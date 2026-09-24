@@ -4624,9 +4624,6 @@ fn scoped_fea_artifact_roots(root: &Path) -> FeaRuntimeConfigRestoreGuard {
 }
 
 fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, PathBuf) {
-    let root = temp_artifact_root(test_name);
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("create solver mesh artifact root");
     let mut mesh =
         runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     mesh.topology.boundary_faces[0]
@@ -4641,6 +4638,16 @@ fn write_ready_minimal_analysis_mesh_artifact(test_name: &str) -> (PathBuf, Path
     mesh.canonical_digest = StableDigest::ZERO;
     mesh.seal_canonical_digest()
         .expect("seal canonical solver mesh fixture");
+    write_ready_analysis_mesh_artifact(test_name, &mesh)
+}
+
+fn write_ready_analysis_mesh_artifact(
+    test_name: &str,
+    mesh: &SolverMeshArtifact,
+) -> (PathBuf, PathBuf) {
+    let root = temp_artifact_root(test_name);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create solver mesh artifact root");
     let mesh_path = root.join("solver_mesh.cbor");
     fs::write(
         &mesh_path,
@@ -6587,9 +6594,8 @@ fn analysis_run_electromagnetic_rejects_invalid_harmonic_controls() {
 fn analysis_run_thermal_returns_temperature_payload() {
     let _guard = analysis_test_guard();
     let (mesh_root, mesh_path) = write_ready_minimal_analysis_mesh_artifact("thermal-payload");
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
-    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });
@@ -6691,11 +6697,10 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
     let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
     let (mesh_root, mesh_path) =
         write_ready_minimal_analysis_mesh_artifact("thermal-gpu-provenance");
-    let mut model = sample_model();
+    let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient(
         "thermal_execution_provenance",
     )];
-    model.material_assignments[0].target = runmat_analysis_core::PropertyRegionTarget::all_solids();
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });
@@ -6731,9 +6736,10 @@ fn analysis_run_thermal_reports_host_execution_for_gpu_request() {
 #[test]
 fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     let _guard = analysis_test_guard();
+    let mesh = runmat_meshing_core::fixtures::three_region_tetrahedron_solver_mesh();
     let (mesh_root, mesh_path) =
-        write_ready_minimal_analysis_mesh_artifact("thermal-constitutive-spread");
-    let mut model = sample_model();
+        write_ready_analysis_mesh_artifact("thermal-constitutive-spread", &mesh);
+    let mut model = sample_solid_model();
     model.sequence.steps = vec![ProcedureStep::thermal_transient("thermal_1".to_string())];
     model.thermal = Some(runmat_analysis_core::ThermalDomain {
         reference_temperature: Temperature::new(293.15),
@@ -6761,12 +6767,19 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
         electrical: None,
         plastic: None,
     });
-    model.material_assignments.push(MaterialAssignment {
-        target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
-        expected_material_id: "mat_steel".into(),
-        assigned_material_id: "mat_steel".into(),
+    model.material_assignments = [
+        ("mid_aluminum", "mat_steel"),
+        ("polymer_segment", "mat_poly_high_k"),
+        ("tip_steel", "mat_steel"),
+    ]
+    .into_iter()
+    .map(|(region, material)| MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::solid(region),
+        expected_material_id: material.into(),
+        assigned_material_id: material.into(),
         confidence: EvidenceConfidence::Verified,
-    });
+    })
+    .collect();
 
     let run = analysis_run_thermal_with_options_op(
         &model,
@@ -6782,6 +6795,14 @@ fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
     )
     .expect("thermal run should execute");
 
+    assert_eq!(mesh.topology.volume_elements.len(), 3);
+    let conductivity_spread = diagnostic_metric(
+        &run.data.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "conductivity_spread_ratio",
+    )
+    .expect("active heterogeneous materials should report conductivity spread");
+    assert!((conductivity_spread - 1200.0 / 45.0).abs() < 1.0e-12);
     assert!(!run.data.numerically_acceptable);
     assert_eq!(run.data.run_status, RunStatus::Degraded);
     assert!(run

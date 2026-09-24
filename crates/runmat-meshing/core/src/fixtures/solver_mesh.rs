@@ -180,6 +180,145 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
     artifact
 }
 
+/// Three separated, independently material-addressable Tet4 regions for solver tests.
+pub fn three_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
+    let mut template = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    for (face_index, name) in [(0, "root"), (1, "tip")] {
+        template.topology.boundary_faces[face_index]
+            .provenance
+            .push(entity(PersistentEntityKind::Face, name));
+        template.topology.boundary_faces[face_index]
+            .provenance
+            .sort();
+    }
+    let mut mesh = template.clone();
+    mesh.topology.nodes.clear();
+    mesh.topology.volume_elements.clear();
+    mesh.topology.neighbors.clear();
+    mesh.topology.boundary_faces.clear();
+    mesh.topology.boundary_edges.clear();
+    mesh.topology.regions.clear();
+
+    for (copy, region_name) in ["mid_aluminum", "polymer_segment", "tip_steel"]
+        .into_iter()
+        .enumerate()
+    {
+        let offset = copy as u64 * 100;
+        let node_start = mesh.topology.nodes.len();
+        for (local_node, node) in template.topology.nodes.iter().enumerate() {
+            let mut node = node.clone();
+            node.node_id += offset;
+            node.stable_identity =
+                StableDigest::from_bytes([32 + (copy * 4 + local_node) as u8; 32]);
+            node.coordinates_m[0] += copy as f64 * 2.0;
+            mesh.topology.nodes.push(node);
+        }
+
+        let mut element = template.topology.volume_elements[0].clone();
+        element.element_id += offset;
+        for node_id in &mut element.node_ids {
+            *node_id += offset;
+        }
+        element.region_id = entity(PersistentEntityKind::Region, region_name);
+        element.stable_identity = solver_volume_element_identity(std::array::from_fn(|index| {
+            mesh.topology.nodes[node_start + index].stable_identity
+        }));
+        mesh.topology.volume_elements.push(element.clone());
+        mesh.topology.regions.push(MeshRegion {
+            region_id: element.region_id.clone(),
+            element_ids: vec![element.element_id],
+        });
+
+        for neighbor in &template.topology.neighbors {
+            let mut neighbor = *neighbor;
+            neighbor.element_id += offset;
+            neighbor.adjacent_element_id = neighbor.adjacent_element_id.map(|id| id + offset);
+            mesh.topology.neighbors.push(neighbor);
+        }
+        for (local_face, face) in template.topology.boundary_faces.iter().enumerate() {
+            let mut face = face.clone();
+            face.face_id += offset;
+            for node_id in &mut face.node_ids {
+                *node_id += offset;
+            }
+            for element_id in &mut face.adjacent_volume_element_ids {
+                *element_id += offset;
+            }
+            face.stable_identity = solver_boundary_face_identity(std::array::from_fn(|index| {
+                mesh.topology.nodes
+                    [node_start + face.node_ids[index] as usize - 1 - offset as usize]
+                    .stable_identity
+            }));
+            let targets: &[&str] = match local_face {
+                0 => &["interface"],
+                2 if copy == 0 => &["mid_aluminum"],
+                2 if copy == 2 => &["tip_steel"],
+                _ => &[],
+            };
+            for target in targets {
+                face.provenance
+                    .push(entity(PersistentEntityKind::Face, target));
+            }
+            face.provenance.sort();
+            face.provenance.dedup();
+            mesh.topology.boundary_faces.push(face);
+        }
+        for edge in &template.topology.boundary_edges {
+            let mut edge = edge.clone();
+            edge.edge_id += offset;
+            for node_id in &mut edge.node_ids {
+                *node_id += offset;
+            }
+            for face_id in &mut edge.adjacent_boundary_face_ids {
+                *face_id += offset;
+            }
+            edge.stable_identity = solver_boundary_edge_identity(std::array::from_fn(|index| {
+                mesh.topology.nodes
+                    [node_start + edge.node_ids[index] as usize - 1 - offset as usize]
+                    .stable_identity
+            }));
+            mesh.topology.boundary_edges.push(edge);
+        }
+    }
+    mesh.topology
+        .regions
+        .sort_by(|left, right| left.region_id.cmp(&right.region_id));
+    for topology in &mut mesh.topology.field_topologies {
+        topology.ordered_entity_ids = match topology.location {
+            FieldTopologyLocation::Node => mesh
+                .topology
+                .nodes
+                .iter()
+                .map(|node| node.node_id)
+                .collect(),
+            FieldTopologyLocation::VolumeElement => mesh
+                .topology
+                .volume_elements
+                .iter()
+                .map(|element| element.element_id)
+                .collect(),
+            FieldTopologyLocation::BoundaryFace => mesh
+                .topology
+                .boundary_faces
+                .iter()
+                .map(|face| face.face_id)
+                .collect(),
+            FieldTopologyLocation::BoundaryEdge => mesh
+                .topology
+                .boundary_edges
+                .iter()
+                .map(|edge| edge.edge_id)
+                .collect(),
+        };
+    }
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest()
+        .expect("seal multi-region fixture");
+    mesh.validate()
+        .expect("multi-region fixture must be canonical");
+    mesh
+}
+
 /// Builds valid canonical evidence bound to a solver-mesh fixture.
 pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
     let stage = MeshingStageEvidence {
