@@ -141,14 +141,18 @@ pub fn solve_direct_harmonic(
     let displacement_imaginary = prepared
         .expand(&result.solution[reduced_size..])
         .map_err(|error| DirectHarmonicError::ConstraintReduction(error.to_string()))?;
-    let load_norm = dot(&right_hand_side, &right_hand_side).sqrt().max(1.0);
+    let load_norm = dot(&right_hand_side, &right_hand_side).sqrt();
     Ok(DirectHarmonicResponse {
         angular_frequency_rad_s,
         displacement_real,
         displacement_imaginary,
         iterations: result.iterations,
         residual_norm: result.residual_norm,
-        relative_residual: result.residual_norm / load_norm,
+        relative_residual: if load_norm > 0.0 {
+            result.residual_norm / load_norm
+        } else {
+            0.0
+        },
     })
 }
 
@@ -266,5 +270,61 @@ mod tests {
             .iter()
             .chain(&response.displacement_imaginary)
             .all(|value| value.is_finite()));
+    }
+
+    #[test]
+    fn small_harmonic_load_retains_relative_residual_and_linear_response() {
+        let model = crate::fixtures::fixture_model(FixtureId::CantileverLinearStatic);
+        let step = &model.sequence.steps[0];
+        let excitations = crate::excitation::realize_step_excitations(
+            &model,
+            step,
+            crate::excitation::ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let summary = crate::assembly::assemble_structural_system(
+            &model,
+            &excitations,
+            None,
+            crate::assembly::StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .unwrap();
+        let policy = DirectHarmonicPolicy {
+            relative_tolerance: 1.0e-10,
+            ..DirectHarmonicPolicy::default()
+        };
+        let reference =
+            solve_direct_harmonic(&summary, &vec![0.0; summary.dof_count], 0.5, policy).unwrap();
+        let scale = 1.0e-20;
+        let mut small = summary.clone();
+        small.operator = small
+            .operator
+            .with_load(
+                summary
+                    .operator
+                    .load()
+                    .iter()
+                    .map(|value| value * scale)
+                    .collect(),
+            )
+            .unwrap();
+        let response =
+            solve_direct_harmonic(&small, &vec![0.0; small.dof_count], 0.5, policy).unwrap();
+        assert!(response.iterations > 0);
+        assert!(response.relative_residual <= policy.relative_tolerance);
+        for (actual, expected) in response
+            .displacement_real
+            .iter()
+            .zip(&reference.displacement_real)
+        {
+            assert!((actual / scale - expected).abs() <= 1.0e-8 * expected.abs().max(1.0));
+        }
+
+        let mut zero = summary.clone();
+        zero.operator = zero.operator.with_load(vec![0.0; zero.dof_count]).unwrap();
+        let response =
+            solve_direct_harmonic(&zero, &vec![0.0; zero.dof_count], 0.5, policy).unwrap();
+        assert_eq!(response.iterations, 0);
+        assert_eq!(response.relative_residual, 0.0);
     }
 }

@@ -132,12 +132,21 @@ fn restarted_gmres_with_updates<E>(
     let Some(mut residual) = updates.subtract(right_hand_side, &apply(&solution)?)? else {
         return Ok(None);
     };
-    let rhs_norm = dot(right_hand_side, right_hand_side)?.sqrt().max(1.0);
+    let Some(rhs_norm) = norm(right_hand_side, &dot)? else {
+        return Ok(None);
+    };
     let mut iterations = 0_u32;
     let Some(initial_norm) = norm(&residual, &dot)? else {
         return Ok(None);
     };
-    let mut converged = initial_norm / rhs_norm <= policy.relative_tolerance;
+    // A unit-sized floor declares a genuinely small load converged before any
+    // iteration. A zero-load warm start instead uses its initial residual.
+    let reference_norm = if rhs_norm > 0.0 {
+        rhs_norm
+    } else {
+        initial_norm
+    };
+    let mut converged = initial_norm <= policy.relative_tolerance * reference_norm;
     let mut observed_cancellation = false;
     let mut breakdown = false;
 
@@ -203,7 +212,7 @@ fn restarted_gmres_with_updates<E>(
             projected_rhs[column + 1] = -sines[column] * projected;
             iterations = iterations.saturating_add(1);
             completed = column + 1;
-            if projected_rhs[column + 1].abs() / rhs_norm <= policy.relative_tolerance
+            if projected_rhs[column + 1].abs() <= policy.relative_tolerance * reference_norm
                 || basis.len() == column + 1
             {
                 break;
@@ -227,7 +236,7 @@ fn restarted_gmres_with_updates<E>(
         let Some(residual_norm) = norm(&residual, &dot)? else {
             return Ok(None);
         };
-        converged = residual_norm / rhs_norm <= policy.relative_tolerance;
+        converged = residual_norm <= policy.relative_tolerance * reference_norm;
     }
     let Some(residual_norm) = norm(&residual, &dot)? else {
         return Ok(None);
@@ -424,5 +433,41 @@ mod tests {
                 ScopedLocalExecutionError::NestedExecution
             ))
         ));
+    }
+
+    #[test]
+    fn small_load_and_zero_load_warm_start_are_not_prematurely_converged() {
+        let policy = GmresPolicy {
+            relative_tolerance: 1.0e-12,
+            restart: 1,
+            maximum_iterations: 4,
+        };
+        let apply = |x: &[f64]| Ok::<_, ScopedSpmvError>(vec![2.0 * x[0]]);
+        let dot = |left: &[f64], right: &[f64]| Ok::<_, ScopedSpmvError>(left[0] * right[0]);
+        for (right_hand_side, initial, expected) in [(1.0e-20, 0.0, 5.0e-21), (0.0, 1.0e-20, 0.0)] {
+            let serial =
+                restarted_gmres(&[right_hand_side], &[initial], policy, apply, dot, || false)
+                    .unwrap()
+                    .unwrap();
+            assert!(serial.converged);
+            assert!(serial.iterations > 0);
+            assert!((serial.solution[0] - expected).abs() <= 1.0e-32);
+            for threads in [2, 3] {
+                let plan =
+                    LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
+                let scoped = restarted_gmres_scoped(
+                    &[right_hand_side],
+                    &[initial],
+                    policy,
+                    apply,
+                    dot,
+                    || false,
+                    plan,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(scoped, serial);
+            }
+        }
     }
 }
