@@ -1,7 +1,7 @@
 //! Local composition of the same portable whole-study root used by remote execution.
 
 use runmat_analysis_fea::study::StructuralStudyProductInput;
-use runmat_analysis_fea::{emit_fea_progress_phase, FeaProgressPhase, FeaProgressStatus};
+use runmat_analysis_fea::{FeaProgressEvent, FeaProgressPhase, FeaProgressStatus};
 use runmat_execution::value::{ValuePayload, ValueRefKind};
 use runmat_execution_artifact::cache::CacheExport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -18,17 +18,49 @@ use crate::{
     NativeProgramSession, PreparedStructuralStudyRoot,
 };
 
+#[derive(Clone, Default)]
+pub struct LocalStructuralStudyObservers {
+    pub progress: Option<crate::LocalFeaProgressObserver>,
+    pub mesh: Option<crate::LocalFeaMeshObserver>,
+}
+
+impl std::fmt::Debug for LocalStructuralStudyObservers {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalStructuralStudyObservers")
+            .field("progress", &self.progress.is_some())
+            .field("mesh", &self.mesh.is_some())
+            .finish()
+    }
+}
+
 /// Execute a portable typed study through geometry, exact meshing, compilation, and solve.
 ///
 /// The input is the same immutable root transported to a remote driver. Local execution only
 /// supplies process placement and storage; it does not reconstruct the analysis definition.
 pub async fn execute_prepared_structural_study_locally(
-    mut config: NativeExecutionConfig,
+    config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
 ) -> NativeExecutionResult<runmat_runtime::analysis::StructuralStudyResult> {
+    execute_prepared_structural_study_locally_with_observers(
+        config,
+        prepared,
+        workers,
+        LocalStructuralStudyObservers::default(),
+    )
+    .await
+}
+
+pub async fn execute_prepared_structural_study_locally_with_observers(
+    mut config: NativeExecutionConfig,
+    prepared: PreparedStructuralStudyRoot,
+    workers: u32,
+    observers: LocalStructuralStudyObservers,
+) -> NativeExecutionResult<runmat_runtime::analysis::StructuralStudyResult> {
     const OPERATION: &str = "fea.typed_study";
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::GeometryLoad,
         FeaProgressStatus::Started,
@@ -71,7 +103,8 @@ pub async fn execute_prepared_structural_study_locally(
     output
         .validate_against(&geometry_request)
         .map_err(protocol)?;
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::GeometryLoad,
         FeaProgressStatus::Completed,
@@ -79,7 +112,8 @@ pub async fn execute_prepared_structural_study_locally(
         Some(1),
         Some(1),
     );
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::RegionResolution,
         FeaProgressStatus::Completed,
@@ -88,7 +122,8 @@ pub async fn execute_prepared_structural_study_locally(
         Some(output.regions.len() as u64),
     );
 
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::MeshPrep,
         FeaProgressStatus::Started,
@@ -155,7 +190,11 @@ pub async fn execute_prepared_structural_study_locally(
     )
     .await
     .map_err(protocol)?;
-    emit_fea_progress_phase(
+    if let Some(observer) = observers.mesh.as_ref() {
+        observer(&meshing.artifact);
+    }
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::MeshPrep,
         FeaProgressStatus::Completed,
@@ -168,7 +207,8 @@ pub async fn execute_prepared_structural_study_locally(
         Some(meshing.artifact.topology.volume_elements.len() as u64),
     );
 
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::ModelAssembly,
         FeaProgressStatus::Started,
@@ -202,7 +242,8 @@ pub async fn execute_prepared_structural_study_locally(
         .replace_model(resolved_model.clone())
         .map_err(protocol)?;
     compiled.model = resolved_model;
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::ModelAssembly,
         FeaProgressStatus::Completed,
@@ -210,7 +251,8 @@ pub async fn execute_prepared_structural_study_locally(
         Some(1),
         Some(1),
     );
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::Solve,
         FeaProgressStatus::Started,
@@ -229,7 +271,8 @@ pub async fn execute_prepared_structural_study_locally(
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),
     })
     .await?;
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::Solve,
         FeaProgressStatus::Completed,
@@ -237,7 +280,8 @@ pub async fn execute_prepared_structural_study_locally(
         Some(1),
         Some(1),
     );
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::Postprocess,
         FeaProgressStatus::Started,
@@ -253,7 +297,8 @@ pub async fn execute_prepared_structural_study_locally(
         numerical,
     )
     .map_err(protocol)?;
-    emit_fea_progress_phase(
+    emit_local_progress(
+        &observers,
         OPERATION,
         FeaProgressPhase::Postprocess,
         FeaProgressStatus::Completed,
@@ -262,6 +307,36 @@ pub async fn execute_prepared_structural_study_locally(
         Some(1),
     );
     Ok(result)
+}
+
+fn emit_local_progress(
+    observers: &LocalStructuralStudyObservers,
+    operation: impl Into<String>,
+    phase: FeaProgressPhase,
+    status: FeaProgressStatus,
+    message: impl Into<String>,
+    current: Option<u64>,
+    total: Option<u64>,
+) {
+    let event = FeaProgressEvent {
+        operation: operation.into(),
+        phase,
+        status,
+        message: message.into(),
+        current,
+        total,
+        fraction: match (current, total) {
+            (Some(current), Some(total)) if total > 0 => {
+                Some((current as f64 / total as f64).min(1.0))
+            }
+            _ => None,
+        },
+        metadata: Default::default(),
+    };
+    runmat_analysis_fea::emit_fea_progress(event.clone());
+    if let Some(observer) = observers.progress.as_ref() {
+        observer(event);
+    }
 }
 
 fn materialization_output_root(

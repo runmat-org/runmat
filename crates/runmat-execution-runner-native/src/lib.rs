@@ -168,7 +168,10 @@ pub use geometry_meshing_root::{
     RequiredGeometryMeshingProgram, GEOMETRY_MESHING_ROOT_EXECUTION_MODE,
     GEOMETRY_MESHING_ROOT_TARGET_PROFILE,
 };
-pub use local_structural_study::execute_prepared_structural_study_locally;
+pub use local_structural_study::{
+    execute_prepared_structural_study_locally,
+    execute_prepared_structural_study_locally_with_observers, LocalStructuralStudyObservers,
+};
 pub use meshing_evaluator::{native_meshing_kernel_dispatcher, NativeMeshingEvaluatorProvider};
 pub use meshing_host::{
     execute_meshing_program_request, run_meshing_worker_stdio, NativeMeshingHostLimits,
@@ -205,6 +208,7 @@ pub use typed_fea::{
     MaterializedFeaGeometry, PreparedFeaStudy,
 };
 pub use typed_fea::{
-    execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution, LocalFeaExecutionOptions,
+    execute_checked_fea_locally, CompletedLocalFeaCase, LocalFeaExecution,
+    LocalFeaExecutionOptions, LocalFeaMeshObserver, LocalFeaProgressObserver,
 };
 pub use worker::run_worker_stdio;

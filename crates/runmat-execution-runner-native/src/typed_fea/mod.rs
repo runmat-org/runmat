@@ -48,13 +48,24 @@ use runmat_analysis_core::AuthoredStudyInputBinding;
 use runmat_runtime::analysis::{
     AnalysisStudyRunData, FeaRootSelector, ResolvedFeaRoot, StructuralStudyResult,
 };
+use std::sync::Arc;
 
-#[derive(Clone, Debug)]
+pub type LocalFeaProgressObserver =
+    Arc<dyn Fn(runmat_analysis_fea::FeaProgressEvent) + Send + Sync + 'static>;
+pub type LocalFeaMeshObserver =
+    Arc<dyn Fn(&runmat_meshing_core::SolverMeshArtifact) + Send + Sync + 'static>;
+
+#[derive(Clone)]
 pub struct LocalFeaExecutionOptions {
     pub root: Option<FeaRootSelector>,
     pub workers: Option<u32>,
     pub backend: runmat_analysis_fea::ComputeBackend,
     pub accelerators: Vec<runmat_execution::resource::AcceleratorRequest>,
+    /// Receives coarse, ordered pipeline progress directly from local execution.
+    /// This avoids relying on thread-local propagation across async/native boundaries.
+    pub progress_observer: Option<LocalFeaProgressObserver>,
+    /// Receives the canonical solver mesh as soon as meshing completes, before assembly/solve.
+    pub mesh_observer: Option<LocalFeaMeshObserver>,
 }
 
 impl Default for LocalFeaExecutionOptions {
@@ -64,7 +75,23 @@ impl Default for LocalFeaExecutionOptions {
             workers: None,
             backend: runmat_analysis_fea::ComputeBackend::Cpu,
             accelerators: Vec::new(),
+            progress_observer: None,
+            mesh_observer: None,
         }
+    }
+}
+
+impl std::fmt::Debug for LocalFeaExecutionOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalFeaExecutionOptions")
+            .field("root", &self.root)
+            .field("workers", &self.workers)
+            .field("backend", &self.backend)
+            .field("accelerators", &self.accelerators)
+            .field("progress_observer", &self.progress_observer.is_some())
+            .field("mesh_observer", &self.mesh_observer.is_some())
+            .finish()
     }
 }
 
@@ -183,11 +210,15 @@ async fn execute_case(
     let case_id = study.study.study_id.clone();
     let authority = format!("typed-fea-local:{}", uuid::Uuid::new_v4());
     let prepared = prepare_checked_fea_study(source, study, &inputs, &authority, options).await?;
-    let result = super::execute_prepared_structural_study_locally(
+    let result = super::execute_prepared_structural_study_locally_with_observers(
         super::NativeExecutionConfig::for_current_executable()
             .map_err(|error| error.to_string())?,
         prepared.root,
         options.workers.unwrap_or(prepared.workers).max(1),
+        super::LocalStructuralStudyObservers {
+            progress: options.progress_observer.clone(),
+            mesh: options.mesh_observer.clone(),
+        },
     )
     .await
     .map_err(|error| error.to_string())?;

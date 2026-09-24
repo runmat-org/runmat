@@ -59,6 +59,7 @@ async fn execute_study(
                     workers: None,
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
+                    ..Default::default()
                 },
             )
             .await
@@ -112,6 +113,7 @@ async fn execute_sweep(
                     workers: None,
                     backend: execution.compute.backend,
                     accelerators: execution.compute.accelerators.clone(),
+                    ..Default::default()
                 },
             )
             .await

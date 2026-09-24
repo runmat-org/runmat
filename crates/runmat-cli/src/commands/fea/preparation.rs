@@ -26,6 +26,7 @@ pub(super) async fn prepare_study(
             workers: None,
             backend: compute.backend,
             accelerators: compute.accelerators.clone(),
+            ..Default::default()
         },
     )
     .await
