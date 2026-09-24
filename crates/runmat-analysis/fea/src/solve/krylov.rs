@@ -22,7 +22,7 @@ pub(super) fn restarted_gmres<E>(
     initial: &[f64],
     policy: GmresPolicy,
     apply: impl Fn(&[f64]) -> Result<Vec<f64>, E>,
-    dot: impl Fn(&[f64], &[f64]) -> f64,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, E>,
     cancelled: impl Fn() -> bool,
 ) -> Result<Option<GmresResult>, E> {
     let size = right_hand_side.len();
@@ -44,9 +44,9 @@ pub(super) fn restarted_gmres<E>(
     let Some(mut residual) = subtract(right_hand_side, &apply(&solution)?) else {
         return Ok(None);
     };
-    let rhs_norm = dot(right_hand_side, right_hand_side).sqrt().max(1.0);
+    let rhs_norm = dot(right_hand_side, right_hand_side)?.sqrt().max(1.0);
     let mut iterations = 0_u32;
-    let Some(initial_norm) = norm(&residual, &dot) else {
+    let Some(initial_norm) = norm(&residual, &dot)? else {
         return Ok(None);
     };
     let mut converged = initial_norm / rhs_norm <= policy.relative_tolerance;
@@ -58,7 +58,7 @@ pub(super) fn restarted_gmres<E>(
             observed_cancellation = true;
             break;
         }
-        let Some(beta) = norm(&residual, &dot) else {
+        let Some(beta) = norm(&residual, &dot)? else {
             return Ok(None);
         };
         if beta <= f64::MIN_POSITIVE {
@@ -86,10 +86,10 @@ pub(super) fn restarted_gmres<E>(
                 return Ok(None);
             }
             for row in 0..=column {
-                hessenberg[row][column] = dot(&basis[row], &next);
+                hessenberg[row][column] = dot(&basis[row], &next)?;
                 axpy(-hessenberg[row][column], &basis[row], &mut next);
             }
-            let Some(next_norm) = norm(&next, &dot) else {
+            let Some(next_norm) = norm(&next, &dot)? else {
                 return Ok(None);
             };
             hessenberg[column + 1][column] = next_norm;
@@ -143,12 +143,12 @@ pub(super) fn restarted_gmres<E>(
             return Ok(None);
         };
         residual = next_residual;
-        let Some(residual_norm) = norm(&residual, &dot) else {
+        let Some(residual_norm) = norm(&residual, &dot)? else {
             return Ok(None);
         };
         converged = residual_norm / rhs_norm <= policy.relative_tolerance;
     }
-    let Some(residual_norm) = norm(&residual, &dot) else {
+    let Some(residual_norm) = norm(&residual, &dot)? else {
         return Ok(None);
     };
     Ok(Some(GmresResult {
@@ -161,9 +161,12 @@ pub(super) fn restarted_gmres<E>(
     }))
 }
 
-fn norm(vector: &[f64], dot: &impl Fn(&[f64], &[f64]) -> f64) -> Option<f64> {
-    let norm = dot(vector, vector).sqrt();
-    norm.is_finite().then_some(norm)
+fn norm<E>(
+    vector: &[f64],
+    dot: &impl Fn(&[f64], &[f64]) -> Result<f64, E>,
+) -> Result<Option<f64>, E> {
+    let norm = dot(vector, vector)?.sqrt();
+    Ok(norm.is_finite().then_some(norm))
 }
 
 fn subtract(left: &[f64], right: &[f64]) -> Option<Vec<f64>> {
@@ -197,8 +200,8 @@ fn back_substitute(matrix: &[Vec<f64>], rhs: &[f64], size: usize) -> Option<Vec<
 mod tests {
     use super::*;
 
-    fn dot(left: &[f64], right: &[f64]) -> f64 {
-        left.iter().zip(right).map(|(a, b)| a * b).sum()
+    fn dot(left: &[f64], right: &[f64]) -> Result<f64, std::convert::Infallible> {
+        Ok(left.iter().zip(right).map(|(a, b)| a * b).sum())
     }
 
     #[test]
@@ -253,9 +256,26 @@ mod tests {
                 maximum_iterations: 2,
             },
             |_value| Err::<Vec<f64>, _>("scoped worker failed"),
-            dot,
+            |left, right| Ok::<_, &str>(dot(left, right).unwrap()),
             || false,
         );
         assert_eq!(result, Err("scoped worker failed"));
+    }
+
+    #[test]
+    fn reduction_failure_is_not_converted_into_a_breakdown() {
+        let result = restarted_gmres(
+            &[1.0],
+            &[0.0],
+            GmresPolicy {
+                relative_tolerance: 1.0e-12,
+                restart: 1,
+                maximum_iterations: 2,
+            },
+            |value| Ok::<_, &str>(value.to_vec()),
+            |_left, _right| Err::<f64, _>("scoped reduction failed"),
+            || false,
+        );
+        assert_eq!(result, Err("scoped reduction failed"));
     }
 }

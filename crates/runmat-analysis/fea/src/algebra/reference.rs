@@ -7,6 +7,8 @@ use crate::planning::resource::{
 pub enum ScopedSpmvError {
     #[error("sparse matrix/vector dimension mismatch")]
     DimensionMismatch,
+    #[error("vector reduction dimension mismatch")]
+    ReductionDimensionMismatch,
     #[error("{0}")]
     Execution(#[from] ScopedLocalExecutionError<SpmvWorkError>),
 }
@@ -15,6 +17,34 @@ pub enum ScopedSpmvError {
 pub enum SpmvWorkError {
     #[error("sparse operator application cancelled")]
     Cancelled,
+}
+
+/// Deterministic dot product under the admitted local CPU plan. Each worker reduces a
+/// contiguous interval in input order; partial sums are combined in chunk order.
+/// Partition changes can alter floating-point rounding, so callers use numerical tolerances.
+pub fn dot_scoped(
+    left: &[f64],
+    right: &[f64],
+    plan: LocalExecutionPlan,
+) -> Result<f64, ScopedSpmvError> {
+    if left.len() != right.len() {
+        return Err(ScopedSpmvError::ReductionDimensionMismatch);
+    }
+    if left.is_empty() {
+        return Ok(0.0);
+    }
+    let cancellation = crate::progress::cancellation_token();
+    let partials = execute_scoped_chunks(plan, left.len() as u64, |chunk| {
+        let mut sum = 0.0;
+        for index in chunk.start() as usize..chunk.end_exclusive() as usize {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            sum += left[index] * right[index];
+        }
+        Ok(sum)
+    })?;
+    Ok(partials.into_iter().sum())
 }
 
 pub fn spmv(matrix: &RealSparseMatrix, x: &[f64]) -> Result<Vec<f64>, &'static str> {
@@ -91,6 +121,53 @@ mod tests {
     use crate::algebra::{MatrixProperties, OperatorRole, RealSparseAssembler, RealSparseMatrix};
     use crate::planning::resource::LocalThreadCount;
     use crate::progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext};
+
+    #[test]
+    fn scoped_dot_uses_canonical_chunks_and_rejects_invalid_inputs() {
+        let left = [3.0, -4.0, 0.2, 7.0, 1.0e-12, -5.0, 9.0];
+        let right = [-1.0, 2.0, 3.0, -0.5, 4.0, 6.0, 1.0];
+        let expected = left.iter().zip(right).map(|(a, b)| a * b).sum::<f64>();
+        assert_eq!(
+            dot_scoped(&left, &right, LocalExecutionPlan::serial()).unwrap(),
+            expected
+        );
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        assert!((dot_scoped(&left, &right, plan).unwrap() - expected).abs() <= 1.0e-12);
+        assert!(matches!(
+            dot_scoped(&left, &right[..6], plan),
+            Err(ScopedSpmvError::ReductionDimensionMismatch)
+        ));
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            Ok::<_, ()>(dot_scoped(&left, &right, plan))
+        })
+        .unwrap();
+        assert!(matches!(
+            &nested[0],
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::NestedExecution
+            ))
+        ));
+    }
+
+    #[test]
+    fn scoped_dot_propagates_cancellation() {
+        let cancellation = FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context = replace_fea_progress_context(FeaProgressContext {
+            cancellation,
+            ..FeaProgressContext::default()
+        });
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        assert!(matches!(
+            dot_scoped(&[1.0; 8], &[2.0; 8], plan),
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::Work {
+                    source: SpmvWorkError::Cancelled,
+                    ..
+                }
+            ))
+        ));
+    }
 
     #[test]
     fn identity_application_and_residual_are_deterministic() {

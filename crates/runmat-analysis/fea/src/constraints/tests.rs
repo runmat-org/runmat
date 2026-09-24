@@ -945,7 +945,25 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         execution,
     )
     .unwrap();
-    assert_eq!(parallel, solve);
+    assert!(parallel.converged, "{:?}", parallel.diagnostics);
+    assert_eq!(parallel.iterations, solve.iterations);
+    assert_eq!(parallel.solver_method, solve.solver_method);
+    assert_eq!(parallel.diagnostics, solve.diagnostics);
+    assert!(parallel.residual_norm <= 1.0e-7);
+    assert!((parallel.solution[3] - parallel.solution[6] - 0.001).abs() <= 1.0e-9);
+    for (scoped, serial) in parallel.solution.iter().zip(&solve.solution) {
+        assert!((scoped - serial).abs() <= 1.0e-12);
+    }
+    let repeated = crate::solve::linear::solve_linear_system_with_execution(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        execution,
+    )
+    .unwrap();
+    assert_eq!(repeated, parallel);
     let nested = crate::planning::resource::execute_scoped_chunks(
         crate::planning::resource::LocalExecutionPlan::serial(),
         1,

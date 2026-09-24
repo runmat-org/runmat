@@ -121,7 +121,7 @@ pub fn solve_direct_harmonic(
             maximum_iterations: policy.maximum_iterations,
         },
         apply,
-        dot,
+        |left, right| Ok::<_, std::convert::Infallible>(dot(left, right)),
         crate::is_fea_cancelled,
     )
     .expect("direct harmonic operator application is infallible")

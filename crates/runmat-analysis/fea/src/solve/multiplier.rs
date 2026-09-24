@@ -1,7 +1,7 @@
 //! Exact sparse constraint enforcement through a matrix-free saddle-point system.
 
 use crate::{
-    algebra::{apply_k, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
+    algebra::{apply_k, dot_scoped, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
     assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -25,9 +25,9 @@ pub(super) fn solve_multiplier_constraint_system(
         summary,
         constraints,
         requested_backend,
-        algebra,
         initial_guess,
         |physical| Ok(apply_k(&summary.operator, physical)),
+        |left, right| Ok(algebra.dot(left, right)),
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -44,13 +44,19 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
         summary,
         constraints,
         requested_backend,
-        algebra,
         initial_guess,
         |physical| {
             if plan.is_serial() {
                 Ok(apply_k(&summary.operator, physical))
             } else {
                 spmv_scoped(summary.operator.operators().stiffness(), physical, plan)
+            }
+        },
+        |left, right| {
+            if plan.is_serial() {
+                Ok(algebra.dot(left, right))
+            } else {
+                dot_scoped(left, right, plan)
             }
         },
     )
@@ -60,9 +66,9 @@ fn solve_multiplier_constraint_system_with_apply(
     summary: &AssemblySummary,
     constraints: &ResolvedConstraintMatrix,
     requested_backend: LinearAlgebraBackendKind,
-    algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     apply_stiffness: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let dofs = summary.dof_count;
     let rows = constraints.row_count();
@@ -159,7 +165,7 @@ fn solve_multiplier_constraint_system_with_apply(
             maximum_iterations,
         },
         apply,
-        |left, right| algebra.dot(left, right),
+        dot,
         crate::is_fea_cancelled,
     )?;
     let Some(result) = result else {

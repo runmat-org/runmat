@@ -29,4 +29,4 @@ pub use operator::{
     PreparedModalSystem, PreparedRealLinearSystem, RealSystemError,
 };
 pub use pattern::{SparseIndexWidth, SparsePattern, SparsePatternError};
-pub use reference::{residual, spmv, spmv_scoped, ScopedSpmvError, SpmvWorkError};
+pub use reference::{dot_scoped, residual, spmv, spmv_scoped, ScopedSpmvError, SpmvWorkError};
