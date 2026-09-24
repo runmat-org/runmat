@@ -119,13 +119,12 @@ fn visit_values(
 mod tests {
     use super::*;
     use runmat_accelerate_api::{
-        AccelDownloadFuture, AccelProvider, HostTensorView, SpawnHandleConcurrency,
+        next_device_id, AccelDownloadFuture, AccelProvider, HostTensorView, SpawnHandleConcurrency,
         ThreadProviderGuard,
     };
     use runmat_value::{CellArray, HandleRef, StructValue};
 
-    struct RejectProvider;
-    static REJECT_PROVIDER: RejectProvider = RejectProvider;
+    struct RejectProvider(u32);
 
     impl AccelProvider for RejectProvider {
         fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -145,12 +144,11 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            41
+            self.0
         }
     }
 
-    struct ShareProvider;
-    static SHARE_PROVIDER: ShareProvider = ShareProvider;
+    struct ShareProvider(u32);
 
     impl AccelProvider for ShareProvider {
         fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -170,7 +168,7 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            42
+            self.0
         }
 
         fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
@@ -189,13 +187,16 @@ mod tests {
 
     #[test]
     fn spawn_capture_obeys_provider_concurrency_policy() {
-        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
-        let error = validate_spawn_capture(&gpu(41, 7)).expect_err("reject capture");
+        let reject: &'static RejectProvider = Box::leak(Box::new(RejectProvider(next_device_id())));
+        let _guard = ThreadProviderGuard::set(Some(reject));
+        let error =
+            validate_spawn_capture(&gpu(reject.device_id(), 7)).expect_err("reject capture");
         assert_eq!(error.identifier(), Some("RunMat:SpawnGpuHandleUnsupported"));
         drop(_guard);
 
-        let _guard = ThreadProviderGuard::set(Some(&SHARE_PROVIDER));
-        validate_spawn_capture(&gpu(42, 9)).expect("immutable sharing is safe");
+        let share: &'static ShareProvider = Box::leak(Box::new(ShareProvider(next_device_id())));
+        let _guard = ThreadProviderGuard::set(Some(share));
+        validate_spawn_capture(&gpu(share.device_id(), 9)).expect("immutable sharing is safe");
     }
 
     #[test]
@@ -207,9 +208,11 @@ mod tests {
 
     #[test]
     fn spawn_capture_recurses_through_cells_closures_and_handle_objects() {
-        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let reject: &'static RejectProvider = Box::leak(Box::new(RejectProvider(next_device_id())));
+        let _guard = ThreadProviderGuard::set(Some(reject));
         let cell = Value::Cell(
-            CellArray::new(vec![Value::Num(1.0), gpu(41, 11)], 1, 2).expect("test cell"),
+            CellArray::new(vec![Value::Num(1.0), gpu(reject.device_id(), 11)], 1, 2)
+                .expect("test cell"),
         );
         assert_eq!(
             validate_spawn_capture(&cell).unwrap_err().identifier(),
@@ -219,7 +222,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
             bound_function: None,
-            captures: vec![gpu(41, 21)],
+            captures: vec![gpu(reject.device_id(), 21)],
         });
         assert_eq!(
             validate_spawn_capture(&closure).unwrap_err().identifier(),
@@ -227,7 +230,9 @@ mod tests {
         );
 
         let mut payload = StructValue::new();
-        payload.fields.insert("nested".into(), gpu(41, 31));
+        payload
+            .fields
+            .insert("nested".into(), gpu(reject.device_id(), 31));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc payload");
         let object = Value::HandleObject(HandleRef {
             class_name: "Payload".into(),
