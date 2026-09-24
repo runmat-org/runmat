@@ -91,7 +91,7 @@ model loaded_bracket {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
     }
     load_case service { include load.service_force }
 }
@@ -106,6 +106,9 @@ study bracket_static {
     output stress = analysis.static.field.element.von_mises_stress
 }
 ```
+
+The force tuple is a global XYZ vector. In this fixture `[1, 0, 0] kN` follows the loaded end
+face's outward normal; a face target alone does not turn a force into normal pressure.
 
 ```sh
 runmat fea check bracket.fea

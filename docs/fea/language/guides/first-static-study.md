@@ -93,11 +93,15 @@ model loaded_bracket {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
     }
     load_case service { include load.service_force }
 }
 ```
+
+The force tuple is expressed in global XYZ coordinates. Here `[1, 0, 0] kN` follows the loaded
+end face's outward normal; targeting a face does not implicitly rotate an arbitrary force vector
+onto that face normal.
 
 ## 5. Define the study
 

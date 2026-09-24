@@ -50,7 +50,7 @@ model loaded_bracket {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
     load service_force {
-        force on geometry.bracket.region.left_load_face = [0, -1, 0] kN
+        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
     }
     load_case service { include load.service_force }
 }
