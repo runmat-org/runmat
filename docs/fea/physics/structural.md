@@ -90,10 +90,10 @@ model loaded_bracket {
     constraint right_support {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
-    load service_force {
-        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
+    load service_traction {
+        traction on geometry.bracket.region.left_load_face = [166.6666666667, 0, 0] Pa
     }
-    load_case service { include load.service_force }
+    load_case service { include load.service_traction }
 }
 
 study bracket_static {
@@ -107,8 +107,10 @@ study bracket_static {
 }
 ```
 
-The force tuple is a global XYZ vector. In this fixture `[1, 0, 0] kN` follows the loaded end
-face's outward normal; a face target alone does not turn a force into normal pressure.
+The traction tuple is a global XYZ intensity. In this fixture the selected end face is $6\,\mathrm{m^2}$,
+so `[166.6666666667, 0, 0] Pa` integrates to a $1\,\mathrm{kN}$ resultant in +X while boundary
+quadrature distributes it consistently over the face mesh. A face target alone does not rotate an
+arbitrary traction vector onto that face normal.
 
 ```sh
 runmat fea check bracket.fea

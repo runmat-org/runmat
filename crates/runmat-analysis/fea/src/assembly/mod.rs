@@ -957,8 +957,9 @@ fn assemble_linear_system_impl(
     }
 
     let mut rhs = vec![0.0; dof_count];
-    if structural_requirement
-        == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
+    if solid_topology.is_none()
+        && structural_requirement
+            == Some(StructuralFormulationRequirement::ExperimentalSyntheticOperator)
     {
         apply_synthetic_structural_rhs(excitations, &mut rhs);
     } else if structural_requirement.is_none() {
@@ -3778,6 +3779,41 @@ mod tests {
         assert!(
             evidence.moment_relative_error().unwrap() <= evidence.requirements.relative_tolerance
         );
+    }
+
+    #[test]
+    fn experimental_solid_uses_physical_traction_projection() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.constraints = Vec::new();
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "traction_tip".into(),
+                region_id: "tip".into(),
+                kind: FixtureExcitationKind::Traction([12.0, 0.0, 0.0]),
+            }],
+        );
+        let mut mesh = tetrahedron4_mesh();
+        set_boundary_regions(&mut mesh, 1, &["tip"]);
+        reseal(&mut mesh);
+
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            Some(mesh),
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        )
+        .expect("experimental admission with a solver mesh must use physical traction quadrature");
+
+        let evidence = summary
+            .spatial_projection_evidence
+            .first()
+            .expect("traction projection must publish evidence");
+        assert_eq!(
+            evidence.integration_rule,
+            crate::excitation::SpatialIntegrationRule::BoundaryDunavantSeven
+        );
+        assert!(summary.structural_load_plan_identity.is_some());
     }
 
     #[test]

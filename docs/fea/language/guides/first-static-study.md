@@ -92,16 +92,17 @@ model loaded_bracket {
     constraint right_support {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
-    load service_force {
-        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
+    load service_traction {
+        traction on geometry.bracket.region.left_load_face = [166.6666666667, 0, 0] Pa
     }
-    load_case service { include load.service_force }
+    load_case service { include load.service_traction }
 }
 ```
 
-The force tuple is expressed in global XYZ coordinates. Here `[1, 0, 0] kN` follows the loaded
-end face's outward normal; targeting a face does not implicitly rotate an arbitrary force vector
-onto that face normal.
+The traction tuple is expressed in global XYZ coordinates. The selected end face has an area of
+$6\,\mathrm{m^2}$, so `[166.6666666667, 0, 0] Pa` retains the original $1\,\mathrm{kN}$ resultant
+while boundary quadrature distributes it consistently over the surface mesh. Targeting a face does
+not implicitly rotate an arbitrary traction vector onto that face normal.
 
 ## 5. Define the study
 

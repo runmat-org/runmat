@@ -58,10 +58,10 @@ model loaded_bracket {
     constraint right_support {
         structural.fixed { target = geometry.bracket.region.right_support }
     }
-    load service_force {
-        force on geometry.bracket.region.left_load_face = [1, 0, 0] kN
+    load service_traction {
+        traction on geometry.bracket.region.left_load_face = [166.6666666667, 0, 0] Pa
     }
-    load_case service { include load.service_force }
+    load_case service { include load.service_traction }
 }
 
 study structural_static_experimental {
