@@ -55,6 +55,29 @@ pub(super) struct ConnectorAssemblyContext<'a> {
     pub node_identities: &'a [runmat_meshing_core::StableDigest],
 }
 
+struct PreparedPointConnector<'a> {
+    connector: &'a AnalysisConnector,
+    source_digest: runmat_execution::Digest,
+    operator: PointConnectorOperator,
+}
+
+enum PointConnectorOperator {
+    AxialSpring {
+        endpoints: [usize; 2],
+        axis: [f64; 3],
+        coefficient: f64,
+    },
+    AxialDashpot {
+        endpoints: [usize; 2],
+        axis: [f64; 3],
+        coefficient: f64,
+    },
+    GroundSpring {
+        node: usize,
+        coefficient: f64,
+    },
+}
+
 pub(super) fn assemble_explicit_connectors(
     connectors: &[AnalysisConnector],
     structural: &StructuralModel,
@@ -113,6 +136,8 @@ pub(super) fn assemble_connectors_with_resolver(
     let mut stiffness_count = 0;
     let mut damping_count = 0;
     let mut entries = Vec::with_capacity(connectors.len());
+    let mut point_wave = Vec::new();
+    let point_wave_capacity = scoped::point_wave_capacity(local_execution)?;
     for connector in connectors {
         let source_digest = crate::connectors::contract::source_digest(connector)
             .map_err(|_| invalid(connector, "connector source identity could not be encoded"))?;
@@ -124,24 +149,16 @@ pub(super) fn assemble_connectors_with_resolver(
             } => {
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
-                add_axial_operator(
-                    stiffness,
-                    context.layout,
-                    context.coordinates_m,
-                    endpoints,
-                    value.newtons_per_meter,
+                let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
+                point_wave.push(PreparedPointConnector {
                     connector,
-                )?;
-                stiffness.add_contribution(provenance(connector));
-                entries.push(CanonicalConnectorEntry::AxialSpring {
-                    connector_id: connector.connector_id.clone(),
                     source_digest,
-                    primary: canonical_node(endpoints[0], context.node_identities, connector)?,
-                    secondary: canonical_node(endpoints[1], context.node_identities, connector)?,
-                    unit_axis: axial_axis(context.coordinates_m, endpoints, connector)?,
-                    stiffness_newtons_per_meter: value.newtons_per_meter,
+                    operator: PointConnectorOperator::AxialSpring {
+                        endpoints,
+                        axis,
+                        coefficient: value.newtons_per_meter,
+                    },
                 });
-                stiffness_count += 1;
             }
             ConnectorKind::AxialDashpot {
                 primary,
@@ -150,24 +167,16 @@ pub(super) fn assemble_connectors_with_resolver(
             } => {
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
-                add_axial_operator(
-                    damping,
-                    context.layout,
-                    context.coordinates_m,
-                    endpoints,
-                    value.newton_seconds_per_meter,
+                let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
+                point_wave.push(PreparedPointConnector {
                     connector,
-                )?;
-                damping.add_contribution(provenance(connector));
-                entries.push(CanonicalConnectorEntry::AxialDashpot {
-                    connector_id: connector.connector_id.clone(),
                     source_digest,
-                    primary: canonical_node(endpoints[0], context.node_identities, connector)?,
-                    secondary: canonical_node(endpoints[1], context.node_identities, connector)?,
-                    unit_axis: axial_axis(context.coordinates_m, endpoints, connector)?,
-                    damping_newton_seconds_per_meter: value.newton_seconds_per_meter,
+                    operator: PointConnectorOperator::AxialDashpot {
+                        endpoints,
+                        axis,
+                        coefficient: value.newton_seconds_per_meter,
+                    },
                 });
-                damping_count += 1;
             }
             ConnectorKind::IsotropicGroundSpring {
                 target,
@@ -175,22 +184,29 @@ pub(super) fn assemble_connectors_with_resolver(
             } => {
                 let resolved = resolve(connector, target, ConnectorTargetRole::Point)?;
                 let node = exactly_one_node(connector, target, &resolved.node_indices)?;
-                add_isotropic_ground_operator(
-                    stiffness,
-                    context.layout,
-                    node,
-                    value.newtons_per_meter,
-                );
-                stiffness.add_contribution(provenance(connector));
-                entries.push(CanonicalConnectorEntry::IsotropicGroundSpring {
-                    connector_id: connector.connector_id.clone(),
+                point_wave.push(PreparedPointConnector {
+                    connector,
                     source_digest,
-                    target: canonical_node(node, context.node_identities, connector)?,
-                    stiffness_newtons_per_meter: value.newtons_per_meter,
+                    operator: PointConnectorOperator::GroundSpring {
+                        node,
+                        coefficient: value.newtons_per_meter,
+                    },
                 });
-                stiffness_count += 1;
             }
             ConnectorKind::SurfaceNormalFoundation { target, modulus } => {
+                scoped::flush_point_wave(
+                    &mut point_wave,
+                    context.layout,
+                    local_execution,
+                    scoped::PointConnectorSink {
+                        stiffness,
+                        damping,
+                        node_identities: context.node_identities,
+                        canonical_entries: &mut entries,
+                        stiffness_count: &mut stiffness_count,
+                        damping_count: &mut damping_count,
+                    },
+                )?;
                 let resolved = resolve(connector, target, ConnectorTargetRole::Surface)?;
                 if resolved.surface_samples.is_empty() {
                     return Err(invalid(
@@ -243,7 +259,35 @@ pub(super) fn assemble_connectors_with_resolver(
                 stiffness_count += 1;
             }
         }
+        if point_wave.len() == point_wave_capacity {
+            scoped::flush_point_wave(
+                &mut point_wave,
+                context.layout,
+                local_execution,
+                scoped::PointConnectorSink {
+                    stiffness,
+                    damping,
+                    node_identities: context.node_identities,
+                    canonical_entries: &mut entries,
+                    stiffness_count: &mut stiffness_count,
+                    damping_count: &mut damping_count,
+                },
+            )?;
+        }
     }
+    scoped::flush_point_wave(
+        &mut point_wave,
+        context.layout,
+        local_execution,
+        scoped::PointConnectorSink {
+            stiffness,
+            damping,
+            node_identities: context.node_identities,
+            canonical_entries: &mut entries,
+            stiffness_count: &mut stiffness_count,
+            damping_count: &mut damping_count,
+        },
+    )?;
     let plan = CanonicalStructuralConnectorPlan::new(
         context.topology_identity,
         context.coordinates_m.len(),
@@ -456,53 +500,6 @@ pub(super) fn resolve_projected_surface(
         node_indices: nodes,
         surface_samples: samples,
     })
-}
-
-fn add_axial_operator(
-    assembler: &mut RealSparseAssembler,
-    layout: &StructuralDofLayout,
-    coordinates_m: &[[f64; 3]],
-    endpoints: [usize; 2],
-    coefficient: f64,
-    connector: &AnalysisConnector,
-) -> Result<(), StructuralAssemblyError> {
-    let axis = axial_axis(coordinates_m, endpoints, connector)?;
-    let mut terms = Vec::with_capacity(6);
-    for (node, sign) in [(endpoints[0], -1.0), (endpoints[1], 1.0)] {
-        for (dof, component) in [
-            (StructuralDofKind::Ux, axis[0]),
-            (StructuralDofKind::Uy, axis[1]),
-            (StructuralDofKind::Uz, axis[2]),
-        ] {
-            let row = layout.index(node, dof).ok_or_else(|| {
-                invalid(
-                    connector,
-                    "axial endpoint lacks a translational degree of freedom",
-                )
-            })?;
-            terms.push((row, sign * component));
-        }
-    }
-    add_rank_one(assembler, &terms, coefficient);
-    Ok(())
-}
-
-fn add_isotropic_ground_operator(
-    assembler: &mut RealSparseAssembler,
-    layout: &StructuralDofLayout,
-    node: usize,
-    coefficient: f64,
-) {
-    for dof in [
-        StructuralDofKind::Ux,
-        StructuralDofKind::Uy,
-        StructuralDofKind::Uz,
-    ] {
-        let row = layout
-            .index(node, dof)
-            .expect("structural connector nodes own translational degrees of freedom");
-        assembler.add(row, row, coefficient);
-    }
 }
 
 fn add_surface_normal_foundation(

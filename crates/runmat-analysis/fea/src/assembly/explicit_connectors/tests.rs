@@ -25,13 +25,35 @@ fn axial_operator_is_objective_under_infinitesimal_rigid_rotation() {
         OperatorRole::Stiffness,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     );
-    add_axial_operator(
+    let mut damping = RealSparseAssembler::square(
+        layout.total_dof_count(),
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    assemble_connectors_with_resolver(
+        std::slice::from_ref(&connector),
+        ConnectorAssemblyContext {
+            topology_identity:
+                crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                    mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
+                },
+            layout: &layout,
+            coordinates_m: &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            node_identities: &[
+                runmat_meshing_core::StableDigest::from_bytes([1; 32]),
+                runmat_meshing_core::StableDigest::from_bytes([2; 32]),
+            ],
+        },
+        LocalExecutionPlan::serial(),
         &mut assembler,
-        &layout,
-        &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-        [0, 1],
-        100.0,
-        &connector,
+        &mut damping,
+        |_, target, role| {
+            assert_eq!(role, ConnectorTargetRole::Point);
+            Ok(ResolvedConnectorTarget {
+                node_indices: vec![if target.region_id == "node:1" { 0 } else { 1 }],
+                surface_samples: Vec::new(),
+            })
+        },
     )
     .unwrap();
     let matrix = assembler.finish().unwrap();
@@ -257,6 +279,192 @@ fn scoped_connector_assembly_preserves_plan_provenance_and_mutable_resolution() 
     assert_eq!(reference.0.stiffness_count, 1);
     assert_eq!(reference.0.damping_count, 0);
     assert_eq!(reference.1.contributions().len(), 1);
+}
+
+#[test]
+fn mixed_point_connector_waves_match_serial_authored_order_and_fail_closed() {
+    let layout =
+        StructuralDofLayout::from_node_sets(vec![StructuralNodeDofSet::translational(); 6]);
+    let coordinates = (0..6)
+        .map(|index| [index as f64, index as f64 * 0.25, index as f64 * 0.5])
+        .collect::<Vec<_>>();
+    let identities = (1..=6)
+        .map(|value| runmat_meshing_core::StableDigest::from_bytes([value; 32]))
+        .collect::<Vec<_>>();
+    let mut connectors = (0..29)
+        .map(|index| {
+            let primary = RegionTarget::point(format!("node:{}", index % 6));
+            let secondary = RegionTarget::point(format!("node:{}", (index + 1) % 6));
+            AnalysisConnector {
+                connector_id: format!("point_{index}"),
+                kind: match index % 3 {
+                    0 => ConnectorKind::AxialSpring {
+                        primary,
+                        secondary,
+                        stiffness: runmat_analysis_core::Stiffness::new(10.0 + index as f64),
+                    },
+                    1 => ConnectorKind::AxialDashpot {
+                        primary,
+                        secondary,
+                        damping: runmat_analysis_core::Damping::new(5.0 + index as f64),
+                    },
+                    _ => ConnectorKind::IsotropicGroundSpring {
+                        target: primary,
+                        stiffness: runmat_analysis_core::Stiffness::new(20.0 + index as f64),
+                    },
+                },
+            }
+        })
+        .collect::<Vec<_>>();
+    connectors.insert(
+        11,
+        AnalysisConnector {
+            connector_id: "interleaved_foundation".into(),
+            kind: ConnectorKind::SurfaceNormalFoundation {
+                target: RegionTarget::boundary("face:1"),
+                modulus: runmat_analysis_core::FoundationModulus::new(12.0),
+            },
+        },
+    );
+    let assemble = |execution| {
+        let mut stiffness = RealSparseAssembler::square(
+            layout.total_dof_count(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let mut damping = RealSparseAssembler::square(
+            layout.total_dof_count(),
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let mut resolution_count = 0;
+        let summary = assemble_connectors_with_resolver(
+            &connectors,
+            ConnectorAssemblyContext {
+                topology_identity: crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                    mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
+                },
+                layout: &layout,
+                coordinates_m: &coordinates,
+                node_identities: &identities,
+            },
+            execution,
+            &mut stiffness,
+            &mut damping,
+            |_, target, role| {
+                resolution_count += 1;
+                match role {
+                    ConnectorTargetRole::Point => Ok(ResolvedConnectorTarget {
+                        node_indices: vec![target.region_id.strip_prefix("node:").unwrap().parse::<usize>().unwrap()],
+                        surface_samples: Vec::new(),
+                    }),
+                    ConnectorTargetRole::Surface => Ok(ResolvedConnectorTarget {
+                        node_indices: vec![0, 1, 2],
+                        surface_samples: vec![SurfaceFoundationSample {
+                            node_indices: vec![0, 1, 2],
+                            shape_values: vec![0.2, 0.3, 0.5],
+                            unit_normal: [0.0, 0.0, 1.0],
+                            area_weight_m2: 0.5,
+                        }],
+                    }),
+                }
+            },
+        )?;
+        Ok::<_, StructuralAssemblyError>((
+            summary,
+            stiffness.finish().unwrap(),
+            damping.finish().unwrap(),
+            resolution_count,
+        ))
+    };
+    let reference = assemble(LocalExecutionPlan::serial()).unwrap();
+    assert_eq!(reference.0.stiffness_count, 20);
+    assert_eq!(reference.0.damping_count, 10);
+    assert_eq!(reference.3, 50);
+    for threads in [2, 3, 7] {
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
+        for _ in 0..2 {
+            assert_eq!(assemble(plan).unwrap(), reference);
+        }
+    }
+    let worker_wave_bytes = std::mem::size_of::<PreparedPointConnector<'_>>() * 8
+        + std::mem::size_of::<Vec<(usize, usize, f64)>>() * 8 * 2
+        + std::mem::size_of::<(usize, usize, f64)>() * 36 * 8 * 2;
+    assert!(worker_wave_bytes < 128 * 1024);
+
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+        Ok::<_, ()>(assemble(plan))
+    })
+    .unwrap();
+    assert!(matches!(
+        &nested[0],
+        Err(StructuralAssemblyError::LocalExecution(message))
+            if message.contains("nested local numerical execution")
+    ));
+    let cancellation = FeaCancellationToken::new();
+    cancellation.cancel();
+    let _context = replace_fea_progress_context(FeaProgressContext {
+        cancellation,
+        ..FeaProgressContext::default()
+    });
+    assert!(matches!(
+        assemble(plan),
+        Err(StructuralAssemblyError::Cancelled)
+    ));
+}
+
+#[test]
+fn scoped_point_connector_keeps_authored_error_attribution() {
+    let layout = StructuralDofLayout::from_node_sets(vec![StructuralNodeDofSet::from_kinds([
+        StructuralDofKind::Rx,
+    ])]);
+    let connector = AnalysisConnector {
+        connector_id: "rotation_only_ground".into(),
+        kind: ConnectorKind::IsotropicGroundSpring {
+            target: RegionTarget::point("node:0"),
+            stiffness: runmat_analysis_core::Stiffness::new(10.0),
+        },
+    };
+    let mut stiffness = RealSparseAssembler::square(
+        layout.total_dof_count(),
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    let mut damping = RealSparseAssembler::square(
+        layout.total_dof_count(),
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    );
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+    let error = assemble_connectors_with_resolver(
+        &[connector],
+        ConnectorAssemblyContext {
+            topology_identity:
+                crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                    mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
+                },
+            layout: &layout,
+            coordinates_m: &[[0.0, 0.0, 0.0]],
+            node_identities: &[runmat_meshing_core::StableDigest::from_bytes([1; 32])],
+        },
+        plan,
+        &mut stiffness,
+        &mut damping,
+        |_, _, role| {
+            assert_eq!(role, ConnectorTargetRole::Point);
+            Ok(ResolvedConnectorTarget {
+                node_indices: vec![0],
+                surface_samples: Vec::new(),
+            })
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, StructuralAssemblyError::InvalidExplicitConnector {
+        connector_id, reason: "ground spring node lacks a translational degree of freedom"
+    } if connector_id == "rotation_only_ground")
+    );
 }
 
 fn foundation_rigid_normal_stiffness(
