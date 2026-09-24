@@ -12,7 +12,7 @@ use crate::{
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
-        affine::solve_affine_constraint_system,
+        affine::{solve_affine_constraint_system, solve_affine_constraint_system_with_execution},
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         multiplier::solve_multiplier_constraint_system,
     },
@@ -130,9 +130,9 @@ pub fn solve_linear_system(
     )
 }
 
-/// Uses the admitted local CPU plan for the ordinary prepared SPD operator. Constraint-reduced
-/// and multiplier systems retain their existing serial solver until their transforms have an
-/// independently accounted, fallible scoped execution path.
+/// Uses the admitted local CPU plan for ordinary and affine-reduced static stiffness application.
+/// Multiplier systems retain their serial solver until their GMRES callback can propagate scoped
+/// execution failure.
 pub fn solve_linear_system_with_execution(
     summary: &AssemblySummary,
     preconditioner_kind: SpdPreconditionerKind,
@@ -141,7 +141,17 @@ pub fn solve_linear_system_with_execution(
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
-    if summary.affine_constraint_reduction.is_some() || summary.constraint_matrix.is_some() {
+    if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
+        return solve_affine_constraint_system_with_execution(
+            summary,
+            reduction,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+            plan,
+        );
+    }
+    if summary.constraint_matrix.is_some() {
         return Ok(solve_linear_system(
             summary,
             preconditioner_kind,

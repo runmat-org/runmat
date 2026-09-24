@@ -5224,6 +5224,114 @@ fn admitted_parallel_solid_recovery_matches_serial_static_fields_exactly() {
 }
 
 #[test]
+fn admitted_affine_static_solve_matches_serial_and_closed_form() {
+    use crate::algebra::{
+        AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
+        RealSparseMatrix, ScopedSpmvError,
+    };
+    use crate::constraints::ResolvedConstraintMatrix;
+    use crate::planning::resource::{
+        execute_scoped_chunks, LocalExecutionPlan, LocalThreadCount, ScopedLocalExecutionError,
+    };
+    use crate::solve::{
+        backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
+        linear::{solve_linear_system, solve_linear_system_with_execution},
+        preconditioner::SpdPreconditionerKind,
+    };
+
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let mut summary = crate::assembly::assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        None,
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("fixture should provide a complete structural assembly summary");
+    let dofs = summary.dof_count;
+    let stiffness = RealSparseMatrix::diagonal(
+        vec![4.0; dofs],
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let mass = RealSparseMatrix::diagonal(
+        vec![1.0; dofs],
+        OperatorRole::Mass,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let damping = RealSparseMatrix::diagonal(
+        vec![0.0; dofs],
+        OperatorRole::Damping,
+        MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+    )
+    .unwrap();
+    let mut load = vec![0.0; dofs];
+    load[0] = 1.0;
+    load[1] = 2.0;
+    summary.operator = AssembledRealSystem::try_new(
+        CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+        vec![false; dofs],
+        load,
+    )
+    .unwrap();
+    let matrix = ResolvedConstraintMatrix {
+        full_dof_count: dofs,
+        row_offsets: vec![0, 2],
+        column_indices: vec![0, 1],
+        coefficients: vec![1.0, -1.0],
+        right_hand_side: vec![0.0],
+        row_identities: vec![runmat_execution::Digest::sha256([1u8])],
+        constraint_ids: vec!["tie_0_1".into()],
+    };
+    summary.affine_constraint_reduction = Some(matrix.affine_reduction().unwrap());
+    summary.constraint_matrix = Some(matrix);
+    let serial = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    let parallel = solve_linear_system_with_execution(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+    )
+    .unwrap();
+    assert!(parallel.converged, "diagnostics={:?}", parallel.diagnostics);
+    assert_eq!(parallel, serial);
+    assert!((parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
+    assert!((parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);
+    assert!(parallel
+        .diagnostics
+        .iter()
+        .any(|diagnostic| { diagnostic.code == "FEA_AFFINE_CONSTRAINT_REDUCTION" }));
+
+    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+        Ok::<_, ()>(solve_linear_system_with_execution(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+            plan,
+        ))
+    })
+    .unwrap();
+    assert!(matches!(
+        &nested[0],
+        Err(ScopedSpmvError::Execution(
+            ScopedLocalExecutionError::NestedExecution
+        ))
+    ));
+}
+
+#[test]
 fn electromagnetic_coefficients_are_independent_of_assignment_confidence() {
     let mut audited_model = fixture_model(FixtureId::MultiMaterialAssembly);
     replace_fixture_with_electric_current(&mut audited_model, "coil_current", "tip", 120.0);

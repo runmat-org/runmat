@@ -1,9 +1,10 @@
 use crate::{
-    algebra::{apply_k, PreparedRealLinearSystem},
+    algebra::{apply_k, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    planning::resource::LocalExecutionPlan,
     solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
 };
 
@@ -16,22 +17,65 @@ pub(super) fn solve_affine_constraint_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
+    solve_affine_constraint_system_with_apply(
+        summary,
+        reduction,
+        requested_backend,
+        algebra_backend,
+        initial_guess,
+        |full| Ok(apply_k(&summary.operator, full)),
+    )
+    .expect("reference sparse application is infallible for an assembled system")
+}
+
+pub(super) fn solve_affine_constraint_system_with_execution(
+    summary: &AssemblySummary,
+    reduction: &AffineConstraintReduction,
+    requested_backend: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_affine_constraint_system_with_apply(
+        summary,
+        reduction,
+        requested_backend,
+        algebra_backend,
+        initial_guess,
+        |full| {
+            if plan.is_serial() {
+                Ok(apply_k(&summary.operator, full))
+            } else {
+                spmv_scoped(summary.operator.operators().stiffness(), full, plan)
+            }
+        },
+    )
+}
+
+fn solve_affine_constraint_system_with_apply(
+    summary: &AssemblySummary,
+    reduction: &AffineConstraintReduction,
+    requested_backend: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    apply_full: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     let expected_reduction = summary
         .constraint_matrix
         .as_ref()
         .and_then(|matrix| matrix.affine_reduction().ok());
     if expected_reduction.as_ref() != Some(reduction) {
-        return rejected_affine_system(
+        return Ok(rejected_affine_system(
             summary,
             "affine reduction differs from the canonical resolved constraint matrix",
-        );
+        ));
     }
     let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
         summary.operator.operators().stiffness(),
         summary.operator.load(),
     ) {
         Ok(reduced) => reduced,
-        Err(error) => return rejected_affine_system(summary, &error.to_string()),
+        Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
     };
     let mut reduced_solution = initial_guess
         .map(|guess| {
@@ -56,13 +100,12 @@ pub(super) fn solve_affine_constraint_system(
         diagnostics.push(FeaDiagnostic {
             code: "FEA_AFFINE_CPU_REFERENCE".into(),
             severity: FeaDiagnosticSeverity::Warning,
-            message: "affine constraint reduction is executing on the serial CPU reference backend"
-                .into(),
+            message: "affine constraint reduction is executing on the CPU reference backend".into(),
         });
     }
 
     if reduction.reduced_dof_count == 0 {
-        return LinearSolveResult {
+        return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: 0.0,
             converged: true,
@@ -75,7 +118,7 @@ pub(super) fn solve_affine_constraint_system(
             solver_method: SolverMethod::MatrixFreePcg,
             preconditioner: SolverPreconditioner::None,
             diagnostics,
-        };
+        });
     }
 
     if let Err(error) = PreparedRealLinearSystem::try_new(
@@ -83,12 +126,12 @@ pub(super) fn solve_affine_constraint_system(
         reduced_rhs.clone(),
         vec![false; reduction.reduced_dof_count],
     ) {
-        return rejected_affine_system(summary, &error.to_string());
+        return Ok(rejected_affine_system(summary, &error.to_string()));
     }
 
     let mut residual = algebra_backend.vec_sub(
         &reduced_rhs,
-        &apply_reduced_operator(summary, reduction, &reduced_solution),
+        &apply_reduced_operator(reduction, &reduced_solution, &apply_full)?,
     );
     let mut direction = residual.clone();
     let mut residual_squared = algebra_backend.dot(&residual, &residual);
@@ -110,7 +153,7 @@ pub(super) fn solve_affine_constraint_system(
             });
             break;
         }
-        let operator_direction = apply_reduced_operator(summary, reduction, &direction);
+        let operator_direction = apply_reduced_operator(reduction, &direction, &apply_full)?;
         let denominator = algebra_backend.dot(&direction, &operator_direction);
         if !denominator.is_finite() || denominator <= 1.0e-18 {
             diagnostics.push(FeaDiagnostic {
@@ -145,7 +188,7 @@ pub(super) fn solve_affine_constraint_system(
         severity: FeaDiagnosticSeverity::Info,
         message: "solver=pcg space=affine_reduced preconditioner=none matrix_free=true".into(),
     });
-    LinearSolveResult {
+    Ok(LinearSolveResult {
         iterations,
         residual_norm: residual_squared.sqrt(),
         converged,
@@ -158,7 +201,7 @@ pub(super) fn solve_affine_constraint_system(
         solver_method: SolverMethod::MatrixFreePcg,
         preconditioner: SolverPreconditioner::None,
         diagnostics,
-    }
+    })
 }
 
 fn rejected_affine_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
@@ -189,12 +232,12 @@ fn rejected_affine_system(summary: &AssemblySummary, message: &str) -> LinearSol
 }
 
 fn apply_reduced_operator(
-    summary: &AssemblySummary,
     reduction: &AffineConstraintReduction,
     reduced: &[f64],
-) -> Vec<f64> {
+    apply_full: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+) -> Result<Vec<f64>, ScopedSpmvError> {
     let full = expand_linear(reduction, reduced);
-    transpose_apply(reduction, &apply_k(&summary.operator, &full))
+    Ok(transpose_apply(reduction, &apply_full(&full)?))
 }
 
 fn expand(reduction: &AffineConstraintReduction, reduced: &[f64]) -> Vec<f64> {
