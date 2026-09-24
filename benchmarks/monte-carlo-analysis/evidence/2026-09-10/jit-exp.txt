@@ -1,0 +1,11 @@
+Warming up...
+Running benchmark...
+  Completed 10 iterations
+
+Benchmark Results:
+  Total iterations: 12
+  JIT executions: 6
+  Interpreter executions: 6
+  Total time: 701ms
+  Average time: 58.416666ms
+  Throughput: 17.12 executions/second

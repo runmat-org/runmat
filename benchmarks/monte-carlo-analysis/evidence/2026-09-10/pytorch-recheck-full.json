@@ -1,0 +1,150 @@
+{
+  "case": "monte-carlo-analysis",
+  "variant": "options-terminal-cpu-fixture",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "arm",
+  "numpy": "2.5.3",
+  "commit": "46e7df465f504345098bb0d2d9953413f1f7d6f6",
+  "dirty": true,
+  "precision": "float32",
+  "device": "gpu",
+  "seed": 1219,
+  "warmups": 3,
+  "repeats": 10,
+  "analytic_price": 9.413403383853016,
+  "timing": "resident",
+  "timing_excludes": "fixture I/O, RNG, process startup",
+  "peak_memory": null,
+  "publication_ready": false,
+  "results": [
+    {
+      "impl": "python-torch",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_torch_options.py"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 2082.512166991364,
+      "stdout": "DEVICE gpu MPS\nSAMPLE rep=1 ms=545.468041033 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=2 ms=8.43383400934 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=3 ms=8.68233398069 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=4 ms=7.74650002131 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=5 ms=9.37941699522 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=6 ms=8.07504198747 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=7 ms=8.74141702661 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=8 ms=7.92599999113 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=9 ms=8.71208298486 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=10 ms=7.73675000528 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=11 ms=8.36066697957 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=12 ms=7.96970800729 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=13 ms=8.36354098283 price=9.4113483428955078 stderr=0.004461145494133234\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 545.468041033,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 2,
+          "ms": 8.43383400934,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 3,
+          "ms": 8.68233398069,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 4,
+          "ms": 7.74650002131,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 5,
+          "ms": 9.37941699522,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 6,
+          "ms": 8.07504198747,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 7,
+          "ms": 8.74141702661,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 8,
+          "ms": 7.92599999113,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 9,
+          "ms": 8.71208298486,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 10,
+          "ms": 7.73675000528,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 11,
+          "ms": 8.36066697957,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 12,
+          "ms": 7.96970800729,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 13,
+          "ms": 8.36354098283,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        }
+      ],
+      "first_execution_ms": 545.468041033,
+      "median_ms": 8.21785448352,
+      "min_ms": 7.73675000528,
+      "max_ms": 9.37941699522,
+      "paths_per_second": 1216862627.5938442
+    }
+  ],
+  "missing": [],
+  "source_sha256": {
+    "benchmarks/.harness/run_options.py": "7e86ab2a07ba92c3b19dfd3f2ca779ce1bc225540c836117be17b5a7f1f3658b",
+    "benchmarks/.harness/run_bench.py": "f18aa0e17ad68c9a4b82cc299fbbb2c3a7e6dc2d2c0af76d1f73e045ef6fc453",
+    "benchmarks/monte-carlo-analysis/python_torch_options.py": "0c48cfe242ab2c9d7ef0db69e3e020bbe3425df5364b0eb9987b0c25a3a6950d"
+  },
+  "binary_sha256": {
+    "python-torch": "5c3ea934d18a7979253ca08ff16151db78a896be29dbc37fd9bf7e7c549593b8"
+  },
+  "hardware": {
+    "hw.model": "Mac16,13",
+    "hw.memsize": "25769803776",
+    "machdep.cpu.brand_string": "Apple M4"
+  },
+  "runmat_disable_fused_reduction": false,
+  "runmat_config": "[runtime.accelerate]\nenabled = true\nprovider = \"wgpu\"\nallow_inprocess_fallback = false\n",
+  "thread_limits": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "JULIA_NUM_THREADS": "1"
+  },
+  "versions": {
+    "python-torch": "Python 3.14.4"
+  },
+  "torch_version": "2.14.0"
+}

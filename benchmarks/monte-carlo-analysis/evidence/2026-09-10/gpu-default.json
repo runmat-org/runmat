@@ -1,0 +1,5620 @@
+{
+  "case": "monte-carlo-analysis",
+  "variant": "options-terminal-cpu-fixture",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "arm",
+  "numpy": "2.5.3",
+  "commit": "46e7df465f504345098bb0d2d9953413f1f7d6f6",
+  "dirty": true,
+  "precision": "float32",
+  "device": "gpu",
+  "seed": 1219,
+  "warmups": 3,
+  "repeats": 10,
+  "analytic_price": 9.413403383853016,
+  "timing": "resident",
+  "timing_excludes": "fixture I/O, RNG, process startup",
+  "peak_memory": null,
+  "publication_ready": false,
+  "results": [
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 723.7570830038749,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=29.452833 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=2 ms=29.20025 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=3 ms=27.909833 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=4 ms=31.29925 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=5 ms=31.15425 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=6 ms=29.445 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=7 ms=30.827042 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=8 ms=35.628625 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=9 ms=41.389333 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=10 ms=38.344667 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=11 ms=31.743333 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=12 ms=38.567667 price=9.3936376571655273 stderr=2970.529296875\nSAMPLE rep=13 ms=33.099167 price=9.3936376571655273 stderr=2970.529296875\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            },
+            {
+              "hits": 0,
+              "misses": 26,
+              "tag": "runmat-reduction-layout-1"
+            },
+            {
+              "hits": 0,
+              "misses": 13,
+              "tag": "runmat-fusion-layout-1"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 117,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 143,
+            "total_wall_time_ns": 243219668
+          },
+          "fused_reduction": {
+            "count": 26,
+            "total_wall_time_ns": 81485708
+          },
+          "fusion_cache_hits": 117,
+          "fusion_cache_misses": 0,
+          "kernel_launches": [
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 100000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 400260
+        }
+      },
+      "status": "failed",
+      "error": "standard-error parity failed: 2970.529296875 vs 0.044568205417637514"
+    },
+    {
+      "impl": "python-torch",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_torch_options.py"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 1341.3969590328634,
+      "stdout": "DEVICE gpu MPS\nSAMPLE rep=1 ms=355.519792007 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=2 ms=1.19620800251 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=3 ms=0.968958018348 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=4 ms=0.719333009329 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=5 ms=1.72637501964 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=6 ms=0.881167012267 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=7 ms=0.658833014313 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=8 ms=0.661375001073 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=9 ms=0.658542034216 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=10 ms=3.36712499848 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=11 ms=1.11958297202 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=12 ms=1.14708294859 price=9.3936376571655273 stderr=0.044568203389644623\nSAMPLE rep=13 ms=1.27445801627 price=9.3936376571655273 stderr=0.044568203389644623\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 355.519792007,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 2,
+          "ms": 1.19620800251,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 3,
+          "ms": 0.968958018348,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 4,
+          "ms": 0.719333009329,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 5,
+          "ms": 1.72637501964,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 6,
+          "ms": 0.881167012267,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 7,
+          "ms": 0.658833014313,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 8,
+          "ms": 0.661375001073,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 9,
+          "ms": 0.658542034216,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 10,
+          "ms": 3.36712499848,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 11,
+          "ms": 1.11958297202,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 12,
+          "ms": 1.14708294859,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        },
+        {
+          "rep": 13,
+          "ms": 1.27445801627,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820338964462
+        }
+      ],
+      "first_execution_ms": 355.519792007,
+      "median_ms": 1.0003749921435,
+      "min_ms": 0.658542034216,
+      "max_ms": 3.36712499848,
+      "paths_per_second": 99962514.84228966
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "julia",
+        "--project=/private/tmp/rm1219-tools/julia-gpu",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 5075.098209024873,
+      "stdout": "DEVICE gpu Metal\nSAMPLE rep=1 ms=1110.391459 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=2 ms=2.47525 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=3 ms=1.865334 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=4 ms=1.954125 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=5 ms=1.4825 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=6 ms=1.26875 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=7 ms=2.508083 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=8 ms=1.893958 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=9 ms=1.7645 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=10 ms=1.936959 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=11 ms=179.358333 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=12 ms=2.4205 price=9.3936376571655273 stderr=0.044568206015414773\nSAMPLE rep=13 ms=1.989791 price=9.3936376571655273 stderr=0.044568206015414773\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 1110.391459,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 2,
+          "ms": 2.47525,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 3,
+          "ms": 1.865334,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 4,
+          "ms": 1.954125,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 5,
+          "ms": 1.4825,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 6,
+          "ms": 1.26875,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 7,
+          "ms": 2.508083,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 8,
+          "ms": 1.893958,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 9,
+          "ms": 1.7645,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 10,
+          "ms": 1.936959,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 11,
+          "ms": 179.358333,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 12,
+          "ms": 2.4205,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        },
+        {
+          "rep": 13,
+          "ms": 1.989791,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820601541477
+        }
+      ],
+      "first_execution_ms": 1110.391459,
+      "median_ms": 1.945542,
+      "min_ms": 1.26875,
+      "max_ms": 179.358333,
+      "paths_per_second": 51399558.580590904
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 1295.453540980816,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=122.656916 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=2 ms=43.216042 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=3 ms=43.714708 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=4 ms=41.055459 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=5 ms=43.257333 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=6 ms=41.99975 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=7 ms=41.163209 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=8 ms=47.039959 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=9 ms=45.979125 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=10 ms=52.063333 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=11 ms=54.239792 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=12 ms=55.513583 price=9.3946552276611328 stderr=9394.6552734375\nSAMPLE rep=13 ms=55.431291 price=9.3946552276611328 stderr=9394.6552734375\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 26,
+              "tag": "runmat-reduction-p2-bgl"
+            },
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            },
+            {
+              "hits": 0,
+              "misses": 13,
+              "tag": "runmat-fusion-layout-1"
+            },
+            {
+              "hits": 0,
+              "misses": 26,
+              "tag": "runmat-reduction-p1-bgl"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 143,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 143,
+            "total_wall_time_ns": 282388799
+          },
+          "fused_reduction": {
+            "count": 26,
+            "total_wall_time_ns": 207646581
+          },
+          "fusion_cache_hits": 141,
+          "fusion_cache_misses": 2,
+          "kernel_launches": [
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 1000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 4000260
+        }
+      },
+      "status": "failed",
+      "error": "standard-error parity failed: 9394.6552734375 vs 0.014101507809308826"
+    },
+    {
+      "impl": "python-torch",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_torch_options.py"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 1189.4576249760576,
+      "stdout": "DEVICE gpu MPS\nSAMPLE rep=1 ms=299.375375034 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=2 ms=1.57362502068 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=3 ms=3.09000001289 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=4 ms=1.9906659727 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=5 ms=2.17799999518 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=6 ms=1.77591602551 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=7 ms=2.14016699465 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=8 ms=1.32712494815 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=9 ms=2.25829100236 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=10 ms=1.3601250248 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=11 ms=2.84320901847 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=12 ms=1.34349998552 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=13 ms=2.1778329974 price=9.3946561813354492 stderr=0.014101507142186165\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 299.375375034,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 2,
+          "ms": 1.57362502068,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 3,
+          "ms": 3.09000001289,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 4,
+          "ms": 1.9906659727,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 5,
+          "ms": 2.17799999518,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 6,
+          "ms": 1.77591602551,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 7,
+          "ms": 2.14016699465,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 8,
+          "ms": 1.32712494815,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 9,
+          "ms": 2.25829100236,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 10,
+          "ms": 1.3601250248,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 11,
+          "ms": 2.84320901847,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 12,
+          "ms": 1.34349998552,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 13,
+          "ms": 2.1778329974,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        }
+      ],
+      "first_execution_ms": 299.375375034,
+      "median_ms": 2.065416483675,
+      "min_ms": 1.32712494815,
+      "max_ms": 2.84320901847,
+      "paths_per_second": 484163851.65121657
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "julia",
+        "--project=/private/tmp/rm1219-tools/julia-gpu",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 4753.032792010345,
+      "stdout": "DEVICE gpu Metal\nSAMPLE rep=1 ms=1271.79575 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=2 ms=2.525208 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=3 ms=3.231583 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=4 ms=2.403416 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=5 ms=2.302042 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=6 ms=2.34125 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=7 ms=1.994458 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=8 ms=2.355166 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=9 ms=1.928459 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=10 ms=3.209625 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=11 ms=190.503 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=12 ms=2.008458 price=9.3946552276611328 stderr=0.014101508140563965\nSAMPLE rep=13 ms=2.589875 price=9.3946552276611328 stderr=0.014101508140563965\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 1271.79575,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 2,
+          "ms": 2.525208,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 3,
+          "ms": 3.231583,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 4,
+          "ms": 2.403416,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 5,
+          "ms": 2.302042,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 6,
+          "ms": 2.34125,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 7,
+          "ms": 1.994458,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 8,
+          "ms": 2.355166,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 9,
+          "ms": 1.928459,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 10,
+          "ms": 3.209625,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 11,
+          "ms": 190.503,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 12,
+          "ms": 2.008458,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        },
+        {
+          "rep": 13,
+          "ms": 2.589875,
+          "price": 9.394655227661133,
+          "stderr": 0.014101508140563965
+        }
+      ],
+      "first_execution_ms": 1271.79575,
+      "median_ms": 2.348208,
+      "min_ms": 1.928459,
+      "max_ms": 190.503,
+      "paths_per_second": 425856653.2436649
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 7080.673541000579,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=279.375875 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=2 ms=187.257333 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=3 ms=192.167208 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=4 ms=175.642083 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=5 ms=184.674834 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=6 ms=182.88175 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=7 ms=180.511291 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=8 ms=195.8515 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=9 ms=182.490291 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=10 ms=183.054625 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=11 ms=222.217708 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=12 ms=208.485416 price=9.4113492965698242 stderr=29761.30078125\nSAMPLE rep=13 ms=182.396292 price=9.4113492965698242 stderr=29761.30078125\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            },
+            {
+              "hits": 0,
+              "misses": 26,
+              "tag": "runmat-reduction-p1-bgl"
+            },
+            {
+              "hits": 0,
+              "misses": 13,
+              "tag": "runmat-fusion-layout-1"
+            },
+            {
+              "hits": 0,
+              "misses": 26,
+              "tag": "runmat-reduction-p2-bgl"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 143,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 143,
+            "total_wall_time_ns": 1061891418
+          },
+          "fused_reduction": {
+            "count": 26,
+            "total_wall_time_ns": 311394754
+          },
+          "fusion_cache_hits": 143,
+          "fusion_cache_misses": 0,
+          "kernel_launches": [
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 1
+                }
+              ]
+            },
+            {
+              "kernel": "fused_reduction",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "reduce_len",
+                  "value": 10000000
+                },
+                {
+                  "key": "slices",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 256
+                },
+                {
+                  "key": "flavor",
+                  "value": 0
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 40000260
+        }
+      },
+      "status": "failed",
+      "error": "standard-error parity failed: 29761.30078125 vs 0.0044611457114168045"
+    },
+    {
+      "impl": "python-torch",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_torch_options.py"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 1629.9640419892967,
+      "stdout": "DEVICE gpu MPS\nSAMPLE rep=1 ms=448.511167022 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=2 ms=13.4255000157 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=3 ms=12.3886659858 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=4 ms=10.5535420007 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=5 ms=9.76337498287 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=6 ms=9.39583301079 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=7 ms=10.9914999921 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=8 ms=10.0405830308 price=9.4113483428955078 stderr=0.0045304493978619576\nSAMPLE rep=9 ms=9.79966594605 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=10 ms=9.69279196579 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=11 ms=9.46045800811 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=12 ms=10.1712500327 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=13 ms=10.1950840326 price=9.4113483428955078 stderr=0.004461145494133234\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "failed",
+      "error": "standard-error parity failed: 0.0045304493978619576 vs 0.0044611457114168045"
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "julia",
+        "--project=/private/tmp/rm1219-tools/julia-gpu",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 5075.1047499943525,
+      "stdout": "DEVICE gpu Metal\nSAMPLE rep=1 ms=1234.797292 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=2 ms=7.866667 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=3 ms=10.736583 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=4 ms=7.381667 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=5 ms=7.476083 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=6 ms=10.073042 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=7 ms=12.930167 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=8 ms=15.85725 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=9 ms=12.4915 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=10 ms=17.222667 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=11 ms=320.259958 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=12 ms=10.587333 price=9.4113492965698242 stderr=0.0044611455359214814\nSAMPLE rep=13 ms=7.144792 price=9.4113492965698242 stderr=0.0044611455359214814\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 1234.797292,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 2,
+          "ms": 7.866667,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 3,
+          "ms": 10.736583,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 4,
+          "ms": 7.381667,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 5,
+          "ms": 7.476083,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 6,
+          "ms": 10.073042,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 7,
+          "ms": 12.930167,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 8,
+          "ms": 15.85725,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 9,
+          "ms": 12.4915,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 10,
+          "ms": 17.222667,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 11,
+          "ms": 320.259958,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 12,
+          "ms": 10.587333,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        },
+        {
+          "rep": 13,
+          "ms": 7.144792,
+          "price": 9.411349296569824,
+          "stderr": 0.004461145535921481
+        }
+      ],
+      "first_execution_ms": 1234.797292,
+      "median_ms": 11.5394165,
+      "min_ms": 7.144792,
+      "max_ms": 320.259958,
+      "paths_per_second": 866594944.38042
+    }
+  ],
+  "missing": [],
+  "source_sha256": {
+    "benchmarks/.harness/run_options.py": "8245ce7c0f7cfab53d2ce896af654ed2d00ea57ea4b7b9a9f9e68e870f6e6c29",
+    "benchmarks/.harness/run_bench.py": "f18aa0e17ad68c9a4b82cc299fbbb2c3a7e6dc2d2c0af76d1f73e045ef6fc453",
+    "benchmarks/monte-carlo-analysis/runmat_options.m": "d9cf0060beedf853860733152effac8b15bf4e5124be68d91d62dd675ab21e69",
+    "benchmarks/monte-carlo-analysis/python_torch_options.py": "0c48cfe242ab2c9d7ef0db69e3e020bbe3425df5364b0eb9987b0c25a3a6950d",
+    "benchmarks/monte-carlo-analysis/julia_options.jl": "a20f20b67c0263bf6feaca7cbea2822b4989a5eaff7a9163408fd62a978b7ed2"
+  },
+  "binary_sha256": {
+    "runmat": "076d30d236b6012d9fb2d5ba95d91cca710540e71cacab9dfe0789f29b1eabec",
+    "python-torch": "5c3ea934d18a7979253ca08ff16151db78a896be29dbc37fd9bf7e7c549593b8",
+    "julia": "70ab05dde9c2b11b03e8f87b9c0b668a2a97b3a3d9a722ea1b5a1cd7a9d217da"
+  },
+  "runmat_disable_fused_reduction": false,
+  "runmat_config": "[runtime.accelerate]\nenabled = true\nprovider = \"wgpu\"\nallow_inprocess_fallback = false\n",
+  "thread_limits": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "JULIA_NUM_THREADS": "1"
+  },
+  "versions": {
+    "runmat": "runmat 0.6.2",
+    "python-torch": "Python 3.14.4",
+    "julia": "julia version 1.12.7"
+  }
+}

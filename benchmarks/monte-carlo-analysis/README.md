@@ -1,5 +1,8 @@
 # Monte Carlo GBM Risk Simulation
 
+Development: [exact-terminal option-pricing CPU baseline (RM-1219)](OPTIONS.md).
+That variant is a separate workload; its timings are not comparable to the multi-step results below.
+
 Geometric Brownian Motion (GBM) is a staple in intraday risk and options pricing. At realistic scales (millions of paths, hundreds of steps), throughput wins matter. This benchmark compares RunMat against NumPy, and PyTorch for a batched GBM simulation with a simple call option payoff.
 
 We simulate `M` paths over `T` steps:

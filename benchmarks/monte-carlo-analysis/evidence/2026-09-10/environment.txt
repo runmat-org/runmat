@@ -1,0 +1,6 @@
+Host: Apple M4, Mac16,13, 24 GiB RAM
+RunMat official binary SHA256: 076d30d236b6012d9fb2d5ba95d91cca710540e71cacab9dfe0789f29b1eabec
+Official archive SHA256 verified against GitHub asset digest: 439f039cd00228e6ad60b2f43b5257492905393c1fd30a3351869a663fdb51be
+CPU float64 and loop Python: 3.12.14; NumPy 2.3.5
+CPU float32 and GPU Python: 3.14; NumPy 2.5.3; PyTorch 2.14.0
+Julia 1.12.7; GNU Octave 11.3.0; Metal dependencies pinned in ../../julia-gpu/Manifest.toml

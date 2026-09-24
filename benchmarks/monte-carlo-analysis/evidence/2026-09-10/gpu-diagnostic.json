@@ -1,0 +1,5040 @@
+{
+  "case": "monte-carlo-analysis",
+  "variant": "options-terminal-cpu-fixture",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "arm",
+  "numpy": "2.5.3",
+  "commit": "46e7df465f504345098bb0d2d9953413f1f7d6f6",
+  "dirty": true,
+  "precision": "float32",
+  "device": "gpu",
+  "seed": 1219,
+  "warmups": 3,
+  "repeats": 10,
+  "analytic_price": 9.413403383853016,
+  "timing": "resident",
+  "timing_excludes": "fixture I/O, RNG, process startup",
+  "peak_memory": null,
+  "publication_ready": false,
+  "results": [
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 1525.6030409946106,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=88.497333 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=2 ms=89.613541 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=3 ms=85.805666 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=4 ms=97.655791 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=5 ms=102.368042 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=6 ms=97.912541 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=7 ms=104.102333 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=8 ms=109.0895 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=9 ms=97.124583 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=10 ms=96.950792 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=11 ms=98.270541 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=12 ms=96.755875 price=9.3936290740966797 stderr=0.0445680767297745\nSAMPLE rep=13 ms=148.4535 price=9.3936290740966797 stderr=0.0445680767297745\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            },
+            {
+              "hits": 0,
+              "misses": 39,
+              "tag": "runmat-fusion-layout-1"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 117,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 260,
+            "total_wall_time_ns": 487770461
+          },
+          "fused_reduction": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "fusion_cache_hits": 117,
+          "fusion_cache_misses": 0,
+          "kernel_launches": [
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 100000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 400260
+        }
+      },
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 88.497333,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 2,
+          "ms": 89.613541,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 3,
+          "ms": 85.805666,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 4,
+          "ms": 97.655791,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 5,
+          "ms": 102.368042,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 6,
+          "ms": 97.912541,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 7,
+          "ms": 104.102333,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 8,
+          "ms": 109.0895,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 9,
+          "ms": 97.124583,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 10,
+          "ms": 96.950792,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 11,
+          "ms": 98.270541,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 12,
+          "ms": 96.755875,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        },
+        {
+          "rep": 13,
+          "ms": 148.4535,
+          "price": 9.39362907409668,
+          "stderr": 0.0445680767297745
+        }
+      ],
+      "first_execution_ms": 88.497333,
+      "median_ms": 98.091541,
+      "min_ms": 96.755875,
+      "max_ms": 148.4535,
+      "paths_per_second": 1019455.897833229
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 4827.894082991406,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=322.860125 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=2 ms=325.420167 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=3 ms=323.961708 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=4 ms=321.087833 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=5 ms=319.854125 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=6 ms=315.405458 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=7 ms=325.189958 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=8 ms=328.35525 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=9 ms=328.984 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=10 ms=319.028875 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=11 ms=327.535166 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=12 ms=327.278958 price=9.394561767578125 stderr=0.0140993669629097\nSAMPLE rep=13 ms=322.569791 price=9.394561767578125 stderr=0.0140993669629097\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 39,
+              "tag": "runmat-fusion-layout-1"
+            },
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 117,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 260,
+            "total_wall_time_ns": 453987003
+          },
+          "fused_reduction": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "fusion_cache_hits": 117,
+          "fusion_cache_misses": 0,
+          "kernel_launches": [
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 4000260
+        }
+      },
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 322.860125,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 2,
+          "ms": 325.420167,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 3,
+          "ms": 323.961708,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 4,
+          "ms": 321.087833,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 5,
+          "ms": 319.854125,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 6,
+          "ms": 315.405458,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 7,
+          "ms": 325.189958,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 8,
+          "ms": 328.35525,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 9,
+          "ms": 328.984,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 10,
+          "ms": 319.028875,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 11,
+          "ms": 327.535166,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 12,
+          "ms": 327.278958,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        },
+        {
+          "rep": 13,
+          "ms": 322.569791,
+          "price": 9.394561767578125,
+          "stderr": 0.0140993669629097
+        }
+      ],
+      "first_execution_ms": 322.860125,
+      "median_ms": 323.8798745,
+      "min_ms": 315.405458,
+      "max_ms": 328.984,
+      "paths_per_second": 3087564.491445423
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 41724.322583002504,
+      "stdout": "DEVICE gpu\nApple M4\nSAMPLE rep=1 ms=2847.459417 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=2 ms=2862.030709 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=3 ms=2824.10725 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=4 ms=2823.000125 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=5 ms=2810.875334 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=6 ms=2805.751084 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=7 ms=2840.527375 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=8 ms=2852.542333 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=9 ms=2953.1185 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=10 ms=2879.35475 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=11 ms=2881.789584 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=12 ms=2872.165666 price=9.3895444869995117 stderr=0.0044435425661504\nSAMPLE rep=13 ms=2868.786584 price=9.3895444869995117 stderr=0.0044435425661504\n",
+      "stderr": "",
+      "returncode": 0,
+      "provider_telemetry": {
+        "device": {
+          "backend": "metal",
+          "device_id": 1,
+          "memory_bytes": 14302248960,
+          "name": "Apple M4",
+          "vendor": "Apple"
+        },
+        "telemetry": {
+          "bind_group_cache_by_layout": [
+            {
+              "hits": 0,
+              "misses": 78,
+              "tag": "runmat-fusion-layout-2"
+            },
+            {
+              "hits": 0,
+              "misses": 39,
+              "tag": "runmat-fusion-layout-1"
+            }
+          ],
+          "bind_group_cache_hits": 0,
+          "bind_group_cache_misses": 117,
+          "download_bytes": 108,
+          "fused_elementwise": {
+            "count": 260,
+            "total_wall_time_ns": 1319030505
+          },
+          "fused_reduction": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "fusion_cache_hits": 117,
+          "fusion_cache_misses": 0,
+          "kernel_launches": [
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 10000000
+                },
+                {
+                  "key": "inputs",
+                  "value": 2
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            },
+            {
+              "kernel": "fused_elementwise",
+              "precision": "f32",
+              "shape": [
+                {
+                  "key": "len",
+                  "value": 1
+                },
+                {
+                  "key": "inputs",
+                  "value": 1
+                },
+                {
+                  "key": "rank",
+                  "value": 2
+                }
+              ],
+              "tuning": [
+                {
+                  "key": "wg",
+                  "value": 512
+                }
+              ]
+            }
+          ],
+          "linsolve": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "matmul": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mldivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "mrdivide": {
+            "count": 0,
+            "total_wall_time_ns": 0
+          },
+          "solve_fallbacks": [],
+          "upload_bytes": 40000260
+        }
+      },
+      "status": "failed",
+      "error": "price parity failed: 9.389544486999512 vs 9.411349262530187"
+    }
+  ],
+  "missing": [],
+  "source_sha256": {
+    "benchmarks/.harness/run_options.py": "8245ce7c0f7cfab53d2ce896af654ed2d00ea57ea4b7b9a9f9e68e870f6e6c29",
+    "benchmarks/.harness/run_bench.py": "f18aa0e17ad68c9a4b82cc299fbbb2c3a7e6dc2d2c0af76d1f73e045ef6fc453",
+    "benchmarks/monte-carlo-analysis/runmat_options.m": "d9cf0060beedf853860733152effac8b15bf4e5124be68d91d62dd675ab21e69"
+  },
+  "binary_sha256": {
+    "runmat": "076d30d236b6012d9fb2d5ba95d91cca710540e71cacab9dfe0789f29b1eabec"
+  },
+  "runmat_disable_fused_reduction": true,
+  "runmat_config": "[runtime.accelerate]\nenabled = true\nprovider = \"wgpu\"\nallow_inprocess_fallback = false\n",
+  "thread_limits": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "JULIA_NUM_THREADS": "1"
+  },
+  "versions": {
+    "runmat": "runmat 0.6.2"
+  }
+}

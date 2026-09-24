@@ -1,0 +1,1120 @@
+{
+  "case": "monte-carlo-analysis",
+  "variant": "options-terminal-cpu-fixture",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu": "arm",
+  "numpy": "2.5.3",
+  "commit": "46e7df465f504345098bb0d2d9953413f1f7d6f6",
+  "dirty": true,
+  "precision": "float32",
+  "device": "cpu",
+  "seed": 1219,
+  "warmups": 3,
+  "repeats": 10,
+  "analytic_price": 9.413403383853016,
+  "timing": "resident",
+  "timing_excludes": "fixture I/O, RNG, process startup",
+  "peak_memory": null,
+  "publication_ready": false,
+  "results": [
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 214.7831249749288,
+      "stdout": "SAMPLE rep=1 ms=5.797292 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=2 ms=6.268417 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=3 ms=6.483375 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=4 ms=6.80725 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=5 ms=6.567709 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=6 ms=5.959166 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=7 ms=6.529625 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=8 ms=6.17475 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=9 ms=6.593084 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=10 ms=6.144375 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=11 ms=6.298625 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=12 ms=6.708583 price=9.393637344041343 stderr=0.0445682045988948\nSAMPLE rep=13 ms=6.50675 price=9.393637344041343 stderr=0.0445682045988948\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 5.797292,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 2,
+          "ms": 6.268417,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 3,
+          "ms": 6.483375,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 4,
+          "ms": 6.80725,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 5,
+          "ms": 6.567709,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 6,
+          "ms": 5.959166,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 7,
+          "ms": 6.529625,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 8,
+          "ms": 6.17475,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 9,
+          "ms": 6.593084,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 10,
+          "ms": 6.144375,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 11,
+          "ms": 6.298625,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 12,
+          "ms": 6.708583,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        },
+        {
+          "rep": 13,
+          "ms": 6.50675,
+          "price": 9.393637344041343,
+          "stderr": 0.0445682045988948
+        }
+      ],
+      "first_execution_ms": 5.797292,
+      "median_ms": 6.5181875,
+      "min_ms": 5.959166,
+      "max_ms": 6.80725,
+      "paths_per_second": 15341688.161011018
+    },
+    {
+      "impl": "octave",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "octave",
+        "-qf",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 594.143875001464,
+      "stdout": "SAMPLE rep=1 ms=4.802942276 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=2 ms=1.62506103516 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=3 ms=1.40500068665 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=4 ms=1.35397911072 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=5 ms=1.37805938721 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=6 ms=1.44505500793 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=7 ms=1.34897232056 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=8 ms=1.32918357849 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=9 ms=1.38688087463 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=10 ms=1.34110450745 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=11 ms=1.42788887024 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=12 ms=1.64198875427 price=9.3936376571655273 stderr=0.044557772576808929\nSAMPLE rep=13 ms=1.41310691833 price=9.3936376571655273 stderr=0.044557772576808929\n",
+      "stderr": "\n",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 4.802942276,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 2,
+          "ms": 1.62506103516,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 3,
+          "ms": 1.40500068665,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 4,
+          "ms": 1.35397911072,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 5,
+          "ms": 1.37805938721,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 6,
+          "ms": 1.44505500793,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 7,
+          "ms": 1.34897232056,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 8,
+          "ms": 1.32918357849,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 9,
+          "ms": 1.38688087463,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 10,
+          "ms": 1.34110450745,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 11,
+          "ms": 1.42788887024,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 12,
+          "ms": 1.64198875427,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        },
+        {
+          "rep": 13,
+          "ms": 1.41310691833,
+          "price": 9.393637657165527,
+          "stderr": 0.04455777257680893
+        }
+      ],
+      "first_execution_ms": 4.802942276,
+      "median_ms": 1.38247013092,
+      "min_ms": 1.32918357849,
+      "max_ms": 1.64198875427,
+      "paths_per_second": 72334293.35175036
+    },
+    {
+      "impl": "python-numpy",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_numpy_options.py"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 56.23250000644475,
+      "stdout": "SAMPLE rep=1 ms=0.293999968562 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=2 ms=0.256958999671 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=3 ms=0.24924997706 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=4 ms=0.246040988714 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=5 ms=0.246959039941 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=6 ms=0.247375050094 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=7 ms=0.248041003942 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=8 ms=0.244541966822 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=9 ms=0.24416699307 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=10 ms=0.248124997597 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=11 ms=0.247167015914 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=12 ms=0.247874995694 price=9.3936376571655273 stderr=0.044568207114934921\nSAMPLE rep=13 ms=0.250625016633 price=9.3936376571655273 stderr=0.044568207114934921\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 0.293999968562,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 2,
+          "ms": 0.256958999671,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 3,
+          "ms": 0.24924997706,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 4,
+          "ms": 0.246040988714,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 5,
+          "ms": 0.246959039941,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 6,
+          "ms": 0.247375050094,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 7,
+          "ms": 0.248041003942,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 8,
+          "ms": 0.244541966822,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 9,
+          "ms": 0.24416699307,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 10,
+          "ms": 0.248124997597,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 11,
+          "ms": 0.247167015914,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 12,
+          "ms": 0.247874995694,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        },
+        {
+          "rep": 13,
+          "ms": 0.250625016633,
+          "price": 9.393637657165527,
+          "stderr": 0.04456820711493492
+        }
+      ],
+      "first_execution_ms": 0.293999968562,
+      "median_ms": 0.247271033004,
+      "min_ms": 0.24416699307,
+      "max_ms": 0.250625016633,
+      "paths_per_second": 404414535.68231887
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 100000,
+      "command": [
+        "julia",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "a5f1c63d1a0198b3f557fc217bf7d9e26fbf32b9f2ca58412e5f485589edf281",
+      "reference_price": 9.39363739711921,
+      "reference_stderr": 0.044568205417637514,
+      "process_total_ms": 784.7212080378085,
+      "stdout": "SAMPLE rep=1 ms=0.309375 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=2 ms=0.279625 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=3 ms=0.288166 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=4 ms=0.281916 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=5 ms=0.322958 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=6 ms=0.270125 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=7 ms=5.70425 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=8 ms=0.272625 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=9 ms=0.276875 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=10 ms=0.256375 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=11 ms=0.284583 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=12 ms=0.273666 price=9.3936376571655273 stderr=0.044568193952282828\nSAMPLE rep=13 ms=0.275084 price=9.3936376571655273 stderr=0.044568193952282828\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 0.309375,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 2,
+          "ms": 0.279625,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 3,
+          "ms": 0.288166,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 4,
+          "ms": 0.281916,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 5,
+          "ms": 0.322958,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 6,
+          "ms": 0.270125,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 7,
+          "ms": 5.70425,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 8,
+          "ms": 0.272625,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 9,
+          "ms": 0.276875,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 10,
+          "ms": 0.256375,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 11,
+          "ms": 0.284583,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 12,
+          "ms": 0.273666,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        },
+        {
+          "rep": 13,
+          "ms": 0.275084,
+          "price": 9.393637657165527,
+          "stderr": 0.04456819395228283
+        }
+      ],
+      "first_execution_ms": 0.309375,
+      "median_ms": 0.2759795,
+      "min_ms": 0.256375,
+      "max_ms": 5.70425,
+      "paths_per_second": 362345753.9418689
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 1607.7164169983007,
+      "stdout": "SAMPLE rep=1 ms=66.723667 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=2 ms=73.933125 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=3 ms=75.488166 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=4 ms=74.995917 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=5 ms=80.3865 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=6 ms=75.982583 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=7 ms=111.664959 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=8 ms=105.36775 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=9 ms=75.95125 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=10 ms=75.1505 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=11 ms=79.360417 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=12 ms=79.426667 price=9.3946553788029625 stderr=0.0141015075448327\nSAMPLE rep=13 ms=76.702917 price=9.3946553788029625 stderr=0.0141015075448327\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 66.723667,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 2,
+          "ms": 73.933125,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 3,
+          "ms": 75.488166,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 4,
+          "ms": 74.995917,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 5,
+          "ms": 80.3865,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 6,
+          "ms": 75.982583,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 7,
+          "ms": 111.664959,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 8,
+          "ms": 105.36775,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 9,
+          "ms": 75.95125,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 10,
+          "ms": 75.1505,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 11,
+          "ms": 79.360417,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 12,
+          "ms": 79.426667,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        },
+        {
+          "rep": 13,
+          "ms": 76.702917,
+          "price": 9.394655378802963,
+          "stderr": 0.0141015075448327
+        }
+      ],
+      "first_execution_ms": 66.723667,
+      "median_ms": 78.031667,
+      "min_ms": 74.995917,
+      "max_ms": 111.664959,
+      "paths_per_second": 12815309.968964268
+    },
+    {
+      "impl": "octave",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "octave",
+        "-qf",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 740.2695419732481,
+      "stdout": "SAMPLE rep=1 ms=16.0229206085 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=2 ms=12.0010375977 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=3 ms=11.6291046143 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=4 ms=12.7379894257 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=5 ms=12.638092041 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=6 ms=12.4070644379 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=7 ms=12.5260353088 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=8 ms=12.815952301 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=9 ms=12.8118991852 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=10 ms=13.4649276733 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=11 ms=12.7990245819 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=12 ms=11.5349292755 price=9.3946552276611328 stderr=0.014138970524072647\nSAMPLE rep=13 ms=12.7139091492 price=9.3946552276611328 stderr=0.014138970524072647\n",
+      "stderr": "\n",
+      "returncode": 0,
+      "status": "failed",
+      "error": "standard-error parity failed: 0.014138970524072647 vs 0.014101507809308826"
+    },
+    {
+      "impl": "python-numpy",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_numpy_options.py"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 85.50412498880178,
+      "stdout": "SAMPLE rep=1 ms=2.8167499695 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=2 ms=2.45820794953 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=3 ms=2.33500002651 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=4 ms=2.34162498964 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=5 ms=2.58199998643 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=6 ms=2.37120798556 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=7 ms=2.35670804977 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=8 ms=2.52820801688 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=9 ms=2.34258302953 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=10 ms=2.33145797392 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=11 ms=2.32995802071 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=12 ms=2.45933397673 price=9.3946561813354492 stderr=0.014101507142186165\nSAMPLE rep=13 ms=2.80908297282 price=9.3946561813354492 stderr=0.014101507142186165\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 2.8167499695,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 2,
+          "ms": 2.45820794953,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 3,
+          "ms": 2.33500002651,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 4,
+          "ms": 2.34162498964,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 5,
+          "ms": 2.58199998643,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 6,
+          "ms": 2.37120798556,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 7,
+          "ms": 2.35670804977,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 8,
+          "ms": 2.52820801688,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 9,
+          "ms": 2.34258302953,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 10,
+          "ms": 2.33145797392,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 11,
+          "ms": 2.32995802071,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 12,
+          "ms": 2.45933397673,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        },
+        {
+          "rep": 13,
+          "ms": 2.80908297282,
+          "price": 9.39465618133545,
+          "stderr": 0.014101507142186165
+        }
+      ],
+      "first_execution_ms": 2.8167499695,
+      "median_ms": 2.363958017665,
+      "min_ms": 2.32995802071,
+      "max_ms": 2.80908297282,
+      "paths_per_second": 423019356.74295527
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 1000000,
+      "command": [
+        "julia",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "618d83a510e8c039c506ff4443ea085f7317900cbac3db9e93c0092788385b87",
+      "reference_price": 9.39465543890921,
+      "reference_stderr": 0.014101507809308826,
+      "process_total_ms": 881.7667909897864,
+      "stdout": "SAMPLE rep=1 ms=8.330959 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=2 ms=2.733167 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=3 ms=2.839167 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=4 ms=2.846459 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=5 ms=2.817792 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=6 ms=2.763875 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=7 ms=8.956083 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=8 ms=2.635416 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=9 ms=2.74 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=10 ms=2.589792 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=11 ms=2.714375 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=12 ms=2.692125 price=9.3946561813354492 stderr=0.014101511001586913\nSAMPLE rep=13 ms=40.377875 price=9.3946561813354492 stderr=0.014101511001586913\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 8.330959,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 2,
+          "ms": 2.733167,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 3,
+          "ms": 2.839167,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 4,
+          "ms": 2.846459,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 5,
+          "ms": 2.817792,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 6,
+          "ms": 2.763875,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 7,
+          "ms": 8.956083,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 8,
+          "ms": 2.635416,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 9,
+          "ms": 2.74,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 10,
+          "ms": 2.589792,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 11,
+          "ms": 2.714375,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 12,
+          "ms": 2.692125,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        },
+        {
+          "rep": 13,
+          "ms": 40.377875,
+          "price": 9.39465618133545,
+          "stderr": 0.014101511001586913
+        }
+      ],
+      "first_execution_ms": 8.330959,
+      "median_ms": 2.7519375000000004,
+      "min_ms": 2.589792,
+      "max_ms": 40.377875,
+      "paths_per_second": 363380345.66555375
+    },
+    {
+      "impl": "runmat",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-tools/runmat",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 15232.028500002343,
+      "stdout": "SAMPLE rep=1 ms=887.805417 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=2 ms=767.072292 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=3 ms=840.084666 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=4 ms=765.515708 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=5 ms=933.338292 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=6 ms=769.129541 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=7 ms=760.301084 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=8 ms=804.093 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=9 ms=764.02825 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=10 ms=776.511333 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=11 ms=789.7475 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=12 ms=766.976875 price=9.4113492054051964 stderr=0.0044611456284815\nSAMPLE rep=13 ms=795.664167 price=9.4113492054051964 stderr=0.0044611456284815\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 887.805417,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 2,
+          "ms": 767.072292,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 3,
+          "ms": 840.084666,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 4,
+          "ms": 765.515708,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 5,
+          "ms": 933.338292,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 6,
+          "ms": 769.129541,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 7,
+          "ms": 760.301084,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 8,
+          "ms": 804.093,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 9,
+          "ms": 764.02825,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 10,
+          "ms": 776.511333,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 11,
+          "ms": 789.7475,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 12,
+          "ms": 766.976875,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        },
+        {
+          "rep": 13,
+          "ms": 795.664167,
+          "price": 9.411349205405196,
+          "stderr": 0.0044611456284815
+        }
+      ],
+      "first_execution_ms": 887.805417,
+      "median_ms": 772.8204370000001,
+      "min_ms": 760.301084,
+      "max_ms": 933.338292,
+      "paths_per_second": 12939616.398886718
+    },
+    {
+      "impl": "octave",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "octave",
+        "-qf",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/runmat_options.m"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 2354.4568750075996,
+      "stdout": "SAMPLE rep=1 ms=140.311956406 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=2 ms=122.15089798 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=3 ms=124.759912491 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=4 ms=122.50995636 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=5 ms=125.376939774 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=6 ms=126.289844513 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=7 ms=124.089002609 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=8 ms=124.173879623 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=9 ms=124.217033386 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=10 ms=125.03194809 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=11 ms=142.808914185 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=12 ms=97.5918769836 price=9.4113492965698242 stderr=0.0045066210441291332\nSAMPLE rep=13 ms=125.141859055 price=9.4113492965698242 stderr=0.0045066210441291332\n",
+      "stderr": "\n",
+      "returncode": 0,
+      "status": "failed",
+      "error": "standard-error parity failed: 0.004506621044129133 vs 0.0044611457114168045"
+    },
+    {
+      "impl": "python-numpy",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "/private/tmp/rm1219-python/bin/python",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/python_numpy_options.py"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 428.3550419495441,
+      "stdout": "SAMPLE rep=1 ms=28.3028749982 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=2 ms=25.804749981 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=3 ms=26.3751660241 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=4 ms=25.9856249904 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=5 ms=26.396625035 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=6 ms=26.7559579806 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=7 ms=25.8762079757 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=8 ms=27.9857499991 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=9 ms=26.5110830078 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=10 ms=26.2710840325 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=11 ms=26.4520000201 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=12 ms=25.8903750218 price=9.4113483428955078 stderr=0.004461145494133234\nSAMPLE rep=13 ms=26.534167002 price=9.4113483428955078 stderr=0.004461145494133234\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 28.3028749982,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 2,
+          "ms": 25.804749981,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 3,
+          "ms": 26.3751660241,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 4,
+          "ms": 25.9856249904,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 5,
+          "ms": 26.396625035,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 6,
+          "ms": 26.7559579806,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 7,
+          "ms": 25.8762079757,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 8,
+          "ms": 27.9857499991,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 9,
+          "ms": 26.5110830078,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 10,
+          "ms": 26.2710840325,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 11,
+          "ms": 26.4520000201,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 12,
+          "ms": 25.8903750218,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        },
+        {
+          "rep": 13,
+          "ms": 26.534167002,
+          "price": 9.411348342895508,
+          "stderr": 0.004461145494133234
+        }
+      ],
+      "first_execution_ms": 28.3028749982,
+      "median_ms": 26.42431252755,
+      "min_ms": 25.8762079757,
+      "max_ms": 27.9857499991,
+      "paths_per_second": 378439362.9758199
+    },
+    {
+      "impl": "julia",
+      "mode": "vectorized",
+      "paths": 10000000,
+      "command": [
+        "julia",
+        "--startup-file=no",
+        "--color=no",
+        "/Users/finsworkmacbookair/Desktop/runmat-workspace/Dystr-runmat-repo/benchmarks/monte-carlo-analysis/julia_options.jl"
+      ],
+      "fixture_sha256": "c7f689b97ad76675422f616d25f752a0af35d5163ed5c14d05b7113d5b237b33",
+      "reference_price": 9.411349262530187,
+      "reference_stderr": 0.0044611457114168045,
+      "process_total_ms": 1631.7321250098757,
+      "stdout": "SAMPLE rep=1 ms=27.866375 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=2 ms=33.346583 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=3 ms=65.959166 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=4 ms=26.498709 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=5 ms=26.750583 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=6 ms=26.378333 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=7 ms=26.459083 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=8 ms=26.409459 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=9 ms=26.805834 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=10 ms=26.622667 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=11 ms=26.300083 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=12 ms=26.653917 price=9.4113483428955078 stderr=0.0044611452343431834\nSAMPLE rep=13 ms=26.248334 price=9.4113483428955078 stderr=0.0044611452343431834\n",
+      "stderr": "",
+      "returncode": 0,
+      "status": "passed",
+      "samples": [
+        {
+          "rep": 1,
+          "ms": 27.866375,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 2,
+          "ms": 33.346583,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 3,
+          "ms": 65.959166,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 4,
+          "ms": 26.498709,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 5,
+          "ms": 26.750583,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 6,
+          "ms": 26.378333,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 7,
+          "ms": 26.459083,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 8,
+          "ms": 26.409459,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 9,
+          "ms": 26.805834,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 10,
+          "ms": 26.622667,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 11,
+          "ms": 26.300083,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 12,
+          "ms": 26.653917,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        },
+        {
+          "rep": 13,
+          "ms": 26.248334,
+          "price": 9.411348342895508,
+          "stderr": 0.0044611452343431834
+        }
+      ],
+      "first_execution_ms": 27.866375,
+      "median_ms": 26.478896,
+      "min_ms": 26.248334,
+      "max_ms": 26.805834,
+      "paths_per_second": 377659249.84183633
+    }
+  ],
+  "missing": [],
+  "source_sha256": {
+    "benchmarks/.harness/run_options.py": "7e86ab2a07ba92c3b19dfd3f2ca779ce1bc225540c836117be17b5a7f1f3658b",
+    "benchmarks/.harness/run_bench.py": "f18aa0e17ad68c9a4b82cc299fbbb2c3a7e6dc2d2c0af76d1f73e045ef6fc453",
+    "benchmarks/monte-carlo-analysis/runmat_options.m": "d9cf0060beedf853860733152effac8b15bf4e5124be68d91d62dd675ab21e69",
+    "benchmarks/monte-carlo-analysis/python_numpy_options.py": "78d72c47ccbfbf0a717d18029e735b12fc5795f58e403cbb2f81a274a365a845",
+    "benchmarks/monte-carlo-analysis/julia_options.jl": "a20f20b67c0263bf6feaca7cbea2822b4989a5eaff7a9163408fd62a978b7ed2"
+  },
+  "binary_sha256": {
+    "runmat": "076d30d236b6012d9fb2d5ba95d91cca710540e71cacab9dfe0789f29b1eabec",
+    "octave": "23a5900fc97218db8fadd639f3ffce1411f6dde3db1185e3a45d17fae96e04d4",
+    "python-numpy": "5c3ea934d18a7979253ca08ff16151db78a896be29dbc37fd9bf7e7c549593b8",
+    "julia": "70ab05dde9c2b11b03e8f87b9c0b668a2a97b3a3d9a722ea1b5a1cd7a9d217da"
+  },
+  "hardware": {
+    "hw.model": "Mac16,13",
+    "hw.memsize": "25769803776",
+    "machdep.cpu.brand_string": "Apple M4"
+  },
+  "runmat_disable_fused_reduction": false,
+  "runmat_config": "[runtime.accelerate]\nenabled = false\nprovider = \"wgpu\"\nallow_inprocess_fallback = false\n",
+  "thread_limits": {
+    "OPENBLAS_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "JULIA_NUM_THREADS": "1"
+  },
+  "versions": {
+    "runmat": "runmat 0.6.2",
+    "octave": "GNU Octave (aarch64-apple-darwin25.4.0) version 11.3.0\nCopyright (C) 1993-2026 The Octave Project Developers.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\n\nThis is free software; see the source code for copying conditions.\nThere is NO WARRANTY, to the extent permitted by law.\n\nHome page:            <https://octave.org>\nSupport resources:    <https://octave.org/support>\nImprove Octave:       <https://octave.org/get-involved>",
+    "python-numpy": "Python 3.14.4",
+    "julia": "julia version 1.12.7"
+  }
+}
