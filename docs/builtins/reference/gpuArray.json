@@ -36,7 +36,7 @@
     "reshape": "builtins::acceleration::gpu::gpuarray::tests::gpu_array_applies_size_arguments",
     "wgpu": "builtins::acceleration::gpu::gpuarray::tests::gpu_array_wgpu_complex_and_integer_roundtrip"
   },
-  "description": "`gpuArray(X)` moves data to the active GPU and returns a `gpuArray` handle for accelerated execution. RunMat mode additionally supports explicit dtype, size, and `'like'` construction extensions.\n\nFor hardware requirements, setup, and a worked GPU example, see [How to use a GPU with MATLAB](/blog/how-to-use-gpu-in-matlab).",
+  "description": "`gpuArray(X)` moves data to the active GPU and returns a `gpuArray` handle for accelerated execution. RunMat mode additionally supports explicit dtype, size, and `'like'` construction extensions.",
   "behaviors": [
     "Accepts numeric tensors, complex tensors, logical arrays, booleans, character vectors, and existing gpuArray handles. Double, single, and all eight integer classes retain native real or supported complex storage during transfer.",
     "In `runmat` compatibility mode, optional leading size arguments reshape the uploaded value while preserving element count.",
