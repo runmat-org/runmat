@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     AnalysisModel, AnalysisProcedure, FormulationRequirement, PhysicsFamily,
 };
+use runmat_analysis_fea::planning::resource::ResourcePlanningError;
 use runmat_analysis_fea::{AnalysisRunIdentity, FeaRunError};
 
 use crate::operations::{
@@ -65,6 +66,31 @@ pub(super) fn map_fea_run_error(
             error.to_string(),
             model_details(),
         ),
+        FeaRunError::Resource(error) => {
+            let error_type = match &error {
+                ResourcePlanningError::AccuracyCeiling { .. }
+                | ResourcePlanningError::Inventory(_)
+                | ResourcePlanningError::Capability(_)
+                | ResourcePlanningError::Accelerator { .. } => OperationErrorType::Capacity,
+                ResourcePlanningError::Invalid(_)
+                | ResourcePlanningError::Overflow(_)
+                | ResourcePlanningError::Identity
+                | ResourcePlanningError::Encoding(_) => OperationErrorType::Contract,
+            };
+            operation_error(
+                operation.name(),
+                operation.version(),
+                context,
+                OperationErrorSpec {
+                    error_code: "RM.FEA.RESOURCE_PLANNING_FAILED",
+                    error_type,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                error.to_string(),
+                model_details(),
+            )
+        }
         FeaRunError::MissingElectromagneticSource { frequency_hz } => operation_error(
             operation.name(),
             operation.version(),
@@ -160,4 +186,36 @@ pub(super) fn admit_runtime_proxy_for_operation(
             ]),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resource_ceiling_is_capacity_not_invalid_physics() {
+        let model = runmat_analysis_fea::fixtures::fixture_model(
+            runmat_analysis_fea::fixtures::FixtureId::StructuralTransientTet4Reference,
+        );
+        let context = OperationContext::new(None, None);
+        let ceiling = map_fea_run_error(
+            AnalysisOperation::Transient,
+            &model,
+            &context,
+            FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                required: 2,
+                maximum: 1,
+            }),
+        );
+        assert_eq!(ceiling.error_type, OperationErrorType::Capacity);
+        assert_eq!(ceiling.error_code, "RM.FEA.RESOURCE_PLANNING_FAILED");
+        let invalid = map_fea_run_error(
+            AnalysisOperation::Transient,
+            &model,
+            &context,
+            FeaRunError::Resource(ResourcePlanningError::Invalid("bad facts".into())),
+        );
+        assert_eq!(invalid.error_type, OperationErrorType::Contract);
+    }
 }

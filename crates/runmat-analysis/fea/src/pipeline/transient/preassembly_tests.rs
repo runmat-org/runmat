@@ -130,9 +130,15 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
         .resources
         .maximum_resident_bytes = 1;
     let error = prepare_transient_checkpoint_scope(&rejected, &mesh, None).unwrap_err();
-    assert!(
-        matches!(error, FeaRunError::InvalidModel(message) if message.contains("resident memory bytes"))
-    );
+    assert!(matches!(
+        error,
+        FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                ..
+            }
+        )
+    ));
 }
 
 #[test]
@@ -153,7 +159,13 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
         observation_cursors: Vec::new(),
     })
     .unwrap_err();
-    assert!(
-        matches!(error, FeaRunError::InvalidModel(message) if message.contains("resident memory bytes"))
-    );
+    assert!(matches!(
+        error,
+        FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                ..
+            }
+        )
+    ));
 }

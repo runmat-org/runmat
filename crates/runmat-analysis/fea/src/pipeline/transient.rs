@@ -214,8 +214,7 @@ fn prepare_transient_scope_basis(
         solver_mesh,
         modal_state,
         &prepared,
-    )
-    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    )?;
     let options = workload.solve_options(solver_mesh.clone());
     let basis = assemble_transient_block_basis(prepared, &options)?;
     Ok((basis, options))

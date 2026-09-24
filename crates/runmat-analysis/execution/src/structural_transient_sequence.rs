@@ -71,8 +71,7 @@ pub fn prepare_structural_transient_sequence(
         input.workload,
         input.mesh,
         input.modal_state,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    )?;
     let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1)
         .map_err(|_| invalid("transient schedule exceeds u64 ordinals"))?;
     let terminal_schedule_ordinals = input

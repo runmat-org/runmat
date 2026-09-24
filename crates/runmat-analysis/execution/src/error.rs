@@ -10,6 +10,8 @@ pub enum AnalysisBridgeError {
     Artifact(#[from] runmat_execution_artifact::ArtifactError),
     #[error("analysis execution contract failure: {0}")]
     Analysis(#[from] runmat_analysis_fea::execution::AnalysisExecutionError),
+    #[error(transparent)]
+    FeaRun(#[from] runmat_analysis_fea::contracts::FeaRunError),
     #[error("analysis execution runner failure: {0}")]
     Runner(#[from] runmat_execution_runner::RunnerError),
     #[error("analysis execution platform contract failure: {0}")]

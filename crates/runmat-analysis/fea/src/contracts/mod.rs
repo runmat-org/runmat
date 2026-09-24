@@ -1,7 +1,9 @@
 mod field_ids;
+mod run_error;
 mod solver_compatibility;
 
 pub use field_ids::*;
+pub use run_error::FeaRunError;
 
 pub use solver_compatibility::{
     validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
@@ -14,7 +16,6 @@ use runmat_analysis_core::{
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use crate::planning::resource::LocalExecutionPlan;
 use crate::solve::{
@@ -759,28 +760,4 @@ pub struct FeaNonlinearRunResult {
     pub iteration_spike_count: usize,
     pub convergence_stall_count: usize,
     pub backtrack_burst_count: usize,
-}
-
-#[derive(Debug, Error)]
-pub enum FeaRunError {
-    #[error("FEA_MODEL_INVALID: {0}")]
-    InvalidModel(String),
-    #[error("FEA_ASSEMBLY_FAILED: {0}")]
-    Assembly(String),
-    #[error("FEA_SOLVE_FAILED: {0}")]
-    Solve(String),
-    #[error("FEA_OBSERVATION_FAILED: {0}")]
-    Observation(String),
-    #[error(transparent)]
-    FrequencyPlan(#[from] crate::frequency::FrequencyPlanError),
-    #[error("FEA_ELECTROMAGNETIC_SOURCE_MISSING: no nonzero source at {frequency_hz} Hz")]
-    MissingElectromagneticSource { frequency_hz: f64 },
-    #[error(transparent)]
-    FormulationAdmission(#[from] crate::admission::FormulationAdmissionRejection),
-    #[error(transparent)]
-    FormulationAvailability(#[from] crate::admission::FormulationAvailabilityRejection),
-    #[error(transparent)]
-    SolverFormulationCompatibility(#[from] SolverFormulationCompatibilityError),
-    #[error("FEA_CANCELLED: execution cancelled by user")]
-    Cancelled,
 }

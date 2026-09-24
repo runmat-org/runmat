@@ -788,6 +788,52 @@ fn transient_sequence_coordinator_admits_each_exact_transition_before_assembly()
 }
 
 #[test]
+fn transient_sequence_preserves_typed_scope_resource_rejection() {
+    let (mut model, mesh) = transient_fixture();
+    let step_id = model.sequence.steps[0].step_id.clone();
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let workload = StructuralTransientWorkload {
+        schema_version: 1,
+        model,
+        step_id,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        solver: StructuralTransientSolverPlan::Direct,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
+        residual_target: 1.0e-10,
+    };
+    let error =
+        match prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+            workload: &workload,
+            mesh: &mesh,
+            modal_state: None,
+            block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
+            initial_dependencies: Vec::new(),
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: ObjectInventoryLimits::default(),
+        }) {
+            Ok(_) => panic!("over-ceiling transient scope was prepared"),
+            Err(error) => error,
+        };
+    assert!(matches!(
+        error,
+        runmat_analysis_execution::AnalysisBridgeError::FeaRun(
+            runmat_analysis_fea::contracts::FeaRunError::Resource(
+                runmat_analysis_fea::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                    resource: "resident memory bytes",
+                    ..
+                }
+            )
+        )
+    ));
+}
+
+#[test]
 fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_state() {
     for (workload, mesh, modal_state) in [modal_transient_fixture(), modal_support_motion_fixture()]
     {
