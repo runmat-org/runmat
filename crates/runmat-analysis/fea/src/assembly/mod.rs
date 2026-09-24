@@ -49,8 +49,8 @@ use self::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
     },
     solver_solid::{
-        assemble_solver_solid_operators, resolve_element_material, solver_solid_topology,
-        SolverSolidAssemblyError,
+        assemble_solver_solid_operators_with_execution, resolve_element_material,
+        solver_solid_topology, SolverSolidAssemblyError,
     },
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
@@ -783,8 +783,11 @@ pub(crate) fn assemble_linear_system(
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
-        None,
-        None,
+        AssemblyExecution {
+            structural_requirement: None,
+            supplied_constraint_plan: None,
+            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
+        },
     )
 }
 
@@ -803,8 +806,11 @@ pub(crate) fn assemble_structural_system(
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
-        Some(requirement),
-        None,
+        AssemblyExecution {
+            structural_requirement: Some(requirement),
+            supplied_constraint_plan: None,
+            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
+        },
     )
 }
 
@@ -815,6 +821,24 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
     requirement: StructuralFormulationRequirement,
     constraint_plan: &CanonicalStructuralConstraintPlan,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_structural_system_with_execution(
+        model,
+        excitations,
+        solver_mesh,
+        requirement,
+        Some(constraint_plan),
+        crate::planning::resource::LocalExecutionPlan::serial(),
+    )
+}
+
+pub(crate) fn assemble_structural_system_with_execution(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<SolverMeshArtifact>,
+    requirement: StructuralFormulationRequirement,
+    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    local_execution: crate::planning::resource::LocalExecutionPlan,
+) -> Result<AssemblySummary, LinearAssemblyError> {
     let (thermo_mechanical_context, electro_thermal_context) =
         crate::excitation::realize_coupling_contexts(model, excitations)
             .map_err(LinearAssemblyError::CouplingRealization)?;
@@ -824,9 +848,18 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
         solver_mesh,
         thermo_mechanical_context,
         electro_thermal_context,
-        Some(requirement),
-        Some(constraint_plan),
+        AssemblyExecution {
+            structural_requirement: Some(requirement),
+            supplied_constraint_plan: constraint_plan,
+            local_execution,
+        },
     )
+}
+
+struct AssemblyExecution<'a> {
+    structural_requirement: Option<StructuralFormulationRequirement>,
+    supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
+    local_execution: crate::planning::resource::LocalExecutionPlan,
 }
 
 fn assemble_linear_system_impl(
@@ -835,9 +868,13 @@ fn assemble_linear_system_impl(
     solver_mesh: Option<SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
-    structural_requirement: Option<StructuralFormulationRequirement>,
-    supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    execution: AssemblyExecution<'_>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
+    let AssemblyExecution {
+        structural_requirement,
+        supplied_constraint_plan,
+        local_execution,
+    } = execution;
     let explicit_element_count = model
         .structural
         .as_ref()
@@ -850,6 +887,7 @@ fn assemble_linear_system_impl(
                 excitations,
                 solver_mesh,
                 supplied_constraint_plan,
+                local_execution,
             );
         }
         return assemble_explicit_structural_system(model, excitations, supplied_constraint_plan)
@@ -1245,7 +1283,9 @@ fn assemble_linear_system_impl(
         .as_ref()
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
-        .map(|(mesh, properties)| assemble_solver_solid_operators(mesh, properties))
+        .map(|(mesh, properties)| {
+            assemble_solver_solid_operators_with_execution(mesh, properties, local_execution)
+        })
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
     let structural_solid_total_mass_kg = solid_operators
@@ -2608,7 +2648,8 @@ mod tests {
         let model = mixed_solid_beam_model(attached_coordinates);
         let properties = crate::properties::compile_solid_property_map(&model, &mesh)
             .expect("compiled solid properties");
-        let solid = assemble_solver_solid_operators(&mesh, &properties).expect("solid operator");
+        let solid = solver_solid::assemble_solver_solid_operators(&mesh, &properties)
+            .expect("solid operator");
 
         let summary = assemble_structural_system(
             &model,

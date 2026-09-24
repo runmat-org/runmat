@@ -320,7 +320,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert_eq!(parallel_plan.request.cpu_millicores, 4_000);
     assert_eq!(
         parallel_plan.request.scratch_bytes - plan.request.scratch_bytes,
-        3 * 64 * 1024
+        3 * 128 * 1024
     );
     assert_ne!(parallel_plan.identity, plan.identity);
     let recovery_bound = plan

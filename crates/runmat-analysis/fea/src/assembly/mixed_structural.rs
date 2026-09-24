@@ -17,7 +17,7 @@ use super::{
     },
     explicit_elements::{assemble_explicit_elements, ExplicitElementAssembly},
     requested_moment_norm,
-    solver_solid::assemble_solver_solid_operators,
+    solver_solid::assemble_solver_solid_operators_with_execution,
     structural_loads::{
         apply as apply_structural_load_plan, compile_mixed as compile_mixed_load_plan,
     },
@@ -69,6 +69,7 @@ pub(super) fn assemble_mixed_structural_system(
     excitations: &RealizedExcitations,
     mesh: &SolverMeshArtifact,
     supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    local_execution: crate::planning::resource::LocalExecutionPlan,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     let structural = model.structural.as_ref().ok_or({
         LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
@@ -95,8 +96,9 @@ pub(super) fn assemble_mixed_structural_system(
                 ),
             )
         })?;
-    let solid = assemble_solver_solid_operators(mesh, &solid_properties)
-        .map_err(LinearAssemblyError::SolidOperator)?;
+    let solid =
+        assemble_solver_solid_operators_with_execution(mesh, &solid_properties, local_execution)
+            .map_err(LinearAssemblyError::SolidOperator)?;
     let ExplicitElementAssembly {
         stiffness: explicit_stiffness,
         damping: explicit_damping,

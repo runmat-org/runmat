@@ -18,8 +18,12 @@ use super::{
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
+// Scoped solid assembly retains at most eight Tet10 contributions per active worker. Each
+// contribution owns two 30x30 f64 matrices (~14.1 KiB); 8 KiB per element plus 128 KiB per
+// worker bounds the retained wave and its element-local construction scratch for every
+// admitted element/thread count. Sparse rows are counted separately as operator storage.
 const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
-const STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
+const STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const STRUCTURAL_ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;

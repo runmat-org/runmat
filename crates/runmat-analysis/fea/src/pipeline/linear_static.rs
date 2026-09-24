@@ -7,8 +7,8 @@ use runmat_execution::Digest;
 use crate::{
     algebra::apply_k,
     assembly::{
-        assemble_structural_system, assemble_structural_system_with_constraint_plan,
-        AssemblySummary, StructuralFormulationRequirement,
+        assemble_structural_system_with_execution, solver_solid::SolverSolidAssemblyError,
+        AssemblySummary, LinearAssemblyError, StructuralFormulationRequirement,
     },
     constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult},
     contracts::{
@@ -155,22 +155,20 @@ fn run_linear_static_with_constraint_plan(
         Some(1),
         Some(5),
     );
-    let summary = match constraint_plan {
-        Some(plan) => assemble_structural_system_with_constraint_plan(
-            model,
-            &excitations,
-            options.solver_mesh.clone(),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-            plan,
-        ),
-        None => assemble_structural_system(
-            model,
-            &excitations,
-            options.solver_mesh.clone(),
-            StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-        ),
-    }
-    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    let summary = assemble_structural_system_with_execution(
+        model,
+        &excitations,
+        options.solver_mesh.clone(),
+        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        constraint_plan,
+        options.local_execution,
+    )
+    .map_err(|err| match err {
+        LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled) => {
+            FeaRunError::Cancelled
+        }
+        other => FeaRunError::Assembly(other.to_string()),
+    })?;
     let identity = super::admission::admit_structural(
         &summary,
         execution_step,

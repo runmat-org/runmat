@@ -7,6 +7,80 @@ use runmat_meshing_core::{
 };
 
 #[test]
+fn scoped_solid_assembly_matches_serial_operators_exactly() {
+    let artifact = crate::tests::multi_region_tetrahedron_solver_mesh();
+    let properties = inventory(&artifact, material(70.0e9, 2_700.0));
+    let serial = assemble_solver_solid_operators(&artifact, &properties).unwrap();
+    for threads in [2, 3, 4] {
+        let plan = LocalExecutionPlan::from_thread_count(
+            crate::planning::resource::LocalThreadCount::new(threads).unwrap(),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            let parallel =
+                assemble_solver_solid_operators_with_execution(&artifact, &properties, plan)
+                    .unwrap();
+            assert_eq!(parallel, serial);
+        }
+    }
+}
+
+#[test]
+fn scoped_solid_assembly_preserves_shared_row_sum_across_waves() {
+    let artifact = artifact(ElementOrder::Tet10);
+    let properties = inventory(&artifact, material(70.0e9, 2_700.0));
+    let nodes = artifact
+        .topology
+        .nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| (node.node_id, (node.coordinates_m, index * 3)))
+        .collect::<NodeIndex>();
+    // Repeated contributions deliberately target identical rows. This exercises summation
+    // order and a second bounded wave without admitting a duplicate canonical mesh element.
+    let elements = vec![artifact.topology.volume_elements[0].clone(); 19];
+    let serial = assemble_solid_rows(
+        &elements,
+        &properties,
+        &nodes,
+        nodes.len() * 3,
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
+    let plan = LocalExecutionPlan::from_thread_count(
+        crate::planning::resource::LocalThreadCount::new(2).unwrap(),
+    )
+    .unwrap();
+    let parallel =
+        assemble_solid_rows(&elements, &properties, &nodes, nodes.len() * 3, plan).unwrap();
+    assert_eq!(parallel.stiffness, serial.stiffness);
+    assert_eq!(parallel.mass, serial.mass);
+    assert_eq!(parallel.damping, serial.damping);
+    assert_eq!(parallel.lumped_mass_diag, serial.lumped_mass_diag);
+    assert_eq!(parallel.total_mass_kg, serial.total_mass_kg);
+}
+
+#[test]
+fn scoped_solid_assembly_honors_the_shared_cancellation_token() {
+    let artifact = crate::tests::multi_region_tetrahedron_solver_mesh();
+    let properties = inventory(&artifact, material(70.0e9, 2_700.0));
+    let cancellation = crate::FeaCancellationToken::new();
+    let _guard = crate::replace_fea_progress_context(crate::FeaProgressContext {
+        cancellation: cancellation.clone(),
+        ..crate::FeaProgressContext::default()
+    });
+    cancellation.cancel();
+    let plan = LocalExecutionPlan::from_thread_count(
+        crate::planning::resource::LocalThreadCount::new(2).unwrap(),
+    )
+    .unwrap();
+    assert!(matches!(
+        assemble_solver_solid_operators_with_execution(&artifact, &properties, plan),
+        Err(SolverSolidAssemblyError::Cancelled)
+    ));
+}
+
+#[test]
 fn canonical_tet4_and_tet10_artifacts_assemble_into_solver_csr() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let artifact = artifact(order);

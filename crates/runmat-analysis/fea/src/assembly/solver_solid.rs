@@ -5,7 +5,9 @@ use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, SolverVolumeElement}
 
 use crate::algebra::{OperatorRole, RealSparseMatrix};
 use crate::{
-    physics::structural::material::StructuralElementMaterial, properties::CompiledPropertyMap,
+    physics::structural::material::StructuralElementMaterial,
+    planning::resource::{execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError},
+    properties::CompiledPropertyMap,
 };
 
 use super::{
@@ -57,6 +59,8 @@ pub enum SolverSolidAssemblyError {
     },
     InvalidMassOperator,
     SparseOperator(String),
+    LocalExecution(String),
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +141,20 @@ pub fn assemble_solver_solid_operators(
     artifact: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
 ) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
+    assemble_solver_solid_operators_with_execution(
+        artifact,
+        properties,
+        LocalExecutionPlan::serial(),
+    )
+}
+
+/// Computes bounded waves of element contributions under the admitted local CPU plan, then
+/// scatters them in canonical mesh order. No worker owns a replica of the global sparse rows.
+pub fn assemble_solver_solid_operators_with_execution(
+    artifact: &SolverMeshArtifact,
+    properties: &CompiledPropertyMap,
+    local_execution: LocalExecutionPlan,
+) -> Result<SolverSolidOperators, SolverSolidAssemblyError> {
     let topology = solver_solid_topology(artifact)?;
     if properties.identity.mesh_digest != Some(artifact.canonical_digest) {
         return Err(SolverSolidAssemblyError::InvalidMaterialCoverage(
@@ -150,51 +168,13 @@ pub fn assemble_solver_solid_operators(
         .enumerate()
         .map(|(index, node)| (node.node_id, (node.coordinates_m, index * 3)))
         .collect::<BTreeMap<_, _>>();
-    let mut rows = SolidOperatorRows::new(topology.dof_count);
-    for element in &artifact.topology.volume_elements {
-        let material = resolve_element_material(element, properties)?;
-        let elasticity = solid_material(material);
-        match element.order {
-            ElementOrder::Tet4 => {
-                let (coordinates, offsets) =
-                    element_geometry::<4>(element.element_id, &element.node_ids, &nodes)?;
-                let stiffness = tetrahedron4_stiffness(
-                    elasticity,
-                    Tetrahedron4ElementGeometry {
-                        nodes_m: coordinates,
-                    },
-                )
-                .map_err(|failure| element_failure(element.element_id, failure))?;
-                let mass = tetrahedron4_consistent_mass_matrix(
-                    elasticity,
-                    Tetrahedron4ElementGeometry {
-                        nodes_m: coordinates,
-                    },
-                )
-                .map_err(|failure| mass_failure(element.element_id, failure))?;
-                rows.add_element(&offsets, &stiffness, &mass, material.damping)?;
-            }
-            ElementOrder::Tet10 => {
-                let (coordinates, offsets) =
-                    element_geometry::<10>(element.element_id, &element.node_ids, &nodes)?;
-                let stiffness = tetrahedron10_global_stiffness_matrix(
-                    elasticity,
-                    Tetrahedron10ElementGeometry {
-                        nodes_m: coordinates,
-                    },
-                )
-                .map_err(|failure| element_failure(element.element_id, failure))?;
-                let mass = tetrahedron10_consistent_mass_matrix(
-                    elasticity,
-                    Tetrahedron10ElementGeometry {
-                        nodes_m: coordinates,
-                    },
-                )
-                .map_err(|failure| mass_failure(element.element_id, failure))?;
-                rows.add_element(&offsets, &stiffness, &mass, material.damping)?;
-            }
-        }
-    }
+    let rows = assemble_solid_rows(
+        &artifact.topology.volume_elements,
+        properties,
+        &nodes,
+        topology.dof_count,
+        local_execution,
+    )?;
     Ok(SolverSolidOperators {
         stiffness: sparse(rows.stiffness, OperatorRole::Stiffness)?,
         consistent_mass: sparse(rows.mass, OperatorRole::Mass)?,
@@ -202,6 +182,127 @@ pub fn assemble_solver_solid_operators(
         lumped_mass_diag: rows.lumped_mass_diag,
         total_mass_kg: rows.total_mass_kg,
     })
+}
+
+fn assemble_solid_rows(
+    elements: &[SolverVolumeElement],
+    properties: &CompiledPropertyMap,
+    nodes: &NodeIndex,
+    dof_count: usize,
+    local_execution: LocalExecutionPlan,
+) -> Result<SolidOperatorRows, SolverSolidAssemblyError> {
+    let mut rows = SolidOperatorRows::new(dof_count);
+    let cancellation = crate::progress::cancellation_token();
+    // Each worker retains at most eight element matrices (Tet10: two 30x30 f64 matrices).
+    const ELEMENTS_PER_WORKER_WAVE: usize = 8;
+    let wave_capacity = usize::from(local_execution.thread_count().get())
+        .checked_mul(ELEMENTS_PER_WORKER_WAVE)
+        .ok_or_else(|| {
+            SolverSolidAssemblyError::LocalExecution("assembly wave size overflow".into())
+        })?;
+    for wave in elements.chunks(wave_capacity) {
+        if cancellation.is_cancelled() {
+            return Err(SolverSolidAssemblyError::Cancelled);
+        }
+        let chunks = execute_scoped_chunks(local_execution, wave.len() as u64, |chunk| {
+            let mut contributions = Vec::with_capacity(chunk.len() as usize);
+            for element in &wave[chunk.start() as usize..chunk.end_exclusive() as usize] {
+                if cancellation.is_cancelled() {
+                    return Err(SolverSolidAssemblyError::Cancelled);
+                }
+                contributions.push(element_contribution(element, properties, nodes)?);
+            }
+            Ok(contributions)
+        })
+        .map_err(|error| match error {
+            ScopedLocalExecutionError::Work { source, .. } => source,
+            other => SolverSolidAssemblyError::LocalExecution(format!("{other:?}")),
+        })?;
+        for contribution in chunks.into_iter().flatten() {
+            contribution.scatter(&mut rows)?;
+        }
+    }
+    Ok(rows)
+}
+
+enum SolidElementContribution {
+    Tet4(Box<SolidElementMatrices<4, 12>>),
+    Tet10(Box<SolidElementMatrices<10, 30>>),
+}
+
+struct SolidElementMatrices<const N: usize, const D: usize> {
+    offsets: [usize; N],
+    stiffness: [[f64; D]; D],
+    mass: [[f64; D]; D],
+    damping: MechanicalDampingModel,
+}
+
+impl SolidElementContribution {
+    fn scatter(self, rows: &mut SolidOperatorRows) -> Result<(), SolverSolidAssemblyError> {
+        match self {
+            Self::Tet4(matrices) => rows.add_element(
+                &matrices.offsets,
+                &matrices.stiffness,
+                &matrices.mass,
+                matrices.damping,
+            ),
+            Self::Tet10(matrices) => rows.add_element(
+                &matrices.offsets,
+                &matrices.stiffness,
+                &matrices.mass,
+                matrices.damping,
+            ),
+        }
+    }
+}
+
+fn element_contribution(
+    element: &SolverVolumeElement,
+    properties: &CompiledPropertyMap,
+    nodes: &NodeIndex,
+) -> Result<SolidElementContribution, SolverSolidAssemblyError> {
+    let material = resolve_element_material(element, properties)?;
+    let elasticity = solid_material(material);
+    match element.order {
+        ElementOrder::Tet4 => {
+            let (coordinates, offsets) =
+                element_geometry::<4>(element.element_id, &element.node_ids, nodes)?;
+            let geometry = Tetrahedron4ElementGeometry {
+                nodes_m: coordinates,
+            };
+            let stiffness = tetrahedron4_stiffness(elasticity, geometry)
+                .map_err(|error| element_failure(element.element_id, error))?;
+            let mass = tetrahedron4_consistent_mass_matrix(elasticity, geometry)
+                .map_err(|error| mass_failure(element.element_id, error))?;
+            Ok(SolidElementContribution::Tet4(Box::new(
+                SolidElementMatrices {
+                    offsets,
+                    stiffness,
+                    mass,
+                    damping: material.damping,
+                },
+            )))
+        }
+        ElementOrder::Tet10 => {
+            let (coordinates, offsets) =
+                element_geometry::<10>(element.element_id, &element.node_ids, nodes)?;
+            let geometry = Tetrahedron10ElementGeometry {
+                nodes_m: coordinates,
+            };
+            let stiffness = tetrahedron10_global_stiffness_matrix(elasticity, geometry)
+                .map_err(|error| element_failure(element.element_id, error))?;
+            let mass = tetrahedron10_consistent_mass_matrix(elasticity, geometry)
+                .map_err(|error| mass_failure(element.element_id, error))?;
+            Ok(SolidElementContribution::Tet10(Box::new(
+                SolidElementMatrices {
+                    offsets,
+                    stiffness,
+                    mass,
+                    damping: material.damping,
+                },
+            )))
+        }
+    }
 }
 
 pub(super) fn resolve_element_material(
