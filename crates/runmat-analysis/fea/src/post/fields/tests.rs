@@ -68,11 +68,17 @@ fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
             &summary,
             &solution,
             LocalExecutionPlan::serial(),
+            DeformationRecoveryDetail::Complete,
         )
         .unwrap();
         for _ in 0..3 {
-            let scoped =
-                recover_deformation_result_fields_with_plan(&summary, &solution, plan).unwrap();
+            let scoped = recover_deformation_result_fields_with_plan(
+                &summary,
+                &solution,
+                plan,
+                DeformationRecoveryDetail::Complete,
+            )
+            .unwrap();
             assert_eq!(scoped, serial);
         }
     }
@@ -112,12 +118,14 @@ fn scoped_two_element_beam_recovery_preserves_physical_assembly_fields() {
         &summary,
         &solution,
         LocalExecutionPlan::serial(),
+        DeformationRecoveryDetail::Complete,
     )
     .unwrap();
     let scoped = recover_deformation_result_fields_with_plan(
         &summary,
         &solution,
         LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap(),
+        DeformationRecoveryDetail::Complete,
     )
     .unwrap();
     assert_eq!(scoped, serial);
@@ -143,7 +151,10 @@ fn scoped_explicit_recovery_rejects_nested_and_cancelled_execution() {
         let solution = vec![1.0e-4; summary.dof_count];
         let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
             Ok::<_, ()>(recover_deformation_result_fields_with_plan(
-                &summary, &solution, plan,
+                &summary,
+                &solution,
+                plan,
+                DeformationRecoveryDetail::Complete,
             ))
         })
         .unwrap();
@@ -156,7 +167,12 @@ fn scoped_explicit_recovery_rejects_nested_and_cancelled_execution() {
         context.cancellation.cancel();
         let _guard = replace_fea_progress_context(context);
         assert_eq!(
-            recover_deformation_result_fields_with_plan(&summary, &solution, plan),
+            recover_deformation_result_fields_with_plan(
+                &summary,
+                &solution,
+                plan,
+                DeformationRecoveryDetail::Complete
+            ),
             Err(StructuralFieldRecoveryError::Cancelled),
         );
     }
@@ -178,6 +194,7 @@ fn scoped_shell_recovery_preserves_element_attribution_on_invalid_geometry() {
             &summary,
             &vec![1.0e-4; summary.dof_count],
             plan,
+            DeformationRecoveryDetail::Complete,
         ),
         Err(StructuralFieldRecoveryError::Shell { element_id, .. })
             if element_id == "degenerate_shell"
@@ -374,6 +391,28 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
         "solid_tetrahedron10_integration_point_projection"
     );
     assert_eq!(metrics.solver_mesh_node_count, 10);
+
+    let history = recover_transient_history_deformation_fields(&summary, &solve.solution).unwrap();
+    for field_id in [
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_STRAIN,
+        FEA_FIELD_STRUCTURAL_STRESS,
+        FEA_FIELD_STRUCTURAL_VON_MISES,
+        FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+    ] {
+        assert_eq!(
+            host_field(&history, field_id),
+            host_field(&fields, field_id)
+        );
+    }
+    for field_id in [
+        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+        FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+    ] {
+        assert!(history.iter().all(|field| field.field_id != field_id));
+        assert!(fields.iter().any(|field| field.field_id == field_id));
+    }
 }
 
 #[test]

@@ -21,6 +21,7 @@ use crate::{
 };
 
 mod catalog;
+mod edge;
 mod formulation;
 mod scalars;
 mod state;
@@ -29,6 +30,7 @@ pub use catalog::{
     structural_observable_field_definitions, take_structural_observable_fields,
     StructuralLinearFieldQuantity,
 };
+use edge::edge_strain_tensor;
 use formulation::{recover_beam_result_fields, recover_shell_result_fields};
 use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
 use state::{
@@ -39,6 +41,12 @@ use state::{
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 const TENSOR_COMPONENT_COUNT: usize = 6;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeformationRecoveryDetail {
+    Complete,
+    TransientHistory,
+}
 
 pub fn recover_result_fields(
     summary: &AssemblySummary,
@@ -61,6 +69,7 @@ pub fn recover_result_fields(
         summary,
         &solve_result.solution,
         local_execution,
+        DeformationRecoveryDetail::Complete,
     )?;
     fields.extend([
         AnalysisField::host_f64(
@@ -101,13 +110,33 @@ pub fn recover_deformation_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
 ) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
-    recover_deformation_result_fields_with_plan(summary, solution, LocalExecutionPlan::serial())
+    recover_deformation_result_fields_with_plan(
+        summary,
+        solution,
+        LocalExecutionPlan::serial(),
+        DeformationRecoveryDetail::Complete,
+    )
+}
+
+/// Intermediate transient states retain element averages, not integration-point tensors.
+/// The final accepted state still uses complete recovery for ordinary result fields.
+pub(crate) fn recover_transient_history_deformation_fields(
+    summary: &AssemblySummary,
+    solution: &[f64],
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    recover_deformation_result_fields_with_plan(
+        summary,
+        solution,
+        LocalExecutionPlan::serial(),
+        DeformationRecoveryDetail::TransientHistory,
+    )
 }
 
 fn recover_deformation_result_fields_with_plan(
     summary: &AssemblySummary,
     solution: &[f64],
     local_execution: LocalExecutionPlan,
+    detail: DeformationRecoveryDetail,
 ) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
     if solution.is_empty() || solution.iter().any(|value| !value.is_finite()) {
         return Ok(Vec::new());
@@ -121,19 +150,27 @@ fn recover_deformation_result_fields_with_plan(
     let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
     let displacement_values = recover_displacement(summary, solution, node_count);
     let continuum_fields = if publishes_continuum_fields(summary) {
-        let strain_recovery =
-            recover_structural_strain_with_plan(summary, &displacement_values, local_execution)?;
+        let strain_recovery = recover_structural_strain_with_detail(
+            summary,
+            &displacement_values,
+            local_execution,
+            detail == DeformationRecoveryDetail::Complete,
+        )?;
         let element_count = strain_recovery.element_count;
         let strain_values = strain_recovery.values;
         let stress_values = strain_recovery
             .stress
             .unwrap_or_else(|| recover_stress(&strain_values, summary.structural_material));
         let von_mises_values = recover_von_mises(&stress_values);
-        let nodal_von_mises_values = recover_volume_weighted_nodal_scalar(
-            &summary.structural_solid_recovery,
-            &von_mises_values,
-            node_count,
-        )?;
+        let nodal_von_mises_values = if detail == DeformationRecoveryDetail::Complete {
+            recover_volume_weighted_nodal_scalar(
+                &summary.structural_solid_recovery,
+                &von_mises_values,
+                node_count,
+            )?
+        } else {
+            Vec::new()
+        };
         let strain_energy_density_values = strain_recovery
             .strain_energy_density
             .unwrap_or_else(|| recover_strain_energy_density(&strain_values, &stress_values));
@@ -197,22 +234,26 @@ fn recover_deformation_result_fields_with_plan(
                 vec![element_count],
                 strain_energy_density_values,
             ),
-            AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
-                vec![element_count * 4, TENSOR_COMPONENT_COUNT],
-                integration_point_strain,
-            ),
-            AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
-                vec![element_count * 4, TENSOR_COMPONENT_COUNT],
-                integration_point_stress,
-            ),
-            AnalysisField::host_f64(
-                FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
-                vec![node_count],
-                nodal_von_mises_values,
-            ),
         ]);
+        if detail == DeformationRecoveryDetail::Complete {
+            fields.extend([
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN,
+                    vec![element_count * 4, TENSOR_COMPONENT_COUNT],
+                    integration_point_strain,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+                    vec![element_count * 4, TENSOR_COMPONENT_COUNT],
+                    integration_point_stress,
+                ),
+                AnalysisField::host_f64(
+                    FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
+                    vec![node_count],
+                    nodal_von_mises_values,
+                ),
+            ]);
+        }
     }
     if let Some(beam_fields) = recover_beam_result_fields(summary, solution, local_execution)? {
         fields.extend(beam_fields);
@@ -457,11 +498,21 @@ fn recover_structural_strain_with_plan(
     displacement: &[f64],
     local_execution: LocalExecutionPlan,
 ) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
+    recover_structural_strain_with_detail(summary, displacement, local_execution, true)
+}
+
+fn recover_structural_strain_with_detail(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+    retain_integration_points: bool,
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
     if !summary.structural_solid_recovery.is_empty() {
         let recovered = recover_solid_fields_with_plan(
             &summary.structural_solid_recovery,
             displacement,
             local_execution,
+            retain_integration_points,
         )?;
         let basis = if summary.structural_solid_recovery.iter().all(|element| {
             matches!(
@@ -511,48 +562,6 @@ fn recover_edge_strain(
         strain[base..base + TENSOR_COMPONENT_COUNT].copy_from_slice(&edge_strain);
     }
     strain
-}
-
-fn edge_strain_tensor(displacement: &[f64], edge: &StructuralRecoveryEdge) -> [f64; 6] {
-    let length = if edge.edge_length_m.is_finite() && edge.edge_length_m > 0.0 {
-        edge.edge_length_m
-    } else {
-        edge.hop.max(1) as f64
-    };
-    let from_node = edge.from_dof / VECTOR_COMPONENT_COUNT;
-    let to_node = edge.to_dof / VECTOR_COMPONENT_COUNT;
-    if from_node == to_node {
-        let jump = displacement.get(edge.to_dof).copied().unwrap_or(0.0)
-            - displacement.get(edge.from_dof).copied().unwrap_or(0.0);
-        let mut tensor = [0.0; TENSOR_COMPONENT_COUNT];
-        tensor[edge.component] = jump / length;
-        return tensor;
-    }
-
-    let du = nodal_displacement(displacement, to_node);
-    let u0 = nodal_displacement(displacement, from_node);
-    let gradient = [
-        (du[0] - u0[0]) / length,
-        (du[1] - u0[1]) / length,
-        (du[2] - u0[2]) / length,
-    ];
-    [
-        gradient[0],
-        gradient[1],
-        gradient[2],
-        0.5 * (gradient[0] + gradient[1]),
-        0.5 * (gradient[1] + gradient[2]),
-        0.5 * (gradient[0] + gradient[2]),
-    ]
-}
-
-fn nodal_displacement(displacement: &[f64], node: usize) -> [f64; VECTOR_COMPONENT_COUNT] {
-    let base = node * VECTOR_COMPONENT_COUNT;
-    [
-        displacement.get(base).copied().unwrap_or(0.0),
-        displacement.get(base + 1).copied().unwrap_or(0.0),
-        displacement.get(base + 2).copied().unwrap_or(0.0),
-    ]
 }
 
 fn strain_component_coverage_ratio(

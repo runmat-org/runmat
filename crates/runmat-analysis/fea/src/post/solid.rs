@@ -23,17 +23,21 @@ pub(super) struct SolidRecoveredFields {
 }
 
 impl SolidRecoveredFields {
-    fn with_element_capacity(element_count: usize) -> Self {
+    fn with_element_capacity(element_count: usize, retain_points: bool) -> Self {
         Self {
             strain: Vec::with_capacity(element_count * COMPONENT_COUNT),
             stress: Vec::with_capacity(element_count * COMPONENT_COUNT),
             strain_energy_density: Vec::with_capacity(element_count),
-            integration_point_strain: Vec::with_capacity(
-                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT,
-            ),
-            integration_point_stress: Vec::with_capacity(
-                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT,
-            ),
+            integration_point_strain: Vec::with_capacity(if retain_points {
+                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT
+            } else {
+                0
+            }),
+            integration_point_stress: Vec::with_capacity(if retain_points {
+                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT
+            } else {
+                0
+            }),
         }
     }
 
@@ -60,8 +64,9 @@ fn recover_solid_fields_checked(
     elements: &[SolidRecoveryElementSummary],
     displacement: &[f64],
     cancellation: &FeaCancellationToken,
+    retain_points: bool,
 ) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
-    let mut fields = SolidRecoveredFields::with_element_capacity(elements.len());
+    let mut fields = SolidRecoveredFields::with_element_capacity(elements.len(), retain_points);
     for element in elements {
         if cancellation.is_cancelled() {
             return Err(StructuralFieldRecoveryError::Cancelled);
@@ -121,12 +126,14 @@ fn recover_solid_fields_checked(
         fields.strain.extend(element_strain);
         fields.stress.extend(element_stress);
         fields.strain_energy_density.push(energy);
-        fields
-            .integration_point_strain
-            .extend(recovered.strain.into_iter().flatten());
-        fields
-            .integration_point_stress
-            .extend(point_stress.into_iter().flatten());
+        if retain_points {
+            fields
+                .integration_point_strain
+                .extend(recovered.strain.into_iter().flatten());
+            fields
+                .integration_point_stress
+                .extend(point_stress.into_iter().flatten());
+        }
     }
     Ok(fields)
 }
@@ -135,19 +142,21 @@ pub(super) fn recover_solid_fields_with_plan(
     elements: &[SolidRecoveryElementSummary],
     displacement: &[f64],
     plan: LocalExecutionPlan,
+    retain_points: bool,
 ) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
     let cancellation = cancellation_token();
     if cancellation.is_cancelled() {
         return Err(StructuralFieldRecoveryError::Cancelled);
     }
     if elements.is_empty() || plan.is_serial() {
-        return recover_solid_fields_checked(elements, displacement, &cancellation);
+        return recover_solid_fields_checked(elements, displacement, &cancellation, retain_points);
     }
     let partitions = execute_scoped_chunks(plan, elements.len() as u64, |chunk| {
         recover_solid_fields_checked(
             &elements[chunk.start() as usize..chunk.end_exclusive() as usize],
             displacement,
             &cancellation,
+            retain_points,
         )
     })
     .map_err(|error| match error {
@@ -159,7 +168,7 @@ pub(super) fn recover_solid_fields_with_plan(
     if cancellation.is_cancelled() {
         return Err(StructuralFieldRecoveryError::Cancelled);
     }
-    let mut combined = SolidRecoveredFields::with_element_capacity(elements.len());
+    let mut combined = SolidRecoveredFields::with_element_capacity(elements.len(), retain_points);
     for mut partition in partitions {
         combined.append(&mut partition);
     }
@@ -311,7 +320,8 @@ mod tests {
             ..FeaProgressContext::default()
         });
         for plan in [LocalExecutionPlan::serial(), two_threads()] {
-            let error = recover_solid_fields_with_plan(&elements, &[0.0; 12], plan).unwrap_err();
+            let error =
+                recover_solid_fields_with_plan(&elements, &[0.0; 12], plan, true).unwrap_err();
             assert_eq!(error, StructuralFieldRecoveryError::Cancelled);
         }
     }
@@ -348,15 +358,41 @@ mod tests {
         ];
         let displacement = [0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
-        let recovered =
-            recover_solid_fields_with_plan(&elements, &displacement, LocalExecutionPlan::serial())
-                .unwrap();
+        let recovered = recover_solid_fields_with_plan(
+            &elements,
+            &displacement,
+            LocalExecutionPlan::serial(),
+            true,
+        )
+        .unwrap();
         for _ in 0..5 {
             assert_eq!(
-                recover_solid_fields_with_plan(&elements, &displacement, two_threads()).unwrap(),
+                recover_solid_fields_with_plan(&elements, &displacement, two_threads(), true)
+                    .unwrap(),
                 recovered,
             );
         }
+        let history = recover_solid_fields_with_plan(
+            &elements,
+            &displacement,
+            LocalExecutionPlan::serial(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(history.strain, recovered.strain);
+        assert_eq!(history.stress, recovered.stress);
+        assert_eq!(
+            history.strain_energy_density,
+            recovered.strain_energy_density
+        );
+        assert!(history.integration_point_strain.is_empty());
+        assert!(history.integration_point_stress.is_empty());
+        assert_eq!(history.integration_point_strain.capacity(), 0);
+        assert_eq!(history.integration_point_stress.capacity(), 0);
+        assert_eq!(
+            recover_solid_fields_with_plan(&elements, &displacement, two_threads(), false).unwrap(),
+            history,
+        );
 
         assert_eq!(&recovered.strain[..6], &recovered.strain[6..]);
         for (soft, hard) in recovered.stress[..6].iter().zip(&recovered.stress[6..]) {
@@ -423,11 +459,15 @@ mod tests {
             .flat_map(|coordinate| [coordinate[0].powi(2), 0.0, 0.0])
             .collect::<Vec<_>>();
 
-        let recovered =
-            recover_solid_fields_with_plan(&elements, &displacement, LocalExecutionPlan::serial())
-                .unwrap();
+        let recovered = recover_solid_fields_with_plan(
+            &elements,
+            &displacement,
+            LocalExecutionPlan::serial(),
+            true,
+        )
+        .unwrap();
         assert_eq!(
-            recover_solid_fields_with_plan(&elements, &displacement, two_threads()).unwrap(),
+            recover_solid_fields_with_plan(&elements, &displacement, two_threads(), true).unwrap(),
             recovered,
         );
 

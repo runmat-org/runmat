@@ -18,7 +18,10 @@ use crate::{
     excitation::SpatialProjectionEvidence,
     execution::StructuralTransientSchedule,
     pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshot},
-    post::{fields::recover_deformation_result_fields, recover_connector_observable_fields},
+    post::{
+        fields::{recover_deformation_result_fields, recover_transient_history_deformation_fields},
+        recover_connector_observable_fields,
+    },
     solve::transient::TransientSolveResult,
 };
 
@@ -129,8 +132,12 @@ pub(super) fn recover_transient_fields(
             .zip(reactions)
             .enumerate()
     {
-        let mut fields = recover_deformation_result_fields(&summary, &displacement)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let mut fields = if index + 1 == snapshot_count {
+            recover_deformation_result_fields(&summary, &displacement)
+        } else {
+            recover_transient_history_deformation_fields(&summary, &displacement)
+        }
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         if index + 1 == snapshot_count {
             final_deformation_fields = fields
                 .iter()
