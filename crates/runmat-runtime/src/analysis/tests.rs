@@ -1611,10 +1611,35 @@ fn analysis_run_study_executes_linear_static_path() {
     );
     assert!(envelope.data.study_fingerprint.starts_with("sha256:"));
     assert!(envelope.data.steps[0].run_id.starts_with("run_"));
-    assert!(Path::new(&envelope.data.evidence_artifact_path)
+    let evidence_path = Path::new(&envelope.data.evidence_artifact_path);
+    assert_eq!(
+        evidence_path
+            .parent()
+            .and_then(Path::file_name)
+            .and_then(|name| name.to_str()),
+        Some(
+            format!(
+                "sha256_{}",
+                envelope
+                    .data
+                    .study_fingerprint
+                    .trim_start_matches("sha256:")
+            )
+            .as_str()
+        )
+    );
+    let evidence_file_name = evidence_path
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("sequence-run-") && name.ends_with(".json")));
+        .expect("evidence file name");
+    let evidence_digest = evidence_file_name
+        .strip_prefix("sequence-run_sha256_")
+        .and_then(|suffix| suffix.strip_suffix(".json"))
+        .expect("sequence evidence is content addressed");
+    assert_eq!(evidence_digest.len(), 64);
+    assert!(evidence_digest
+        .bytes()
+        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
 
     let persisted = storage::load_run_result(&envelope.data.steps[0].run_id)
         .expect("run load should succeed")
@@ -1670,6 +1695,15 @@ fn analysis_run_study_executes_linear_static_path() {
         &fs::read(&envelope.data.evidence_artifact_path).expect("read run evidence artifact"),
     )
     .expect("parse run evidence artifact");
+    assert_eq!(run_evidence_payload["$evidence"]["stage"], "sequence-run");
+    assert_eq!(
+        run_evidence_payload["$evidence"]["study_fingerprint"],
+        envelope.data.study_fingerprint
+    );
+    assert_eq!(
+        run_evidence_payload["$evidence"]["content_digest"],
+        format!("sha256:{evidence_digest}")
+    );
     assert!(run_evidence_payload.get("model_template").is_none());
     drop(env_guard);
     let _ = fs::remove_dir_all(&root);
@@ -4941,6 +4975,8 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         root: root.clone(),
     })
     .expect("configure filesystem artifact store");
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("family-op-version-cht");
 
     let mut cfd_model = sample_model();
     cfd_model.sequence.steps[0] = ProcedureStep::fluid_static("cfd_test");
@@ -4958,7 +4994,10 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         &sample_cht_model(),
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisChtRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(None, None),
     )
     .expect("cht run should succeed");
@@ -4988,10 +5027,13 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         OperationContext::new(None, None),
     )
     .expect("acoustic run should succeed");
-    let mut thermal_model = sample_model();
+    let mut thermal_model = sample_solid_model();
     thermal_model.sequence.steps = vec![ProcedureStep::thermal_transient(
         "thermal_op_version".to_string(),
     )];
+    thermal_model.thermal = Some(runmat_analysis_core::ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
     set_model_thermo_coupling(
         &mut thermal_model,
         TestThermoMechanicalCoupling {
@@ -5005,7 +5047,10 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
         &thermal_model,
         ComputeBackend::Cpu,
         FormulationRequirement::Experimental,
-        Default::default(),
+        AnalysisThermalRunOptions {
+            solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+            ..Default::default()
+        },
         OperationContext::new(None, None),
     )
     .expect("thermal run should succeed");
@@ -5033,6 +5078,7 @@ fn analysis_artifacts_record_family_specific_op_versions_for_coupled_runs() {
 
     storage::reset_artifact_store_for_tests();
     let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&mesh_root);
 }
 
 #[test]
