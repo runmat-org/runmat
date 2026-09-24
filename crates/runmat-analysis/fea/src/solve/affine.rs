@@ -1,5 +1,5 @@
 use crate::{
-    algebra::{apply_k, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
+    algebra::{apply_k, dot_scoped, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -24,6 +24,7 @@ pub(super) fn solve_affine_constraint_system(
         algebra_backend,
         initial_guess,
         |full| Ok(apply_k(&summary.operator, full)),
+        |left, right| Ok(algebra_backend.dot(left, right)),
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -49,6 +50,13 @@ pub(super) fn solve_affine_constraint_system_with_execution(
                 spmv_scoped(summary.operator.operators().stiffness(), full, plan)
             }
         },
+        |left, right| {
+            if plan.is_serial() {
+                Ok(algebra_backend.dot(left, right))
+            } else {
+                dot_scoped(left, right, plan)
+            }
+        },
     )
 }
 
@@ -59,6 +67,7 @@ fn solve_affine_constraint_system_with_apply(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     apply_full: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let expected_reduction = summary
         .constraint_matrix
@@ -134,11 +143,8 @@ fn solve_affine_constraint_system_with_apply(
         &apply_reduced_operator(reduction, &reduced_solution, &apply_full)?,
     );
     let mut direction = residual.clone();
-    let mut residual_squared = algebra_backend.dot(&residual, &residual);
-    let right_hand_side_norm = algebra_backend
-        .dot(&reduced_rhs, &reduced_rhs)
-        .sqrt()
-        .max(1.0);
+    let mut residual_squared = dot(&residual, &residual)?;
+    let right_hand_side_norm = dot(&reduced_rhs, &reduced_rhs)?.sqrt().max(1.0);
     let tolerance = 1.0e-8;
     let maximum_iterations = reduction.reduced_dof_count.saturating_mul(4).max(256);
     let mut iterations = 0_u32;
@@ -154,7 +160,7 @@ fn solve_affine_constraint_system_with_apply(
             break;
         }
         let operator_direction = apply_reduced_operator(reduction, &direction, &apply_full)?;
-        let denominator = algebra_backend.dot(&direction, &operator_direction);
+        let denominator = dot(&direction, &operator_direction)?;
         if !denominator.is_finite() || denominator <= 1.0e-18 {
             diagnostics.push(FeaDiagnostic {
                 code: "FEA_AFFINE_REDUCED_BREAKDOWN".into(),
@@ -169,7 +175,7 @@ fn solve_affine_constraint_system_with_apply(
         let alpha = residual_squared / denominator;
         algebra_backend.axpy(alpha, &direction, &mut reduced_solution);
         algebra_backend.axpy(-alpha, &operator_direction, &mut residual);
-        let next_residual_squared = algebra_backend.dot(&residual, &residual);
+        let next_residual_squared = dot(&residual, &residual)?;
         iterations += 1;
         converged = next_residual_squared.sqrt() / right_hand_side_norm <= tolerance;
         if converged {

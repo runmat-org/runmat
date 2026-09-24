@@ -5307,6 +5307,18 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
     assert_eq!(parallel, serial);
     assert!((parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
     assert!((parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);
+    assert_eq!(
+        solve_linear_system_with_execution(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+            plan,
+        )
+        .unwrap(),
+        parallel,
+    );
     assert!(parallel
         .diagnostics
         .iter()

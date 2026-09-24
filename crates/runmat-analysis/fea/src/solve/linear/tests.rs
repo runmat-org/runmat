@@ -72,6 +72,16 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         plan,
     )
     .unwrap();
+    let repeated = solve_operator_system_scoped(
+        &operator,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+    )
+    .unwrap();
+    assert_eq!(parallel, repeated);
     assert_eq!(parallel, serial);
     assert!((parallel.solution[0] - 5.0 / 11.0).abs() < 1.0e-12);
     assert!((parallel.solution[1] - 9.0 / 11.0).abs() < 1.0e-12);
@@ -92,6 +102,24 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         Err(ScopedSpmvError::Execution(
             ScopedLocalExecutionError::NestedExecution
         ))
+    ));
+}
+
+#[test]
+fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
+    let operator = system([4.0, 3.0]);
+    let result = solve_operator_system_with_apply(
+        &operator,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        |prepared, x| Ok(crate::algebra::apply_prepared(prepared, x)),
+        |_, _| Err(ScopedSpmvError::ReductionDimensionMismatch),
+    );
+    assert!(matches!(
+        result,
+        Err(ScopedSpmvError::ReductionDimensionMismatch)
     ));
 }
 

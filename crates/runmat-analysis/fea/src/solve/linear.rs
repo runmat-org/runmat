@@ -193,6 +193,13 @@ fn solve_operator_system_scoped(
                 crate::algebra::spmv_scoped(prepared.matrix(), x, plan)
             }
         },
+        |left, right| {
+            if plan.is_serial() {
+                Ok(algebra_backend.dot(left, right))
+            } else {
+                crate::algebra::dot_scoped(left, right, plan)
+            }
+        },
     )
 }
 
@@ -210,6 +217,7 @@ pub fn solve_operator_system(
         algebra_backend,
         initial_guess,
         |prepared, x| Ok(crate::algebra::apply_prepared(prepared, x)),
+        |left, right| Ok(algebra_backend.dot(left, right)),
     )
     .expect("reference sparse application is infallible for a prepared system")
 }
@@ -221,6 +229,7 @@ fn solve_operator_system_with_apply(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     apply: impl Fn(&PreparedRealLinearSystem, &[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let mut effective_backend_kind = backend_kind;
     let mut accelerator_fallback = false;
@@ -353,8 +362,8 @@ fn solve_operator_system_with_apply(
     let mut r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
     let mut z = preconditioner.apply(&r);
     let mut p = z.clone();
-    let mut rz_old = algebra_backend.dot(&r, &z);
-    let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
+    let mut rz_old = dot(&r, &z)?;
+    let b_norm = dot(b, b)?.sqrt().max(1.0);
 
     let mut diagnostics = initial_diagnostics;
     diagnostics.push(FeaDiagnostic {
@@ -366,10 +375,11 @@ fn solve_operator_system_with_apply(
         ),
     });
 
-    if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
+    let initial_residual_norm = dot(&r, &r)?.sqrt();
+    if initial_residual_norm / b_norm <= tol {
         return Ok(LinearSolveResult {
             iterations: 0,
-            residual_norm: algebra_backend.dot(&r, &r).sqrt(),
+            residual_norm: initial_residual_norm,
             converged: true,
             host_sync_count: 0,
             solver_backend: effective_backend_kind,
@@ -389,7 +399,7 @@ fn solve_operator_system_with_apply(
             break;
         }
         let ap = apply(&prepared, &p)?;
-        let denom = algebra_backend.dot(&p, &ap);
+        let denom = dot(&p, &ap)?;
         // PCG is scale invariant. An absolute cutoff here rejects valid systems when the
         // preconditioned search direction is small (a common case for dynamics operators and a
         // good warm start). For an admitted SPD operator only non-positive or non-finite
@@ -400,14 +410,14 @@ fn solve_operator_system_with_apply(
         let alpha = rz_old / denom;
         algebra_backend.axpy(alpha, &p, &mut x);
         algebra_backend.axpy(-alpha, &ap, &mut r);
-        let residual_norm = algebra_backend.dot(&r, &r).sqrt();
+        let residual_norm = dot(&r, &r)?.sqrt();
         iterations += 1;
         if residual_norm / b_norm <= tol {
             break;
         }
 
         z = preconditioner.apply(&r);
-        let rz_new = algebra_backend.dot(&r, &z);
+        let rz_new = dot(&r, &z)?;
         if !rz_new.is_finite() || !rz_old.is_finite() || rz_old <= 0.0 || rz_new < 0.0 {
             break;
         }
@@ -422,7 +432,7 @@ fn solve_operator_system_with_apply(
     // freshly evaluated equation residual so downstream physics never inherits a false positive
     // or false negative from recurrence roundoff.
     r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
-    let residual_norm = algebra_backend.dot(&r, &r).sqrt();
+    let residual_norm = dot(&r, &r)?.sqrt();
     let converged = residual_norm / b_norm <= tol;
     if !converged {
         diagnostics.push(FeaDiagnostic {
