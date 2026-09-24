@@ -1,6 +1,6 @@
 use crate::{
     algebra::CoercivitySymbolicPlan,
-    constraints::CanonicalStructuralConstraintPlan,
+    constraints::{CanonicalStructuralConstraintPlan, ConstraintEnforcement},
     execution::{FieldRecoveryPlan, StructuralLinearWorkload},
     results::{field::StructuralRecoveredFieldTopology, observation::ResolvedObservationPlan},
     solve::preconditioner::SpdPreconditionerKind,
@@ -101,6 +101,9 @@ pub fn build_structural_resource_plan(
     let solve = solve_policy(
         workload.preconditioner,
         dofs,
+        u64::try_from(facts.constraint_matrix.row_count())
+            .map_err(|_| ResourcePlanningError::Overflow("constraint row count"))?,
+        constraints.enforcement,
         stiffness_nonzeros,
         &admission,
     )?;
@@ -244,6 +247,8 @@ fn structural_accelerator_requirements(
 fn solve_policy(
     preconditioner: SpdPreconditionerKind,
     dofs: u64,
+    constraint_rows: u64,
+    enforcement: ConstraintEnforcement,
     stiffness_nonzeros: u64,
     admission: &CoercivitySymbolicPlan,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
@@ -268,7 +273,11 @@ fn solve_policy(
         }
     };
     Ok(SolveResourcePolicy::Iterative {
-        vector_count: Count(STRUCTURAL_SOLVE_VECTOR_COUNT),
+        vector_count: Count(structural_solve_vector_count(
+            dofs,
+            constraint_rows,
+            enforcement,
+        )?),
         scalar: NumericalScalar::RealF64,
         preconditioner: storage,
         admission: SolverAdmissionResourcePolicy {
@@ -278,6 +287,47 @@ fn solve_policy(
             resident_bytes_upper_bound: ByteCount(admission.resident_bytes_upper_bound()),
         },
     })
+}
+
+/// Bounds the retained restarted-GMRES basis and saddle work in units of full physical vectors.
+/// The sixteen auxiliary saddle vectors cover RHS/initial/solution/residual, an in-flight
+/// Arnoldi vector, operator output, constraint transforms and temporary reductions. Two full
+/// physical vectors cover scoped CSR chunk output plus its ordered merge. Hessenberg, Givens,
+/// and projected-RHS scalars are charged separately before rounding up to physical vectors.
+fn structural_solve_vector_count(
+    dofs: u64,
+    constraint_rows: u64,
+    enforcement: ConstraintEnforcement,
+) -> Result<u64, ResourcePlanningError> {
+    if enforcement != ConstraintEnforcement::LagrangeMultiplier {
+        return Ok(STRUCTURAL_SOLVE_VECTOR_COUNT);
+    }
+    if dofs == 0 {
+        return Err(ResourcePlanningError::Invalid(
+            "multiplier solve requires physical DOFs".into(),
+        ));
+    }
+    let saddle = dofs
+        .checked_add(constraint_rows)
+        .ok_or(ResourcePlanningError::Overflow("saddle dimension"))?;
+    let restart = saddle.min(32);
+    let basis_and_auxiliary =
+        saddle
+            .checked_mul(restart + 17)
+            .ok_or(ResourcePlanningError::Overflow(
+                "GMRES basis and work vectors",
+            ))?;
+    let scalar_work = (restart + 1)
+        .checked_mul(restart + 6)
+        .ok_or(ResourcePlanningError::Overflow("GMRES Hessenberg work"))?;
+    let spmv_work = dofs
+        .checked_mul(2)
+        .ok_or(ResourcePlanningError::Overflow("scoped saddle SpMV work"))?;
+    let values = basis_and_auxiliary
+        .checked_add(scalar_work)
+        .and_then(|sum| sum.checked_add(spmv_work))
+        .ok_or(ResourcePlanningError::Overflow("multiplier solve values"))?;
+    Ok(values.div_ceil(dofs).max(STRUCTURAL_SOLVE_VECTOR_COUNT))
 }
 
 fn checked_bytes(
@@ -293,4 +343,28 @@ fn checked_bytes(
 fn checked_add(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
     left.checked_add(right)
         .ok_or(ResourcePlanningError::Overflow(label))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiplier_gmres_basis_is_charged_above_scoped_pcg() {
+        assert_eq!(
+            structural_solve_vector_count(12, 7, ConstraintEnforcement::LagrangeMultiplier)
+                .unwrap(),
+            101
+        );
+        assert_eq!(
+            structural_solve_vector_count(12, 7, ConstraintEnforcement::AffineReduction).unwrap(),
+            STRUCTURAL_SOLVE_VECTOR_COUNT
+        );
+        assert!(structural_solve_vector_count(
+            u64::MAX,
+            1,
+            ConstraintEnforcement::LagrangeMultiplier
+        )
+        .is_err());
+    }
 }

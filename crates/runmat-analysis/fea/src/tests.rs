@@ -5224,7 +5224,7 @@ fn admitted_parallel_solid_recovery_matches_serial_static_fields_exactly() {
 }
 
 #[test]
-fn admitted_affine_static_solve_matches_serial_and_closed_form() {
+fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
     use crate::algebra::{
         AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
         RealSparseMatrix, ScopedSpmvError,
@@ -5329,6 +5329,32 @@ fn admitted_affine_static_solve_matches_serial_and_closed_form() {
             ScopedLocalExecutionError::NestedExecution
         ))
     ));
+
+    summary.affine_constraint_reduction = None;
+    let multiplier_serial = solve_linear_system(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+    );
+    let multiplier_parallel = solve_linear_system_with_execution(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+    )
+    .unwrap();
+    assert!(
+        multiplier_parallel.converged,
+        "diagnostics={:?}",
+        multiplier_parallel.diagnostics
+    );
+    assert_eq!(multiplier_parallel, multiplier_serial);
+    assert!((multiplier_parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
+    assert!((multiplier_parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);
 }
 
 #[test]

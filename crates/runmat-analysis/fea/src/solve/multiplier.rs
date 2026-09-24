@@ -1,11 +1,12 @@
 //! Exact sparse constraint enforcement through a matrix-free saddle-point system.
 
 use crate::{
-    algebra::{apply_k, PreparedRealLinearSystem},
+    algebra::{apply_k, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
     assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    planning::resource::LocalExecutionPlan,
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         krylov::{restarted_gmres, GmresPolicy},
@@ -20,10 +21,53 @@ pub(super) fn solve_multiplier_constraint_system(
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
+    solve_multiplier_constraint_system_with_apply(
+        summary,
+        constraints,
+        requested_backend,
+        algebra,
+        initial_guess,
+        |physical| Ok(apply_k(&summary.operator, physical)),
+    )
+    .expect("reference sparse application is infallible for an assembled system")
+}
+
+pub(super) fn solve_multiplier_constraint_system_with_execution(
+    summary: &AssemblySummary,
+    constraints: &ResolvedConstraintMatrix,
+    requested_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_multiplier_constraint_system_with_apply(
+        summary,
+        constraints,
+        requested_backend,
+        algebra,
+        initial_guess,
+        |physical| {
+            if plan.is_serial() {
+                Ok(apply_k(&summary.operator, physical))
+            } else {
+                spmv_scoped(summary.operator.operators().stiffness(), physical, plan)
+            }
+        },
+    )
+}
+
+fn solve_multiplier_constraint_system_with_apply(
+    summary: &AssemblySummary,
+    constraints: &ResolvedConstraintMatrix,
+    requested_backend: LinearAlgebraBackendKind,
+    algebra: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    apply_stiffness: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     let dofs = summary.dof_count;
     let rows = constraints.row_count();
     if constraints.validate().is_err() || constraints.full_dof_count != dofs {
-        return LinearSolveResult {
+        return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: f64::INFINITY,
             converged: false,
@@ -42,11 +86,11 @@ pub(super) fn solve_multiplier_constraint_system(
                     "multiplier constraint dimensions or canonical sparse evidence are invalid"
                         .into(),
             }],
-        };
+        });
     }
     let reduction = match constraints.affine_reduction() {
         Ok(reduction) => reduction,
-        Err(error) => return rejected_multiplier_system(summary, &error.to_string()),
+        Err(error) => return Ok(rejected_multiplier_system(summary, &error.to_string())),
     };
     if reduction.reduced_dof_count > 0 {
         let (reduced_operator, reduced_rhs) = match reduction.reduce_sparse_system(
@@ -54,14 +98,14 @@ pub(super) fn solve_multiplier_constraint_system(
             summary.operator.load(),
         ) {
             Ok(reduced) => reduced,
-            Err(error) => return rejected_multiplier_system(summary, &error.to_string()),
+            Err(error) => return Ok(rejected_multiplier_system(summary, &error.to_string())),
         };
         if let Err(error) = PreparedRealLinearSystem::try_new(
             reduced_operator,
             reduced_rhs,
             vec![false; reduction.reduced_dof_count],
         ) {
-            return rejected_multiplier_system(summary, &error.to_string());
+            return Ok(rejected_multiplier_system(summary, &error.to_string()));
         }
     }
     let equation_scale = representative_stiffness(summary);
@@ -78,7 +122,15 @@ pub(super) fn solve_multiplier_constraint_system(
             *target = *value;
         }
     }
-    let apply = |value: &[f64]| apply_saddle(summary, constraints, value, equation_scale);
+    let apply = |value: &[f64]| {
+        apply_saddle(
+            summary,
+            constraints,
+            value,
+            equation_scale,
+            &apply_stiffness,
+        )
+    };
     let tolerance = 1.0e-8;
     let restart = (dofs + rows).min(32);
     let maximum_iterations = (dofs + rows).saturating_mul(8).max(256);
@@ -93,9 +145,8 @@ pub(super) fn solve_multiplier_constraint_system(
         diagnostics.push(FeaDiagnostic {
             code: "FEA_MULTIPLIER_CPU_REFERENCE".into(),
             severity: FeaDiagnosticSeverity::Warning,
-            message:
-                "multiplier constraint enforcement is executing on the serial CPU reference backend"
-                    .into(),
+            message: "multiplier constraint enforcement is executing on the CPU reference backend"
+                .into(),
         });
     }
 
@@ -110,9 +161,12 @@ pub(super) fn solve_multiplier_constraint_system(
         apply,
         |left, right| algebra.dot(left, right),
         crate::is_fea_cancelled,
-    );
+    )?;
     let Some(result) = result else {
-        return rejected_multiplier_system(summary, "matrix-free GMRES inputs are invalid");
+        return Ok(rejected_multiplier_system(
+            summary,
+            "matrix-free GMRES inputs are invalid",
+        ));
     };
     if result.cancelled {
         diagnostics.push(FeaDiagnostic {
@@ -133,7 +187,7 @@ pub(super) fn solve_multiplier_constraint_system(
         severity: FeaDiagnosticSeverity::Info,
         message: "solver=gmres space=saddle_point preconditioner=none matrix_free=true".into(),
     });
-    LinearSolveResult {
+    Ok(LinearSolveResult {
         iterations: result.iterations,
         residual_norm: result.residual_norm,
         converged: result.converged,
@@ -146,7 +200,7 @@ pub(super) fn solve_multiplier_constraint_system(
         solver_method: SolverMethod::MatrixFreeSaddlePointGmres,
         preconditioner: SolverPreconditioner::None,
         diagnostics,
-    }
+    })
 }
 
 fn rejected_multiplier_system(summary: &AssemblySummary, message: &str) -> LinearSolveResult {
@@ -181,9 +235,10 @@ fn apply_saddle(
     constraints: &ResolvedConstraintMatrix,
     value: &[f64],
     equation_scale: f64,
-) -> Vec<f64> {
+    apply_stiffness: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+) -> Result<Vec<f64>, ScopedSpmvError> {
     let dofs = summary.dof_count;
-    let mut physical = apply_k(&summary.operator, &value[..dofs]);
+    let mut physical = apply_stiffness(&value[..dofs])?;
     let transpose = constraints.transpose_apply_validated(&value[dofs..]);
     for (target, contribution) in physical.iter_mut().zip(transpose) {
         *target += equation_scale * contribution;
@@ -194,7 +249,7 @@ fn apply_saddle(
             .into_iter()
             .map(|entry| entry * equation_scale),
     );
-    physical
+    Ok(physical)
 }
 
 fn representative_stiffness(summary: &AssemblySummary) -> f64 {

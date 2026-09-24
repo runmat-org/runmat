@@ -932,6 +932,66 @@ fn canonical_solid_solve_enforces_exact_multiplier_equations() {
         crate::contracts::SolverMethod::MatrixFreeSaddlePointGmres
     );
     assert!((solve.solution[3] - solve.solution[6] - 0.001).abs() <= 1.0e-9);
+    let execution = crate::planning::resource::LocalExecutionPlan::fixed(
+        crate::planning::resource::LocalThreadCount::new(3).unwrap(),
+    )
+    .unwrap();
+    let parallel = crate::solve::linear::solve_linear_system_with_execution(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        execution,
+    )
+    .unwrap();
+    assert_eq!(parallel, solve);
+    let nested = crate::planning::resource::execute_scoped_chunks(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        1,
+        |_| {
+            Ok::<_, ()>(crate::solve::linear::solve_linear_system_with_execution(
+                &summary,
+                SpdPreconditionerKind::Jacobi,
+                LinearAlgebraBackendKind::CpuReference,
+                &CpuReferenceBackend,
+                None,
+                execution,
+            ))
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        &nested[0],
+        Err(crate::algebra::ScopedSpmvError::Execution(
+            crate::planning::resource::ScopedLocalExecutionError::NestedExecution
+        ))
+    ));
+    {
+        let cancellation = crate::progress::FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context =
+            crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+                cancellation,
+                ..crate::progress::FeaProgressContext::default()
+            });
+        assert!(matches!(
+            crate::solve::linear::solve_linear_system_with_execution(
+                &summary,
+                SpdPreconditionerKind::Jacobi,
+                LinearAlgebraBackendKind::CpuReference,
+                &CpuReferenceBackend,
+                None,
+                execution,
+            ),
+            Err(crate::algebra::ScopedSpmvError::Execution(
+                crate::planning::resource::ScopedLocalExecutionError::Work {
+                    source: crate::algebra::SpmvWorkError::Cancelled,
+                    ..
+                }
+            ))
+        ));
+    }
     let fields = recover_result_fields(
         &summary,
         &solve,

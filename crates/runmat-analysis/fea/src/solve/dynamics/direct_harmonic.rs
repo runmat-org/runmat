@@ -105,7 +105,13 @@ pub fn solve_direct_harmonic(
     }
     let mut right_hand_side = reduced_real;
     right_hand_side.extend(reduced_imaginary);
-    let apply = |value: &[f64]| apply_dynamic_block(&prepared, angular_frequency_rad_s, value);
+    let apply = |value: &[f64]| {
+        Ok::<_, std::convert::Infallible>(apply_dynamic_block(
+            &prepared,
+            angular_frequency_rad_s,
+            value,
+        ))
+    };
     let result = restarted_gmres(
         &right_hand_side,
         &vec![0.0; reduced_size * 2],
@@ -118,6 +124,7 @@ pub fn solve_direct_harmonic(
         dot,
         crate::is_fea_cancelled,
     )
+    .expect("direct harmonic operator application is infallible")
     .ok_or(DirectHarmonicError::Breakdown)?;
     if result.cancelled {
         return Err(DirectHarmonicError::Cancelled);

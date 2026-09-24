@@ -14,7 +14,9 @@ use crate::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
         affine::{solve_affine_constraint_system, solve_affine_constraint_system_with_execution},
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
-        multiplier::solve_multiplier_constraint_system,
+        multiplier::{
+            solve_multiplier_constraint_system, solve_multiplier_constraint_system_with_execution,
+        },
     },
 };
 
@@ -130,9 +132,8 @@ pub fn solve_linear_system(
     )
 }
 
-/// Uses the admitted local CPU plan for ordinary and affine-reduced static stiffness application.
-/// Multiplier systems retain their serial solver until their GMRES callback can propagate scoped
-/// execution failure.
+/// Uses the admitted local CPU plan for ordinary, affine-reduced, and multiplier static stiffness
+/// application. Multiplier GMRES propagates scoped execution failure without reporting breakdown.
 pub fn solve_linear_system_with_execution(
     summary: &AssemblySummary,
     preconditioner_kind: SpdPreconditionerKind,
@@ -151,14 +152,15 @@ pub fn solve_linear_system_with_execution(
             plan,
         );
     }
-    if summary.constraint_matrix.is_some() {
-        return Ok(solve_linear_system(
+    if let Some(matrix) = summary.constraint_matrix.as_ref() {
+        return solve_multiplier_constraint_system_with_execution(
             summary,
-            preconditioner_kind,
+            matrix,
             backend_kind,
             algebra_backend,
             initial_guess,
-        ));
+            plan,
+        );
     }
     solve_operator_system_scoped(
         &summary.operator,

@@ -17,14 +17,14 @@ pub(super) struct GmresResult {
     pub breakdown: bool,
 }
 
-pub(super) fn restarted_gmres(
+pub(super) fn restarted_gmres<E>(
     right_hand_side: &[f64],
     initial: &[f64],
     policy: GmresPolicy,
-    apply: impl Fn(&[f64]) -> Vec<f64>,
+    apply: impl Fn(&[f64]) -> Result<Vec<f64>, E>,
     dot: impl Fn(&[f64], &[f64]) -> f64,
     cancelled: impl Fn() -> bool,
-) -> Option<GmresResult> {
+) -> Result<Option<GmresResult>, E> {
     let size = right_hand_side.len();
     if size == 0
         || initial.len() != size
@@ -37,14 +37,19 @@ pub(super) fn restarted_gmres(
             .chain(initial)
             .any(|value| !value.is_finite())
     {
-        return None;
+        return Ok(None);
     }
     let restart = policy.restart.min(size).min(policy.maximum_iterations);
     let mut solution = initial.to_vec();
-    let mut residual = subtract(right_hand_side, &apply(&solution))?;
+    let Some(mut residual) = subtract(right_hand_side, &apply(&solution)?) else {
+        return Ok(None);
+    };
     let rhs_norm = dot(right_hand_side, right_hand_side).sqrt().max(1.0);
     let mut iterations = 0_u32;
-    let mut converged = norm(&residual, &dot)? / rhs_norm <= policy.relative_tolerance;
+    let Some(initial_norm) = norm(&residual, &dot) else {
+        return Ok(None);
+    };
+    let mut converged = initial_norm / rhs_norm <= policy.relative_tolerance;
     let mut observed_cancellation = false;
     let mut breakdown = false;
 
@@ -53,7 +58,9 @@ pub(super) fn restarted_gmres(
             observed_cancellation = true;
             break;
         }
-        let beta = norm(&residual, &dot)?;
+        let Some(beta) = norm(&residual, &dot) else {
+            return Ok(None);
+        };
         if beta <= f64::MIN_POSITIVE {
             breakdown = true;
             break;
@@ -74,15 +81,18 @@ pub(super) fn restarted_gmres(
                 observed_cancellation = cancelled();
                 break;
             }
-            let mut next = apply(&basis[column]);
+            let mut next = apply(&basis[column])?;
             if next.len() != size || next.iter().any(|value| !value.is_finite()) {
-                return None;
+                return Ok(None);
             }
             for row in 0..=column {
                 hessenberg[row][column] = dot(&basis[row], &next);
                 axpy(-hessenberg[row][column], &basis[row], &mut next);
             }
-            hessenberg[column + 1][column] = norm(&next, &dot)?;
+            let Some(next_norm) = norm(&next, &dot) else {
+                return Ok(None);
+            };
+            hessenberg[column + 1][column] = next_norm;
             if hessenberg[column + 1][column] > f64::MIN_POSITIVE {
                 basis.push(
                     next.iter()
@@ -129,17 +139,26 @@ pub(super) fn restarted_gmres(
         for (coefficient, direction) in coefficients.iter().zip(&basis) {
             axpy(*coefficient, direction, &mut solution);
         }
-        residual = subtract(right_hand_side, &apply(&solution))?;
-        converged = norm(&residual, &dot)? / rhs_norm <= policy.relative_tolerance;
+        let Some(next_residual) = subtract(right_hand_side, &apply(&solution)?) else {
+            return Ok(None);
+        };
+        residual = next_residual;
+        let Some(residual_norm) = norm(&residual, &dot) else {
+            return Ok(None);
+        };
+        converged = residual_norm / rhs_norm <= policy.relative_tolerance;
     }
-    Some(GmresResult {
+    let Some(residual_norm) = norm(&residual, &dot) else {
+        return Ok(None);
+    };
+    Ok(Some(GmresResult {
         solution,
         iterations,
-        residual_norm: norm(&residual, &dot)?,
+        residual_norm,
         converged,
         cancelled: observed_cancellation,
         breakdown,
-    })
+    }))
 }
 
 fn norm(vector: &[f64], dot: &impl Fn(&[f64], &[f64]) -> f64) -> Option<f64> {
@@ -184,7 +203,9 @@ mod tests {
 
     #[test]
     fn restarted_solver_handles_nonsymmetric_system_and_cancellation() {
-        let apply = |x: &[f64]| vec![4.0 * x[0] + x[1], -2.0 * x[0] + 3.0 * x[1]];
+        let apply = |x: &[f64]| {
+            Ok::<_, std::convert::Infallible>(vec![4.0 * x[0] + x[1], -2.0 * x[0] + 3.0 * x[1]])
+        };
         let result = restarted_gmres(
             &[6.0, 4.0],
             &[0.0; 2],
@@ -197,6 +218,7 @@ mod tests {
             dot,
             || false,
         )
+        .unwrap()
         .unwrap();
         assert!(result.converged);
         assert!((result.solution[0] - 1.0).abs() <= 1.0e-12);
@@ -214,8 +236,26 @@ mod tests {
             dot,
             || true,
         )
+        .unwrap()
         .unwrap();
         assert!(cancelled.cancelled);
         assert!(!cancelled.converged);
+    }
+
+    #[test]
+    fn operator_failure_is_not_converted_into_a_breakdown() {
+        let result = restarted_gmres(
+            &[1.0],
+            &[0.0],
+            GmresPolicy {
+                relative_tolerance: 1.0e-12,
+                restart: 1,
+                maximum_iterations: 2,
+            },
+            |_value| Err::<Vec<f64>, _>("scoped worker failed"),
+            dot,
+            || false,
+        );
+        assert_eq!(result, Err("scoped worker failed"));
     }
 }
