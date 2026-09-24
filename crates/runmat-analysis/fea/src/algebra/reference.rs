@@ -141,6 +141,32 @@ pub fn vector_sub_scoped(
     Ok(result)
 }
 
+/// Replaces an existing result buffer with `left - right` under the admitted plan.
+/// Affine CG uses this for its independently checked final equation residual,
+/// without allocating another full reduced vector.
+pub fn subtract_into_scoped(
+    left: &[f64],
+    right: &[f64],
+    result: &mut [f64],
+    plan: LocalExecutionPlan,
+) -> Result<(), ScopedSpmvError> {
+    if left.len() != right.len() || left.len() != result.len() {
+        return Err(ScopedSpmvError::VectorDimensionMismatch);
+    }
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, result, |chunk, output| {
+        for (offset, value) in output.iter_mut().enumerate() {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            let index = chunk.start() as usize + offset;
+            *value = left[index] - right[index];
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Builds a normalized Krylov basis vector without retaining a second output copy.
 pub fn normalized_copy_scoped(
     input: &[f64],
@@ -314,6 +340,12 @@ mod tests {
                     .map(|(left, right)| left - right)
                     .collect::<Vec<_>>()
             );
+            let mut reused = [f64::NAN; 7];
+            subtract_into_scoped(&actual, &x, &mut reused, plan).unwrap();
+            assert_eq!(
+                reused.to_vec(),
+                vector_sub_scoped(&actual, &x, plan).unwrap()
+            );
             assert_eq!(
                 normalized_copy_scoped(&actual, 2.5, plan).unwrap(),
                 actual.iter().map(|value| value / 2.5).collect::<Vec<_>>()
@@ -325,6 +357,10 @@ mod tests {
         ));
         assert!(matches!(
             vector_sub_scoped(&x[..6], &expected, LocalExecutionPlan::serial()),
+            Err(ScopedSpmvError::VectorDimensionMismatch)
+        ));
+        assert!(matches!(
+            subtract_into_scoped(&x, &expected, &mut [0.0; 6], LocalExecutionPlan::serial()),
             Err(ScopedSpmvError::VectorDimensionMismatch)
         ));
     }
@@ -343,6 +379,7 @@ mod tests {
             axpy_scoped(2.0, &[1.0; 8], &mut values, plan).map(|_| Vec::new()),
             scale_scoped(&mut values, 2.0, plan).map(|_| Vec::new()),
             vector_sub_scoped(&[2.0; 8], &[1.0; 8], plan),
+            subtract_into_scoped(&[2.0; 8], &[1.0; 8], &mut values, plan).map(|_| Vec::new()),
             normalized_copy_scoped(&[2.0; 8], 2.0, plan),
         ] {
             assert!(matches!(

@@ -151,16 +151,19 @@ fn solve_affine_constraint_system_with_apply(
         .filter(|plan| !plan.is_serial())
         .map(|_| AffineTransposeIndex::new(reduction));
 
-    let mut residual = algebra_backend.vec_sub(
-        &reduced_rhs,
-        &apply_reduced_operator(
-            reduction,
-            &reduced_solution,
-            &apply_full,
-            vector_plan,
-            transpose_index.as_ref(),
-        )?,
-    );
+    let applied_initial = apply_reduced_operator(
+        reduction,
+        &reduced_solution,
+        &apply_full,
+        vector_plan,
+        transpose_index.as_ref(),
+    )?;
+    let mut residual = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        crate::algebra::vector_sub_scoped(&reduced_rhs, &applied_initial, plan)?
+    } else {
+        algebra_backend.vec_sub(&reduced_rhs, &applied_initial)
+    };
+    drop(applied_initial);
     let mut direction = residual.clone();
     let mut residual_squared = dot(&residual, &residual)?;
     let right_hand_side_norm = dot(&reduced_rhs, &reduced_rhs)?.sqrt();
@@ -237,11 +240,16 @@ fn solve_affine_constraint_system_with_apply(
         vector_plan,
         transpose_index.as_ref(),
     )?;
-    for ((residual_value, right_hand_side), applied) in
-        residual.iter_mut().zip(&reduced_rhs).zip(applied_solution)
-    {
-        *residual_value = right_hand_side - applied;
+    if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        crate::algebra::subtract_into_scoped(&reduced_rhs, &applied_solution, &mut residual, plan)?;
+    } else {
+        for ((residual_value, right_hand_side), applied) in
+            residual.iter_mut().zip(&reduced_rhs).zip(&applied_solution)
+        {
+            *residual_value = right_hand_side - applied;
+        }
     }
+    drop(applied_solution);
     let residual_norm = dot(&residual, &residual)?.sqrt();
     converged = residual_norm <= tolerance * reference_norm;
     if !converged {

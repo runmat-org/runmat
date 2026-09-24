@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+mod admission;
+
+use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
+
 use crate::{
     algebra::{
-        validate_prepared_solver_compatibility, AssembledRealSystem, CompatibilityError,
-        PreparedRealLinearSystem, RealPreconditioner, RealSolver, RealSystemError, ScopedSpmvError,
+        validate_prepared_solver_compatibility, AssembledRealSystem, PreparedRealLinearSystem,
+        RealPreconditioner, RealSolver, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -34,68 +38,6 @@ pub struct LinearSolveResult {
     pub solver_method: SolverMethod,
     pub preconditioner: SolverPreconditioner,
     pub diagnostics: Vec<FeaDiagnostic>,
-}
-
-fn invalid_system_result(
-    operator: &AssembledRealSystem,
-    backend: LinearAlgebraBackendKind,
-    preconditioner: SpdPreconditionerKind,
-    error: RealSystemError,
-) -> LinearSolveResult {
-    rejected_system_result(
-        operator,
-        backend,
-        preconditioner,
-        "FEA_INVALID_REAL_SYSTEM",
-        format!("real linear-system preparation failed: {error:?}"),
-    )
-}
-
-fn incompatible_system_result(
-    operator: &AssembledRealSystem,
-    backend: LinearAlgebraBackendKind,
-    preconditioner: SpdPreconditionerKind,
-    error: CompatibilityError,
-) -> LinearSolveResult {
-    rejected_system_result(
-        operator,
-        backend,
-        preconditioner,
-        "FEA_INCOMPATIBLE_REAL_SOLVER",
-        error.to_string(),
-    )
-}
-
-fn rejected_system_result(
-    operator: &AssembledRealSystem,
-    backend: LinearAlgebraBackendKind,
-    preconditioner: SpdPreconditionerKind,
-    code: &str,
-    message: String,
-) -> LinearSolveResult {
-    LinearSolveResult {
-        iterations: 0,
-        residual_norm: operator
-            .load()
-            .iter()
-            .map(|value| value * value)
-            .sum::<f64>()
-            .sqrt(),
-        converged: false,
-        host_sync_count: 0,
-        solver_backend: backend,
-        device_apply_k_count: 0,
-        device_apply_k_attempt_count: 0,
-        accelerator_evidence: None,
-        solution: vec![0.0; operator.dof_count()],
-        solver_method: SolverMethod::MatrixFreePcg,
-        preconditioner: SolverPreconditioner::from_spd(preconditioner),
-        diagnostics: vec![FeaDiagnostic {
-            code: code.to_string(),
-            severity: FeaDiagnosticSeverity::Error,
-            message,
-        }],
-    }
 }
 
 pub fn solve_linear_system(
@@ -371,7 +313,13 @@ fn solve_operator_system_with_apply(
         }
     }
 
-    let mut r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
+    let applied_initial = apply(&prepared, &x)?;
+    let mut r = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        crate::algebra::vector_sub_scoped(b, &applied_initial, plan)?
+    } else {
+        algebra_backend.vec_sub(b, &applied_initial)
+    };
+    drop(applied_initial);
     let mut z = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
         preconditioner.apply_with_execution(&r, plan)?
     } else {
@@ -465,7 +413,13 @@ fn solve_operator_system_with_apply(
     // Recurrence residuals can drift from b - A*x. Make the public convergence decision from a
     // freshly evaluated equation residual so downstream physics never inherits a false positive
     // or false negative from recurrence roundoff.
-    r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
+    let applied_final = apply(&prepared, &x)?;
+    if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        crate::algebra::subtract_into_scoped(b, &applied_final, &mut r, plan)?;
+    } else {
+        r = algebra_backend.vec_sub(b, &applied_final);
+    }
+    drop(applied_final);
     let residual_norm = dot(&r, &r)?.sqrt();
     let converged = residual_norm <= tol * reference_norm;
     if !converged {
