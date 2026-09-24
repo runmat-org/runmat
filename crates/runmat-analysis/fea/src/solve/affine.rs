@@ -147,10 +147,19 @@ fn solve_affine_constraint_system_with_apply(
     ) {
         return Ok(rejected_affine_system(summary, &error.to_string()));
     }
+    let transpose_index = vector_plan
+        .filter(|plan| !plan.is_serial())
+        .map(|_| AffineTransposeIndex::new(reduction));
 
     let mut residual = algebra_backend.vec_sub(
         &reduced_rhs,
-        &apply_reduced_operator(reduction, &reduced_solution, &apply_full, vector_plan)?,
+        &apply_reduced_operator(
+            reduction,
+            &reduced_solution,
+            &apply_full,
+            vector_plan,
+            transpose_index.as_ref(),
+        )?,
     );
     let mut direction = residual.clone();
     let mut residual_squared = dot(&residual, &residual)?;
@@ -175,8 +184,13 @@ fn solve_affine_constraint_system_with_apply(
             });
             break;
         }
-        let operator_direction =
-            apply_reduced_operator(reduction, &direction, &apply_full, vector_plan)?;
+        let operator_direction = apply_reduced_operator(
+            reduction,
+            &direction,
+            &apply_full,
+            vector_plan,
+            transpose_index.as_ref(),
+        )?;
         let denominator = dot(&direction, &operator_direction)?;
         if !denominator.is_finite() || denominator <= 0.0 {
             diagnostics.push(FeaDiagnostic {
@@ -216,8 +230,13 @@ fn solve_affine_constraint_system_with_apply(
 
     // Publish convergence from the physical reduced equation, not only the
     // recursively updated residual, which can drift after many CG steps.
-    let applied_solution =
-        apply_reduced_operator(reduction, &reduced_solution, &apply_full, vector_plan)?;
+    let applied_solution = apply_reduced_operator(
+        reduction,
+        &reduced_solution,
+        &apply_full,
+        vector_plan,
+        transpose_index.as_ref(),
+    )?;
     for ((residual_value, right_hand_side), applied) in
         residual.iter_mut().zip(&reduced_rhs).zip(applied_solution)
     {
@@ -288,9 +307,77 @@ fn apply_reduced_operator(
     reduced: &[f64],
     apply_full: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
     plan: Option<LocalExecutionPlan>,
+    transpose_index: Option<&AffineTransposeIndex>,
 ) -> Result<Vec<f64>, ScopedSpmvError> {
     let full = expand_linear(reduction, reduced, plan)?;
-    Ok(transpose_apply(reduction, &apply_full(&full)?))
+    let applied = apply_full(&full)?;
+    if let (Some(plan), Some(index)) = (plan.filter(|plan| !plan.is_serial()), transpose_index) {
+        index.apply(reduction, &applied, plan)
+    } else {
+        Ok(transpose_apply(reduction, &applied))
+    }
+}
+
+/// Column ownership makes Tᵀ application race-free without a worker-sized reduced vector.
+/// Entries in each column retain the original row/entry order and the serial sum order.
+struct AffineTransposeIndex {
+    column_offsets: Vec<usize>,
+    row_entries: Vec<(usize, usize)>,
+}
+
+impl AffineTransposeIndex {
+    fn new(reduction: &AffineConstraintReduction) -> Self {
+        let mut column_offsets = vec![0; reduction.reduced_dof_count + 1];
+        for &column in &reduction.recovery_column_indices {
+            column_offsets[column + 1] += 1;
+        }
+        for column in 0..reduction.reduced_dof_count {
+            column_offsets[column + 1] += column_offsets[column];
+        }
+        let mut cursor = column_offsets.clone();
+        let mut row_entries = vec![(0, 0); reduction.recovery_column_indices.len()];
+        for row in 0..reduction.full_dof_count {
+            for entry in
+                reduction.recovery_row_offsets[row]..reduction.recovery_row_offsets[row + 1]
+            {
+                let column = reduction.recovery_column_indices[entry];
+                row_entries[cursor[column]] = (row, entry);
+                cursor[column] += 1;
+            }
+        }
+        Self {
+            column_offsets,
+            row_entries,
+        }
+    }
+
+    fn apply(
+        &self,
+        reduction: &AffineConstraintReduction,
+        full: &[f64],
+        plan: LocalExecutionPlan,
+    ) -> Result<Vec<f64>, ScopedSpmvError> {
+        let mut reduced = vec![0.0; reduction.reduced_dof_count];
+        let cancellation = crate::progress::cancellation_token();
+        crate::planning::resource::execute_scoped_slices_mut(
+            plan,
+            &mut reduced,
+            |chunk, output| {
+                for (offset, value) in output.iter_mut().enumerate() {
+                    if cancellation.is_cancelled() {
+                        return Err(crate::algebra::SpmvWorkError::Cancelled);
+                    }
+                    let column = chunk.start() as usize + offset;
+                    for position in self.column_offsets[column]..self.column_offsets[column + 1] {
+                        let (row, entry) = self.row_entries[position];
+                        *value += reduction.recovery_coefficients[entry] * full[row];
+                    }
+                }
+                Ok(())
+            },
+        )?;
+        Ok(reduced)
+    }
 }
 
 fn expand(
@@ -387,6 +474,7 @@ mod tests {
         let reduced = [0.75, -2.0, 1.25];
         let serial_linear = expand_linear(&reduction, &reduced, None).unwrap();
         let serial_full = expand(&reduction, &reduced, None).unwrap();
+        let transpose_index = AffineTransposeIndex::new(&reduction);
         for threads in [2, 3, 7, 8] {
             let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
             assert_eq!(
@@ -398,7 +486,19 @@ mod tests {
                 serial_full
             );
             assert_eq!(
-                apply_reduced_operator(&reduction, &reduced, &|full| Ok(full.to_vec()), Some(plan))
+                apply_reduced_operator(
+                    &reduction,
+                    &reduced,
+                    &|full| Ok(full.to_vec()),
+                    Some(plan),
+                    Some(&transpose_index),
+                )
+                .unwrap(),
+                transpose_apply(&reduction, &serial_linear),
+            );
+            assert_eq!(
+                transpose_index
+                    .apply(&reduction, &serial_linear, plan)
                     .unwrap(),
                 transpose_apply(&reduction, &serial_linear),
             );
@@ -410,8 +510,10 @@ mod tests {
         let reduction = coupled_reduction();
         let reduced = [0.75, -2.0, 1.25];
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        let transpose_index = AffineTransposeIndex::new(&reduction);
+        let full = expand_linear(&reduction, &reduced, None).unwrap();
         let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
-            Ok::<_, ()>(expand_linear(&reduction, &reduced, Some(plan)))
+            Ok::<_, ()>(transpose_index.apply(&reduction, &full, plan))
         })
         .unwrap();
         assert!(matches!(
@@ -428,7 +530,7 @@ mod tests {
             ..FeaProgressContext::default()
         });
         assert!(matches!(
-            expand_linear(&reduction, &reduced, Some(plan)),
+            transpose_index.apply(&reduction, &full, plan),
             Err(ScopedSpmvError::Execution(
                 ScopedLocalExecutionError::Work {
                     source: crate::algebra::SpmvWorkError::Cancelled,

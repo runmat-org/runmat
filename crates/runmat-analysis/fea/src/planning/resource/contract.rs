@@ -20,10 +20,14 @@ use crate::execution::{
 };
 use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
 
+pub use super::solve_policy::{
+    NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
+};
+
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 8;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 9;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -121,127 +125,6 @@ pub struct AssemblyResourcePolicy {
     pub contribution_bytes_upper_bound: ByteCount,
     pub scratch_bytes_per_element: ByteCount,
     pub fixed_scratch_bytes_per_worker: ByteCount,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PreconditionerStorage {
-    None,
-    Diagonal,
-    SparseCsr {
-        nonzero_upper_bound: Count,
-        resident_bytes_upper_bound: ByteCount,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NumericalScalar {
-    RealF64,
-    ComplexF64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SolverAdmissionResourcePolicy {
-    pub dimension: Count,
-    pub factor_nonzero_upper_bound: Count,
-    pub update_count_upper_bound: Count,
-    pub resident_bytes_upper_bound: ByteCount,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SolveResourcePolicy {
-    NoSolve {
-        workspace_bytes_upper_bound: ByteCount,
-    },
-    Iterative {
-        vector_count: Count,
-        scalar: NumericalScalar,
-        preconditioner: PreconditionerStorage,
-        admission: SolverAdmissionResourcePolicy,
-    },
-    DirectFactorization {
-        vector_count: Count,
-        scalar: NumericalScalar,
-        factor_nonzero_upper_bound: Count,
-        factor_bytes_upper_bound: ByteCount,
-    },
-    RestartedGmres {
-        block_dimension: Count,
-        restart: Count,
-        maximum_iterations: Count,
-        workspace_bytes_upper_bound: ByteCount,
-    },
-    ModalDenseHarmonic {
-        full_dimension: Count,
-        mode_count: Count,
-        workspace_bytes_upper_bound: ByteCount,
-    },
-    SymmetricSubspaceIteration {
-        full_dimension: Count,
-        reduced_dimension: Count,
-        requested_mode_count: Count,
-        initial_subspace_dimension: Count,
-        maximum_subspace_dimension: Count,
-        boundary_probe_width: Count,
-        subspace_expansion_count_upper_bound: Count,
-        maximum_iterations_per_expansion: Count,
-        orthogonalization_passes_per_block: Count,
-        dense_projected_value_count_upper_bound: Count,
-        workspace_bytes_upper_bound: ByteCount,
-    },
-}
-
-impl SolveResourcePolicy {
-    pub(crate) fn vector_count(&self) -> Option<u64> {
-        match self {
-            Self::Iterative { vector_count, .. }
-            | Self::DirectFactorization { vector_count, .. } => Some(vector_count.0),
-            Self::NoSolve { .. }
-            | Self::RestartedGmres { .. }
-            | Self::ModalDenseHarmonic { .. }
-            | Self::SymmetricSubspaceIteration { .. } => None,
-        }
-    }
-
-    pub(crate) fn scalar_bytes(&self) -> u64 {
-        let scalar = match self {
-            Self::Iterative { scalar, .. } | Self::DirectFactorization { scalar, .. } => scalar,
-            Self::NoSolve { .. }
-            | Self::RestartedGmres { .. }
-            | Self::ModalDenseHarmonic { .. }
-            | Self::SymmetricSubspaceIteration { .. } => {
-                return 8;
-            }
-        };
-        match scalar {
-            NumericalScalar::RealF64 => 8,
-            NumericalScalar::ComplexF64 => 16,
-        }
-    }
-
-    pub(crate) const fn explicit_workspace_bytes(&self) -> Option<ByteCount> {
-        match self {
-            Self::NoSolve {
-                workspace_bytes_upper_bound,
-            }
-            | Self::RestartedGmres {
-                workspace_bytes_upper_bound,
-                ..
-            }
-            | Self::ModalDenseHarmonic {
-                workspace_bytes_upper_bound,
-                ..
-            }
-            | Self::SymmetricSubspaceIteration {
-                workspace_bytes_upper_bound,
-                ..
-            } => Some(*workspace_bytes_upper_bound),
-            Self::Iterative { .. } | Self::DirectFactorization { .. } => None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

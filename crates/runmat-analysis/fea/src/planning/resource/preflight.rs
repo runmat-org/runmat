@@ -1,6 +1,8 @@
 use crate::{
     algebra::CoercivitySymbolicPlan,
-    constraints::{CanonicalStructuralConstraintPlan, ConstraintEnforcement},
+    constraints::{
+        AffineConstraintReduction, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
+    },
     execution::{FieldRecoveryPlan, StructuralLinearWorkload},
     results::{field::StructuralRecoveredFieldTopology, observation::ResolvedObservationPlan},
     solve::preconditioner::SpdPreconditionerKind,
@@ -109,6 +111,17 @@ pub fn build_structural_resource_plan(
         constraints.enforcement,
         stiffness_nonzeros,
         &admission,
+        if constraints.enforcement == ConstraintEnforcement::AffineReduction
+            && !local_execution.is_serial()
+        {
+            let reduction = facts
+                .constraint_matrix
+                .affine_reduction()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            affine_transpose_index_peak_bytes(&reduction)?
+        } else {
+            0
+        },
     )?;
     let publishes_linearization = step
         .state_outputs
@@ -254,6 +267,7 @@ fn solve_policy(
     enforcement: ConstraintEnforcement,
     stiffness_nonzeros: u64,
     admission: &CoercivitySymbolicPlan,
+    transpose_index_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
     let storage = match preconditioner {
         SpdPreconditionerKind::Jacobi => PreconditionerStorage::Diagonal,
@@ -289,6 +303,7 @@ fn solve_policy(
             update_count_upper_bound: Count(admission.update_count()),
             resident_bytes_upper_bound: ByteCount(admission.resident_bytes_upper_bound()),
         },
+        transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
     })
 }
 
@@ -333,6 +348,26 @@ fn structural_solve_vector_count(
     Ok(values.div_ceil(dofs).max(STRUCTURAL_SOLVE_VECTOR_COUNT))
 }
 
+fn affine_transpose_index_peak_bytes(
+    reduction: &AffineConstraintReduction,
+) -> Result<u64, ResourcePlanningError> {
+    let entries = u64::try_from(reduction.recovery_column_indices.len())
+        .map_err(|_| ResourcePlanningError::Overflow("affine transpose entries"))?;
+    let columns = u64::try_from(reduction.reduced_dof_count)
+        .map_err(|_| ResourcePlanningError::Overflow("affine transpose columns"))?;
+    checked_add(
+        checked_bytes(entries, 16, "affine transpose row-entry pairs")?,
+        checked_bytes(
+            columns
+                .checked_add(1)
+                .ok_or(ResourcePlanningError::Overflow("affine transpose offsets"))?,
+            16,
+            "affine transpose offsets and construction cursors",
+        )?,
+        "affine transpose index peak bytes",
+    )
+}
+
 fn checked_bytes(
     count: u64,
     width: u64,
@@ -369,5 +404,24 @@ mod tests {
             ConstraintEnforcement::LagrangeMultiplier
         )
         .is_err());
+    }
+
+    #[test]
+    fn affine_transpose_index_charges_entries_offsets_and_build_cursors() {
+        let reduction = AffineConstraintReduction {
+            full_dof_count: 4,
+            reduced_dof_count: 2,
+            free_dof_indices: vec![0, 1],
+            pivot_dof_indices: vec![2, 3],
+            recovery_row_offsets: vec![0, 1, 2, 4, 5],
+            recovery_column_indices: vec![0, 1, 0, 1, 1],
+            recovery_coefficients: vec![1.0; 5],
+            offset: vec![0.0; 4],
+        };
+        reduction.validate().unwrap();
+        assert_eq!(
+            affine_transpose_index_peak_bytes(&reduction).unwrap(),
+            5 * 16 + 3 * 16
+        );
     }
 }

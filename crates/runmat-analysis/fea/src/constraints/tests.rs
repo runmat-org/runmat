@@ -912,6 +912,35 @@ fn affine_static_solve_preserves_constraint_displacement_under_stiffness_scaling
         assert!((actual - expected).abs() <= 1.0e-9);
     }
     assert!((scaled.solution[3] - scaled.solution[6] - 0.001).abs() <= 1.0e-9);
+    let plan = crate::planning::resource::LocalExecutionPlan::fixed(
+        crate::planning::resource::LocalThreadCount::new(3).unwrap(),
+    )
+    .unwrap();
+    let scoped = crate::solve::linear::solve_linear_system_with_execution(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+    )
+    .unwrap();
+    assert!(scoped.converged, "{:?}", scoped.diagnostics);
+    assert_eq!(
+        scoped,
+        crate::solve::linear::solve_linear_system_with_execution(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+            plan,
+        )
+        .unwrap()
+    );
+    for (actual, expected) in scoped.solution.iter().zip(&scaled.solution) {
+        assert!((actual - expected).abs() <= 1.0e-9);
+    }
 }
 
 #[test]

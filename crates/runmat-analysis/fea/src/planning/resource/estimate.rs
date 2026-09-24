@@ -7,8 +7,6 @@ use post_process::{
     build_response_spectrum_assembly_resource_plan,
 };
 
-use runmat_execution::{resource::ResourceRequest, Digest};
-
 use super::contract::{
     AccuracyResourceDemand, ByteCount, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
     FeaResourcePlanIdentity, FeaResourcePlanningInput, ObservationAssemblyResourceDemand,
@@ -21,6 +19,7 @@ use super::contract::{
     StructuralRandomResponseAssemblyResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
     RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
+use runmat_execution::{resource::ResourceRequest, Digest};
 
 fn implicit_resource_plan_input_facts() -> Result<PreparedInputResourceFacts, ResourcePlanningError>
 {
@@ -327,6 +326,7 @@ fn build_operator_resource_plan(
             workspace_bytes.0,
             preconditioner_bytes.0,
             factorization_bytes.0,
+            demand.solve.transpose_index_bytes_upper_bound().0,
         ],
         "solve phase memory",
     )?;

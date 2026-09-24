@@ -56,6 +56,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
                 vector_count: Count(5),
                 scalar: NumericalScalar::RealF64,
                 preconditioner: PreconditionerStorage::Diagonal,
+                transpose_index_bytes_upper_bound: ByteCount(0),
                 admission: SolverAdmissionResourcePolicy {
                     dimension: Count(4),
                     factor_nonzero_upper_bound: Count(10),
@@ -118,6 +119,23 @@ fn operator_mut(input: &mut FeaResourcePlanningInput) -> &mut StructuralOperator
     input
         .structural_operator_mut()
         .expect("test input is an operator demand")
+}
+
+#[test]
+fn affine_transpose_index_bytes_are_included_in_solve_memory_and_identity() {
+    let base = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let mut indexed_input = input(PartitioningPolicy::Monolithic);
+    let SolveResourcePolicy::Iterative {
+        transpose_index_bytes_upper_bound,
+        ..
+    } = &mut operator_mut(&mut indexed_input).solve
+    else {
+        panic!("fixture must use an iterative solve");
+    };
+    *transpose_index_bytes_upper_bound = ByteCount(1_000_000);
+    let indexed = build_resource_plan(indexed_input).unwrap();
+    assert_ne!(indexed.identity, base.identity);
+    assert!(indexed.request.memory_bytes >= base.request.memory_bytes + 1_000_000);
 }
 
 fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
@@ -826,6 +844,7 @@ fn understated_resident_bounds_are_rejected() {
             nonzero_upper_bound: Count(10),
             resident_bytes_upper_bound: ByteCount(1),
         },
+        transpose_index_bytes_upper_bound: ByteCount(0),
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),
             factor_nonzero_upper_bound: Count(10),
@@ -872,6 +891,7 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
         vector_count: Count(5),
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
+        transpose_index_bytes_upper_bound: ByteCount(0),
         admission: SolverAdmissionResourcePolicy {
             dimension: Count(4),
             factor_nonzero_upper_bound: Count(10),

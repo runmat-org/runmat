@@ -15,7 +15,7 @@
   "crates/runmat-analysis/fea/src/solve/nonlinear/mod.rs": 1219,
   "crates/runmat-analysis/fea/src/execution/transient_segment.rs": 1125,
   "crates/runmat-analysis/fea/src/pipeline/electro_thermal.rs": 1108,
-  "crates/runmat-analysis/fea/src/planning/resource/contract.rs": 1076,
+  "crates/runmat-analysis/fea/src/planning/resource/contract.rs": 959,
   "crates/runmat-analysis/fea/src/planning/resource/estimate.rs": 1053,
   "crates/runmat-analysis/fea/src/pipeline/linear_static.rs": 1032,
   "crates/runmat-analysis/fea/src/results/field/contract.rs": 1019,

@@ -15,6 +15,7 @@ mod random_response;
 mod reconciliation;
 mod response_spectrum;
 mod scoped_execution;
+mod solve_policy;
 mod structural_facts;
 mod symbolic;
 mod usage;
