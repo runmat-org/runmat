@@ -2933,6 +2933,66 @@ mod tests {
         .into_identity()
     }
 
+    fn synthetic_connector_result(
+    ) -> Box<runmat_analysis_fea::connectors::CanonicalStructuralConnectorResult> {
+        let topology =
+            runmat_analysis_fea::constraints::CanonicalStructuralTopologyIdentity::Solid {
+                mesh_digest: runmat_meshing_core::StableDigest::from_bytes([7; 32]),
+            };
+        let plan =
+            runmat_analysis_fea::connectors::CanonicalStructuralConnectorPlan::empty(topology, 0)
+                .expect("empty synthetic connector plan");
+        Box::new(
+            runmat_analysis_fea::connectors::CanonicalStructuralConnectorResult::recover_static(
+                plan,
+                &runmat_analysis_fea::assembly::dofs::StructuralDofLayout::default(),
+                &[],
+            )
+            .expect("zero synthetic connector state"),
+        )
+    }
+
+    fn synthetic_static_balance() -> Box<runmat_analysis_fea::solve::StructuralStaticBalanceEvidence>
+    {
+        Box::new(
+            runmat_analysis_fea::solve::StructuralStaticBalanceEvidence {
+                internal_work_joules: 0.0,
+                applied_load_work_joules: 0.0,
+                constraint_work_joules: 0.0,
+                work_balance_residual_joules: 0.0,
+                work_balance_relative_error: 0.0,
+                equilibrium_residual_norm_newtons: 0.0,
+                equilibrium_scale_newtons: 1.0,
+                equilibrium_relative_error: 0.0,
+                relative_tolerance: 1.0e-8,
+                accepted: true,
+            },
+        )
+    }
+
+    fn synthetic_constraint_result(
+    ) -> Box<runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult> {
+        Box::new(
+            runmat_analysis_fea::constraints::CanonicalStructuralConstraintResult {
+                schema_version: 1,
+                constraint_plan_digest: runmat_execution::Digest::sha256(
+                    b"synthetic-constraint-plan",
+                ),
+                topology:
+                    runmat_analysis_fea::constraints::CanonicalStructuralTopologyIdentity::Solid {
+                        mesh_digest: runmat_meshing_core::StableDigest::from_bytes([7; 32]),
+                    },
+                reference_points: Vec::new(),
+                groups: Vec::new(),
+                resultant_force_newtons: [0.0; 3],
+                resultant_moment_about_global_origin_newton_meters: [0.0; 3],
+                constraint_work_joules: 0.0,
+                maximum_displacement_error_meters: 0.0,
+                maximum_rotation_error_radians: 0.0,
+            },
+        )
+    }
+
     fn cell(values: Vec<Value>) -> Value {
         let shape = if values.is_empty() {
             (0, 0)
@@ -4463,14 +4523,14 @@ mod tests {
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
+                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
-                structural_static_balance: None,
-                structural_constraint_result: None,
-                structural_connector_result: None,
+                structural_static_balance: Some(synthetic_static_balance()),
+                structural_constraint_result: Some(synthetic_constraint_result()),
+                structural_connector_result: Some(synthetic_connector_result()),
                 observations: Vec::new(),
                 observation_histories: Vec::new(),
                 series_reductions: Vec::new(),
@@ -4519,8 +4579,8 @@ mod tests {
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
+                solver_method: runmat_analysis_fea::SolverMethod::MatrixFreePcg,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
             },
@@ -4556,14 +4616,14 @@ mod tests {
                 execution_backend: runmat_analysis_fea::ExecutionBackend::Cpu,
                 solver_backend: runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
                 solver_device_apply_k_ratio: 0.0,
-                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
+                solver_method: runmat_analysis_fea::SolverMethod::NewmarkAverageAccelerationPcg,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 solver_host_sync_count: 0,
                 diagnostics: Vec::new(),
                 spatial_projection_evidence: Vec::new(),
                 structural_static_balance: None,
                 structural_constraint_result: None,
-                structural_connector_result: None,
+                structural_connector_result: Some(synthetic_connector_result()),
                 observations: Vec::new(),
                 observation_histories: Vec::new(),
                 series_reductions: Vec::new(),
@@ -4657,8 +4717,8 @@ mod tests {
                 solver_host_sync_count: 0,
                 precision_mode: "fp64".to_string(),
                 deterministic_mode: true,
-                solver_method: runmat_analysis_fea::SolverMethod::DenseDirect,
-                preconditioner: runmat_analysis_fea::SolverPreconditioner::None,
+                solver_method: runmat_analysis_fea::SolverMethod::NewmarkAverageAccelerationPcg,
+                preconditioner: runmat_analysis_fea::SolverPreconditioner::Jacobi,
                 quality_policy: "balanced".to_string(),
                 fallback_events: Vec::new(),
             },
