@@ -494,6 +494,21 @@ fn directional_residual_vector_is_generated_in_the_basis_and_combined_as_a_mode(
     let direction = [1.0, 0.5, 0.25];
     let basis = run.basis;
     let residual = &basis.residual_vectors()[0];
+    assert_eq!(
+        residual.static_correction_preconditioner(),
+        crate::solve::preconditioner::SpdPreconditionerKind::Ilu0
+    );
+    let published = serde_json::to_value(&basis).unwrap();
+    assert_eq!(
+        published["residual_vectors"][0]["static_correction_preconditioner"],
+        "ilu0"
+    );
+    let restored: crate::pipeline::modal_basis::ModalBasisArtifact =
+        serde_json::from_value(published).unwrap();
+    assert_eq!(
+        restored.residual_vectors()[0].static_correction_preconditioner(),
+        crate::solve::preconditioner::SpdPreconditionerKind::Ilu0
+    );
     assert!(residual.frequency_hz() > basis.modes().last().unwrap().frequency_hz());
     assert!(residual.static_equilibrium_residual_ratio() <= 1.0e-8);
     assert!(residual.maximum_mass_orthogonality_ratio() <= 1.0e-8);

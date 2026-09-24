@@ -5,6 +5,7 @@ use crate::{
     algebra::{apply_k, apply_m},
     assembly::AssemblySummary,
     contracts::FeaRunError,
+    solve::preconditioner::SpdPreconditionerKind,
 };
 
 use super::{
@@ -45,6 +46,7 @@ pub struct ModalResidualVector {
     participation_factor: f64,
     effective_mass: f64,
     static_equilibrium_residual_ratio: f64,
+    static_correction_preconditioner: SpdPreconditionerKind,
     maximum_mass_orthogonality_ratio: f64,
     dof_shape: Vec<f64>,
 }
@@ -70,6 +72,9 @@ impl ModalResidualVector {
     }
     pub const fn static_equilibrium_residual_ratio(&self) -> f64 {
         self.static_equilibrium_residual_ratio
+    }
+    pub const fn static_correction_preconditioner(&self) -> SpdPreconditionerKind {
+        self.static_correction_preconditioner
     }
     pub const fn maximum_mass_orthogonality_ratio(&self) -> f64 {
         self.maximum_mass_orthogonality_ratio
@@ -143,6 +148,7 @@ pub(super) fn build_directional_residual_vectors(
             participation_factor,
             effective_mass: participation_factor * participation_factor * modal_mass,
             static_equilibrium_residual_ratio: equilibrium_ratio,
+            static_correction_preconditioner: static_solver.preconditioner_kind(),
             maximum_mass_orthogonality_ratio,
             dof_shape: shape,
         });

@@ -3,13 +3,15 @@
 use crate::{
     algebra::{
         apply_k, AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
-        RealSparseMatrix,
+        PreparedRealLinearSystem, RealSparseMatrix,
     },
     assembly::AssemblySummary,
     constraints::AffineConstraintReduction,
     contracts::FeaRunError,
     solve::{
-        preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+        preconditioner::{
+            build_spd_preconditioner, PreconditionerError, SpdPreconditioner, SpdPreconditionerKind,
+        },
         spd_linear::{solve_spd_system_cg, SpdCgSolveOptions},
     },
 };
@@ -24,7 +26,7 @@ pub(crate) fn homogeneous_static_iteration_limit(dimension: usize) -> usize {
 pub(crate) struct HomogeneousStaticSolver {
     reduction: AffineConstraintReduction,
     system: AssembledRealSystem,
-    preconditioner: Box<dyn crate::solve::preconditioner::SpdPreconditioner>,
+    preconditioner: Box<dyn SpdPreconditioner>,
 }
 
 pub(crate) struct HomogeneousStaticSolution {
@@ -33,6 +35,10 @@ pub(crate) struct HomogeneousStaticSolution {
 }
 
 impl HomogeneousStaticSolver {
+    pub(crate) fn preconditioner_kind(&self) -> SpdPreconditionerKind {
+        self.preconditioner.kind()
+    }
+
     pub(crate) fn new(summary: &AssemblySummary) -> Result<Self, FeaRunError> {
         let reduction = homogeneous_reduction(summary)?;
         let stiffness = reduction
@@ -63,8 +69,7 @@ impl HomogeneousStaticSolver {
         let prepared = system
             .prepare_linear()
             .map_err(|error| FeaRunError::Solve(error.to_string()))?;
-        let preconditioner = build_spd_preconditioner(&prepared, SpdPreconditionerKind::Ilu0)
-            .or_else(|_| build_spd_preconditioner(&prepared, SpdPreconditionerKind::Jacobi))
+        let preconditioner = correction_preconditioner(&prepared)
             .map_err(|error| FeaRunError::Solve(error.to_string()))?;
         Ok(Self {
             reduction,
@@ -128,6 +133,13 @@ impl HomogeneousStaticSolver {
     }
 }
 
+fn correction_preconditioner(
+    prepared: &PreparedRealLinearSystem,
+) -> Result<Box<dyn SpdPreconditioner>, PreconditionerError> {
+    build_spd_preconditioner(prepared, SpdPreconditionerKind::Ilu0)
+        .or_else(|_| build_spd_preconditioner(prepared, SpdPreconditionerKind::Jacobi))
+}
+
 fn homogeneous_reduction(
     summary: &AssemblySummary,
 ) -> Result<AffineConstraintReduction, FeaRunError> {
@@ -162,4 +174,69 @@ fn subtract(left: &[f64], right: &[f64]) -> Result<Vec<f64>, FeaRunError> {
 
 fn norm(vector: &[f64]) -> f64 {
     vector.iter().map(|value| value * value).sum::<f64>().sqrt()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algebra::RealSparseAssembler;
+
+    #[test]
+    fn correction_reports_jacobi_when_positive_definite_ilu_breaks_down() {
+        // The full operator is coercive, while zero-fill ILU has a negative
+        // final pivot. The correction's actual fallback must remain inspectable.
+        let values = [
+            [
+                2.853656491730362,
+                0.0,
+                1.7390443217009306,
+                1.6154918987303972,
+                0.6468259897083044,
+            ],
+            [0.0, 4.752237345324829, 0.0, 2.2926174104213715, 0.0],
+            [
+                1.7390443217009306,
+                0.0,
+                5.047566675581038,
+                0.0,
+                -2.5766232535243034,
+            ],
+            [
+                1.6154918987303972,
+                2.2926174104213715,
+                0.0,
+                3.101011391496286,
+                1.4569321684539318,
+            ],
+            [
+                0.6468259897083044,
+                0.0,
+                -2.5766232535243034,
+                1.4569321684539318,
+                3.166770219337195,
+            ],
+        ];
+        let mut assembler = RealSparseAssembler::square(
+            5,
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        );
+        for (row, entries) in values.iter().enumerate() {
+            for (column, value) in entries.iter().copied().enumerate() {
+                if value != 0.0 {
+                    assembler.add(row, column, value);
+                }
+            }
+        }
+        let prepared = PreparedRealLinearSystem::try_new(
+            assembler.finish().unwrap(),
+            vec![1.0; 5],
+            vec![false; 5],
+        )
+        .unwrap();
+        assert_eq!(
+            correction_preconditioner(&prepared).unwrap().kind(),
+            SpdPreconditionerKind::Jacobi
+        );
+    }
 }
