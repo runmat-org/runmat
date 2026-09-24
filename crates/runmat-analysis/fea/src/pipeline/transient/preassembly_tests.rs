@@ -33,7 +33,7 @@ fn scope_preparation_rejects_accepted_schedule_over_sample_ceiling_before_assemb
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..TransientSolveOptions::default()
     };
-    let error = match prepare_transient_block_basis(&model, &options) {
+    let error = match prepare_transient_preassembly(&model, (&options).into()) {
         Ok(_) => panic!("over-ceiling transient schedule was admitted"),
         Err(error) => error,
     };
@@ -54,7 +54,7 @@ fn motion_breakpoint_samples_count_against_transient_ceiling() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..TransientSolveOptions::default()
     };
-    let error = match prepare_transient_block_basis(&model, &options) {
+    let error = match prepare_transient_preassembly(&model, (&options).into()) {
         Ok(_) => panic!("over-ceiling motion schedule was admitted"),
         Err(error) => error,
     };
@@ -95,7 +95,7 @@ fn direct_host_samples_follow_the_shared_preassembly_schedule() {
         formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
         ..TransientSolveOptions::default()
     };
-    let prepared = prepare_transient_preassembly(&model, &options).unwrap();
+    let prepared = prepare_transient_preassembly(&model, (&options).into()).unwrap();
     let expected = prepared
         .schedule
         .points
@@ -109,9 +109,7 @@ fn direct_host_samples_follow_the_shared_preassembly_schedule() {
 #[test]
 fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() {
     let (workload, mesh) = direct_scope_case();
-    let prepared =
-        prepare_transient_preassembly(&workload.model, &workload.solve_options(mesh.clone()))
-            .unwrap();
+    let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
     let first = crate::planning::resource::build_structural_transient_scope_resource_plan(
         &workload, &mesh, None, &prepared,
     )
@@ -132,6 +130,29 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
         .resources
         .maximum_resident_bytes = 1;
     let error = prepare_transient_checkpoint_scope(&rejected, &mesh, None).unwrap_err();
+    assert!(
+        matches!(error, FeaRunError::InvalidModel(message) if message.contains("resident memory bytes"))
+    );
+}
+
+#[test]
+fn transient_block_checks_scope_residency_before_its_initial_assembly() {
+    let (mut workload, mesh) = direct_scope_case();
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let error = run_transient_block(StructuralTransientRunBlockInput {
+        workload: &workload,
+        solver_mesh: &mesh,
+        request: &request,
+        predecessor: None,
+        modal_state: None,
+        observation_cursors: Vec::new(),
+    })
+    .unwrap_err();
     assert!(
         matches!(error, FeaRunError::InvalidModel(message) if message.contains("resident memory bytes"))
     );

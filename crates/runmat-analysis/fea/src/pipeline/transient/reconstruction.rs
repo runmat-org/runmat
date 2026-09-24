@@ -48,8 +48,8 @@ pub fn recover_completed_transient_run(
         .validate_for_result(&input.result)
         .map_err(|error| FeaRunError::Solve(error.to_string()))?;
 
-    let options = input.workload.solve_options(input.solver_mesh.clone());
-    let basis = super::prepare_transient_block_basis(&input.workload.model, &options)?;
+    let (basis, options) =
+        super::prepare_transient_scope_basis(input.workload, input.solver_mesh, input.modal_state)?;
     let expected_scope = StructuralTransientCheckpointScope::from_prepared_workload(
         StructuralTransientCheckpointScopeInput {
             workload: input.workload,

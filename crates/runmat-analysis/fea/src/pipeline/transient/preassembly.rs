@@ -3,15 +3,18 @@
 //! The checkpoint-scope and direct-host paths must use one active-constraint and schedule
 //! authority. Resource projection can inspect this result before either path builds an operator.
 
-use runmat_analysis_core::{validate_model, AnalysisModel, AnalysisProcedure, ProcedureStep};
+use runmat_analysis_core::{
+    validate_model, AnalysisModel, AnalysisProcedure, FormulationRequirement, ProcedureStep,
+};
 
 use crate::{
     contracts::FeaRunError,
     excitation::{time_breakpoints, StructuralMotionSet},
+    execution::StructuralTransientWorkload,
     pipeline::observation_history::required_time_history_samples,
     solve::transient::{
-        canonical_transient_schedule, canonical_transient_step_boundaries, TransientSolveOptions,
-        TransientStepBoundary,
+        canonical_transient_schedule, canonical_transient_step_boundaries,
+        StructuralTimeStepPolicy, TransientSolveOptions, TransientStepBoundary,
     },
 };
 
@@ -25,9 +28,35 @@ pub(crate) struct PreparedTransientPreassembly {
     pub(crate) step_boundaries: Vec<TransientStepBoundary>,
 }
 
+/// Inputs needed to validate the active model and schedule before any mesh-owned solve options
+/// or structural operators are constructed.
+#[derive(Clone, Copy)]
+pub(crate) struct TransientPreassemblyOptions {
+    pub(crate) formulation_requirement: FormulationRequirement,
+    pub(crate) time_step_policy: StructuralTimeStepPolicy,
+}
+
+impl From<&TransientSolveOptions> for TransientPreassemblyOptions {
+    fn from(options: &TransientSolveOptions) -> Self {
+        Self {
+            formulation_requirement: options.formulation_requirement,
+            time_step_policy: options.time_step_policy,
+        }
+    }
+}
+
+impl From<&StructuralTransientWorkload> for TransientPreassemblyOptions {
+    fn from(workload: &StructuralTransientWorkload) -> Self {
+        Self {
+            formulation_requirement: workload.formulation_requirement,
+            time_step_policy: workload.time_step_policy,
+        }
+    }
+}
+
 pub(crate) fn prepare_transient_preassembly(
     model: &AnalysisModel,
-    options: &TransientSolveOptions,
+    options: TransientPreassemblyOptions,
 ) -> Result<PreparedTransientPreassembly, FeaRunError> {
     let execution_step = super::super::admission::require_structural(
         model,
