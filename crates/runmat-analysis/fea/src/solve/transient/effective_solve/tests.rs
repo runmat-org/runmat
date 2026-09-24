@@ -1,6 +1,98 @@
 use runmat_execution::Digest;
 
 use super::*;
+use crate::{
+    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
+    fixtures::{
+        fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
+        FixtureId,
+    },
+};
+
+#[test]
+fn tiny_physical_load_keeps_a_unit_sized_relative_dynamic_residual() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: "tiny_tip_moment".into(),
+            region_id: "node:2".into(),
+            kind: FixtureExcitationKind::Moment([0.0, 0.0, 1.0e-9]),
+        }],
+    );
+    let excitations = realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let summary = assemble_structural_system(
+        &model,
+        &excitations,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let zero_state = SecondOrderState::try_new(
+        vec![0.0; summary.dof_count],
+        vec![0.0; summary.dof_count],
+        vec![0.0; summary.dof_count],
+    )
+    .unwrap();
+    let balance = StructuralDynamicBalanceSnapshot::evaluate(
+        summary.operator.operators(),
+        &zero_state,
+        &summary.physical_load,
+    )
+    .unwrap();
+    assert_eq!(
+        project_residual(&summary, &balance)
+            .unwrap()
+            .relative_norm(),
+        1.0
+    );
+
+    replace_fixture_excitations(&mut model, Vec::new());
+    let zero_excitations = realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let unloaded = assemble_structural_system(
+        &model,
+        &zero_excitations,
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    let unloaded_balance = StructuralDynamicBalanceSnapshot::evaluate(
+        unloaded.operator.operators(),
+        &zero_state,
+        &unloaded.physical_load,
+    )
+    .unwrap();
+    assert_eq!(
+        project_residual(&unloaded, &unloaded_balance)
+            .unwrap()
+            .relative_norm(),
+        0.0
+    );
+
+    let mut inconsistent = unloaded_balance;
+    let free_dof = unloaded
+        .operator
+        .constrained_dofs()
+        .iter()
+        .position(|constrained| !constrained)
+        .unwrap();
+    inconsistent.equilibrium_residual[free_dof] = 1.0e-9;
+    assert_eq!(
+        project_residual(&unloaded, &inconsistent),
+        Err(EffectiveDynamicsSolveError::InvalidSolution)
+    );
+}
 
 #[test]
 fn correction_equation_normalization_is_invariant_to_physical_scale() {

@@ -539,13 +539,19 @@ fn project_residual(
     let projected_elastic = project_vector(summary, &balance.elastic_force)?;
     let absolute_norm = norm(&imbalance);
     let force_scale = norm(&projected_load)
-        .max(norm(&projected_inertia) + norm(&projected_damping) + norm(&projected_elastic))
-        .max(1.0);
+        .max(norm(&projected_inertia) + norm(&projected_damping) + norm(&projected_elastic));
     if imbalance.iter().any(|value| !value.is_finite())
         || !absolute_norm.is_finite()
         || !force_scale.is_finite()
     {
         return Err(EffectiveDynamicsSolveError::InvalidSolution);
+    }
+    if force_scale == 0.0 {
+        return if absolute_norm == 0.0 {
+            Ok(ProjectedDynamicResidual { relative_norm: 0.0 })
+        } else {
+            Err(EffectiveDynamicsSolveError::InvalidSolution)
+        };
     }
     Ok(ProjectedDynamicResidual {
         relative_norm: absolute_norm / force_scale,
