@@ -85,7 +85,9 @@ pub use response_spectrum::{
     structural_modal_response_spectrum_receipt_payload_bytes_upper_bound,
     StructuralModalResponseSpectrumResourceProjection,
 };
-pub use scoped_execution::{execute_scoped_chunks, ScopedLocalExecutionError};
+pub use scoped_execution::{
+    execute_scoped_chunks, execute_scoped_slices_mut, ScopedLocalExecutionError,
+};
 pub use symbolic::StructuralSymbolicOperators;
 pub use usage::{
     AnalysisResourceUsage, ResourceOverrun, ResourceUsageAttempt, ResourceUsageAttemptOverrun,

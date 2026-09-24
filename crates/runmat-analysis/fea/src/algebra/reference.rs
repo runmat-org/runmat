@@ -1,6 +1,6 @@
 use super::RealSparseMatrix;
 use crate::planning::resource::{
-    execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError,
+    execute_scoped_chunks, execute_scoped_slices_mut, LocalExecutionPlan, ScopedLocalExecutionError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -9,6 +9,8 @@ pub enum ScopedSpmvError {
     DimensionMismatch,
     #[error("vector reduction dimension mismatch")]
     ReductionDimensionMismatch,
+    #[error("vector update dimension mismatch")]
+    VectorDimensionMismatch,
     #[error("{0}")]
     Execution(#[from] ScopedLocalExecutionError<SpmvWorkError>),
 }
@@ -45,6 +47,54 @@ pub fn dot_scoped(
         Ok(sum)
     })?;
     Ok(partials.into_iter().sum())
+}
+
+/// In-place `y += alpha*x` under the admitted plan. Disjoint output slices keep the
+/// allocation envelope unchanged, and every element uses the reference update order.
+pub fn axpy_scoped(
+    alpha: f64,
+    x: &[f64],
+    y: &mut [f64],
+    plan: LocalExecutionPlan,
+) -> Result<(), ScopedSpmvError> {
+    if x.len() != y.len() {
+        return Err(ScopedSpmvError::VectorDimensionMismatch);
+    }
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, y, |chunk, output| {
+        for (offset, value) in output.iter_mut().enumerate() {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            *value += alpha * x[chunk.start() as usize + offset];
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// In-place PCG direction recurrence `y = x + beta*y`, preserving the reference
+/// operation order independently for every vector entry.
+pub fn direction_update_scoped(
+    x: &[f64],
+    y: &mut [f64],
+    beta: f64,
+    plan: LocalExecutionPlan,
+) -> Result<(), ScopedSpmvError> {
+    if x.len() != y.len() {
+        return Err(ScopedSpmvError::VectorDimensionMismatch);
+    }
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, y, |chunk, output| {
+        for (offset, value) in output.iter_mut().enumerate() {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            *value = x[chunk.start() as usize + offset] + beta * *value;
+        }
+        Ok(())
+    })?;
+    Ok(())
 }
 
 pub fn spmv(matrix: &RealSparseMatrix, x: &[f64]) -> Result<Vec<f64>, &'static str> {
@@ -166,6 +216,30 @@ mod tests {
                     ..
                 }
             ))
+        ));
+    }
+
+    #[test]
+    fn scoped_vector_updates_preserve_reference_bits_and_reject_bad_dimensions() {
+        let x = [3.0, -4.0, 0.2, 7.0, 1.0e-12, -5.0, 9.0];
+        let base = [0.5, 8.0, -3.0, 2.0, -2.0, 1.0, -7.0];
+        let mut expected = base;
+        for (value, input) in expected.iter_mut().zip(x) {
+            *value += -0.25 * input;
+            *value = input + 0.75 * *value;
+        }
+        for threads in [1, 2, 3, 7, 8] {
+            let plan =
+                LocalExecutionPlan::from_thread_count(LocalThreadCount::new(threads).unwrap())
+                    .unwrap();
+            let mut actual = base;
+            axpy_scoped(-0.25, &x, &mut actual, plan).unwrap();
+            direction_update_scoped(&x, &mut actual, 0.75, plan).unwrap();
+            assert_eq!(actual, expected);
+        }
+        assert!(matches!(
+            axpy_scoped(1.0, &x[..6], &mut expected, LocalExecutionPlan::serial()),
+            Err(ScopedSpmvError::VectorDimensionMismatch)
         ));
     }
 

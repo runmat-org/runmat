@@ -141,6 +141,70 @@ where
     })
 }
 
+/// Updates disjoint contiguous slices under the admitted local plan without a full-size
+/// temporary output. The caller owns the buffer; each worker receives only its canonical slice.
+pub fn execute_scoped_slices_mut<T, E, F>(
+    plan: LocalExecutionPlan,
+    values: &mut [T],
+    work: F,
+) -> Result<(), ScopedLocalExecutionError<E>>
+where
+    T: Send,
+    E: Send,
+    F: Fn(LocalWorkChunk, &mut [T]) -> Result<(), E> + Sync,
+{
+    if values.is_empty() {
+        return Ok(());
+    }
+    let chunks = plan
+        .chunks(values.len() as u64)
+        .map_err(ScopedLocalExecutionError::InvalidPlan)?;
+    let _guard = LocalChunkGuard::enter().ok_or(ScopedLocalExecutionError::NestedExecution)?;
+    if chunks.len() == 1 {
+        let chunk = chunks[0];
+        return std::panic::catch_unwind(AssertUnwindSafe(|| work(chunk, values)))
+            .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
+            .map_err(|source| ScopedLocalExecutionError::Work { chunk, source });
+    }
+
+    thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(chunks.len());
+        let mut remaining = values;
+        for chunk in chunks {
+            let len = (chunk.end_exclusive() - chunk.start()) as usize;
+            let (slice, rest) = remaining.split_at_mut(len);
+            remaining = rest;
+            let work = &work;
+            let handle = thread::Builder::new().spawn_scoped(scope, move || {
+                let _guard = LocalChunkGuard::enter().expect("new scoped worker is not active");
+                work(chunk, slice)
+            });
+            match handle {
+                Ok(handle) => handles.push((chunk, handle)),
+                Err(error) => {
+                    for (_, handle) in handles {
+                        let _ = handle.join();
+                    }
+                    return Err(ScopedLocalExecutionError::WorkerSpawnFailed {
+                        chunk,
+                        reason: error.to_string(),
+                    });
+                }
+            }
+        }
+        let outcomes = handles
+            .into_iter()
+            .map(|(chunk, handle)| (chunk, handle.join()))
+            .collect::<Vec<_>>();
+        for (chunk, outcome) in outcomes {
+            outcome
+                .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
+                .map_err(|source| ScopedLocalExecutionError::Work { chunk, source })?;
+        }
+        Ok(())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,5 +284,55 @@ mod tests {
         assert!(results
             .iter()
             .all(|result| matches!(result, Err(ScopedLocalExecutionError::NestedExecution))));
+    }
+
+    #[test]
+    fn mutable_slices_cover_canonical_intervals_without_extra_output() {
+        let mut values = [0_u64; 8];
+        execute_scoped_slices_mut(fixed(3), &mut values, |chunk, slice| {
+            for (offset, value) in slice.iter_mut().enumerate() {
+                *value = chunk.start() + offset as u64;
+            }
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert_eq!(values, [0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    #[test]
+    fn mutable_slice_failures_use_canonical_order_and_release_the_guard() {
+        let mut values = [0_u8; 3];
+        let error = execute_scoped_slices_mut(fixed(3), &mut values, |chunk, _| {
+            if chunk.ordinal() == 0 {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err::<(), _>(chunk.ordinal())
+        })
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ScopedLocalExecutionError::Work { chunk, source: 0 } if chunk.ordinal() == 0
+        ));
+        execute_scoped_slices_mut(fixed(3), &mut values, |_, slice| {
+            slice.fill(1);
+            Ok::<_, ()>(())
+        })
+        .unwrap();
+        assert_eq!(values, [1; 3]);
+    }
+
+    #[test]
+    fn mutable_slices_reject_nested_execution() {
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            let mut values = [0_u8; 2];
+            Ok::<_, ()>(execute_scoped_slices_mut(fixed(2), &mut values, |_, _| {
+                Ok::<_, ()>(())
+            }))
+        })
+        .unwrap();
+        assert!(matches!(
+            nested[0],
+            Err(ScopedLocalExecutionError::NestedExecution)
+        ));
     }
 }

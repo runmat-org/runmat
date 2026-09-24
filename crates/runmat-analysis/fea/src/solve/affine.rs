@@ -23,8 +23,11 @@ pub(super) fn solve_affine_constraint_system(
         requested_backend,
         algebra_backend,
         initial_guess,
-        |full| Ok(apply_k(&summary.operator, full)),
-        |left, right| Ok(algebra_backend.dot(left, right)),
+        (
+            |full: &[f64]| Ok(apply_k(&summary.operator, full)),
+            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
+            None,
+        ),
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -43,20 +46,23 @@ pub(super) fn solve_affine_constraint_system_with_execution(
         requested_backend,
         algebra_backend,
         initial_guess,
-        |full| {
-            if plan.is_serial() {
-                Ok(apply_k(&summary.operator, full))
-            } else {
-                spmv_scoped(summary.operator.operators().stiffness(), full, plan)
-            }
-        },
-        |left, right| {
-            if plan.is_serial() {
-                Ok(algebra_backend.dot(left, right))
-            } else {
-                dot_scoped(left, right, plan)
-            }
-        },
+        (
+            |full: &[f64]| {
+                if plan.is_serial() {
+                    Ok(apply_k(&summary.operator, full))
+                } else {
+                    spmv_scoped(summary.operator.operators().stiffness(), full, plan)
+                }
+            },
+            |left: &[f64], right: &[f64]| {
+                if plan.is_serial() {
+                    Ok(algebra_backend.dot(left, right))
+                } else {
+                    dot_scoped(left, right, plan)
+                }
+            },
+            Some(plan),
+        ),
     )
 }
 
@@ -66,9 +72,13 @@ fn solve_affine_constraint_system_with_apply(
     requested_backend: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-    apply_full: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
-    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+    operations: (
+        impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+        impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+        Option<LocalExecutionPlan>,
+    ),
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let (apply_full, dot, vector_plan) = operations;
     let expected_reduction = summary
         .constraint_matrix
         .as_ref()
@@ -173,8 +183,13 @@ fn solve_affine_constraint_system_with_apply(
             break;
         }
         let alpha = residual_squared / denominator;
-        algebra_backend.axpy(alpha, &direction, &mut reduced_solution);
-        algebra_backend.axpy(-alpha, &operator_direction, &mut residual);
+        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+            crate::algebra::axpy_scoped(alpha, &direction, &mut reduced_solution, plan)?;
+            crate::algebra::axpy_scoped(-alpha, &operator_direction, &mut residual, plan)?;
+        } else {
+            algebra_backend.axpy(alpha, &direction, &mut reduced_solution);
+            algebra_backend.axpy(-alpha, &operator_direction, &mut residual);
+        }
         let next_residual_squared = dot(&residual, &residual)?;
         iterations += 1;
         converged = next_residual_squared.sqrt() / right_hand_side_norm <= tolerance;
@@ -183,8 +198,12 @@ fn solve_affine_constraint_system_with_apply(
             break;
         }
         let beta = next_residual_squared / residual_squared;
-        for (direction, residual) in direction.iter_mut().zip(&residual) {
-            *direction = *residual + beta * *direction;
+        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+            crate::algebra::direction_update_scoped(&residual, &mut direction, beta, plan)?;
+        } else {
+            for (direction, residual) in direction.iter_mut().zip(&residual) {
+                *direction = *residual + beta * *direction;
+            }
         }
         residual_squared = next_residual_squared;
     }

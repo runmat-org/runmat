@@ -186,20 +186,23 @@ fn solve_operator_system_scoped(
         backend_kind,
         algebra_backend,
         initial_guess,
-        |prepared, x| {
-            if plan.is_serial() {
-                Ok(crate::algebra::apply_prepared(prepared, x))
-            } else {
-                crate::algebra::spmv_scoped(prepared.matrix(), x, plan)
-            }
-        },
-        |left, right| {
-            if plan.is_serial() {
-                Ok(algebra_backend.dot(left, right))
-            } else {
-                crate::algebra::dot_scoped(left, right, plan)
-            }
-        },
+        (
+            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
+                if plan.is_serial() {
+                    Ok(crate::algebra::apply_prepared(prepared, x))
+                } else {
+                    crate::algebra::spmv_scoped(prepared.matrix(), x, plan)
+                }
+            },
+            |left: &[f64], right: &[f64]| {
+                if plan.is_serial() {
+                    Ok(algebra_backend.dot(left, right))
+                } else {
+                    crate::algebra::dot_scoped(left, right, plan)
+                }
+            },
+            Some(plan),
+        ),
     )
 }
 
@@ -216,8 +219,13 @@ pub fn solve_operator_system(
         backend_kind,
         algebra_backend,
         initial_guess,
-        |prepared, x| Ok(crate::algebra::apply_prepared(prepared, x)),
-        |left, right| Ok(algebra_backend.dot(left, right)),
+        (
+            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
+                Ok(crate::algebra::apply_prepared(prepared, x))
+            },
+            |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
+            None,
+        ),
     )
     .expect("reference sparse application is infallible for a prepared system")
 }
@@ -228,9 +236,13 @@ fn solve_operator_system_with_apply(
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-    apply: impl Fn(&PreparedRealLinearSystem, &[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
-    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+    operations: (
+        impl Fn(&PreparedRealLinearSystem, &[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+        impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+        Option<LocalExecutionPlan>,
+    ),
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let (apply, dot, vector_plan) = operations;
     let mut effective_backend_kind = backend_kind;
     let mut accelerator_fallback = false;
     let has_dofs = operator.dof_count() > 0;
@@ -408,8 +420,13 @@ fn solve_operator_system_with_apply(
             break;
         }
         let alpha = rz_old / denom;
-        algebra_backend.axpy(alpha, &p, &mut x);
-        algebra_backend.axpy(-alpha, &ap, &mut r);
+        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+            crate::algebra::axpy_scoped(alpha, &p, &mut x, plan)?;
+            crate::algebra::axpy_scoped(-alpha, &ap, &mut r, plan)?;
+        } else {
+            algebra_backend.axpy(alpha, &p, &mut x);
+            algebra_backend.axpy(-alpha, &ap, &mut r);
+        }
         let residual_norm = dot(&r, &r)?.sqrt();
         iterations += 1;
         if residual_norm / b_norm <= tol {
@@ -422,8 +439,12 @@ fn solve_operator_system_with_apply(
             break;
         }
         let beta = rz_new / rz_old;
-        for i in 0..p.len() {
-            p[i] = z[i] + beta * p[i];
+        if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+            crate::algebra::direction_update_scoped(&z, &mut p, beta, plan)?;
+        } else {
+            for i in 0..p.len() {
+                p[i] = z[i] + beta * p[i];
+            }
         }
         rz_old = rz_new;
     }

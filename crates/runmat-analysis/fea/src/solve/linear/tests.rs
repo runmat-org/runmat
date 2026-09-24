@@ -114,8 +114,13 @@ fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-        |prepared, x| Ok(crate::algebra::apply_prepared(prepared, x)),
-        |_, _| Err(ScopedSpmvError::ReductionDimensionMismatch),
+        (
+            |prepared: &PreparedRealLinearSystem, x: &[f64]| {
+                Ok(crate::algebra::apply_prepared(prepared, x))
+            },
+            |_: &[f64], _: &[f64]| Err(ScopedSpmvError::ReductionDimensionMismatch),
+            None,
+        ),
     );
     assert!(matches!(
         result,
