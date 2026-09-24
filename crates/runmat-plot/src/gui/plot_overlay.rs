@@ -1656,33 +1656,32 @@ impl PlotOverlay {
             .geometry_overlay()
             .and_then(|overlay| overlay.scalar_legend.as_ref())
         {
-            self.draw_geometry_scalar_legend(
-                ui,
-                centered_plot_rect,
-                legend,
-                config.font_scale,
-                config.show_cad_overlay,
-            );
+            self.draw_geometry_scalar_legend(ui, centered_plot_rect, legend, config.font_scale);
         }
 
-        if config.show_cad_overlay {
-            if let Some(overlay) = plot_renderer.geometry_overlay() {
-                let annotations = plot_renderer.geometry_screen_annotations([
-                    centered_plot_rect.width(),
-                    centered_plot_rect.height(),
-                ]);
-                let actions = self.cad_overlay.render(CadOverlayRenderInput {
-                    ctx: ui.ctx(),
-                    plot_rect: centered_plot_rect,
-                    overlay,
-                    grid_enabled: plot_renderer.overlay_show_grid(),
-                    xray_enabled: plot_renderer.geometry_xray_enabled(),
-                    owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
-                    font_scale: config.font_scale,
-                    annotations: &annotations,
-                });
-                self.cad_actions.merge(actions);
-            }
+        // Result scenes have their own toolbar and mesh-info popover. The CAD
+        // strip duplicates those controls and overlaps the scalar legend.
+        if let Some(overlay) = plot_renderer
+            .geometry_overlay()
+            .filter(|overlay| config.show_cad_overlay && overlay.scalar_legend.is_none())
+        {
+            let annotations = plot_renderer.geometry_screen_annotations([
+                centered_plot_rect.width(),
+                centered_plot_rect.height(),
+            ]);
+            let actions = self.cad_overlay.render(CadOverlayRenderInput {
+                ctx: ui.ctx(),
+                plot_rect: centered_plot_rect,
+                overlay,
+                grid_enabled: plot_renderer.overlay_show_grid(),
+                xray_enabled: plot_renderer.geometry_xray_enabled(),
+                owner_visible: &|owner_id| plot_renderer.geometry_owner_visible(owner_id),
+                font_scale: config.font_scale,
+                annotations: &annotations,
+            });
+            self.cad_actions.merge(actions);
+        } else {
+            self.cad_overlay.clear_interaction();
         }
 
         self.axes_plot_rects = rendered_axes_rects;
@@ -2976,17 +2975,13 @@ impl PlotOverlay {
         plot_rect: Rect,
         legend: &GeometrySceneScalarLegend,
         scale: f32,
-        cad_strip_visible: bool,
     ) {
         let scale = scale.max(0.75);
         let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
         let pad = 12.0 * scale;
         let bar_height = 7.0 * scale;
         let rect = Rect::from_min_size(
-            egui::pos2(
-                plot_rect.max.x - width - pad,
-                plot_rect.min.y + pad + if cad_strip_visible { 36.0 * scale } else { 0.0 },
-            ),
+            egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
             egui::vec2(width, 56.0 * scale),
         );
         let theme = self.theme.build_theme();

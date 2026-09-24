@@ -65,6 +65,11 @@ pub(crate) struct CadOverlayRenderInput<'a> {
 }
 
 impl CadOverlayState {
+    pub(crate) fn clear_interaction(&mut self) {
+        self.pointer_captured = false;
+        self.capture_regions.clear();
+    }
+
     pub(crate) fn pointer_captured(&self) -> bool {
         self.pointer_captured
     }
