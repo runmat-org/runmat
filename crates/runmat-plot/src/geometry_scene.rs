@@ -747,10 +747,10 @@ impl GeometrySceneChunk {
         let is_edge_chunk = self.is_edge_chunk();
         match presentation.display_mode {
             GeometrySceneDisplayMode::Wireframe if !is_edge_chunk => {
-                render_data.material.alpha_mode = AlphaMode::Blend;
-                render_data.material.albedo.w = presentation
-                    .display_mode
-                    .alpha(presentation.edge_overlay_enabled);
+                // A wireframe view is the topology, not a translucent shaded view. Keeping
+                // triangle draw calls here both hid the mesh lines through depth writes and made
+                // the mode look indistinguishable from shaded rendering on native surfaces.
+                render_data.draw_calls.clear();
             }
             GeometrySceneDisplayMode::Wireframe => {}
             GeometrySceneDisplayMode::Edges
@@ -1520,6 +1520,27 @@ mod tests {
             render_data.vertices[6].color,
             GEOMETRY_SELECTED_REGION_COLOR
         );
+    }
+
+    #[test]
+    fn wireframe_presentation_draws_only_explicit_edge_chunks() {
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "solver-surface",
+            vec![
+                vertex([0.0, 0.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([1.0, 0.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+                vertex([0.0, 1.0, 0.0], [0.5, 0.5, 0.5, 1.0], [0.0, 0.0, 1.0]),
+            ],
+            vec![0, 1, 2],
+            cad_default_material(),
+        );
+
+        let render_data = chunk.render_data_with_presentation(&GeometryScenePresentation {
+            display_mode: GeometrySceneDisplayMode::Wireframe,
+            ..Default::default()
+        });
+
+        assert!(render_data.draw_calls.is_empty());
     }
 
     #[test]
