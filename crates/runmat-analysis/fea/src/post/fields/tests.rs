@@ -18,6 +18,172 @@ use runmat_analysis_core::{
 };
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
+fn explicit_recovery_summary(fixture: FixtureId) -> AssemblySummary {
+    let model = fixture_model(fixture);
+    assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("physical explicit fixture should assemble")
+}
+
+#[test]
+fn scoped_beam_and_shell_resultants_match_serial_in_canonical_element_order() {
+    use crate::planning::resource::LocalThreadCount;
+
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    for fixture in [
+        FixtureId::StructuralBeamCantileverEndMomentReference,
+        FixtureId::StructuralShellPlateMomentReference,
+    ] {
+        let mut summary = explicit_recovery_summary(fixture);
+        // Multiple physical recovery entries force the admitted plan to use all
+        // workers without manufacturing a second stiffness operator or load.
+        if let Some(beam) = summary.structural_beam_recovery.first().cloned() {
+            summary.structural_beam_recovery = (0..7)
+                .map(|index| {
+                    let mut element = beam.clone();
+                    element.element_id = format!("beam_recovery_{index}");
+                    element.material.youngs_modulus_pa *= 1.0 + index as f64 * 0.1;
+                    element
+                })
+                .collect();
+        }
+        if let Some(shell) = summary.structural_shell_recovery.first().cloned() {
+            summary.structural_shell_recovery = (0..7)
+                .map(|index| {
+                    let mut element = shell.clone();
+                    element.element_id = format!("shell_recovery_{index}");
+                    element.geometry.nodes_m[2][1] += index as f64 * 0.1;
+                    element
+                })
+                .collect();
+        }
+        let solution = (0..summary.dof_count)
+            .map(|index| index as f64 * 1.0e-4)
+            .collect::<Vec<_>>();
+        let serial = recover_deformation_result_fields_with_plan(
+            &summary,
+            &solution,
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            let scoped =
+                recover_deformation_result_fields_with_plan(&summary, &solution, plan).unwrap();
+            assert_eq!(scoped, serial);
+        }
+    }
+}
+
+#[test]
+fn scoped_two_element_beam_recovery_preserves_physical_assembly_fields() {
+    use crate::planning::resource::LocalThreadCount;
+    use runmat_analysis_core::{StructuralElementKind, StructuralNode};
+
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let structural = model.structural.as_mut().expect("beam fixture topology");
+    structural.nodes.push(StructuralNode {
+        node_id: 3,
+        coordinates_m: [2.0, 0.0, 0.0],
+        solid_attachment: None,
+    });
+    let mut second = structural.elements[0].clone();
+    second.element_id = "beam_2".into();
+    let StructuralElementKind::Beam(beam) = &mut second.kind else {
+        panic!("fixture must contain a physical beam");
+    };
+    beam.node_ids = [2, 3];
+    structural.elements.push(second);
+    let summary = assemble_structural_system(
+        &model,
+        &static_excitations(&model),
+        None,
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert_eq!(summary.structural_beam_recovery.len(), 2);
+    let solution = (0..summary.dof_count)
+        .map(|index| index as f64 * 1.0e-4)
+        .collect::<Vec<_>>();
+    let serial = recover_deformation_result_fields_with_plan(
+        &summary,
+        &solution,
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
+    let scoped = recover_deformation_result_fields_with_plan(
+        &summary,
+        &solution,
+        LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(scoped, serial);
+}
+
+#[test]
+fn scoped_explicit_recovery_rejects_nested_and_cancelled_execution() {
+    use crate::planning::resource::{execute_scoped_chunks, LocalThreadCount};
+    use crate::progress::{replace_fea_progress_context, FeaProgressContext};
+
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+    for fixture in [
+        FixtureId::StructuralBeamCantileverEndMomentReference,
+        FixtureId::StructuralShellPlateMomentReference,
+    ] {
+        let mut summary = explicit_recovery_summary(fixture);
+        if let Some(beam) = summary.structural_beam_recovery.first().cloned() {
+            summary.structural_beam_recovery = vec![beam; 4];
+        }
+        if let Some(shell) = summary.structural_shell_recovery.first().cloned() {
+            summary.structural_shell_recovery = vec![shell; 4];
+        }
+        let solution = vec![1.0e-4; summary.dof_count];
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            Ok::<_, ()>(recover_deformation_result_fields_with_plan(
+                &summary, &solution, plan,
+            ))
+        })
+        .unwrap();
+        assert!(matches!(
+            nested[0],
+            Err(StructuralFieldRecoveryError::ScopedExecution { .. })
+        ));
+
+        let context = FeaProgressContext::default();
+        context.cancellation.cancel();
+        let _guard = replace_fea_progress_context(context);
+        assert_eq!(
+            recover_deformation_result_fields_with_plan(&summary, &solution, plan),
+            Err(StructuralFieldRecoveryError::Cancelled),
+        );
+    }
+}
+
+#[test]
+fn scoped_shell_recovery_preserves_element_attribution_on_invalid_geometry() {
+    use crate::planning::resource::LocalThreadCount;
+
+    let mut summary = explicit_recovery_summary(FixtureId::StructuralShellPlateMomentReference);
+    let original = summary.structural_shell_recovery[0].clone();
+    summary.structural_shell_recovery = vec![original.clone(); 4];
+    summary.structural_shell_recovery[2].element_id = "degenerate_shell".into();
+    summary.structural_shell_recovery[2].geometry.nodes_m[2] =
+        summary.structural_shell_recovery[2].geometry.nodes_m[0];
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+    assert!(matches!(
+        recover_deformation_result_fields_with_plan(
+            &summary,
+            &vec![1.0e-4; summary.dof_count],
+            plan,
+        ),
+        Err(StructuralFieldRecoveryError::Shell { element_id, .. })
+            if element_id == "degenerate_shell"
+    ));
+}
+
 fn static_excitations(model: &runmat_analysis_core::AnalysisModel) -> RealizedExcitations {
     realize_step_excitations(
         model,

@@ -16,7 +16,9 @@ use crate::{
         FEA_FIELD_STRUCTURAL_SHELL_BENDING_MOMENT, FEA_FIELD_STRUCTURAL_SHELL_MEMBRANE_FORCE,
         FEA_FIELD_STRUCTURAL_SHELL_TRANSVERSE_SHEAR, FEA_FIELD_STRUCTURAL_SHELL_VON_MISES,
     },
+    planning::resource::{execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError},
     post::error::StructuralFieldRecoveryError,
+    progress::{cancellation_token, FeaCancellationToken},
 };
 
 struct BeamResultValues {
@@ -31,13 +33,45 @@ struct BeamResultValues {
 pub(super) fn recover_beam_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
-) -> Option<Vec<AnalysisField>> {
+    plan: LocalExecutionPlan,
+) -> Result<Option<Vec<AnalysisField>>, StructuralFieldRecoveryError> {
     if summary.structural_beam_recovery.is_empty() {
-        return None;
+        return Ok(None);
     }
-    let values = recover_beam_result_values(summary, solution);
+    let cancellation = cancellation_token();
+    let values = if plan.is_serial() {
+        recover_beam_result_values(
+            summary,
+            solution,
+            &summary.structural_beam_recovery,
+            &cancellation,
+        )?
+    } else {
+        let partitions = execute_scoped_chunks(
+            plan,
+            summary.structural_beam_recovery.len() as u64,
+            |chunk| {
+                recover_beam_result_values(
+                    summary,
+                    solution,
+                    &summary.structural_beam_recovery
+                        [chunk.start() as usize..chunk.end_exclusive() as usize],
+                    &cancellation,
+                )
+            },
+        )
+        .map_err(scoped_recovery_error)?;
+        let mut merged = BeamResultValues::with_capacity(summary.structural_beam_recovery.len());
+        for mut partition in partitions {
+            merged.append(&mut partition);
+        }
+        merged
+    };
+    if cancellation.is_cancelled() {
+        return Err(StructuralFieldRecoveryError::Cancelled);
+    }
     let element_count = summary.structural_beam_recovery.len();
-    Some(vec![
+    Ok(Some(vec![
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_BEAM_AXIAL_FORCE,
             vec![element_count],
@@ -68,18 +102,43 @@ pub(super) fn recover_beam_result_fields(
             vec![element_count],
             values.torsion_stress,
         ),
-    ])
+    ]))
 }
 
-fn recover_beam_result_values(summary: &AssemblySummary, solution: &[f64]) -> BeamResultValues {
-    let mut axial_force = Vec::with_capacity(summary.structural_beam_recovery.len());
-    let mut shear_force = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut torsion_moment = Vec::with_capacity(summary.structural_beam_recovery.len());
-    let mut bending_moment = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut bending_stress = Vec::with_capacity(summary.structural_beam_recovery.len() * 2);
-    let mut torsion_stress = Vec::with_capacity(summary.structural_beam_recovery.len());
+impl BeamResultValues {
+    fn with_capacity(count: usize) -> Self {
+        Self {
+            axial_force: Vec::with_capacity(count),
+            shear_force: Vec::with_capacity(count * 2),
+            torsion_moment: Vec::with_capacity(count),
+            bending_moment: Vec::with_capacity(count * 2),
+            bending_stress: Vec::with_capacity(count * 2),
+            torsion_stress: Vec::with_capacity(count),
+        }
+    }
 
-    for beam in &summary.structural_beam_recovery {
+    fn append(&mut self, other: &mut Self) {
+        self.axial_force.append(&mut other.axial_force);
+        self.shear_force.append(&mut other.shear_force);
+        self.torsion_moment.append(&mut other.torsion_moment);
+        self.bending_moment.append(&mut other.bending_moment);
+        self.bending_stress.append(&mut other.bending_stress);
+        self.torsion_stress.append(&mut other.torsion_stress);
+    }
+}
+
+fn recover_beam_result_values(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    beams: &[BeamRecoveryElementSummary],
+    cancellation: &FeaCancellationToken,
+) -> Result<BeamResultValues, StructuralFieldRecoveryError> {
+    let mut values = BeamResultValues::with_capacity(beams.len());
+
+    for beam in beams {
+        if cancellation.is_cancelled() {
+            return Err(StructuralFieldRecoveryError::Cancelled);
+        }
         let q_global = beam_global_displacement(summary, solution, beam);
         let q_local = multiply_beam_matrix_vector(&beam.transform_global_to_local, &q_global);
         let k_local = local_stiffness_matrix(beam.section, beam.material, beam.length_m)
@@ -93,29 +152,22 @@ fn recover_beam_result_values(summary: &AssemblySummary, solution: &[f64]) -> Be
         let bending_y = signed_peak_pair(f_local[4], f_local[10]);
         let bending_z = signed_peak_pair(f_local[5], f_local[11]);
 
-        axial_force.push(axial);
-        shear_force.extend([shear_y, shear_z]);
-        torsion_moment.push(torsion);
-        bending_moment.extend([bending_y, bending_z]);
-        bending_stress.extend([
+        values.axial_force.push(axial);
+        values.shear_force.extend([shear_y, shear_z]);
+        values.torsion_moment.push(torsion);
+        values.bending_moment.extend([bending_y, bending_z]);
+        values.bending_stress.extend([
             bending_stress_from_moment(bending_y, beam.section.outer_fiber_z_m, beam.section.iy_m4),
             bending_stress_from_moment(bending_z, beam.section.outer_fiber_y_m, beam.section.iz_m4),
         ]);
-        torsion_stress.push(torsion_stress_from_moment(
+        values.torsion_stress.push(torsion_stress_from_moment(
             torsion,
             beam.section.torsion_outer_radius_m,
             beam.section.torsion_j_m4,
         ));
     }
 
-    BeamResultValues {
-        axial_force,
-        shear_force,
-        torsion_moment,
-        bending_moment,
-        bending_stress,
-        torsion_stress,
-    }
+    Ok(values)
 }
 
 fn beam_global_displacement(
@@ -186,11 +238,43 @@ struct ShellResultValues {
 pub(super) fn recover_shell_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
+    plan: LocalExecutionPlan,
 ) -> Result<Option<Vec<AnalysisField>>, StructuralFieldRecoveryError> {
     if summary.structural_shell_recovery.is_empty() {
         return Ok(None);
     }
-    let values = recover_shell_result_values(summary, solution)?;
+    let cancellation = cancellation_token();
+    let values = if plan.is_serial() {
+        recover_shell_result_values(
+            summary,
+            solution,
+            &summary.structural_shell_recovery,
+            &cancellation,
+        )?
+    } else {
+        let partitions = execute_scoped_chunks(
+            plan,
+            summary.structural_shell_recovery.len() as u64,
+            |chunk| {
+                recover_shell_result_values(
+                    summary,
+                    solution,
+                    &summary.structural_shell_recovery
+                        [chunk.start() as usize..chunk.end_exclusive() as usize],
+                    &cancellation,
+                )
+            },
+        )
+        .map_err(scoped_recovery_error)?;
+        let mut merged = ShellResultValues::with_capacity(summary.structural_shell_recovery.len());
+        for mut partition in partitions {
+            merged.append(&mut partition);
+        }
+        merged
+    };
+    if cancellation.is_cancelled() {
+        return Err(StructuralFieldRecoveryError::Cancelled);
+    }
     let element_count = summary.structural_shell_recovery.len();
     Ok(Some(vec![
         AnalysisField::host_f64(
@@ -219,13 +303,15 @@ pub(super) fn recover_shell_result_fields(
 fn recover_shell_result_values(
     summary: &AssemblySummary,
     solution: &[f64],
+    shells: &[ShellRecoveryElementSummary],
+    cancellation: &FeaCancellationToken,
 ) -> Result<ShellResultValues, StructuralFieldRecoveryError> {
-    let mut membrane_force = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
-    let mut bending_moment = Vec::with_capacity(summary.structural_shell_recovery.len() * 3);
-    let mut transverse_shear = Vec::with_capacity(summary.structural_shell_recovery.len() * 2);
-    let mut von_mises = Vec::with_capacity(summary.structural_shell_recovery.len());
+    let mut values = ShellResultValues::with_capacity(shells.len());
 
-    for shell in &summary.structural_shell_recovery {
+    for shell in shells {
+        if cancellation.is_cancelled() {
+            return Err(StructuralFieldRecoveryError::Cancelled);
+        }
         let q = shell_node_values(summary, solution, shell);
         let global_displacement =
             std::array::from_fn::<_, SHELL_ELEMENT_DOF_COUNT, _>(|index| q[index / 6][index % 6]);
@@ -238,18 +324,44 @@ fn recover_shell_result_values(
             element_id: shell.element_id.clone(),
             source,
         })?;
-        membrane_force.extend(result.membrane_force_n_per_m);
-        bending_moment.extend(result.bending_moment_n);
-        transverse_shear.extend(result.transverse_shear_n_per_m);
-        von_mises.push(result.surface_von_mises_pa);
+        values.membrane_force.extend(result.membrane_force_n_per_m);
+        values.bending_moment.extend(result.bending_moment_n);
+        values
+            .transverse_shear
+            .extend(result.transverse_shear_n_per_m);
+        values.von_mises.push(result.surface_von_mises_pa);
     }
 
-    Ok(ShellResultValues {
-        membrane_force,
-        bending_moment,
-        transverse_shear,
-        von_mises,
-    })
+    Ok(values)
+}
+
+impl ShellResultValues {
+    fn with_capacity(count: usize) -> Self {
+        Self {
+            membrane_force: Vec::with_capacity(count * 3),
+            bending_moment: Vec::with_capacity(count * 3),
+            transverse_shear: Vec::with_capacity(count * 2),
+            von_mises: Vec::with_capacity(count),
+        }
+    }
+
+    fn append(&mut self, other: &mut Self) {
+        self.membrane_force.append(&mut other.membrane_force);
+        self.bending_moment.append(&mut other.bending_moment);
+        self.transverse_shear.append(&mut other.transverse_shear);
+        self.von_mises.append(&mut other.von_mises);
+    }
+}
+
+fn scoped_recovery_error(
+    error: ScopedLocalExecutionError<StructuralFieldRecoveryError>,
+) -> StructuralFieldRecoveryError {
+    match error {
+        ScopedLocalExecutionError::Work { source, .. } => source,
+        other => StructuralFieldRecoveryError::ScopedExecution {
+            reason: other.to_string(),
+        },
+    }
 }
 
 fn shell_node_values(

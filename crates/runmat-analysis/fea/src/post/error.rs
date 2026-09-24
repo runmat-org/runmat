@@ -32,9 +32,9 @@ pub enum StructuralFieldRecoveryError {
     InvalidMaterial { element_id: String },
     #[error("solid recovery produced a non-finite field for element {element_id}")]
     NonFiniteResult { element_id: String },
-    #[error("scoped solid recovery failed: {reason}")]
+    #[error("scoped structural recovery failed: {reason}")]
     ScopedExecution { reason: String },
-    #[error("solid field recovery cancelled")]
+    #[error("structural field recovery cancelled")]
     Cancelled,
     #[error("shell recovery failed for element {element_id}: {source}")]
     Shell {

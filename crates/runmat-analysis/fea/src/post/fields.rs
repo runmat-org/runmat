@@ -214,10 +214,10 @@ fn recover_deformation_result_fields_with_plan(
             ),
         ]);
     }
-    if let Some(beam_fields) = recover_beam_result_fields(summary, solution) {
+    if let Some(beam_fields) = recover_beam_result_fields(summary, solution, local_execution)? {
         fields.extend(beam_fields);
     }
-    if let Some(shell_fields) = recover_shell_result_fields(summary, solution)? {
+    if let Some(shell_fields) = recover_shell_result_fields(summary, solution, local_execution)? {
         fields.extend(shell_fields);
     }
     Ok(fields)

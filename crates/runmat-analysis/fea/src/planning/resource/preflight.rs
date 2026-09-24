@@ -35,6 +35,8 @@ const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 9;
 // Five recovered solid arrays retain 61 f64 values per element (6 strain, 6 stress,
 // 1 energy density, and 4 x 6 each of integration-point strain and stress). Scoped
 // recovery can temporarily own one complete set of chunk arrays while merging them.
+// Explicit beam and shell resultants retain nine f64 values per element and at
+// most one additional nine-value chunk set during scoped merging, below this bound.
 // One further scalar covers the element von-Mises field. Nodal displacement, reaction,
 // and projected von-Mises require seven values per node.
 const STRUCTURAL_RECOVERY_PEAK_VALUES_PER_ELEMENT: usize = 123;
