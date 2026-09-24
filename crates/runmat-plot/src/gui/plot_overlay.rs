@@ -4,6 +4,7 @@
 //! plot content, providing controls, axis labels, grid lines, and titles.
 
 use crate::core::{plot_utils, PlotRenderer};
+use crate::geometry_scene::GeometrySceneScalarLegend;
 use crate::overlay::cad_overlay::{CadOverlayActions, CadOverlayRenderInput, CadOverlayState};
 use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
@@ -18,6 +19,21 @@ fn transparent_frame() -> egui::Frame {
 #[cfg(not(target_arch = "wasm32"))]
 fn transparent_frame() -> egui::Frame {
     egui::Frame::none()
+}
+
+fn format_scalar_legend_value(value: f64, unit: &str) -> String {
+    let number = if value == 0.0 {
+        "0".to_string()
+    } else if value.abs() < 0.001 || value.abs() >= 10_000.0 {
+        format!("{value:.2e}")
+    } else {
+        format!("{value:.3}")
+    };
+    if unit.is_empty() {
+        number
+    } else {
+        format!("{number} {unit}")
+    }
 }
 
 /// GUI overlay manager for plot annotations and controls
@@ -1636,6 +1652,13 @@ impl PlotOverlay {
                 .rect_stroke(bar_rect, 0.0, Stroke::new(1.0_f32, border));
         }
 
+        if let Some(legend) = plot_renderer
+            .geometry_overlay()
+            .and_then(|overlay| overlay.scalar_legend.as_ref())
+        {
+            self.draw_geometry_scalar_legend(ui, centered_plot_rect, legend, config.font_scale);
+        }
+
         if config.show_cad_overlay {
             if let Some(overlay) = plot_renderer.geometry_overlay() {
                 let annotations = plot_renderer.geometry_screen_annotations([
@@ -2939,6 +2962,103 @@ impl PlotOverlay {
             );
             y += row_h;
         }
+    }
+
+    fn draw_geometry_scalar_legend(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        legend: &GeometrySceneScalarLegend,
+        scale: f32,
+    ) {
+        let scale = scale.max(0.75);
+        let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
+        let pad = 12.0 * scale;
+        let bar_height = 7.0 * scale;
+        let rect = Rect::from_min_size(
+            egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
+            egui::vec2(width, 58.0 * scale),
+        );
+        let theme = self.theme.build_theme();
+        let text = theme.get_text_color();
+        let text_color = Color32::from_rgb(
+            (text.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.z.clamp(0.0, 1.0) * 255.0) as u8,
+        );
+        let muted = text_color.gamma_multiply(0.68);
+        let label_font = FontId::proportional(11.0 * scale);
+        let detail_font = FontId::proportional(9.0 * scale);
+        ui.painter().text(
+            rect.left_top(),
+            Align2::LEFT_TOP,
+            &legend.label,
+            label_font,
+            text_color,
+        );
+        ui.painter().text(
+            rect.left_top() + egui::vec2(0.0, 13.0 * scale),
+            Align2::LEFT_TOP,
+            format!(
+                "{} nodes · {} boundary faces",
+                legend.node_count, legend.boundary_face_count
+            ),
+            detail_font.clone(),
+            muted,
+        );
+        let bar_rect = Rect::from_min_size(
+            egui::pos2(rect.min.x, rect.min.y + 29.0 * scale),
+            egui::vec2(rect.width(), bar_height),
+        );
+        let stops = [
+            Color32::from_rgb(26, 51, 184),
+            Color32::from_rgb(5, 173, 230),
+            Color32::from_rgb(31, 209, 122),
+            Color32::from_rgb(250, 209, 31),
+            Color32::from_rgb(224, 26, 31),
+        ];
+        let steps = 80;
+        for step in 0..steps {
+            let t = step as f32 / (steps - 1) as f32;
+            let scaled = t * (stops.len() - 1) as f32;
+            let low = scaled.floor() as usize;
+            let high = (low + 1).min(stops.len() - 1);
+            let amount = scaled - low as f32;
+            let low_rgba = stops[low].to_array();
+            let high_rgba = stops[high].to_array();
+            let color = Color32::from_rgb(
+                (low_rgba[0] as f32 + (high_rgba[0] as f32 - low_rgba[0] as f32) * amount).round()
+                    as u8,
+                (low_rgba[1] as f32 + (high_rgba[1] as f32 - low_rgba[1] as f32) * amount).round()
+                    as u8,
+                (low_rgba[2] as f32 + (high_rgba[2] as f32 - low_rgba[2] as f32) * amount).round()
+                    as u8,
+            );
+            let x0 = bar_rect.min.x + bar_rect.width() * step as f32 / steps as f32;
+            let x1 = bar_rect.min.x + bar_rect.width() * (step + 1) as f32 / steps as f32;
+            ui.painter().rect_filled(
+                Rect::from_min_max(
+                    egui::pos2(x0, bar_rect.min.y),
+                    egui::pos2(x1, bar_rect.max.y),
+                ),
+                0.0,
+                color,
+            );
+        }
+        ui.painter().text(
+            bar_rect.left_bottom() + egui::vec2(0.0, 3.0 * scale),
+            Align2::LEFT_TOP,
+            format_scalar_legend_value(legend.minimum, &legend.unit),
+            detail_font.clone(),
+            muted,
+        );
+        ui.painter().text(
+            bar_rect.right_bottom() + egui::vec2(0.0, 3.0 * scale),
+            Align2::RIGHT_TOP,
+            format_scalar_legend_value(legend.maximum, &legend.unit),
+            detail_font,
+            muted,
+        );
     }
 
     fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {

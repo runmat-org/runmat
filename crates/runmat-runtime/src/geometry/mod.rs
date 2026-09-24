@@ -1177,6 +1177,7 @@ pub fn geometry_preview_scene_overlay(
             .map(|mesh| mesh.triangles.len())
             .sum(),
         progress_percent: None,
+        scalar_legend: None,
         region_count: asset.regions.len(),
         mapped_region_count: mapping_summary.mapped_region_count,
         assembly_nodes: asset

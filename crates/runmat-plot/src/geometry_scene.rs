@@ -590,11 +590,22 @@ pub struct GeometrySceneOverlay {
     pub vertex_count: usize,
     pub triangle_count: usize,
     pub progress_percent: Option<f64>,
+    pub scalar_legend: Option<GeometrySceneScalarLegend>,
     pub region_count: usize,
     pub mapped_region_count: usize,
     pub assembly_nodes: Vec<GeometrySceneAssemblyNode>,
     pub regions: Vec<GeometrySceneRegionSummary>,
     pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct GeometrySceneScalarLegend {
+    pub label: String,
+    pub unit: String,
+    pub minimum: f64,
+    pub maximum: f64,
+    pub node_count: usize,
+    pub boundary_face_count: usize,
 }
 
 #[derive(Debug, Clone)]
