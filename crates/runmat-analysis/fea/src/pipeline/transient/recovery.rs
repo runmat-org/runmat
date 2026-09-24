@@ -340,6 +340,27 @@ fn validate_snapshot_shape(
             "transient accepted state {index} changed structural DOF ownership"
         )));
     }
+    // A stable DOF layout alone is not a stable recovery count envelope: an
+    // accepted state could add or remove elements while keeping the same nodes.
+    // This checks cardinality for field histories and later resource planning;
+    // it does not establish full element-identity or geometry equivalence.
+    if summary.structural_node_count != reference.structural_node_count
+        || summary.structural_solid_recovery.len() != reference.structural_solid_recovery.len()
+        || summary.structural_beam_recovery.len() != reference.structural_beam_recovery.len()
+        || summary.structural_shell_recovery.len() != reference.structural_shell_recovery.len()
+        || summary
+            .structural_connector_plan
+            .as_ref()
+            .map(|plan| plan.entries.len())
+            != reference
+                .structural_connector_plan
+                .as_ref()
+                .map(|plan| plan.entries.len())
+    {
+        return Err(FeaRunError::Assembly(format!(
+            "transient accepted state {index} changed structural recovery topology"
+        )));
+    }
     for (kind, values) in [
         ("displacement", displacement),
         ("velocity", velocity),
@@ -481,6 +502,24 @@ mod tests {
             validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
             Err(FeaRunError::Assembly(message)) if message.contains("changed structural DOF ownership")
         ));
+        for change in [
+            |summary: &mut AssemblySummary| summary.structural_node_count += 1,
+            |summary: &mut AssemblySummary| summary.structural_beam_recovery.clear(),
+        ] {
+            let mut changed = summary.clone();
+            change(&mut changed);
+            assert!(matches!(
+                validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+                Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
+            ));
+        }
+        assert!(summary.structural_connector_plan.is_some());
+        let mut changed = summary.clone();
+        changed.structural_connector_plan = None;
+        assert!(matches!(
+            validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+            Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
+        ));
         let short = &state[..state.len() - 1];
         for (displacement, velocity, acceleration, reaction) in [
             (short, state.as_slice(), state.as_slice(), state.as_slice()),
@@ -550,3 +589,7 @@ mod tests {
         .is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "recovery_topology_tests.rs"]
+mod topology_tests;
