@@ -369,6 +369,7 @@ test("factory materialization requires one explicit product-selection form", () 
   for (const argumentsList of [
     ["materialize-composition"],
     ["materialize-composition", "--no-products", "--product", "catalog-math"],
+    ["materialize-composition", "--authority-products", "--product", "catalog-math"],
     ["materialize-composition", "--product", "catalog-math", "--product", "catalog-math"],
   ]) {
     const result = spawnSync(process.execPath, [factory, ...argumentsList], { encoding: "utf8" });

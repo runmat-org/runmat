@@ -187,13 +187,23 @@ test("materialization accepts only an explicit, typed product selection", () => 
   assert.deepEqual(empty.productIds, []);
   assert.equal(empty.noProducts, true);
 
+  const authority = parseFactoryCliArguments([
+    "materialize-composition", "--authority-products", ...common,
+  ]);
+  assert.deepEqual(authority.productIds, []);
+  assert.equal(authority.authorityProducts, true);
+
   assert.throws(() => parseFactoryCliArguments([
     "materialize-composition", ...common,
-  ]), /requires exactly one of --product or --no-products/);
+  ]), /requires exactly one of --product, --no-products, or --authority-products/);
   assert.throws(() => parseFactoryCliArguments([
     "materialize-composition", "--no-products", "--product", "catalog-array-creation",
     ...common,
-  ]), /requires exactly one of --product or --no-products/);
+  ]), /requires exactly one of --product, --no-products, or --authority-products/);
+  assert.throws(() => parseFactoryCliArguments([
+    "materialize-composition", "--authority-products", "--product", "catalog-array-creation",
+    ...common,
+  ]), /requires exactly one of --product, --no-products, or --authority-products/);
   assert.throws(() => parseFactoryCliArguments([
     "materialize-composition", "--product", "catalog-array-creation",
     "--product", "catalog-array-creation", ...common,
