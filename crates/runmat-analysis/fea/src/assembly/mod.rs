@@ -2683,8 +2683,12 @@ mod tests {
         );
         assert!(solve.converged, "{:?}", solve.diagnostics);
         assert!(solve.solution[tip_ux].abs() > 0.0);
-        let fields =
-            crate::post::fields::recover_result_fields(&summary, &solve).expect("mixed recovery");
+        let fields = crate::post::fields::recover_result_fields(
+            &summary,
+            &solve,
+            crate::planning::resource::LocalExecutionPlan::serial(),
+        )
+        .expect("mixed recovery");
         let solid_stress = fields
             .iter()
             .find(|field| field.field_id == crate::contracts::FEA_FIELD_STRUCTURAL_STRESS)

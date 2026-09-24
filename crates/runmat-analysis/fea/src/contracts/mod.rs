@@ -13,6 +13,7 @@ use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::planning::resource::LocalExecutionPlan;
 use crate::solve::{
     backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind,
 };
@@ -791,6 +792,8 @@ pub struct LinearStaticSolveOptions {
     pub require_solver_mesh_for_solid: bool,
     /// Complete displacement state used only to initialize an iterative linear solve.
     pub initial_displacement: Option<Vec<f64>>,
+    /// Admitted CPU concurrency for deterministic local numerical execution.
+    pub local_execution: LocalExecutionPlan,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -803,6 +806,7 @@ impl Default for LinearStaticSolveOptions {
             solver_mesh: None,
             require_solver_mesh_for_solid: true,
             initial_displacement: None,
+            local_execution: LocalExecutionPlan::serial(),
         }
     }
 }

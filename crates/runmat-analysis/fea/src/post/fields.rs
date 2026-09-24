@@ -11,9 +11,10 @@ use crate::contracts::{
 };
 use crate::{
     algebra::apply_k,
-    assembly::{AssemblySummary, StructuralMaterialSummary},
+    assembly::AssemblySummary,
+    planning::resource::LocalExecutionPlan,
     post::{
-        error::StructuralFieldRecoveryError, solid::recover_solid_fields,
+        error::StructuralFieldRecoveryError, solid::recover_solid_fields_with_plan,
         volume_weighted::recover_volume_weighted_nodal_scalar,
     },
     solve::linear::LinearSolveResult,
@@ -21,6 +22,7 @@ use crate::{
 
 mod catalog;
 mod formulation;
+mod scalars;
 mod state;
 
 pub use catalog::{
@@ -28,6 +30,7 @@ pub use catalog::{
     StructuralLinearFieldQuantity,
 };
 use formulation::{recover_beam_result_fields, recover_shell_result_fields};
+use scalars::{recover_strain_energy_density, recover_stress, recover_von_mises};
 use state::{
     recover_displacement, recover_reaction_force, recover_reaction_moment,
     recover_residual_metrics, recover_rotation, recover_total_strain_energy, rotation_shape,
@@ -40,6 +43,7 @@ const TENSOR_COMPONENT_COUNT: usize = 6;
 pub fn recover_result_fields(
     summary: &AssemblySummary,
     solve_result: &LinearSolveResult,
+    local_execution: LocalExecutionPlan,
 ) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
     if solve_result.solution.is_empty()
         || solve_result.solution.iter().any(|value| !value.is_finite())
@@ -53,7 +57,11 @@ pub fn recover_result_fields(
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
     let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
-    let mut fields = recover_deformation_result_fields(summary, &solve_result.solution)?;
+    let mut fields = recover_deformation_result_fields_with_plan(
+        summary,
+        &solve_result.solution,
+        local_execution,
+    )?;
     fields.extend([
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -93,6 +101,14 @@ pub fn recover_deformation_result_fields(
     summary: &AssemblySummary,
     solution: &[f64],
 ) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
+    recover_deformation_result_fields_with_plan(summary, solution, LocalExecutionPlan::serial())
+}
+
+fn recover_deformation_result_fields_with_plan(
+    summary: &AssemblySummary,
+    solution: &[f64],
+    local_execution: LocalExecutionPlan,
+) -> Result<Vec<AnalysisField>, StructuralFieldRecoveryError> {
     if solution.is_empty() || solution.iter().any(|value| !value.is_finite()) {
         return Ok(Vec::new());
     }
@@ -105,7 +121,8 @@ pub fn recover_deformation_result_fields(
     let node_count = structural_displacement_node_count(summary, summary.dof_count.max(3));
     let displacement_values = recover_displacement(summary, solution, node_count);
     let continuum_fields = if publishes_continuum_fields(summary) {
-        let strain_recovery = recover_structural_strain(summary, &displacement_values)?;
+        let strain_recovery =
+            recover_structural_strain_with_plan(summary, &displacement_values, local_execution)?;
         let element_count = strain_recovery.element_count;
         let strain_values = strain_recovery.values;
         let stress_values = strain_recovery
@@ -432,8 +449,20 @@ fn recover_structural_strain(
     summary: &AssemblySummary,
     displacement: &[f64],
 ) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
+    recover_structural_strain_with_plan(summary, displacement, LocalExecutionPlan::serial())
+}
+
+fn recover_structural_strain_with_plan(
+    summary: &AssemblySummary,
+    displacement: &[f64],
+    local_execution: LocalExecutionPlan,
+) -> Result<StructuralStrainRecovery, StructuralFieldRecoveryError> {
     if !summary.structural_solid_recovery.is_empty() {
-        let recovered = recover_solid_fields(&summary.structural_solid_recovery, displacement)?;
+        let recovered = recover_solid_fields_with_plan(
+            &summary.structural_solid_recovery,
+            displacement,
+            local_execution,
+        )?;
         let basis = if summary.structural_solid_recovery.iter().all(|element| {
             matches!(
                 element.geometry,
@@ -544,54 +573,6 @@ fn strain_component_coverage_ratio(
         })
         .sum::<usize>();
     active_component_count as f64 / expected_component_count as f64
-}
-
-fn recover_stress(strain: &[f64], material: StructuralMaterialSummary) -> Vec<f64> {
-    let lambda = material.lame_lambda_pa.max(0.0);
-    let mu = material.shear_modulus_pa.max(0.0);
-    let mut stress = vec![0.0; strain.len()];
-    for (element_index, strain_tensor) in strain.chunks_exact(TENSOR_COMPONENT_COUNT).enumerate() {
-        let trace = strain_tensor[0] + strain_tensor[1] + strain_tensor[2];
-        let base = element_index * TENSOR_COMPONENT_COUNT;
-        stress[base] = lambda * trace + 2.0 * mu * strain_tensor[0];
-        stress[base + 1] = lambda * trace + 2.0 * mu * strain_tensor[1];
-        stress[base + 2] = lambda * trace + 2.0 * mu * strain_tensor[2];
-        stress[base + 3] = mu * strain_tensor[3];
-        stress[base + 4] = mu * strain_tensor[4];
-        stress[base + 5] = mu * strain_tensor[5];
-    }
-    stress
-}
-
-fn recover_von_mises(stress: &[f64]) -> Vec<f64> {
-    stress
-        .chunks_exact(TENSOR_COMPONENT_COUNT)
-        .map(|tensor| {
-            let sxx = tensor[0];
-            let syy = tensor[1];
-            let szz = tensor[2];
-            let txy = tensor[3];
-            let tyz = tensor[4];
-            let txz = tensor[5];
-            (0.5 * ((sxx - syy).powi(2) + (syy - szz).powi(2) + (szz - sxx).powi(2))
-                + 3.0 * (txy.powi(2) + tyz.powi(2) + txz.powi(2)))
-            .sqrt()
-        })
-        .collect()
-}
-
-fn recover_strain_energy_density(strain: &[f64], stress: &[f64]) -> Vec<f64> {
-    strain
-        .chunks_exact(TENSOR_COMPONENT_COUNT)
-        .zip(stress.chunks_exact(TENSOR_COMPONENT_COUNT))
-        .map(|(strain_tensor, stress_tensor)| {
-            0.5 * strain_tensor
-                .iter()
-                .zip(stress_tensor.iter())
-                .map(|(strain, stress)| strain * stress)
-                .sum::<f64>()
-        })
-        .collect()
 }
 
 #[cfg(test)]

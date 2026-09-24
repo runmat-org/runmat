@@ -5193,6 +5193,37 @@ fn multi_material_fixture_has_distinct_response_profile() {
 }
 
 #[test]
+fn admitted_parallel_solid_recovery_matches_serial_static_fields_exactly() {
+    let model = fixture_model(FixtureId::MultiMaterialAssembly);
+    let mesh = multi_region_tetrahedron_solver_mesh();
+    let options = LinearStaticSolveOptions {
+        solver_mesh: Some(mesh),
+        solver_mesh_artifact_path: Some("parallel-recovery-solver-mesh.cbor".to_string()),
+        ..experimental_linear_static_options()
+    };
+    let serial =
+        crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
+            .expect("serial multi-element static solve");
+    let parallel_options = LinearStaticSolveOptions {
+        local_execution: crate::planning::resource::LocalExecutionPlan::fixed(
+            crate::planning::resource::LocalThreadCount::new(3).unwrap(),
+        )
+        .unwrap(),
+        ..options
+    };
+    for _ in 0..3 {
+        let parallel = crate::run_linear_static_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            parallel_options.clone(),
+        )
+        .expect("parallel multi-element static recovery");
+        assert_eq!(parallel.fields, serial.fields);
+        assert_eq!(parallel.observations, serial.observations);
+    }
+}
+
+#[test]
 fn electromagnetic_coefficients_are_independent_of_assignment_confidence() {
     let mut audited_model = fixture_model(FixtureId::MultiMaterialAssembly);
     replace_fixture_with_electric_current(&mut audited_model, "coil_current", "tip", 120.0);

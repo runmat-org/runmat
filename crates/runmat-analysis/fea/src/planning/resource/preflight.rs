@@ -24,6 +24,13 @@ const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const STRUCTURAL_ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
 const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 8;
+// Five recovered solid arrays retain 61 f64 values per element (6 strain, 6 stress,
+// 1 energy density, and 4 x 6 each of integration-point strain and stress). Scoped
+// recovery can temporarily own one complete set of chunk arrays while merging them.
+// One further scalar covers the element von-Mises field. Nodal displacement, reaction,
+// and projected von-Mises require seven values per node.
+const STRUCTURAL_RECOVERY_PEAK_VALUES_PER_ELEMENT: usize = 123;
+const STRUCTURAL_RECOVERY_VALUES_PER_NODE: usize = 7;
 
 /// Builds the canonical resource plan from authoritative post-projection numerical inputs.
 ///
@@ -98,8 +105,14 @@ pub fn build_structural_resource_plan(
         .any(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness);
     let recovery_values = facts
         .recovery_node_count
-        .checked_mul(6)
-        .and_then(|value| value.checked_add(facts.recovery_element_count.checked_mul(13)?))
+        .checked_mul(STRUCTURAL_RECOVERY_VALUES_PER_NODE)
+        .and_then(|value| {
+            value.checked_add(
+                facts
+                    .recovery_element_count
+                    .checked_mul(STRUCTURAL_RECOVERY_PEAK_VALUES_PER_ELEMENT)?,
+            )
+        })
         .ok_or(ResourcePlanningError::Overflow(
             "structural recovery value count",
         ))?;

@@ -4,17 +4,49 @@ use crate::assembly::{
     },
     SolidRecoveryElementSummary, SolidRecoveryGeometry,
 };
+use crate::planning::resource::{
+    execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError,
+};
+use crate::progress::{cancellation_token, FeaCancellationToken};
 
 use super::error::StructuralFieldRecoveryError;
 
 const COMPONENT_COUNT: usize = 6;
 
+#[derive(Debug, PartialEq)]
 pub(super) struct SolidRecoveredFields {
     pub strain: Vec<f64>,
     pub stress: Vec<f64>,
     pub strain_energy_density: Vec<f64>,
     pub integration_point_strain: Vec<f64>,
     pub integration_point_stress: Vec<f64>,
+}
+
+impl SolidRecoveredFields {
+    fn with_element_capacity(element_count: usize) -> Self {
+        Self {
+            strain: Vec::with_capacity(element_count * COMPONENT_COUNT),
+            stress: Vec::with_capacity(element_count * COMPONENT_COUNT),
+            strain_energy_density: Vec::with_capacity(element_count),
+            integration_point_strain: Vec::with_capacity(
+                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT,
+            ),
+            integration_point_stress: Vec::with_capacity(
+                element_count * RECOVERY_POINT_COUNT * COMPONENT_COUNT,
+            ),
+        }
+    }
+
+    fn append(&mut self, other: &mut Self) {
+        self.strain.append(&mut other.strain);
+        self.stress.append(&mut other.stress);
+        self.strain_energy_density
+            .append(&mut other.strain_energy_density);
+        self.integration_point_strain
+            .append(&mut other.integration_point_strain);
+        self.integration_point_stress
+            .append(&mut other.integration_point_stress);
+    }
 }
 
 const RECOVERY_POINT_COUNT: usize = 4;
@@ -24,18 +56,16 @@ struct ElementRecoveryPoints {
     integration_weight_m3: [f64; RECOVERY_POINT_COUNT],
 }
 
-pub(super) fn recover_solid_fields(
+fn recover_solid_fields_checked(
     elements: &[SolidRecoveryElementSummary],
     displacement: &[f64],
+    cancellation: &FeaCancellationToken,
 ) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
-    let mut strain = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
-    let mut stress = Vec::with_capacity(elements.len() * COMPONENT_COUNT);
-    let mut strain_energy_density = Vec::with_capacity(elements.len());
-    let mut integration_point_strain =
-        Vec::with_capacity(elements.len() * RECOVERY_POINT_COUNT * COMPONENT_COUNT);
-    let mut integration_point_stress =
-        Vec::with_capacity(elements.len() * RECOVERY_POINT_COUNT * COMPONENT_COUNT);
+    let mut fields = SolidRecoveredFields::with_element_capacity(elements.len());
     for element in elements {
+        if cancellation.is_cancelled() {
+            return Err(StructuralFieldRecoveryError::Cancelled);
+        }
         let recovered = recover_element_strain(element, displacement)?;
         let point_stress = recovered
             .strain
@@ -88,19 +118,52 @@ pub(super) fn recover_solid_fields(
                 element_id: element.element_id.clone(),
             });
         }
-        strain.extend(element_strain);
-        stress.extend(element_stress);
-        strain_energy_density.push(energy);
-        integration_point_strain.extend(recovered.strain.into_iter().flatten());
-        integration_point_stress.extend(point_stress.into_iter().flatten());
+        fields.strain.extend(element_strain);
+        fields.stress.extend(element_stress);
+        fields.strain_energy_density.push(energy);
+        fields
+            .integration_point_strain
+            .extend(recovered.strain.into_iter().flatten());
+        fields
+            .integration_point_stress
+            .extend(point_stress.into_iter().flatten());
     }
-    Ok(SolidRecoveredFields {
-        strain,
-        stress,
-        strain_energy_density,
-        integration_point_strain,
-        integration_point_stress,
+    Ok(fields)
+}
+
+pub(super) fn recover_solid_fields_with_plan(
+    elements: &[SolidRecoveryElementSummary],
+    displacement: &[f64],
+    plan: LocalExecutionPlan,
+) -> Result<SolidRecoveredFields, StructuralFieldRecoveryError> {
+    let cancellation = cancellation_token();
+    if cancellation.is_cancelled() {
+        return Err(StructuralFieldRecoveryError::Cancelled);
+    }
+    if elements.is_empty() || plan.is_serial() {
+        return recover_solid_fields_checked(elements, displacement, &cancellation);
+    }
+    let partitions = execute_scoped_chunks(plan, elements.len() as u64, |chunk| {
+        recover_solid_fields_checked(
+            &elements[chunk.start() as usize..chunk.end_exclusive() as usize],
+            displacement,
+            &cancellation,
+        )
     })
+    .map_err(|error| match error {
+        ScopedLocalExecutionError::Work { source, .. } => source,
+        other => StructuralFieldRecoveryError::ScopedExecution {
+            reason: other.to_string(),
+        },
+    })?;
+    if cancellation.is_cancelled() {
+        return Err(StructuralFieldRecoveryError::Cancelled);
+    }
+    let mut combined = SolidRecoveredFields::with_element_capacity(elements.len());
+    for mut partition in partitions {
+        combined.append(&mut partition);
+    }
+    Ok(combined)
 }
 
 fn recover_element_strain(
@@ -213,6 +276,45 @@ fn recover_element_stress(
 mod tests {
     use super::*;
     use crate::assembly::elements::solid::SolidMaterial;
+    use crate::planning::resource::LocalThreadCount;
+    use crate::progress::{replace_fea_progress_context, FeaProgressContext};
+
+    fn two_threads() -> LocalExecutionPlan {
+        LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn recovery_rejects_pre_cancelled_serial_and_parallel_plans() {
+        let element = SolidRecoveryElementSummary {
+            element_id: "cancelled".into(),
+            region_id: "body".into(),
+            material: SolidMaterial {
+                youngs_modulus_pa: 10.0,
+                poisson_ratio: 0.25,
+                density_kg_per_m3: 1.0,
+            },
+            geometry: SolidRecoveryGeometry::Tetrahedron4 {
+                node_indices: [0, 1, 2, 3],
+                coordinates_m: [
+                    [0.0, 0.0, 0.0],
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                ],
+            },
+        };
+        let elements = [element.clone(), element];
+        let cancellation = FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context = replace_fea_progress_context(FeaProgressContext {
+            cancellation,
+            ..FeaProgressContext::default()
+        });
+        for plan in [LocalExecutionPlan::serial(), two_threads()] {
+            let error = recover_solid_fields_with_plan(&elements, &[0.0; 12], plan).unwrap_err();
+            assert_eq!(error, StructuralFieldRecoveryError::Cancelled);
+        }
+    }
 
     #[test]
     fn recovery_uses_each_elements_assigned_material() {
@@ -246,7 +348,15 @@ mod tests {
         ];
         let displacement = [0.0, 0.0, 0.0, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 
-        let recovered = recover_solid_fields(&elements, &displacement).unwrap();
+        let recovered =
+            recover_solid_fields_with_plan(&elements, &displacement, LocalExecutionPlan::serial())
+                .unwrap();
+        for _ in 0..5 {
+            assert_eq!(
+                recover_solid_fields_with_plan(&elements, &displacement, two_threads()).unwrap(),
+                recovered,
+            );
+        }
 
         assert_eq!(&recovered.strain[..6], &recovered.strain[6..]);
         for (soft, hard) in recovered.stress[..6].iter().zip(&recovered.stress[6..]) {
@@ -313,7 +423,13 @@ mod tests {
             .flat_map(|coordinate| [coordinate[0].powi(2), 0.0, 0.0])
             .collect::<Vec<_>>();
 
-        let recovered = recover_solid_fields(&elements, &displacement).unwrap();
+        let recovered =
+            recover_solid_fields_with_plan(&elements, &displacement, LocalExecutionPlan::serial())
+                .unwrap();
+        assert_eq!(
+            recover_solid_fields_with_plan(&elements, &displacement, two_threads()).unwrap(),
+            recovered,
+        );
 
         let (soft, hard) = recovered.integration_point_stress.split_at(4 * 6);
         for (soft, hard) in soft.iter().zip(hard) {

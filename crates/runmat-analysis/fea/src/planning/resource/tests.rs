@@ -323,6 +323,19 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         3 * 64 * 1024
     );
     assert_ne!(parallel_plan.identity, plan.identity);
+    let recovery_bound = plan
+        .input
+        .structural_operator()
+        .unwrap()
+        .phase_resources
+        .resident_value_count
+        .0;
+    assert!(
+        recovery_bound
+            >= mesh.topology.nodes.len() as u64 * 7
+                + mesh.topology.volume_elements.len() as u64 * 123,
+        "recovery admission must cover element fields and their scoped merge",
+    );
 
     assert_eq!(
         plan.input.topology_digest(),

@@ -1529,6 +1529,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
             initial_displacement: None,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
     )
     .unwrap();
@@ -2761,6 +2762,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             solver_mesh: Some(mesh.clone()),
             require_solver_mesh_for_solid: true,
             initial_displacement: None,
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         },
     )
     .unwrap();

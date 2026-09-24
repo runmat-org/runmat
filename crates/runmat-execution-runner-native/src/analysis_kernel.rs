@@ -709,6 +709,7 @@ fn execute_structural_linear(
         solver_mesh: mesh.clone(),
         require_solver_mesh_for_solid: solve.require_solver_mesh_for_solid,
         initial_displacement,
+        local_execution,
     };
     let publishes_linearization = solve
         .procedure_step()?

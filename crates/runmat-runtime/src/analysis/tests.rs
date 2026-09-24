@@ -1711,6 +1711,8 @@ impl StructuralLinearExecutor for CanonicalStructuralExecutor {
                 solver_mesh: Some(mesh.clone()),
                 require_solver_mesh_for_solid: workload.require_solver_mesh_for_solid,
                 initial_displacement: None,
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             },
         )
         .map_err(|error| error.to_string())?;

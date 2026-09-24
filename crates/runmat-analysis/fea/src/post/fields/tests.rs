@@ -116,7 +116,7 @@ fn solid_tetrahedron4_recovery_uses_solver_mesh_field_shapes() {
         diagnostics: Vec::new(),
     };
 
-    let fields = recover_result_fields(&summary, &solve).unwrap();
+    let fields = recover_result_fields(&summary, &solve, LocalExecutionPlan::serial()).unwrap();
     assert_eq!(
         field_shape(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
         &[4, 3]
@@ -177,7 +177,7 @@ fn solid_tetrahedron10_recovery_uses_midside_displacements() {
         diagnostics: Vec::new(),
     };
 
-    let fields = recover_result_fields(&summary, &solve).unwrap();
+    let fields = recover_result_fields(&summary, &solve, LocalExecutionPlan::serial()).unwrap();
     let strain = host_field(&fields, FEA_FIELD_STRUCTURAL_STRAIN);
     let integration_point_strain =
         host_field(&fields, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRAIN);
@@ -295,7 +295,7 @@ fn finite_nonconverged_solve_still_recovers_solver_mesh_fields() {
         diagnostics: Vec::new(),
     };
 
-    let fields = recover_result_fields(&summary, &solve).unwrap();
+    let fields = recover_result_fields(&summary, &solve, LocalExecutionPlan::serial()).unwrap();
 
     assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_VON_MISES), &[1]);
     assert_eq!(field_shape(&fields, FEA_FIELD_STRUCTURAL_STRAIN), &[1, 6]);

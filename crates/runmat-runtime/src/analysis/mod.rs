@@ -6029,6 +6029,8 @@ fn analysis_run_linear_static_with_executor(
                 solver_mesh: prepared.solver_mesh.clone(),
                 require_solver_mesh_for_solid: prepared.workload.require_solver_mesh_for_solid,
                 initial_displacement: None,
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             },
         )
         .map_err(|err| {

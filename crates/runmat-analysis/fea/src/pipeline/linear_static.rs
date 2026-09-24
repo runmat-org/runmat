@@ -293,8 +293,11 @@ fn run_linear_static_with_constraint_plan(
         Some(3),
         Some(5),
     );
-    let mut fields = recover_result_fields(&summary, &solve_result)
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let mut fields = recover_result_fields(&summary, &solve_result, options.local_execution)
+        .map_err(|error| match error {
+            crate::post::StructuralFieldRecoveryError::Cancelled => FeaRunError::Cancelled,
+            other => FeaRunError::Assembly(other.to_string()),
+        })?;
     let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
         summary.thermo_mechanical.as_ref(),
         &[1.0],

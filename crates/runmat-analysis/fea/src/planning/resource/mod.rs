@@ -13,6 +13,7 @@ mod preflight;
 mod random_response;
 mod reconciliation;
 mod response_spectrum;
+mod scoped_execution;
 mod structural_facts;
 mod symbolic;
 mod usage;
@@ -84,6 +85,7 @@ pub use response_spectrum::{
     structural_modal_response_spectrum_receipt_payload_bytes_upper_bound,
     StructuralModalResponseSpectrumResourceProjection,
 };
+pub use scoped_execution::{execute_scoped_chunks, ScopedLocalExecutionError};
 pub use symbolic::StructuralSymbolicOperators;
 pub use usage::{
     AnalysisResourceUsage, ResourceOverrun, ResourceUsageAttempt, ResourceUsageAttemptOverrun,
