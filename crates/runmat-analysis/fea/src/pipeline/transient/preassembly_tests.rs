@@ -121,8 +121,45 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     assert_eq!(first.identity, second.identity);
     assert_eq!(first.request.cpu_millicores, 1_000);
     assert!(first.request.memory_bytes > 0);
+    assert!(first.request.max_artifact_bytes > 0);
+    assert_eq!(
+        first.request.max_artifact_bytes,
+        first.request.max_egress_bytes
+    );
     assert_eq!(first.breakdown.observation_produced_sample_count.0, 0);
-    prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let actual_payload_bytes = u64::try_from(scope.canonical_bytes().unwrap().len()).unwrap();
+    let planned_payload_bytes =
+        crate::planning::resource::structural_transient_scope_payload_bytes_upper_bound(
+            &prepared.schedule,
+        )
+        .unwrap();
+    assert!(actual_payload_bytes <= planned_payload_bytes);
+    assert_eq!(
+        first.request.max_artifact_bytes,
+        planned_payload_bytes + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+    );
+
+    let mut longer = workload.clone();
+    longer.time_step_policy =
+        crate::solve::transient::StructuralTimeStepPolicy::Fixed { interval_count: 64 };
+    let longer_prepared = prepare_transient_preassembly(&longer.model, (&longer).into()).unwrap();
+    let longer_plan = crate::planning::resource::build_structural_transient_scope_resource_plan(
+        &longer,
+        &mesh,
+        None,
+        &longer_prepared,
+    )
+    .unwrap();
+    let longer_scope = prepare_transient_checkpoint_scope(&longer, &mesh, None).unwrap();
+    assert!(longer_plan.request.max_artifact_bytes > first.request.max_artifact_bytes);
+    assert!(
+        u64::try_from(longer_scope.canonical_bytes().unwrap().len()).unwrap()
+            <= crate::planning::resource::structural_transient_scope_payload_bytes_upper_bound(
+                &longer_prepared.schedule,
+            )
+            .unwrap()
+    );
 
     let mut rejected = workload;
     rejected.model.sequence.steps[0]

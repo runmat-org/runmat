@@ -27,6 +27,29 @@ const FIXED_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
+// One point has only a f64 and two closed enum tags; 128 bytes covers its canonical map keys,
+// CBOR headers, and values without allocating an encoded schedule during admission.
+const SCOPE_BYTES_PER_SCHEDULE_POINT_UPPER_BOUND: u64 = 128;
+// Every scope field outside `schedule` is a fixed-size identity, scalar, or the bounded modal
+// projection evidence. Reserve its canonical map/field encoding independently of sample count.
+const SCOPE_FIXED_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
+
+pub(crate) fn structural_transient_scope_payload_bytes_upper_bound(
+    schedule: &crate::execution::StructuralTransientSchedule,
+) -> Result<u64, ResourcePlanningError> {
+    schedule
+        .validate()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    add(
+        multiply(
+            count(schedule.points.len(), "transient schedule points")?,
+            SCOPE_BYTES_PER_SCHEDULE_POINT_UPPER_BOUND,
+            "transient schedule payload bytes",
+        )?,
+        SCOPE_FIXED_PAYLOAD_BYTES_UPPER_BOUND,
+        "transient scope payload bytes",
+    )
+}
 
 pub(crate) fn build_structural_transient_scope_resource_plan(
     workload: &StructuralTransientWorkload,
@@ -153,9 +176,29 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     };
     let schedule_points = count(prepared.schedule.points.len(), "transient schedule points")?;
     let schedule_bytes = multiply(schedule_points, 128, "transient schedule residency")?;
+    let scope_payload_bytes =
+        structural_transient_scope_payload_bytes_upper_bound(&prepared.schedule)?;
+    let scope_transport_bytes = add(
+        scope_payload_bytes,
+        crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
+        "transient scope output closure",
+    )?;
+    let scope_construction_bytes =
+        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+            scope_payload_bytes,
+            1,
+        )
+        .and_then(|bytes| bytes.checked_add(scope_transport_bytes))
+        .ok_or(ResourcePlanningError::Overflow(
+            "transient scope output construction",
+        ))?;
     let phase_bytes = add(
-        schedule_bytes,
-        multiply(dofs, 8 * 6, "scope state and load vectors")?,
+        add(
+            schedule_bytes,
+            multiply(dofs, 8 * 6, "scope state and load vectors")?,
+            "scope phase state residency",
+        )?,
+        scope_construction_bytes,
         "scope phase residency",
     )?;
     let scope_workspace = add(
@@ -213,11 +256,11 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                         collective_count: Count(0),
                     },
                     publication: CheckpointArtifactPolicy {
-                        result_artifact_bytes: ByteCount(0),
+                        result_artifact_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_bytes: ByteCount(0),
                         artifact_overhead_bytes: ByteCount(0),
                         relay_bytes: ByteCount(0),
-                        result_egress_bytes: ByteCount(0),
+                        result_egress_bytes: ByteCount(scope_transport_bytes),
                         checkpoint_egress_bytes: ByteCount(0),
                     },
                     partitioning: PartitioningPolicy::Monolithic,

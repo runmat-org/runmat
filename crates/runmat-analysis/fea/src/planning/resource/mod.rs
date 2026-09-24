@@ -100,6 +100,8 @@ pub use transient_result::{
     structural_transient_result_payload_bytes_upper_bound,
 };
 pub(crate) use transient_scope::build_structural_transient_scope_resource_plan;
+#[cfg(test)]
+pub(crate) use transient_scope::structural_transient_scope_payload_bytes_upper_bound;
 pub use usage::{
     AnalysisResourceUsage, ResourceOverrun, ResourceUsageAttempt, ResourceUsageAttemptOverrun,
     ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
