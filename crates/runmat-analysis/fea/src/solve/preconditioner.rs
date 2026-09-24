@@ -1,6 +1,9 @@
 use std::{collections::BTreeMap, fmt};
 
-use crate::algebra::PreparedRealLinearSystem;
+use crate::{
+    algebra::{PreparedRealLinearSystem, ScopedSpmvError, SpmvWorkError},
+    planning::resource::{execute_scoped_slices_mut, LocalExecutionPlan},
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,9 +36,14 @@ impl fmt::Display for PreconditionerError {
 
 impl std::error::Error for PreconditionerError {}
 
-pub trait SpdPreconditioner {
+pub trait SpdPreconditioner: Sync {
     fn kind(&self) -> SpdPreconditionerKind;
     fn apply(&self, residual: &[f64]) -> Vec<f64>;
+    fn apply_with_execution(
+        &self,
+        residual: &[f64],
+        plan: LocalExecutionPlan,
+    ) -> Result<Vec<f64>, ScopedSpmvError>;
 }
 
 struct JacobiPreconditioner {
@@ -66,6 +74,29 @@ impl SpdPreconditioner for JacobiPreconditioner {
             .zip(&self.inverse_diagonal)
             .map(|(value, inverse)| value * inverse)
             .collect()
+    }
+
+    fn apply_with_execution(
+        &self,
+        residual: &[f64],
+        plan: LocalExecutionPlan,
+    ) -> Result<Vec<f64>, ScopedSpmvError> {
+        if residual.len() != self.inverse_diagonal.len() {
+            return Err(ScopedSpmvError::VectorDimensionMismatch);
+        }
+        let cancellation = crate::progress::cancellation_token();
+        let mut result = vec![0.0; residual.len()];
+        execute_scoped_slices_mut(plan, &mut result, |chunk, output| {
+            for (offset, value) in output.iter_mut().enumerate() {
+                if cancellation.is_cancelled() {
+                    return Err(SpmvWorkError::Cancelled);
+                }
+                let index = chunk.start() as usize + offset;
+                *value = residual[index] * self.inverse_diagonal[index];
+            }
+            Ok(())
+        })?;
+        Ok(result)
     }
 }
 
@@ -188,6 +219,16 @@ impl SpdPreconditioner for Ilu0Preconditioner {
         }
         result
     }
+
+    fn apply_with_execution(
+        &self,
+        residual: &[f64],
+        _plan: LocalExecutionPlan,
+    ) -> Result<Vec<f64>, ScopedSpmvError> {
+        // ILU0's forward and backward triangular sweeps have row dependencies.
+        // The admitted plan is deliberately not used by this serial law.
+        Ok(self.apply(residual))
+    }
 }
 
 pub fn build_spd_preconditioner(
@@ -207,6 +248,101 @@ mod tests {
         MatrixProperties, OperatorRole, PreparedRealLinearSystem, RealSparseAssembler,
         RealSparseMatrix,
     };
+    use crate::planning::resource::{
+        execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError,
+    };
+    use crate::progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext};
+
+    #[test]
+    fn jacobi_scoped_application_matches_serial_and_independent_diagonal_law() {
+        let diagonal = [2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0];
+        let residual = [1.0, -2.0, 3.0, -4.0, 5.0, -6.0, 7.0];
+        let matrix = RealSparseMatrix::diagonal(
+            diagonal.to_vec(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let system = PreparedRealLinearSystem::try_new(
+            matrix,
+            vec![0.0; diagonal.len()],
+            vec![false; diagonal.len()],
+        )
+        .unwrap();
+        let preconditioner =
+            build_spd_preconditioner(&system, SpdPreconditionerKind::Jacobi).unwrap();
+        let expected = residual
+            .iter()
+            .zip(diagonal)
+            .map(|(value, diagonal)| value / diagonal)
+            .collect::<Vec<_>>();
+        assert_eq!(preconditioner.apply(&residual), expected);
+        for threads in [1, 2, 3, 7, 8] {
+            let plan =
+                LocalExecutionPlan::from_thread_count(LocalThreadCount::new(threads).unwrap())
+                    .unwrap();
+            assert_eq!(
+                preconditioner
+                    .apply_with_execution(&residual, plan)
+                    .unwrap(),
+                expected
+            );
+            assert_eq!(
+                preconditioner
+                    .apply_with_execution(&residual, plan)
+                    .unwrap(),
+                expected
+            );
+        }
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        assert!(matches!(
+            preconditioner.apply_with_execution(&residual[..6], plan),
+            Err(ScopedSpmvError::VectorDimensionMismatch)
+        ));
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            Ok::<_, ()>(preconditioner.apply_with_execution(&residual, plan))
+        })
+        .unwrap();
+        assert!(matches!(
+            &nested[0],
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::NestedExecution
+            ))
+        ));
+    }
+
+    #[test]
+    fn jacobi_scoped_application_propagates_cancellation() {
+        let system = PreparedRealLinearSystem::try_new(
+            RealSparseMatrix::diagonal(
+                vec![2.0; 8],
+                OperatorRole::Stiffness,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .unwrap(),
+            vec![0.0; 8],
+            vec![false; 8],
+        )
+        .unwrap();
+        let preconditioner =
+            build_spd_preconditioner(&system, SpdPreconditionerKind::Jacobi).unwrap();
+        let cancellation = FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context = replace_fea_progress_context(FeaProgressContext {
+            cancellation,
+            ..FeaProgressContext::default()
+        });
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        assert!(matches!(
+            preconditioner.apply_with_execution(&[1.0; 8], plan),
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::Work {
+                    source: SpmvWorkError::Cancelled,
+                    ..
+                }
+            ))
+        ));
+    }
 
     #[test]
     fn ilu0_uses_canonical_sparse_pattern_and_is_finite() {

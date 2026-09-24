@@ -372,7 +372,11 @@ fn solve_operator_system_with_apply(
     }
 
     let mut r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
-    let mut z = preconditioner.apply(&r);
+    let mut z = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        preconditioner.apply_with_execution(&r, plan)?
+    } else {
+        preconditioner.apply(&r)
+    };
     let mut p = z.clone();
     let mut rz_old = dot(&r, &z)?;
     let b_norm = dot(b, b)?.sqrt();
@@ -438,7 +442,11 @@ fn solve_operator_system_with_apply(
             break;
         }
 
-        z = preconditioner.apply(&r);
+        z = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+            preconditioner.apply_with_execution(&r, plan)?
+        } else {
+            preconditioner.apply(&r)
+        };
         let rz_new = dot(&r, &z)?;
         if !rz_new.is_finite() || !rz_old.is_finite() || rz_old <= 0.0 || rz_new < 0.0 {
             break;
