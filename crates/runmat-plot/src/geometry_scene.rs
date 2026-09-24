@@ -604,8 +604,6 @@ pub struct GeometrySceneScalarLegend {
     pub unit: String,
     pub minimum: f64,
     pub maximum: f64,
-    pub node_count: usize,
-    pub boundary_face_count: usize,
 }
 
 #[derive(Debug, Clone)]
