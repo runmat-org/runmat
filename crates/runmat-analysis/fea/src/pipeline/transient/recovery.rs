@@ -69,54 +69,108 @@ pub(super) fn recover_transient_fields(
         transient.reaction_snapshots.len(),
     )?;
 
-    let deformation_fields = transient
+    if snapshot_count == 0 {
+        return Err(FeaRunError::Assembly(
+            "transient solve produced no accepted state to recover".into(),
+        ));
+    }
+    // Move each recovered field into its history as soon as the snapshot is ready.
+    // Only the final state is cloned for the ordinary result-field view; there is
+    // no second retained history-sized deformation-field collection.
+    let mut final_deformation_fields = Vec::new();
+    let mut displacement_snapshots = Vec::with_capacity(snapshot_count);
+    let mut rotation_snapshots = Vec::with_capacity(snapshot_count);
+    let mut strain_snapshots = Vec::with_capacity(snapshot_count);
+    let mut stress_snapshots = Vec::with_capacity(snapshot_count);
+    let mut von_mises_snapshots = Vec::with_capacity(snapshot_count);
+    let mut strain_energy_density_snapshots = Vec::with_capacity(snapshot_count);
+    for (index, (summary, displacement)) in transient
         .assembly_snapshots
         .iter()
         .zip(&transient.displacement_snapshots)
-        .map(|(summary, displacement)| {
-            recover_deformation_result_fields(summary, displacement)
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let final_deformation_fields = deformation_fields
-        .last()
-        .ok_or_else(|| {
-            FeaRunError::Assembly("transient solve produced no accepted state to recover".into())
-        })?
-        .iter()
-        .filter(|field| !field.is_empty())
-        .cloned()
-        .collect();
-
-    let displacement_snapshots = collect_required_fields(
-        &deformation_fields,
+        .enumerate()
+    {
+        let mut fields = recover_deformation_result_fields(summary, displacement)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        if index + 1 == snapshot_count {
+            final_deformation_fields = fields
+                .iter()
+                .filter(|field| !field.is_empty())
+                .cloned()
+                .collect();
+        }
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            fea_transient_displacement_field_id(index),
+            &mut displacement_snapshots,
+        );
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            fea_transient_rotation_field_id(index),
+            &mut rotation_snapshots,
+        );
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            fea_transient_strain_field_id(index),
+            &mut strain_snapshots,
+        );
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_STRESS,
+            fea_transient_stress_field_id(index),
+            &mut stress_snapshots,
+        );
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_VON_MISES,
+            fea_transient_von_mises_field_id(index),
+            &mut von_mises_snapshots,
+        );
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
+            fea_transient_strain_energy_density_field_id(index),
+            &mut strain_energy_density_snapshots,
+        );
+    }
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT,
-        fea_transient_displacement_field_id,
+        displacement_snapshots.len(),
+        RecoveredFieldPolicy::Required,
     )?;
-    let rotation_snapshots = collect_optional_fields(
-        &deformation_fields,
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_ROTATION,
-        fea_transient_rotation_field_id,
+        rotation_snapshots.len(),
+        RecoveredFieldPolicy::Optional,
     )?;
-    let strain_snapshots = collect_optional_fields(
-        &deformation_fields,
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_STRAIN,
-        fea_transient_strain_field_id,
+        strain_snapshots.len(),
+        RecoveredFieldPolicy::Optional,
     )?;
-    let stress_snapshots = collect_optional_fields(
-        &deformation_fields,
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_STRESS,
-        fea_transient_stress_field_id,
+        stress_snapshots.len(),
+        RecoveredFieldPolicy::Optional,
     )?;
-    let von_mises_snapshots = collect_optional_fields(
-        &deformation_fields,
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_VON_MISES,
-        fea_transient_von_mises_field_id,
+        von_mises_snapshots.len(),
+        RecoveredFieldPolicy::Optional,
     )?;
-    let strain_energy_density_snapshots = collect_optional_fields(
-        &deformation_fields,
+    require_recovered_field_count(
+        snapshot_count,
         FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
-        fea_transient_strain_energy_density_field_id,
+        strain_energy_density_snapshots.len(),
+        RecoveredFieldPolicy::Optional,
     )?;
 
     let mut velocity_snapshots = Vec::with_capacity(snapshot_count);
@@ -234,53 +288,47 @@ pub(super) fn recover_transient_fields(
     })
 }
 
-fn collect_required_fields(
-    snapshots: &[Vec<AnalysisField>],
-    source_id: &str,
-    snapshot_id: impl Fn(usize) -> String,
-) -> Result<Vec<AnalysisField>, FeaRunError> {
-    let fields = collect_fields(snapshots, source_id, snapshot_id);
-    if fields.len() != snapshots.len() {
-        return Err(FeaRunError::Assembly(format!(
-            "transient recovery did not produce required field `{source_id}` for every accepted state"
-        )));
-    }
-    Ok(fields)
+#[derive(Clone, Copy)]
+enum RecoveredFieldPolicy {
+    Required,
+    Optional,
 }
 
-fn collect_optional_fields(
-    snapshots: &[Vec<AnalysisField>],
+fn require_recovered_field_count(
+    snapshot_count: usize,
     source_id: &str,
-    snapshot_id: impl Fn(usize) -> String,
-) -> Result<Vec<AnalysisField>, FeaRunError> {
-    let fields = collect_fields(snapshots, source_id, snapshot_id);
-    if !fields.is_empty() && fields.len() != snapshots.len() {
-        return Err(FeaRunError::Assembly(format!(
-            "transient recovery produced field `{source_id}` for only part of the accepted state history"
-        )));
+    field_count: usize,
+    policy: RecoveredFieldPolicy,
+) -> Result<(), FeaRunError> {
+    match policy {
+        RecoveredFieldPolicy::Required if field_count != snapshot_count => {
+            Err(FeaRunError::Assembly(format!(
+                "transient recovery did not produce required field `{source_id}` for every accepted state"
+            )))
+        }
+        RecoveredFieldPolicy::Optional if field_count != 0 && field_count != snapshot_count => {
+            Err(FeaRunError::Assembly(format!(
+                "transient recovery produced field `{source_id}` for only part of the accepted state history"
+            )))
+        }
+        _ => Ok(()),
     }
-    Ok(fields)
 }
 
-fn collect_fields(
-    snapshots: &[Vec<AnalysisField>],
+fn move_snapshot_field(
+    fields: &mut Vec<AnalysisField>,
     source_id: &str,
-    snapshot_id: impl Fn(usize) -> String,
-) -> Vec<AnalysisField> {
-    snapshots
+    snapshot_id: String,
+    history: &mut Vec<AnalysisField>,
+) {
+    if let Some(position) = fields
         .iter()
-        .enumerate()
-        .filter_map(|(index, fields)| {
-            fields
-                .iter()
-                .find(|field| field.field_id == source_id && !field.is_empty())
-                .cloned()
-                .map(|mut field| {
-                    field.field_id = snapshot_id(index);
-                    field
-                })
-        })
-        .collect()
+        .position(|field| field.field_id == source_id && !field.is_empty())
+    {
+        let mut field = fields.remove(position);
+        field.field_id = snapshot_id;
+        history.push(field);
+    }
 }
 
 pub(super) fn require_snapshot_count(
@@ -294,5 +342,63 @@ pub(super) fn require_snapshot_count(
         Err(FeaRunError::Assembly(format!(
             "transient {kind} snapshot count {actual} does not match time-point count {expected}"
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn streamed_snapshot_field_moves_its_storage_without_copying_the_history() {
+        let mut fields = vec![AnalysisField::host_f64(
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT.to_string(),
+            vec![1],
+            vec![42.0],
+        )];
+        let original_storage = fields[0].as_host_f64().unwrap().as_ptr();
+        let mut history = Vec::new();
+        move_snapshot_field(
+            &mut fields,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            fea_transient_displacement_field_id(2),
+            &mut history,
+        );
+        assert!(fields.is_empty());
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].field_id, fea_transient_displacement_field_id(2));
+        assert_eq!(history[0].as_host_f64().unwrap().as_ptr(), original_storage);
+    }
+
+    #[test]
+    fn streamed_recovery_keeps_required_and_optional_history_cardinality_rules() {
+        assert!(require_recovered_field_count(
+            3,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            3,
+            RecoveredFieldPolicy::Required,
+        )
+        .is_ok());
+        assert!(require_recovered_field_count(
+            3,
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            0,
+            RecoveredFieldPolicy::Optional,
+        )
+        .is_ok());
+        assert!(require_recovered_field_count(
+            3,
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            2,
+            RecoveredFieldPolicy::Required,
+        )
+        .is_err());
+        assert!(require_recovered_field_count(
+            3,
+            FEA_FIELD_STRUCTURAL_ROTATION,
+            2,
+            RecoveredFieldPolicy::Optional,
+        )
+        .is_err());
     }
 }
