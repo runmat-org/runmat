@@ -568,6 +568,8 @@ pub(super) fn advance<E, M: std::fmt::Display>(
     })?;
     let mut samples = Vec::with_capacity(terminal - start);
     let progress_operation = options.progress_operation.as_str();
+    let final_ordinal = u64::try_from(schedule.points.len() - 1)
+        .map_err(|_| TransientSolveError::ScheduleOrdinalLimit)?;
 
     for (ordinal, schedule_point) in schedule
         .points
@@ -583,7 +585,7 @@ pub(super) fn advance<E, M: std::fmt::Display>(
                 FeaProgressStatus::Cancelled,
                 "transient solve cancelled",
                 Some(state.schedule_ordinal),
-                None,
+                Some(final_ordinal),
             );
             return Err(TransientSolveError::Cancelled);
         }
@@ -604,8 +606,8 @@ pub(super) fn advance<E, M: std::fmt::Display>(
             FeaProgressPhase::Solve,
             FeaProgressStatus::Advanced,
             format!("solving transient step ending at {next_time_s} s"),
-            Some(state.schedule_ordinal),
-            None,
+            Some(u64::try_from(ordinal).map_err(|_| TransientSolveError::ScheduleOrdinalLimit)?),
+            Some(final_ordinal),
         );
         let step_summary =
             assembly_at(next_time_s, approach).map_err(TransientSolveError::Assembly)?;

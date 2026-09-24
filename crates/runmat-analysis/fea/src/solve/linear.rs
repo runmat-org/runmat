@@ -295,14 +295,17 @@ pub fn solve_operator_system(
     }
 
     let mut iterations = 0u32;
-    let mut converged = false;
     for _ in 0..max_iters {
         if crate::is_fea_cancelled() {
             break;
         }
         let ap = crate::algebra::apply_prepared(&prepared, &p);
         let denom = algebra_backend.dot(&p, &ap);
-        if !denom.is_finite() || denom <= 1.0e-18 {
+        // PCG is scale invariant. An absolute cutoff here rejects valid systems when the
+        // preconditioned search direction is small (a common case for dynamics operators and a
+        // good warm start). For an admitted SPD operator only non-positive or non-finite
+        // curvature is a breakdown.
+        if !denom.is_finite() || denom <= 0.0 {
             break;
         }
         let alpha = rz_old / denom;
@@ -311,13 +314,12 @@ pub fn solve_operator_system(
         let residual_norm = algebra_backend.dot(&r, &r).sqrt();
         iterations += 1;
         if residual_norm / b_norm <= tol {
-            converged = true;
             break;
         }
 
         z = preconditioner.apply(&r);
         let rz_new = algebra_backend.dot(&r, &z);
-        if rz_old.abs() <= 1.0e-18 {
+        if !rz_new.is_finite() || !rz_old.is_finite() || rz_old <= 0.0 || rz_new < 0.0 {
             break;
         }
         let beta = rz_new / rz_old;
@@ -327,13 +329,19 @@ pub fn solve_operator_system(
         rz_old = rz_new;
     }
 
+    // Recurrence residuals can drift from b - A*x. Make the public convergence decision from a
+    // freshly evaluated equation residual so downstream physics never inherits a false positive
+    // or false negative from recurrence roundoff.
+    r = algebra_backend.vec_sub(b, &crate::algebra::apply_prepared(&prepared, &x));
     let residual_norm = algebra_backend.dot(&r, &r).sqrt();
+    let converged = residual_norm / b_norm <= tol;
     if !converged {
         diagnostics.push(FeaDiagnostic {
-            code: "FEA_CG_MAX_ITERS".to_string(),
+            code: "FEA_CG_NOT_CONVERGED".to_string(),
             severity: FeaDiagnosticSeverity::Warning,
             message: format!(
-                "matrix-free cg reached max iterations ({max_iters}) with residual_norm={residual_norm}"
+                "matrix-free cg stopped after {iterations}/{max_iters} iterations with residual_norm={residual_norm} relative_residual={} tolerance={tol}",
+                residual_norm / b_norm,
             ),
         });
     }
@@ -502,6 +510,46 @@ mod tests {
             None,
         );
         assert!(result.converged);
+        assert!(result.residual_norm <= 1.0e-8);
+    }
+
+    #[test]
+    fn cpu_reference_warm_start_does_not_use_an_absolute_breakdown_threshold() {
+        let stiffness = RealSparseMatrix::diagonal(
+            vec![1.0e12, 2.0e12],
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let mass = RealSparseMatrix::diagonal(
+            vec![1.0; 2],
+            OperatorRole::Mass,
+            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+        )
+        .unwrap();
+        let damping = RealSparseMatrix::diagonal(
+            vec![0.0; 2],
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+        .unwrap();
+        let operator = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+            vec![false; 2],
+            vec![1.0, 2.0],
+        )
+        .unwrap();
+        let initial_guess = [1.0e-12 - 1.0e-19, 1.0e-12 + 1.0e-19];
+
+        let result = solve_operator_system(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            Some(&initial_guess),
+        );
+
+        assert!(result.converged, "diagnostics={:?}", result.diagnostics);
         assert!(result.residual_norm <= 1.0e-8);
     }
 
