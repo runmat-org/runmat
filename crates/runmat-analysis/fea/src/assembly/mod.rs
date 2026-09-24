@@ -251,6 +251,8 @@ impl fmt::Display for StructuralLoadKind {
 #[derive(Debug, Clone, PartialEq)]
 pub enum StructuralAssemblyError {
     SparseOperator(String),
+    LocalExecution(String),
+    Cancelled,
     MissingDiscretization,
     MixedTopology(String),
     MissingNodes,
@@ -370,6 +372,10 @@ impl fmt::Display for StructuralAssemblyError {
             Self::SparseOperator(message) => {
                 write!(f, "structural sparse operator construction failed: {message}")
             }
+            Self::LocalExecution(message) => {
+                write!(f, "structural local execution failed: {message}")
+            }
+            Self::Cancelled => write!(f, "structural assembly cancelled"),
             Self::MissingDiscretization => write!(
                 f,
                 "structural analysis requires a canonical solid mesh or explicit beam/shell connectivity"
@@ -890,8 +896,13 @@ fn assemble_linear_system_impl(
                 local_execution,
             );
         }
-        return assemble_explicit_structural_system(model, excitations, supplied_constraint_plan)
-            .map_err(LinearAssemblyError::Structural);
+        return assemble_explicit_structural_system(
+            model,
+            excitations,
+            supplied_constraint_plan,
+            local_execution,
+        )
+        .map_err(LinearAssemblyError::Structural);
     }
     if solver_mesh.is_none()
         && structural_requirement == Some(StructuralFormulationRequirement::PhysicalDiscretization)
@@ -1768,6 +1779,7 @@ fn assemble_explicit_structural_system(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
     supplied_constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
+    local_execution: crate::planning::resource::LocalExecutionPlan,
 ) -> Result<AssemblySummary, StructuralAssemblyError> {
     let structural = model
         .structural
@@ -1818,6 +1830,7 @@ fn assemble_explicit_structural_system(
         &properties,
         &structural_dof_layout,
         &canonical_node_indices,
+        local_execution,
     )?;
     let mut rhs = vec![0.0_f64; dof_count];
     let mut connector_stiffness_assembler = RealSparseAssembler::square(

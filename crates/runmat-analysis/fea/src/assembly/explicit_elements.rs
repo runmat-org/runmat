@@ -1,9 +1,13 @@
 use std::collections::BTreeSet;
 
+mod beam_contribution;
 mod beam_inertia;
 mod laminate_property;
+#[cfg(test)]
+mod tests;
 
-use beam_inertia::{add_rayleigh_element_damping, lumped_beam_mass};
+use beam_contribution::BeamElementContribution;
+use beam_inertia::add_rayleigh_element_damping;
 
 use runmat_analysis_core::{
     BeamSectionModel, HomogeneousShellReferenceSurface, HomogeneousShellSectionModel,
@@ -14,10 +18,7 @@ use runmat_analysis_core::{
 use super::{
     dofs::{StructuralDofKind, StructuralDofLayout},
     elements::{
-        beam::{
-            global_stiffness_matrix as beam_global_stiffness_matrix, transformation_matrix,
-            BeamElementGeometry, BeamMaterial, BeamSection, BEAM_ELEMENT_DOF_COUNT,
-        },
+        beam::{BeamSection, BEAM_ELEMENT_DOF_COUNT},
         shell::{
             global_lumped_mass_matrix, global_matrix_for_constitutive_matrices,
             global_stiffness_matrix as shell_global_stiffness_matrix,
@@ -37,6 +38,7 @@ use crate::{
     physics::structural::{
         material::StructuralElementMaterial, topology::explicit_element_identity,
     },
+    planning::resource::{execute_scoped_chunks, LocalExecutionPlan, ScopedLocalExecutionError},
     properties::{CompiledPropertyMap, CompiledShellPropertyOwner},
 };
 
@@ -56,6 +58,7 @@ pub(super) fn assemble_explicit_elements(
     properties: &CompiledPropertyMap,
     layout: &StructuralDofLayout,
     canonical_node_indices: &[usize],
+    local_execution: LocalExecutionPlan,
 ) -> Result<ExplicitElementAssembly, StructuralAssemblyError> {
     validate_explicit_topology(structural, canonical_node_indices)?;
     let beam_count = structural
@@ -108,127 +111,111 @@ pub(super) fn assemble_explicit_elements(
     let mut beam_recovery = Vec::with_capacity(beam_count);
     let mut shell_recovery = Vec::with_capacity(shell_count);
 
-    for element in &structural.elements {
-        match &element.kind {
-            StructuralElementKind::Beam(beam) => {
-                let explicit_i = structural_node_index(structural, beam.node_ids[0], element)?;
-                let explicit_j = structural_node_index(structural, beam.node_ids[1], element)?;
-                let node_i = canonical_node_indices[explicit_i];
-                let node_j = canonical_node_indices[explicit_j];
-                let element_identity = explicit_element_identity(
-                    topology_digest,
-                    &element.element_id,
-                    &element.region_id,
-                    &element.kind,
-                )
-                .map_err(|error| {
-                    StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
-                })?;
-                let property = properties.beam_property(element_identity).ok_or_else(|| {
-                    StructuralAssemblyError::UnassignedExplicitRegion {
-                        element_id: element.element_id.clone(),
-                        region_id: element.region_id.clone(),
+    // Only beam element math is scoped here. Shells retain their serial constitutive
+    // path; every K/M/C scatter still follows the authored element order.
+    const ELEMENTS_PER_WORKER_WAVE: usize = 8;
+    let wave_capacity = usize::from(local_execution.thread_count().get())
+        .checked_mul(ELEMENTS_PER_WORKER_WAVE)
+        .ok_or_else(|| StructuralAssemblyError::LocalExecution("beam wave size overflow".into()))?;
+    let cancellation = crate::progress::cancellation_token();
+    for wave in structural.elements.chunks(wave_capacity) {
+        if cancellation.is_cancelled() {
+            return Err(StructuralAssemblyError::Cancelled);
+        }
+        let beam_contributions: Vec<Option<BeamElementContribution>> = if wave
+            .iter()
+            .any(|element| matches!(element.kind, StructuralElementKind::Beam(_)))
+        {
+            execute_scoped_chunks(local_execution, wave.len() as u64, |chunk| {
+                let mut contributions = Vec::with_capacity(chunk.len() as usize);
+                for element in &wave[chunk.start() as usize..chunk.end_exclusive() as usize] {
+                    if cancellation.is_cancelled() {
+                        return Err(StructuralAssemblyError::Cancelled);
                     }
-                })?;
-                let section = section_from_model(&property.section);
-                let material =
-                    StructuralElementMaterial::from_model(&property.material).map_err(|error| {
+                    contributions.push(match &element.kind {
+                        StructuralElementKind::Beam(beam) => Some(beam_contribution::compute(
+                            structural,
+                            element,
+                            beam,
+                            properties,
+                            layout,
+                            canonical_node_indices,
+                            topology_digest,
+                        )?),
+                        StructuralElementKind::Shell(_) => None,
+                    });
+                }
+                Ok(contributions)
+            })
+            .map_err(|error| match error {
+                ScopedLocalExecutionError::Work { source, .. } => source,
+                other => StructuralAssemblyError::LocalExecution(other.to_string()),
+            })?
+            .into_iter()
+            .flatten()
+            .collect()
+        } else {
+            std::iter::repeat_with(|| None).take(wave.len()).collect()
+        };
+        for (element, beam_contribution) in wave.iter().zip(beam_contributions) {
+            match &element.kind {
+                StructuralElementKind::Beam(_) => {
+                    let contribution = beam_contribution.ok_or_else(|| {
+                        StructuralAssemblyError::LocalExecution(
+                            "missing beam wave contribution".into(),
+                        )
+                    })?;
+                    scatter(&mut stiffness, &contribution.dofs, &contribution.stiffness);
+                    scatter_diagonal(&mut mass, &contribution.dofs, &contribution.mass);
+                    has_rayleigh_damping |= add_rayleigh_element_damping(
+                        &mut damping,
+                        &contribution.dofs,
+                        &contribution.stiffness,
+                        &contribution.mass,
+                        contribution.damping,
+                    );
+                    beam_recovery.push(contribution.recovery);
+                }
+                StructuralElementKind::Shell(shell) => {
+                    let mut explicit_nodes = [0_usize; 3];
+                    for (local, node_id) in shell.node_ids.iter().copied().enumerate() {
+                        explicit_nodes[local] =
+                            structural_node_index(structural, node_id, element)?;
+                    }
+                    let node_indices = explicit_nodes.map(|node| canonical_node_indices[node]);
+                    let element_identity = explicit_element_identity(
+                        topology_digest,
+                        &element.element_id,
+                        &element.region_id,
+                        &element.kind,
+                    )
+                    .map_err(|error| {
                         StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
                     })?;
-                let beam_material = BeamMaterial {
-                    youngs_modulus_pa: material.youngs_modulus_pa,
-                    shear_modulus_pa: material.shear_modulus_pa(),
-                };
-                let geometry = BeamElementGeometry {
-                    node_i_m: structural.nodes[explicit_i].coordinates_m,
-                    node_j_m: structural.nodes[explicit_j].coordinates_m,
-                    reference_axis: beam.reference_axis,
-                };
-                let frame = geometry.local_frame().map_err(|error| {
-                    StructuralAssemblyError::BeamElement {
-                        element_id: element.element_id.clone(),
-                        error,
-                    }
-                })?;
-                let transform_global_to_local = transformation_matrix(frame);
-                let element_stiffness =
-                    beam_global_stiffness_matrix(section, beam_material, geometry).map_err(
-                        |error| StructuralAssemblyError::BeamElement {
+                    let property =
+                        properties.shell_property(element_identity).ok_or_else(|| {
+                            StructuralAssemblyError::UnassignedExplicitRegion {
+                                element_id: element.element_id.clone(),
+                                region_id: element.region_id.clone(),
+                            }
+                        })?;
+                    let geometry = ShellElementGeometry {
+                        nodes_m: explicit_nodes.map(|node| structural.nodes[node].coordinates_m),
+                        reference_axis: shell.reference_axis,
+                    };
+                    let frame = geometry.local_frame().map_err(|error| {
+                        StructuralAssemblyError::ShellElement {
                             element_id: element.element_id.clone(),
                             error,
-                        },
-                    )?;
-                let element_dofs =
-                    beam_element_dof_indices(layout, node_i, node_j).ok_or_else(|| {
-                        StructuralAssemblyError::MissingRotationalDof {
-                            element_id: element.element_id.clone(),
                         }
                     })?;
-                scatter(&mut stiffness, &element_dofs, &element_stiffness);
-                let element_mass = lumped_beam_mass(
-                    section,
-                    material.density_kg_per_m3,
-                    frame.length_m,
-                    &transform_global_to_local,
-                );
-                scatter_diagonal(&mut mass, &element_dofs, &element_mass);
-                has_rayleigh_damping |= add_rayleigh_element_damping(
-                    &mut damping,
-                    &element_dofs,
-                    &element_stiffness,
-                    &element_mass,
-                    material.damping,
-                );
-                beam_recovery.push(BeamRecoveryElementSummary {
-                    element_id: element.element_id.clone(),
-                    region_id: element.region_id.clone(),
-                    node_i_index: node_i,
-                    node_j_index: node_j,
-                    length_m: frame.length_m,
-                    section,
-                    material: beam_material,
-                    transform_global_to_local,
-                });
-            }
-            StructuralElementKind::Shell(shell) => {
-                let mut explicit_nodes = [0_usize; 3];
-                for (local, node_id) in shell.node_ids.iter().copied().enumerate() {
-                    explicit_nodes[local] = structural_node_index(structural, node_id, element)?;
-                }
-                let node_indices = explicit_nodes.map(|node| canonical_node_indices[node]);
-                let element_identity = explicit_element_identity(
-                    topology_digest,
-                    &element.element_id,
-                    &element.region_id,
-                    &element.kind,
-                )
-                .map_err(|error| {
-                    StructuralAssemblyError::InvalidMaterialCoverage(error.to_string())
-                })?;
-                let property = properties.shell_property(element_identity).ok_or_else(|| {
-                    StructuralAssemblyError::UnassignedExplicitRegion {
-                        element_id: element.element_id.clone(),
-                        region_id: element.region_id.clone(),
-                    }
-                })?;
-                let geometry = ShellElementGeometry {
-                    nodes_m: explicit_nodes.map(|node| structural.nodes[node].coordinates_m),
-                    reference_axis: shell.reference_axis,
-                };
-                let frame = geometry.local_frame().map_err(|error| {
-                    StructuralAssemblyError::ShellElement {
-                        element_id: element.element_id.clone(),
-                        error,
-                    }
-                })?;
-                let element_dofs =
-                    shell_element_dof_indices(layout, node_indices).ok_or_else(|| {
-                        StructuralAssemblyError::MissingRotationalDof {
-                            element_id: element.element_id.clone(),
-                        }
-                    })?;
-                let (element_stiffness, element_mass, constitutive) =
-                    match &property.owner {
+                    let element_dofs =
+                        shell_element_dof_indices(layout, node_indices).ok_or_else(|| {
+                            StructuralAssemblyError::MissingRotationalDof {
+                                element_id: element.element_id.clone(),
+                            }
+                        })?;
+                    let (element_stiffness, element_mass, constitutive) = match &property.owner {
                         CompiledShellPropertyOwner::Homogeneous { material, section } => {
                             let section = shell_section_from_model(section);
                             let material = StructuralElementMaterial::from_model(material)
@@ -342,15 +329,16 @@ pub(super) fn assemble_explicit_elements(
                             (element_stiffness, element_mass, response.elastic)
                         }
                     };
-                scatter(&mut stiffness, &element_dofs, &element_stiffness);
-                scatter(&mut mass, &element_dofs, &element_mass);
-                shell_recovery.push(ShellRecoveryElementSummary {
-                    element_id: element.element_id.clone(),
-                    region_id: element.region_id.clone(),
-                    node_indices,
-                    geometry,
-                    constitutive,
-                });
+                    scatter(&mut stiffness, &element_dofs, &element_stiffness);
+                    scatter(&mut mass, &element_dofs, &element_mass);
+                    shell_recovery.push(ShellRecoveryElementSummary {
+                        element_id: element.element_id.clone(),
+                        region_id: element.region_id.clone(),
+                        node_indices,
+                        geometry,
+                        constitutive,
+                    });
+                }
             }
         }
     }

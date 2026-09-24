@@ -5,7 +5,6 @@ use runmat_analysis_core::{
 use runmat_execution::Digest;
 
 mod solve;
-
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -163,7 +162,8 @@ fn run_linear_static_with_constraint_plan(
         options.local_execution,
     )
     .map_err(|err| match err {
-        LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled) => {
+        LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::Cancelled)
+        | LinearAssemblyError::Structural(crate::assembly::StructuralAssemblyError::Cancelled) => {
             FeaRunError::Cancelled
         }
         other => FeaRunError::Assembly(other.to_string()),

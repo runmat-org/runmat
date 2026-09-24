@@ -41,7 +41,6 @@ use crate::{
 };
 
 mod operators;
-
 use operators::{embed_solid_matrix, sparse_error, sum};
 
 pub(crate) fn mixed_dof_layout(
@@ -113,6 +112,7 @@ pub(super) fn assemble_mixed_structural_system(
         &solid_properties,
         &layout,
         &topology.explicit_node_indices,
+        local_execution,
     )
     .map_err(LinearAssemblyError::Structural)?;
     let solid_stiffness = embed_solid_matrix(&solid.stiffness, &layout, topology.solid_node_count)?;
