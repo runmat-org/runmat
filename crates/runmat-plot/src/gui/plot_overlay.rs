@@ -1656,7 +1656,13 @@ impl PlotOverlay {
             .geometry_overlay()
             .and_then(|overlay| overlay.scalar_legend.as_ref())
         {
-            self.draw_geometry_scalar_legend(ui, centered_plot_rect, legend, config.font_scale);
+            self.draw_geometry_scalar_legend(
+                ui,
+                centered_plot_rect,
+                legend,
+                config.font_scale,
+                config.show_cad_overlay,
+            );
         }
 
         if config.show_cad_overlay {
@@ -2970,13 +2976,17 @@ impl PlotOverlay {
         plot_rect: Rect,
         legend: &GeometrySceneScalarLegend,
         scale: f32,
+        cad_strip_visible: bool,
     ) {
         let scale = scale.max(0.75);
         let width = (plot_rect.width() * 0.34).clamp(190.0, 300.0);
         let pad = 12.0 * scale;
         let bar_height = 7.0 * scale;
         let rect = Rect::from_min_size(
-            egui::pos2(plot_rect.max.x - width - pad, plot_rect.min.y + pad),
+            egui::pos2(
+                plot_rect.max.x - width - pad,
+                plot_rect.min.y + pad + if cad_strip_visible { 36.0 * scale } else { 0.0 },
+            ),
             egui::vec2(width, 56.0 * scale),
         );
         let theme = self.theme.build_theme();
