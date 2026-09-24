@@ -203,6 +203,64 @@ fn mixed_structural_fixture() -> (
 }
 
 #[test]
+fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
+    let (mut model, mut mesh, _, _) = structural_fixture();
+    let selected = PersistentEntityId {
+        kind: runmat_meshing_core::PersistentEntityKind::Face,
+        source_topology_id: "selected_foundation_face".into(),
+        assembly_path: vec!["root".into()],
+    };
+    mesh.topology.boundary_faces[0].provenance.push(selected);
+    mesh.topology.boundary_faces[0].provenance.sort();
+    mesh.canonical_digest = StableDigest::ZERO;
+    mesh.seal_canonical_digest().unwrap();
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let foundation = runmat_analysis_core::AnalysisConnector {
+        connector_id: "foundation_a".into(),
+        kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
+            target: runmat_analysis_core::RegionTarget::boundary("selected_foundation_face"),
+            modulus: runmat_analysis_core::FoundationModulus::new(1.0),
+        },
+    };
+    model.connectors.push(foundation.clone());
+    let one = connector_buffers::estimate_connector_buffers(
+        &model,
+        Some(&projection),
+        projection.nodes.len() as u64,
+    )
+    .unwrap();
+    let canonical = 7 * 1_024;
+    let transient = 7 * 512 + 1_024;
+    assert_eq!(one, canonical + 4_096 + transient);
+
+    let mut second = foundation;
+    second.connector_id = "foundation_b".into();
+    model.connectors.push(second);
+    let two = connector_buffers::estimate_connector_buffers(
+        &model,
+        Some(&projection),
+        projection.nodes.len() as u64,
+    )
+    .unwrap();
+    assert_eq!(two, 2 * (canonical + 4_096) + transient);
+    assert!(two > one);
+
+    let mut unmapped = model;
+    unmapped.connectors[0].kind = runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
+        target: runmat_analysis_core::RegionTarget::boundary("missing_face"),
+        modulus: runmat_analysis_core::FoundationModulus::new(1.0),
+    };
+    assert!(matches!(
+        connector_buffers::estimate_connector_buffers(
+            &unmapped,
+            Some(&projection),
+            projection.nodes.len() as u64,
+        ),
+        Err(ResourcePlanningError::Invalid(message)) if message.contains("foundation_a")
+    ));
+}
+
+#[test]
 fn structural_symbolic_plan_is_preassembly_and_material_independent() {
     let (model, mesh, projection, constraints) = structural_fixture();
     let operators =
@@ -371,6 +429,50 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         plan.input.structural_operator().unwrap().constraints,
         ConstraintResourceFacts::from_plan(&constraints).unwrap()
     );
+    let mut foundation_workload = workload.clone();
+    foundation_workload
+        .model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "preflight_foundation".into(),
+            kind: runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
+                target: runmat_analysis_core::RegionTarget::boundary("root"),
+                modulus: runmat_analysis_core::FoundationModulus::new(1.0),
+            },
+        });
+    let foundation_plan = build_structural_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &foundation_workload,
+        &[],
+        LocalExecutionPlan::serial(),
+    )
+    .unwrap();
+    let foundation_bytes = connector_buffers::estimate_connector_buffers(
+        &foundation_workload.model,
+        Some(&projection),
+        projection.nodes.len() as u64,
+    )
+    .unwrap();
+    assert!(foundation_bytes > 0);
+    assert_eq!(
+        foundation_plan
+            .input
+            .structural_operator()
+            .unwrap()
+            .assembly
+            .contribution_bytes_upper_bound
+            .0,
+        plan.input
+            .structural_operator()
+            .unwrap()
+            .assembly
+            .contribution_bytes_upper_bound
+            .0
+            + foundation_bytes,
+    );
+    assert_ne!(foundation_plan.identity, plan.identity);
     assert_eq!(
         plan.input
             .structural_operator()

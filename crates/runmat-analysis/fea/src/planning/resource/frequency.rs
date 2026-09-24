@@ -268,7 +268,12 @@ impl StructuralFrequencyEntryResourceProjection {
             constraints: facts.constraints,
             assembly: AssemblyResourcePolicy {
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
-                contribution_bytes_upper_bound: ByteCount(contribution_bytes),
+                contribution_bytes_upper_bound: ByteCount(
+                    super::connector_buffers::include_connector_buffers(
+                        contribution_bytes,
+                        facts.connector_quadrature_bytes,
+                    )?,
+                ),
                 scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
                 fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
             },
@@ -372,11 +377,16 @@ impl StructuralFrequencyEntryResourceProjection {
             constraints: facts.constraints,
             assembly: AssemblyResourcePolicy {
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
-                contribution_bytes_upper_bound: ByteCount(multiply(
-                    contribution_nonzeros,
-                    24,
-                    "frequency recovery contribution bytes",
-                )?),
+                contribution_bytes_upper_bound: ByteCount(
+                    super::connector_buffers::include_connector_buffers(
+                        multiply(
+                            contribution_nonzeros,
+                            24,
+                            "frequency recovery contribution bytes",
+                        )?,
+                        facts.connector_quadrature_bytes,
+                    )?,
+                ),
                 scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
                 fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
             },

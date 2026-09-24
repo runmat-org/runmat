@@ -2,6 +2,7 @@
 
 mod admission;
 mod buckling;
+mod connector_buffers;
 mod contract;
 mod estimate;
 mod facts;

@@ -67,12 +67,14 @@ pub fn build_structural_resource_plan(
             .len(),
     )
     .map_err(|_| ResourcePlanningError::Overflow("assembly contribution count"))?;
-    let contribution_bytes =
+    let contribution_bytes = super::connector_buffers::include_connector_buffers(
         contribution_nonzeros
             .checked_mul(24)
             .ok_or(ResourcePlanningError::Overflow(
                 "assembly contribution bytes",
-            ))?;
+            ))?,
+        facts.connector_quadrature_bytes,
+    )?;
     let observations =
         ObservationResourceFacts::from_plan(observations, workload.observation_execution)?;
     let step = workload

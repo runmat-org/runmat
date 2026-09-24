@@ -1,0 +1,151 @@
+use runmat_analysis_core::{AnalysisModel, ConnectorKind, StructuralElementKind};
+
+use crate::topology::AnalysisProjection;
+
+use super::ResourcePlanningError;
+
+// Conservative, platform-stable allocation envelopes for one retained canonical
+// quadrature point and one simultaneously resolved input point. They include
+// the outer Vec slot, nested node/shape Vec payload and capacity growth, and
+// allocation overhead. Tri6 is the largest admitted foundation face.
+const TRI6_CANONICAL_BYTES: u64 = 1_024;
+const TRI6_RESOLVED_BYTES: u64 = 512;
+const TRI3_CANONICAL_BYTES: u64 = 640;
+const TRI3_RESOLVED_BYTES: u64 = 384;
+const SURFACE_FACE_WORKSPACE_BYTES: u64 = 1_024;
+const EXPLICIT_NODE_MAP_BYTES: u64 = 256;
+const CONNECTOR_METADATA_BYTES: u64 = 4_096;
+
+pub(super) fn estimate_connector_buffers(
+    model: &AnalysisModel,
+    projection: Option<&AnalysisProjection>,
+    topology_node_count: u64,
+) -> Result<u64, ResourcePlanningError> {
+    let mut retained = 0_u64;
+    let mut transient_peak = 0_u64;
+    for connector in &model.connectors {
+        let ConnectorKind::SurfaceNormalFoundation { target, .. } = &connector.kind else {
+            continue;
+        };
+        let solid_faces = projection.map_or(0_usize, |projection| {
+            projection
+                .boundary_faces
+                .iter()
+                .filter(|face| {
+                    face.provenance
+                        .iter()
+                        .any(|entity| target.matches_persistent_entity(entity))
+                })
+                .count()
+        });
+        let shell_faces = model.structural.as_ref().map_or(0_usize, |structural| {
+            structural
+                .elements
+                .iter()
+                .filter(|element| {
+                    element.region_id == target.region_id
+                        && matches!(element.kind, StructuralElementKind::Shell(_))
+                })
+                .count()
+        });
+        let solid_faces = u64::try_from(solid_faces)
+            .map_err(|_| ResourcePlanningError::Overflow("foundation solid face count"))?;
+        let shell_faces = u64::try_from(shell_faces)
+            .map_err(|_| ResourcePlanningError::Overflow("foundation shell face count"))?;
+        if solid_faces == 0 && shell_faces == 0 {
+            return Err(ResourcePlanningError::Invalid(format!(
+                "surface foundation `{}` resolves no structural boundary faces",
+                connector.connector_id
+            )));
+        }
+        let solid_samples = multiply(solid_faces, 7, "foundation solid samples")?;
+        let shell_samples = multiply(shell_faces, 3, "foundation shell samples")?;
+        let canonical = sum(
+            multiply(
+                solid_samples,
+                TRI6_CANONICAL_BYTES,
+                "foundation canonical solid samples",
+            )?,
+            multiply(
+                shell_samples,
+                TRI3_CANONICAL_BYTES,
+                "foundation canonical shell samples",
+            )?,
+            "foundation canonical samples",
+        )?;
+        let face_workspace = multiply(
+            sum(solid_faces, shell_faces, "foundation face count")?,
+            SURFACE_FACE_WORKSPACE_BYTES,
+            "foundation face workspace",
+        )?;
+        let explicit_node_workspace = if shell_faces > 0 {
+            let authored_nodes = u64::try_from(
+                model
+                    .structural
+                    .as_ref()
+                    .map_or(0, |structural| structural.nodes.len()),
+            )
+            .map_err(|_| ResourcePlanningError::Overflow("foundation authored node count"))?;
+            multiply(
+                sum(authored_nodes, topology_node_count, "foundation node maps")?,
+                EXPLICIT_NODE_MAP_BYTES,
+                "foundation node-map workspace",
+            )?
+        } else {
+            0
+        };
+        let transient = sum(
+            sum(
+                multiply(
+                    solid_samples,
+                    TRI6_RESOLVED_BYTES,
+                    "foundation resolved solid samples",
+                )?,
+                multiply(
+                    shell_samples,
+                    TRI3_RESOLVED_BYTES,
+                    "foundation resolved shell samples",
+                )?,
+                "foundation resolved samples",
+            )?,
+            sum(
+                face_workspace,
+                explicit_node_workspace,
+                "foundation resolver workspace",
+            )?,
+            "foundation transient buffers",
+        )?;
+        retained = sum(
+            retained,
+            sum(
+                canonical,
+                CONNECTOR_METADATA_BYTES,
+                "foundation retained buffers",
+            )?,
+            "all foundation retained buffers",
+        )?;
+        transient_peak = transient_peak.max(transient);
+    }
+    sum(retained, transient_peak, "foundation assembly buffer peak")
+}
+
+pub(super) fn include_connector_buffers(
+    sparse_contribution_bytes: u64,
+    connector_quadrature_bytes: u64,
+) -> Result<u64, ResourcePlanningError> {
+    sum(
+        sparse_contribution_bytes,
+        connector_quadrature_bytes,
+        "assembly contributions and connector buffers",
+    )
+}
+
+fn sum(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
+    left.checked_add(right)
+        .ok_or(ResourcePlanningError::Overflow(label))
+}
+
+fn multiply(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
+    left.checked_mul(right)
+        .ok_or(ResourcePlanningError::Overflow(label))
+}

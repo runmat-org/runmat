@@ -25,6 +25,7 @@ pub(super) struct StructuralResourceFacts {
     pub constraint_matrix: ResolvedConstraintMatrix,
     pub symbolic: StructuralSymbolicOperators,
     pub topology: TopologyResourceFacts,
+    pub connector_quadrature_bytes: u64,
     pub recovery_node_count: usize,
     pub recovery_element_count: usize,
     pub recovery_solid_element_count: usize,
@@ -160,6 +161,11 @@ pub(super) fn derive_structural_resource_facts(
             ResourcePlanningError::Invalid("solid resource planning lost its projection".into())
         })?)?
     };
+    let connector_quadrature_bytes = super::connector_buffers::estimate_connector_buffers(
+        model,
+        projection.as_ref(),
+        topology.nodes.0,
+    )?;
     Ok(StructuralResourceFacts {
         topology_digest,
         sparse,
@@ -167,6 +173,7 @@ pub(super) fn derive_structural_resource_facts(
         constraint_matrix,
         symbolic,
         topology,
+        connector_quadrature_bytes,
         recovery_node_count,
         recovery_element_count,
         recovery_solid_element_count,
