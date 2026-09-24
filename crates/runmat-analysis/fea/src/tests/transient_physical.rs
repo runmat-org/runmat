@@ -392,7 +392,7 @@ fn execute_transient_workload(
             workload,
             solver_mesh: mesh,
             modal_state,
-            result: &result,
+            result,
             numerical_receipt: &numerical_receipt,
         },
     )
@@ -806,7 +806,7 @@ fn prescribed_motion_blocks_restart_from_only_the_physical_checkpoint() {
             workload: &transient_workload(&model, &options),
             solver_mesh: options.solver_mesh.as_ref().unwrap(),
             modal_state: None,
-            result: &solver_result,
+            result: solver_result,
             numerical_receipt: &receipt,
         },
     )
@@ -903,7 +903,7 @@ fn prescribed_motion_uneven_blocks_preserve_discontinuity_and_final_result() {
             workload: &workload,
             solver_mesh: &mesh,
             modal_state: None,
-            result: &result,
+            result,
             numerical_receipt: &numerical_receipt,
         },
     )

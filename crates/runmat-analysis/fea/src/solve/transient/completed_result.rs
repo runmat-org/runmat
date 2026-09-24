@@ -12,7 +12,7 @@ use super::{
 
 pub(crate) struct CompletedTransientSolveInput<'a> {
     pub(crate) options: &'a TransientSolveOptions,
-    pub(crate) result: &'a StructuralTransientSolverResult,
+    pub(crate) result: StructuralTransientSolverResult,
     pub(crate) receipt: &'a StructuralTransientNumericalReceipt,
     pub(crate) assembly_snapshots: Vec<AssemblySummary>,
 }
@@ -25,7 +25,7 @@ pub(crate) fn reconstruct_completed_transient_solve(
 ) -> Result<TransientSolveResult, TransientSolveError<std::convert::Infallible>> {
     input
         .receipt
-        .validate_for_result(input.result)
+        .validate_for_result(&input.result)
         .map_err(contract_error)?;
     let samples = input.result.samples();
     if samples.len() != input.assembly_snapshots.len() {
@@ -66,18 +66,6 @@ pub(crate) fn reconstruct_completed_transient_solve(
     let time_points_s = samples
         .iter()
         .map(|sample| sample.time_s)
-        .collect::<Vec<_>>();
-    let displacement_snapshots = samples
-        .iter()
-        .map(|sample| sample.state.displacement.clone())
-        .collect::<Vec<_>>();
-    let velocity_snapshots = samples
-        .iter()
-        .map(|sample| sample.state.velocity.clone())
-        .collect::<Vec<_>>();
-    let acceleration_snapshots = samples
-        .iter()
-        .map(|sample| sample.state.acceleration.clone())
         .collect::<Vec<_>>();
     let residual_norms = samples
         .iter()
@@ -127,9 +115,24 @@ pub(crate) fn reconstruct_completed_transient_solve(
         .iter()
         .flat_map(|block| block.accelerator_evidence.iter().cloned())
         .collect();
+    let schedule = scope.schedule.clone();
+    let mut displacement_snapshots = Vec::with_capacity(samples.len());
+    let mut velocity_snapshots = Vec::with_capacity(samples.len());
+    let mut acceleration_snapshots = Vec::with_capacity(samples.len());
+    let mut reaction_snapshots = Vec::with_capacity(samples.len());
+    let mut dynamic_balance_snapshots = Vec::with_capacity(samples.len());
+    // The validated result is consumed here so recovery does not retain a second
+    // full set of solver-owned physical state and reaction buffers.
+    for sample in input.result.samples {
+        displacement_snapshots.push(sample.state.displacement);
+        velocity_snapshots.push(sample.state.velocity);
+        acceleration_snapshots.push(sample.state.acceleration);
+        reaction_snapshots.push(sample.reaction);
+        dynamic_balance_snapshots.push(sample.dynamic_balance);
+    }
 
     Ok(TransientSolveResult {
-        schedule: scope.schedule.clone(),
+        schedule,
         converged_steps: total_steps,
         total_steps,
         time_points_s,
@@ -147,10 +150,7 @@ pub(crate) fn reconstruct_completed_transient_solve(
         preconditioner: first_block.preconditioner,
         accelerator_evidence,
         assembly_snapshots: input.assembly_snapshots,
-        reaction_snapshots: samples
-            .iter()
-            .map(|sample| sample.reaction.clone())
-            .collect(),
+        reaction_snapshots,
         integration_intervals: Vec::new(),
         strain_energy_snapshots,
         kinetic_energy_snapshots,
@@ -159,10 +159,7 @@ pub(crate) fn reconstruct_completed_transient_solve(
         damping_dissipation_j,
         energy_balance_residual_j,
         relative_energy_balance_error,
-        dynamic_balance_snapshots: samples
-            .iter()
-            .map(|sample| sample.dynamic_balance.clone())
-            .collect(),
+        dynamic_balance_snapshots,
     })
 }
 

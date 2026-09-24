@@ -299,13 +299,14 @@ pub(in crate::analysis) fn complete_modal_transient_study(
             error.to_string(),
         )
     })?;
+    let transient_result_identity = numerical.transient_result.manifest().identity;
     let recovered_transient =
         runmat_analysis_fea::pipeline::transient::recover_completed_transient_run(
             runmat_analysis_fea::pipeline::transient::CompletedStructuralTransientRunInput {
                 workload: &transient_workload,
                 solver_mesh: &solver_mesh,
                 modal_state: Some(&numerical.basis_state),
-                result: &numerical.transient_result,
+                result: numerical.transient_result,
                 numerical_receipt: &numerical.transient_numerical_receipt,
             },
         )
@@ -325,7 +326,6 @@ pub(in crate::analysis) fn complete_modal_transient_study(
         recovered_transient,
         Some(&transient_run_id),
     )?;
-    let transient_result_identity = numerical.transient_result.manifest().identity;
     let mut states = expected_basis_states;
     let sequence = runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
         &prepared.model.sequence,

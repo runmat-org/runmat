@@ -671,12 +671,13 @@ fn complete_direct_transient(
         ));
     };
     workload.model = resolved_model.clone();
+    let solver_result_identity = result.result.manifest().identity;
     let recovered = runmat_analysis_fea::pipeline::transient::recover_completed_transient_run(
         runmat_analysis_fea::pipeline::transient::CompletedStructuralTransientRunInput {
             workload: &workload,
             solver_mesh: &solver_mesh,
             modal_state: None,
-            result: &result.result,
+            result: result.result,
             numerical_receipt: &result.numerical_receipt,
         },
     )
@@ -692,7 +693,6 @@ fn complete_direct_transient(
     options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
     let assigned_run_id = completion_identity
         .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
-    let solver_result_identity = result.result.manifest().identity;
     let run = analysis_admit_transient_run_with_id(
         workload.backend,
         options.clone(),

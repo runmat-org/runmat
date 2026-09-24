@@ -23,7 +23,7 @@ pub struct CompletedStructuralTransientRunInput<'a> {
     pub workload: &'a StructuralTransientWorkload,
     pub solver_mesh: &'a SolverMeshArtifact,
     pub modal_state: Option<&'a crate::execution::CanonicalSemanticState>,
-    pub result: &'a StructuralTransientSolverResult,
+    pub result: StructuralTransientSolverResult,
     pub numerical_receipt: &'a StructuralTransientNumericalReceipt,
 }
 
@@ -45,7 +45,7 @@ pub fn recover_completed_transient_run(
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     input
         .numerical_receipt
-        .validate_for_result(input.result)
+        .validate_for_result(&input.result)
         .map_err(|error| FeaRunError::Solve(error.to_string()))?;
 
     let options = input.workload.solve_options(input.solver_mesh.clone());

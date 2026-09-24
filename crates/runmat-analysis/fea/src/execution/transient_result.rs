@@ -239,7 +239,7 @@ impl StructuralTransientSolverResultManifest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructuralTransientSolverResult {
     manifest: StructuralTransientSolverResultManifest,
-    samples: Vec<StructuralTransientPhysicalSample>,
+    pub(crate) samples: Vec<StructuralTransientPhysicalSample>,
 }
 
 impl StructuralTransientSolverResult {
