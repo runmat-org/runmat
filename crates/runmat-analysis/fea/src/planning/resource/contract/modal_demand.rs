@@ -1,0 +1,37 @@
+//! Resource demand for the monolithic structural modal kernel.
+
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    execution::StructuralModalWorkloadIdentity,
+    pipeline::structural_linearization::StructuralLinearizationIdentity,
+};
+
+use super::{
+    Count, PreparedInputResourceFacts, PreparedOutputResourceFacts,
+    StructuralOperatorResourceDemand,
+};
+
+/// K, M, retained damping, adaptive truncation-boundary probing, and dense Rayleigh-Ritz work.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalResourceDemand {
+    pub workload: StructuralModalWorkloadIdentity,
+    pub operator: StructuralOperatorResourceDemand,
+    /// Exact preload linearization carried by a prestressed-modal task.
+    pub prestress_linearization: Option<StructuralLinearizationIdentity>,
+    /// Full-space nonzeros imported from the exact geometric-stiffness state, or zero for an
+    /// ordinary modal extraction.
+    pub geometric_stiffness_nonzero_count: Count,
+    /// Reduced nonzeros in the exact symbolic union K + Kg used by the modal solve.
+    pub reduced_tangent_nonzero_count_upper_bound: Count,
+    pub retained_mode_count_upper_bound: Count,
+    pub residual_vector_count: Count,
+    pub residual_vector_static_iteration_count_upper_bound: Count,
+    pub residual_vector_mass_orthogonalization_passes: Count,
+    pub modal_phase_value_count_upper_bound: Count,
+    pub modal_output_value_count_upper_bound: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub result_output: PreparedOutputResourceFacts,
+    pub receipt_output: PreparedOutputResourceFacts,
+}

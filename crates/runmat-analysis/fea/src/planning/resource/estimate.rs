@@ -1,7 +1,11 @@
 mod implicit_input;
+mod phase_policy;
 mod post_process;
+mod sparse_validation;
 
 use implicit_input::implicit_resource_plan_input_facts;
+use phase_policy::requires_no_solve_policy;
+use sparse_validation::validate_sparse;
 
 use post_process::{
     build_frequency_result_assembly_resource_plan, build_observation_assembly_resource_plan,
@@ -46,6 +50,12 @@ pub fn build_resource_plan(
             FeaResourceDemand::StructuralBuckling(demand),
         ) if *workload == demand.workload => {
             validate_buckling_demand(demand)?;
+            build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
+        }
+        (
+            FeaResourcePhase::StructuralTransientScopePreparation(workload_digest),
+            FeaResourceDemand::StructuralTransientScopePreparation(demand),
+        ) if *workload_digest == demand.source_workload_digest => {
             build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
         }
         (
@@ -799,13 +809,9 @@ fn validate_operator_demand(
         }
         _ => {}
     }
-    let recovery_phase = matches!(
-        input.phase,
-        FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
-            | FeaResourcePhase::StructuralModalResponseSpectrumDirection(_)
-            | FeaResourcePhase::StructuralRandomResponseInterval(_)
-    );
-    if recovery_phase != matches!(demand.solve, SolveResourcePolicy::NoSolve { .. }) {
+    if requires_no_solve_policy(&input.phase)
+        != matches!(demand.solve, SolveResourcePolicy::NoSolve { .. })
+    {
         return Err(ResourcePlanningError::Invalid(
             "solve and post-processing phases require their matching solve policy".into(),
         ));
@@ -830,25 +836,6 @@ fn validate_operator_demand(
             ))
         }
         _ => {}
-    }
-    Ok(())
-}
-
-fn validate_sparse(facts: &SparseResourceFacts) -> Result<(), ResourcePlanningError> {
-    if facts.rows.0 == 0
-        || facts.columns.0 == 0
-        || facts.operator_nonzeros.is_empty()
-        || facts.operator_nonzeros.iter().any(|count| count.0 == 0)
-    {
-        return Err(ResourcePlanningError::Invalid(
-            "sparse dimensions and every operator nonzero count must be nonzero".into(),
-        ));
-    }
-    let dense = mul(facts.rows.0, facts.columns.0, "sparse dense bound")?;
-    if facts.operator_nonzeros.iter().any(|count| count.0 > dense) {
-        return Err(ResourcePlanningError::Invalid(
-            "sparse nonzeros exceed matrix dimensions".into(),
-        ));
     }
     Ok(())
 }

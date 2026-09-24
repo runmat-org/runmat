@@ -19,15 +19,15 @@ use crate::execution::{
     StructuralRandomResponseIntervalRequestIdentity,
     StructuralTransientResultAssemblyRequestIdentity,
 };
-use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
-
 mod assembly_demand;
+mod modal_demand;
 pub use assembly_demand::{
     StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand,
     StructuralTransientResultAssemblyResourceDemand,
 };
+pub use modal_demand::StructuralModalResourceDemand;
 
 pub use super::solve_policy::{
     NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
@@ -218,6 +218,7 @@ pub enum FeaResourcePhase {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
     StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
+    StructuralTransientScopePreparation(Digest),
     StructuralTransientResultAssembly(StructuralTransientResultAssemblyRequestIdentity),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionRequestIdentity,
@@ -247,32 +248,12 @@ pub struct StructuralOperatorResourceDemand {
     pub accuracy_demand: AccuracyResourceDemand,
 }
 
-/// Exact pre-execution resource facts for the current monolithic structural modal kernel.
-///
-/// The embedded operator demand accounts for K and M plus the damping operator retained by the
-/// current canonical operator carrier. The additional fields bind adaptive truncation-boundary
-/// probing and dense Rayleigh-Ritz work that a generic linear-solve policy cannot represent.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StructuralModalResourceDemand {
-    pub workload: StructuralModalWorkloadIdentity,
+pub struct StructuralTransientScopeResourceDemand {
+    pub source_workload_digest: Digest,
     pub operator: StructuralOperatorResourceDemand,
-    /// Exact preload linearization carried by a prestressed-modal task.
-    pub prestress_linearization: Option<StructuralLinearizationIdentity>,
-    /// Full-space nonzeros imported from the exact geometric-stiffness state, or zero for an
-    /// ordinary modal extraction.
-    pub geometric_stiffness_nonzero_count: Count,
-    /// Reduced nonzeros in the exact symbolic union K + Kg used by the modal solve.
-    pub reduced_tangent_nonzero_count_upper_bound: Count,
-    pub retained_mode_count_upper_bound: Count,
-    pub residual_vector_count: Count,
-    pub residual_vector_static_iteration_count_upper_bound: Count,
-    pub residual_vector_mass_orthogonalization_passes: Count,
-    pub modal_phase_value_count_upper_bound: Count,
-    pub modal_output_value_count_upper_bound: Count,
     pub inputs: PreparedInputResourceFacts,
-    pub result_output: PreparedOutputResourceFacts,
-    pub receipt_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -460,6 +441,7 @@ pub enum FeaResourceDemand {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
     StructuralObservationAssembly(ObservationAssemblyResourceDemand),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
+    StructuralTransientScopePreparation(StructuralTransientScopeResourceDemand),
     StructuralTransientResultAssembly(StructuralTransientResultAssemblyResourceDemand),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionResourceDemand,
@@ -564,7 +546,10 @@ impl FeaResourceDemand {
     }
 
     pub const fn governs_prepared_outputs(&self) -> bool {
-        !matches!(self, Self::StructuralLinearPipeline(_))
+        !matches!(
+            self,
+            Self::StructuralLinearPipeline(_) | Self::StructuralTransientScopePreparation(_)
+        )
     }
 }
 
@@ -597,6 +582,9 @@ impl FeaResourcePlanningInput {
             }
             FeaResourceDemand::StructuralObservationAssembly(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand) => demand.scope_digest,
+            FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
+                demand.operator.topology_digest
+            }
             FeaResourceDemand::StructuralTransientResultAssembly(demand) => demand.scope_digest,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 demand.operator.topology_digest
@@ -618,6 +606,9 @@ impl FeaResourcePlanningInput {
                 Some(&demand.operator.observations)
             }
             FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator.observations),
+            FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
+                Some(&demand.operator.observations)
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 Some(&demand.operator.observations)
@@ -644,6 +635,9 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralBuckling(demand) => &demand.operator.partitioning,
+            FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
+                &demand.operator.partitioning
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 &demand.operator.partitioning
@@ -679,6 +673,9 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
+                Some(&demand.operator)
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralObservationPartition(_)
@@ -701,6 +698,9 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&mut demand.operator),
+            FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
+                Some(&mut demand.operator)
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 Some(&mut demand.operator)

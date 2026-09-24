@@ -150,13 +150,21 @@ fn prepare_transient_block_basis(
     model: &AnalysisModel,
     options: &TransientSolveOptions,
 ) -> Result<PreparedTransientBlockBasis, FeaRunError> {
+    let prepared = prepare_transient_preassembly(model, options)?;
+    assemble_transient_block_basis(prepared, options)
+}
+
+fn assemble_transient_block_basis(
+    prepared: PreparedTransientPreassembly,
+    options: &TransientSolveOptions,
+) -> Result<PreparedTransientBlockBasis, FeaRunError> {
     let PreparedTransientPreassembly {
         execution_step,
         active_model,
         motions,
         schedule,
         ..
-    } = prepare_transient_preassembly(model, options)?;
+    } = prepared;
     let start_time_s = schedule.points[0].time_s;
     let excitations = realize_step_excitations(
         &active_model,
@@ -191,7 +199,15 @@ pub fn prepare_transient_checkpoint_scope(
         .validate()
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let options = workload.solve_options(solver_mesh.clone());
-    let basis = prepare_transient_block_basis(&workload.model, &options)?;
+    let prepared = prepare_transient_preassembly(&workload.model, &options)?;
+    let _scope_plan = crate::planning::resource::build_structural_transient_scope_resource_plan(
+        workload,
+        solver_mesh,
+        modal_state,
+        &prepared,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let basis = assemble_transient_block_basis(prepared, &options)?;
     StructuralTransientCheckpointScope::from_prepared_workload(
         StructuralTransientCheckpointScopeInput {
             workload,
