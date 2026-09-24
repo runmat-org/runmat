@@ -8322,7 +8322,11 @@ fn analysis_run_nonlinear_rejects_unknown_temperature_field_region() {
     )
     .expect_err("unknown thermo expected region should be rejected");
 
-    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.INVALID_OPTIONS");
+    assert_eq!(err.error_code, "RM.FEA.RUN_NONLINEAR.SOLVER_MODEL_INVALID");
+    assert_eq!(err.error_type, OperationErrorType::Validation);
+    assert!(err
+        .message
+        .contains("temperature field targets unknown model region missing_region"));
 }
 
 #[test]

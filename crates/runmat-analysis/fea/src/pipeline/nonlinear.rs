@@ -4,7 +4,7 @@ use runmat_analysis_core::{
 };
 
 use crate::{
-    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    assembly::{assemble_structural_system, LinearAssemblyError, StructuralFormulationRequirement},
     contracts::{
         fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
         fea_nonlinear_displacement_field_id, fea_nonlinear_equivalent_plastic_strain_field_id,
@@ -111,7 +111,10 @@ pub fn run_nonlinear_with_options(
         options.solver_mesh.clone(),
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
-    .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
+    .map_err(|err| match err {
+        LinearAssemblyError::CouplingRealization(_) => FeaRunError::InvalidModel(err.to_string()),
+        _ => FeaRunError::Assembly(err.to_string()),
+    })?;
     let identity = super::admission::admit_structural(
         &summary,
         execution_step,
