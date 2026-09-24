@@ -1878,6 +1878,36 @@ mod tests {
                 builtin.name
             );
         }
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let catalog_names = catalog["builtins"]
+            .as_array()
+            .expect("builtin entries")
+            .iter()
+            .filter(|entry| entry.get("integer_capabilities").is_some())
+            .map(|entry| entry["name"].as_str().expect("builtin name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let registered_names = registered
+            .iter()
+            .filter(|builtin| {
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                }) && !builtin.integer_capabilities.is_empty()
+            })
+            .map(|builtin| builtin.name)
+            .chain(
+                runmat_builtins::builtin_catalog_entries()
+                    .iter()
+                    .filter_map(|entry| {
+                        (!entry.integer_capabilities.is_empty()).then_some(entry.identity.name)
+                    }),
+            )
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            registered_names, catalog_names,
+            "public integer capability census"
+        );
         for name in [
             "DataArray.fill",
             "DataArray.read",
@@ -2053,19 +2083,9 @@ mod tests {
             "fclose",
             "fcontour",
             "feedback",
-            "fea.ConjugateHeatTransferInterface.conductance",
-            "fea.ConjugateHeatTransferInterface.perfect",
-            "fea.ConjugateHeatTransferInterface.resistance",
-            "fea.ContactInterface.coulomb",
-            "fea.ContactInterface.frictionless",
             "fea.DynamicViscosity.pascalSeconds",
-            "fea.ElectroThermalDomain.atReferenceTemperature",
-            "fea.ElectromagneticDomain.atFrequency",
-            "fea.FluidStructureInterface.noSlip",
-            "fea.FluidDomain.newtonian",
             "fea.Frequency.hertz",
             "fea.MassDensity.kilogramsPerCubicMeter",
-            "fea.ThermoMechanicalDomain.atReferenceTemperature",
             "fea.TurbulenceIntensity.ratio",
             "fea.material",
             "fea.results",
@@ -2166,199 +2186,37 @@ mod tests {
                 assert_eq!(previous, audit, "{} duplicate integer audit", builtin.name);
             }
         }
+        let catalog: serde_json::Value =
+            serde_json::from_str(include_str!("../../../docs/builtins/meta.json"))
+                .expect("builtin metadata catalog");
+        let catalog_names = catalog["builtins"]
+            .as_array()
+            .expect("builtin entries")
+            .iter()
+            .filter(|entry| entry.get("integer_audit").is_some())
+            .map(|entry| entry["name"].as_str().expect("builtin name"))
+            .collect::<std::collections::BTreeSet<_>>();
+        let registered_names = registered
+            .iter()
+            .filter(|builtin| {
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                }) && builtin.integer_audit.is_some()
+            })
+            .map(|builtin| builtin.name)
+            .collect::<std::collections::BTreeSet<_>>();
+        let published_names = registered_names
+            .iter()
+            .copied()
+            .chain(
+                runmat_builtins::builtin_catalog_entries()
+                    .iter()
+                    .filter_map(|entry| entry.integer_audit.map(|_| entry.identity.name)),
+            )
+            .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
-            audited.keys().copied().collect::<Vec<_>>(),
-            [
-                "DataArray.chunk_shape",
-                "DataArray.codec",
-                "DataArray.dtype",
-                "DataArray.name",
-                "DataArray.rank",
-                "DataArray.shape",
-                "DataTransaction.abort",
-                "DataTransaction.commit",
-                "DataTransaction.delete_array",
-                "DataTransaction.id",
-                "DataTransaction.status",
-                "Dataset.array",
-                "Dataset.arrays",
-                "Dataset.begin",
-                "Dataset.has_array",
-                "Dataset.id",
-                "Dataset.path",
-                "Dataset.refresh",
-                "Dataset.snapshot",
-                "Dataset.version",
-                "addDependencyDetails",
-                "addEntityDetails",
-                "addLemmaDetails",
-                "addPartOfSpeechDetails",
-                "addSentenceDetails",
-                "addTypeDetails",
-                "addlistener",
-                "addprop",
-                "ancestor",
-                "append",
-                "argsort",
-                "cancel",
-                "caxis",
-                "cellstr",
-                "clearCache",
-                "commit",
-                "data.copy",
-                "data.delete",
-                "data.exists",
-                "data.export",
-                "data.import",
-                "data.inspect",
-                "data.list",
-                "data.move",
-                "data.open",
-                "deblank",
-                "erasePunctuation",
-                "eraseURLs",
-                "exist",
-                "extractHTMLText",
-                "fea.compare",
-                "fea.field",
-                "fea.materialAssignment",
-                "fea.model",
-                "fea.plan",
-                "fea.run",
-                "fea.study",
-                "fea.sweep",
-                "fea.validate",
-                "fieldnames",
-                "fileattrib",
-                "fileparts",
-                "fileread",
-                "findElement",
-                "findprop",
-                "func2str",
-                "functions",
-                "genvarname",
-                "geometry.listRegions",
-                "geometry.meshes",
-                "getAttribute",
-                "getenv",
-                "getmethod",
-                "hgload",
-                "hgsave",
-                "htmlTree",
-                "input",
-                "isStringScalar",
-                "isVocabularyWord",
-                "iscategorical",
-                "iscell",
-                "iscellstr",
-                "ischar",
-                "iscolumn",
-                "isdeployed",
-                "isdiag",
-                "isempty",
-                "isenv",
-                "isfield",
-                "isfile",
-                "isfolder",
-                "isgraphics",
-                "ishandle",
-                "ishermitian",
-                "isletter",
-                "islogical",
-                "ismatrix",
-                "ismethod",
-                "isobject",
-                "isordinal",
-                "ispref",
-                "isrow",
-                "isscalar",
-                "isspace",
-                "isstable",
-                "isstring",
-                "issymmetric",
-                "istable",
-                "istimetable",
-                "istril",
-                "istriu",
-                "isvalid",
-                "isvarname",
-                "isvector",
-                "jsondecode",
-                "legend",
-                "lower",
-                "matches",
-                "matlab.metadata.DynamicProperty.delete",
-                "memoize",
-                "mustBeFile",
-                "mustBeFolder",
-                "mustBeNonzeroLengthText",
-                "mustBeText",
-                "mustBeTextScalar",
-                "mustBeValidVariableName",
-                "namedargs2cell",
-                "normalizeWords",
-                "notify",
-                "onCleanup",
-                "openfig",
-                "pattern",
-                "readWordEmbedding",
-                "readline",
-                "regexp",
-                "regexpPattern",
-                "regexpi",
-                "removeStopWords",
-                "replace",
-                "rethrow",
-                "reverse",
-                "rmpath",
-                "rowfilter",
-                "saveas",
-                "savefig",
-                "saveobj",
-                "second",
-                "sendmail",
-                "splitlines",
-                "stats",
-                "str2double",
-                "str2func",
-                "str2num",
-                "strcat",
-                "strcmp",
-                "strcmpi",
-                "strip",
-                "strjoin",
-                "strjust",
-                "strlength",
-                "strrep",
-                "strsplit",
-                "strtok",
-                "strtrim",
-                "superclasses",
-                "suptitle",
-                "system",
-                "tokenDetails",
-                "tokenizedDocument",
-                "uigetfile",
-                "uiputfile",
-                "unsetenv",
-                "upper",
-                "urldecode",
-                "urlencode",
-                "userpath",
-                "validateFunctionSignaturesJSON",
-                "vartype",
-                "verLessThan",
-                "version",
-                "what",
-                "word2ind",
-                "word2vec",
-                "writeWordEmbedding",
-                "writelines",
-                "xmlread",
-                "xticklabels",
-                "yticklabels",
-                "zero",
-            ]
+            published_names, catalog_names,
+            "public integer audit census"
         );
         for (name, audit) in audited {
             assert!(!audit.notes.is_empty(), "{name} integer audit notes");
@@ -2396,7 +2254,9 @@ mod tests {
         for registered in runmat_builtins::builtin_functions()
             .into_iter()
             .filter(|builtin| {
-                !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
+                }) && (!builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some())
             })
         {
             let name = registered.name;

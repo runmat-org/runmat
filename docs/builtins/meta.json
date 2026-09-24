@@ -49774,6 +49774,50 @@
       }
     },
     {
+      "name": "fea.AccuracyTarget.numericalResult",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.AccuracyTarget.numericalResult()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This constructor accepts identifiers and typed FEA policy objects only."
+      }
+    },
+    {
       "name": "fea.AccuracyTarget.observation",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -63743,6 +63787,58 @@
       ]
     },
     {
+      "name": "fea.IndependentDomain.responseSpectra",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "domain = fea.IndependentDomain.responseSpectra(spectra)",
+          "inputs": [
+            {
+              "name": "spectra",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One or more typed fea.ResponseSpectrum values consumed by the procedure."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This typed sequence constructor accepts identifiers and typed FEA objects only."
+      }
+    },
+    {
       "name": "fea.IndependentDomain.staticDomain",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -66419,6 +66515,171 @@
           "notes": "Response-spectrum authoring is a portable host construction boundary."
         }
       ]
+    },
+    {
+      "name": "fea.ModalTruncationCorrection.missingMass",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "correction = fea.ModalTruncationCorrection.missingMass(zeroPeriodAcceleration)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "typed response-spectrum numeric component",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The physical or dimensionless value is checked before conversion to canonical binary64 storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Response-spectrum authoring is a portable host construction boundary."
+        }
+      ]
+    },
+    {
+      "name": "fea.ModalTruncationCorrection.none",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "correction = fea.ModalTruncationCorrection.none()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "The concrete method fixes a closed response-spectrum policy and accepts no numeric input."
+      }
+    },
+    {
+      "name": "fea.ModalTruncationCorrection.residualMode",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "correction = fea.ModalTruncationCorrection.residualMode()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "The concrete method fixes a closed response-spectrum policy and accepts no numeric input."
+      }
     },
     {
       "name": "fea.MomentSignal.constantNewtonMeters",
@@ -69755,6 +70016,270 @@
       }
     },
     {
+      "name": "fea.ObservationQuantity.beamAxialForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamAxialForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.beamBendingMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamBendingMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.beamBendingStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamBendingStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.beamShearForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamShearForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.beamTorsionMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamTorsionMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.beamTorsionStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.beamTorsionStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
       "name": "fea.ObservationQuantity.constraintViolation",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -70955,6 +71480,182 @@
       }
     },
     {
+      "name": "fea.ObservationQuantity.shellBendingMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.shellBendingMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.shellMembraneForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.shellMembraneForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.shellTransverseShear",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.shellTransverseShear()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.shellVonMises",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.shellVonMises()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
       "name": "fea.ObservationQuantity.soundPressureLevel",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -71280,6 +71981,50 @@
           "when": "A .fea document cannot be read, parsed, or resolved.",
           "message": "fea: failed to load FEA document"
         },
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA observation-policy constructors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ObservationQuantity.vonMisesStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "value = fea.ObservationQuantity.vonMisesStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
         {
           "code": "RM.FEA.BUILTIN.INVALID_INPUT",
           "identifier": "RunMat:fea:InvalidInput",
@@ -72020,6 +72765,58 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "This constructor accepts identifiers and typed FEA values only."
+      }
+    },
+    {
+      "name": "fea.OutputField.named",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.OutputField.named(name)",
+          "inputs": [
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Authored output identifier declared by the FEA study."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
       }
     },
     {
@@ -73146,6 +73943,526 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "This typed sequence constructor accepts identifiers and typed FEA objects only."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.allBeams",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.allBeams(geometry)",
+          "inputs": [
+            {
+              "name": "geometry",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry asset whose compatible domains are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.allCells",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.allCells(geometry)",
+          "inputs": [
+            {
+              "name": "geometry",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry asset whose compatible domains are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.allShells",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.allShells(geometry)",
+          "inputs": [
+            {
+              "name": "geometry",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry asset whose compatible domains are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.allSolids",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.allSolids(geometry)",
+          "inputs": [
+            {
+              "name": "geometry",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry asset whose compatible domains are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.beam",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.beam(region)",
+          "inputs": [
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.cell",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.cell(region)",
+          "inputs": [
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.shell",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.shell(region)",
+          "inputs": [
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.PropertyRegionTarget.solid",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "target = fea.PropertyRegionTarget.solid(region)",
+          "inputs": [
+            {
+              "name": "region",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.Region value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
+      }
+    },
+    {
+      "name": "fea.RandomResponseField.rms",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.RandomResponseField.rms(quantity)",
+          "inputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "A linear fea.StructuralField quantity."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.RandomResponseField.variance",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.RandomResponseField.variance(quantity)",
+          "inputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "A linear fea.StructuralField quantity."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
       }
     },
     {
@@ -74483,6 +75800,586 @@
       ]
     },
     {
+      "name": "fea.ResponseSpectrumField.absoluteAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.absoluteAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.absoluteAngularAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.absoluteAngularAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.envelope",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.envelope(quantity)",
+          "inputs": [
+            {
+              "name": "quantity",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "A linear fea.StructuralField quantity."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.pseudoAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.pseudoAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.pseudoAngularAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.pseudoAngularAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.pseudoAngularVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.pseudoAngularVelocity()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.pseudoVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.pseudoVelocity()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.relativeAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.relativeAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.relativeAngularAcceleration",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.relativeAngularAcceleration()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.relativeAngularVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.relativeAngularVelocity()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.relativeDisplacement",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.relativeDisplacement()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.relativeVelocity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.relativeVelocity()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.ResponseSpectrumField.rotation",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.ResponseSpectrumField.rotation()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Statistical field selectors have no integer inputs."
+      }
+    },
+    {
       "name": "fea.RestartPolicy.continueFromCompletedState",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -74927,6 +76824,227 @@
         "kind": "NotApplicable",
         "notes": "This constructor accepts identifiers and typed FEA values only."
       }
+    },
+    {
+      "name": "fea.RigidResponse.disabled",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "policy = fea.RigidResponse.disabled()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "The concrete method fixes a closed response-spectrum policy and accepts no numeric input."
+      }
+    },
+    {
+      "name": "fea.RigidResponse.gupta",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "policy = fea.RigidResponse.gupta(periodicFrequencyHertz, rigidFrequencyHertz)",
+          "inputs": [
+            {
+              "name": "periodicFrequencyHertz",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Upper bound of the wholly periodic frequency region."
+            },
+            {
+              "name": "rigidFrequencyHertz",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Lower bound of the wholly rigid frequency region."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "typed Gupta rigid-response policy",
+          "inputs": [
+            {
+              "name": "periodicFrequencyHertz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric input is checked before conversion to canonical binary64 storage."
+            },
+            {
+              "name": "rigidFrequencyHertz",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "Numeric input is checked before conversion to canonical binary64 storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Response-spectrum authoring is a portable host construction boundary."
+        }
+      ]
+    },
+    {
+      "name": "fea.RigidResponse.lindleyYow",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "policy = fea.RigidResponse.lindleyYow(zeroPeriodAcceleration)",
+          "inputs": [
+            {
+              "name": "value",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite scalar value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "typed response-spectrum numeric component",
+          "inputs": [
+            {
+              "name": "value",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "The physical or dimensionless value is checked before conversion to canonical binary64 storage."
+            }
+          ],
+          "computation_domain": "FloatingPoint",
+          "output_class": "NotApplicable",
+          "overflow": "NotApplicable",
+          "backend": "HostOnly",
+          "overload": "FunctionSpecific",
+          "notes": "Response-spectrum authoring is a portable host construction boundary."
+        }
+      ]
     },
     {
       "name": "fea.Rotation.degrees",
@@ -85280,6 +87398,1150 @@
       }
     },
     {
+      "name": "fea.StructuralField.beamAxialForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamAxialForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.beamBendingMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamBendingMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.beamBendingStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamBendingStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.beamShearForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamShearForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.beamTorsionMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamTorsionMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.beamTorsionStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.beamTorsionStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.constraintReactionForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.constraintReactionForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.constraintReactionMomentAboutGlobalOrigin",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.constraintReactionMomentAboutGlobalOrigin()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.displacement",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.displacement()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.equationScale",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.equationScale()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.integrationPointStrain",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.integrationPointStrain()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.integrationPointStress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.integrationPointStress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.nodalVonMises",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.nodalVonMises()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.reactionForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.reactionForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.reactionMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.reactionMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.residualNorm",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.residualNorm()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.rotation",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.rotation()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.shellBendingMoment",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.shellBendingMoment()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.shellMembraneForce",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.shellMembraneForce()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.shellTransverseShear",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.shellTransverseShear()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.shellVonMises",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.shellVonMises()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.strain",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.strain()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.strainEnergyDensity",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.strainEnergyDensity()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.stress",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.stress()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.totalStrainEnergy",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.totalStrainEnergy()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
+      "name": "fea.StructuralField.vonMises",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "field = fea.StructuralField.vonMises()",
+          "inputs": [],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Structural field selectors have no integer inputs."
+      }
+    },
+    {
       "name": "fea.StructuralInitialCondition.angularVelocity",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -85710,6 +88972,58 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "Concrete constraint constructors accept identifiers, immutable geometry regions, and already-dimensioned values; they have no direct integer input role."
+      }
+    },
+    {
+      "name": "fea.StructuralStep.harmonic",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "step = fea.StructuralStep.harmonic(id)",
+          "inputs": [
+            {
+              "name": "id",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Procedure-step identifier."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Typed FEA step constructors accept only a text identifier. Family, procedure, solution space, and default independent domain are fixed by the concrete class method."
       }
     },
     {
@@ -89803,6 +93117,113 @@
         "kind": "NotApplicable",
         "notes": "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs."
       }
+    },
+    {
+      "name": "fea.fieldPage",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "page = fea.fieldPage(field, start, count)",
+          "inputs": [
+            {
+              "name": "field",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Artifact-backed fea.Field returned by fea.field."
+            },
+            {
+              "name": "start",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "1",
+              "description": "One-based logical value index."
+            },
+            {
+              "name": "count",
+              "ty": "Any",
+              "arity": "Optional",
+              "default": "256",
+              "description": "Positive maximum logical value count, capped at 4096."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "FEA object or operation result."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.FEA.BUILTIN.INVALID_INPUT",
+          "identifier": "RunMat:fea:InvalidInput",
+          "when": "A builtin receives an unsupported argument pattern or object type.",
+          "message": "fea: invalid input"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.OPERATION_FAILED",
+          "identifier": "RunMat:fea:OperationFailed",
+          "when": "A validation, planning, run, result-query, comparison, or trend operation fails.",
+          "message": "fea: operation failed"
+        },
+        {
+          "code": "RM.FEA.BUILTIN.INTERNAL",
+          "identifier": "RunMat:fea:Internal",
+          "when": "An FEA object or operation result cannot be converted to a RunMat value.",
+          "message": "fea: internal error"
+        }
+      ],
+      "integer_capabilities": [
+        {
+          "form": "field page bounds",
+          "inputs": [
+            {
+              "name": "start",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive one-based host integer or integral scalar double; provider-resident values are rejected."
+            },
+            {
+              "name": "count",
+              "classes": [
+                "Int8",
+                "Int16",
+                "Int32",
+                "Int64",
+                "Uint8",
+                "Uint16",
+                "Uint32",
+                "Uint64"
+              ],
+              "availability": "Documented",
+              "scalar_double": "Allowed",
+              "notes": "A positive host integer or integral scalar double, capped by the field-page contract; provider-resident values are rejected."
+            }
+          ],
+          "computation_domain": "Structural",
+          "output_class": "FunctionSpecific",
+          "overflow": "Error",
+          "backend": "HostOnly",
+          "overload": "StructuralParameter",
+          "notes": "Paging indexes and counts remain exact native integers; numerical field values retain their real or complex floating representation."
+        }
+      ]
     },
     {
       "name": "fea.material",
@@ -105185,6 +108606,551 @@
       ]
     },
     {
+      "name": "geometry.box",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.box(width, depth, height)",
+          "inputs": [
+            {
+              "name": "width",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive width in meters."
+            },
+            {
+              "name": "depth",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive depth in meters."
+            },
+            {
+              "name": "height",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive height in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature box in SI units."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.BOX.INVALID_INPUT",
+          "identifier": "RunMat:geometry:box:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.box: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.chamfer",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.chamfer(target, edges, distance)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target geometry.Feature."
+            },
+            {
+              "name": "edges",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.RegionOutput edge selection."
+            },
+            {
+              "name": "distance",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive distance in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature with beveled selected edges."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.CHAMFER.INVALID_INPUT",
+          "identifier": "RunMat:geometry:chamfer:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.chamfer: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.cylinder",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.cylinder(radius, height, axis, origin)",
+          "inputs": [
+            {
+              "name": "radius",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive radius in meters."
+            },
+            {
+              "name": "height",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive height in meters."
+            },
+            {
+              "name": "axis",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite three-component axis."
+            },
+            {
+              "name": "origin",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite three-component origin in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature cylinder in SI units."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.CYLINDER.INVALID_INPUT",
+          "identifier": "RunMat:geometry:cylinder:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.cylinder: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.edges",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "output = geometry.edges(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Feature."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-or-more edge geometry.RegionOutput."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.EDGES.INVALID_INPUT",
+          "identifier": "RunMat:geometry:edges:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.edges: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.edgesIntroducedBy",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "output = geometry.edgesIntroducedBy(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Feature whose introduced edges are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Edge geometry.RegionOutput selected by topology history."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.EDGES_INTRODUCED_BY.INVALID_INPUT",
+          "identifier": "RunMat:geometry:edgesIntroducedBy:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.edgesIntroducedBy: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.extrude",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.extrude(profile, distance, direction)",
+          "inputs": [
+            {
+              "name": "profile",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exact profile geometry.Feature."
+            },
+            {
+              "name": "distance",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive distance in meters."
+            },
+            {
+              "name": "direction",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonzero three-component direction."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Extruded immutable geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.EXTRUDE.INVALID_INPUT",
+          "identifier": "RunMat:geometry:extrude:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.extrude: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.faces",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "output = geometry.faces(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Feature."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "One-or-more face geometry.RegionOutput."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.FACES.INVALID_INPUT",
+          "identifier": "RunMat:geometry:faces:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.faces: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.facesIntroducedBy",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "output = geometry.facesIntroducedBy(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Feature whose introduced faces are selected."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Face geometry.RegionOutput selected by topology history."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.FACES_INTRODUCED_BY.INVALID_INPUT",
+          "identifier": "RunMat:geometry:facesIntroducedBy:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.facesIntroducedBy: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.fillet",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.fillet(target, edges, radius)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target geometry.Feature."
+            },
+            {
+              "name": "edges",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.RegionOutput edge selection."
+            },
+            {
+              "name": "radius",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive radius in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature with rounded selected edges."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.FILLET.INVALID_INPUT",
+          "identifier": "RunMat:geometry:fillet:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.fillet: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.finish",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "generated = geometry.finish(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Final geometry.Feature result."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Generated product."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.FINISH.INVALID_INPUT",
+          "identifier": "RunMat:geometry:finish:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.finish: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.hole",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.hole(target, radius, depth, axis, origin)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target geometry.Feature."
+            },
+            {
+              "name": "radius",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive radius in meters."
+            },
+            {
+              "name": "depth",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive depth in meters."
+            },
+            {
+              "name": "axis",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonzero three-component axis."
+            },
+            {
+              "name": "origin",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite three-component origin in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature with a cylindrical hole."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.HOLE.INVALID_INPUT",
+          "identifier": "RunMat:geometry:hole:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.hole: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
       "name": "geometry.inspect",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -105231,6 +109197,93 @@
           "message": "geometry.inspect: internal error"
         }
       ]
+    },
+    {
+      "name": "geometry.instance",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.instance(source, transform, ...)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Feature."
+            },
+            {
+              "name": "transform",
+              "ty": "NumericArray",
+              "arity": "Variadic",
+              "default": null,
+              "description": "One or more finite 4-by-4 column-major affine transforms."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature containing exact occurrences."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.INSTANCE.INVALID_INPUT",
+          "identifier": "RunMat:geometry:instance:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.instance: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.intersect",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.intersect(feature, feature, ...)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Two or more geometry.Feature operands."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Boolean-intersection geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.INTERSECT.INVALID_INPUT",
+          "identifier": "RunMat:geometry:intersect:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.intersect: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
     },
     {
       "name": "geometry.listRegions",
@@ -105392,6 +109445,67 @@
       }
     },
     {
+      "name": "geometry.pocket",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.pocket(target, profile, depth, direction)",
+          "inputs": [
+            {
+              "name": "target",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Target geometry.Feature."
+            },
+            {
+              "name": "profile",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exact profile geometry.Feature."
+            },
+            {
+              "name": "depth",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive depth in meters."
+            },
+            {
+              "name": "direction",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonzero three-component direction."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature with a swept pocket."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.POCKET.INVALID_INPUT",
+          "identifier": "RunMat:geometry:pocket:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.pocket: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
       "name": "geometry.region",
       "output_mode": "Fixed",
       "completion_policy": "Public",
@@ -105436,6 +109550,342 @@
       "integer_audit": {
         "kind": "NotApplicable",
         "notes": "geometry.region resolves text metadata from a geometry.Asset; its revision is returned as a native uint32 value and it has no integer input role."
+      }
+    },
+    {
+      "name": "geometry.revolve",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.revolve(profile, axis, origin, angle)",
+          "inputs": [
+            {
+              "name": "profile",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exact profile geometry.Feature."
+            },
+            {
+              "name": "axis",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite nonzero three-component axis."
+            },
+            {
+              "name": "origin",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite three-component origin in meters."
+            },
+            {
+              "name": "angle",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Angle in radians in (0, 2*pi]."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Revolved immutable geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.REVOLVE.INVALID_INPUT",
+          "identifier": "RunMat:geometry:revolve:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.revolve: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.solid",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "output = geometry.solid(feature)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Feature."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Exactly-one solid geometry.RegionOutput."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.SOLID.INVALID_INPUT",
+          "identifier": "RunMat:geometry:solid:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.solid: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.sphere",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.sphere(radius, center)",
+          "inputs": [
+            {
+              "name": "radius",
+              "ty": "NumericScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Positive radius in meters."
+            },
+            {
+              "name": "center",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite three-component center in meters."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Immutable geometry.Feature sphere in SI units."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.SPHERE.INVALID_INPUT",
+          "identifier": "RunMat:geometry:sphere:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.sphere: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.subtract",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.subtract(base, tool, ...)",
+          "inputs": [
+            {
+              "name": "base",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Base geometry.Feature."
+            },
+            {
+              "name": "tool",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "One or more tool geometry.Feature values."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Boolean-subtraction geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.SUBTRACT.INVALID_INPUT",
+          "identifier": "RunMat:geometry:subtract:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.subtract: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.transform",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.transform(source, matrix)",
+          "inputs": [
+            {
+              "name": "source",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Feature."
+            },
+            {
+              "name": "matrix",
+              "ty": "NumericArray",
+              "arity": "Required",
+              "default": null,
+              "description": "Finite 4-by-4 column-major affine transform."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Transformed immutable geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.TRANSFORM.INVALID_INPUT",
+          "identifier": "RunMat:geometry:transform:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.transform: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.union",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "feature = geometry.union(feature, feature, ...)",
+          "inputs": [
+            {
+              "name": "feature",
+              "ty": "Any",
+              "arity": "Variadic",
+              "default": null,
+              "description": "Two or more geometry.Feature operands."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Boolean-union geometry.Feature."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.UNION.INVALID_INPUT",
+          "identifier": "RunMat:geometry:union:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.union: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
+      }
+    },
+    {
+      "name": "geometry.withRegion",
+      "output_mode": "Fixed",
+      "completion_policy": "Public",
+      "signatures": [
+        {
+          "label": "generated = geometry.withRegion(generated, name, output)",
+          "inputs": [
+            {
+              "name": "generated",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Source geometry.Generated product."
+            },
+            {
+              "name": "name",
+              "ty": "StringScalar",
+              "arity": "Required",
+              "default": null,
+              "description": "Unique output name."
+            },
+            {
+              "name": "output",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "Typed geometry.RegionOutput value."
+            }
+          ],
+          "outputs": [
+            {
+              "name": "result",
+              "ty": "Any",
+              "arity": "Required",
+              "default": null,
+              "description": "geometry.Generated product with one additional named region output."
+            }
+          ]
+        }
+      ],
+      "errors": [
+        {
+          "code": "RM.GEOMETRY.WITH_REGION.INVALID_INPUT",
+          "identifier": "RunMat:geometry:withRegion:InvalidInput",
+          "when": "An argument is malformed, incompatible, non-finite, or violates the typed geometry contract.",
+          "message": "geometry.withRegion: invalid input"
+        }
+      ],
+      "integer_audit": {
+        "kind": "NotApplicable",
+        "notes": "Generated geometry stores SI coordinates and transforms in canonical binary64 form; exactly representable integer literals may cross that boundary, but no operation performs integer-domain computation or returns integer data."
       }
     },
     {
