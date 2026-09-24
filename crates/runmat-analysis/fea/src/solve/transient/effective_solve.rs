@@ -257,10 +257,9 @@ impl EquilibriumRefinement<'_> {
                 &correction_equation.summary,
                 self.backend,
                 None,
-                match self.backend {
-                    LinearAlgebraBackendKind::CpuReference => SpdPreconditionerKind::Ilu0,
-                    LinearAlgebraBackendKind::Accelerator => SpdPreconditionerKind::Jacobi,
-                },
+                // The correction operator is SPD. ILU0 does not guarantee an SPD
+                // preconditioner and can break CG even when the operator is valid.
+                SpdPreconditionerKind::Jacobi,
             )?;
             let mut correction_values = match correction_equation.expansion.as_ref() {
                 Some(reduction) => reduction

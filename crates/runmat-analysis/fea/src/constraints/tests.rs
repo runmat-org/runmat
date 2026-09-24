@@ -1292,6 +1292,50 @@ fn transient_steps_enforce_nonzero_direct_prescriptions() {
 }
 
 #[test]
+fn transient_direct_prescription_refinement_is_scale_consistent() {
+    for prescribed_m in [1.0e-4, 1.0e-3, 1.0e-2] {
+        let (mut model, mesh) = model_and_mesh();
+        model.excitations.clear();
+        model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
+            constraint_id: "prescribed_x".into(),
+            frame: CoordinateFrame::Global,
+            kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                target: RegionTarget::point("node:1"),
+                translations: vec![TranslationDofValue {
+                    dof: StructuralTranslationDof::Ux,
+                    value: PrescribedValue::Constant(Displacement::new(prescribed_m)),
+                }],
+                rotations: Vec::new(),
+            }),
+        })];
+        let summary = assemble_structural_system(
+            &model,
+            &static_excitations(&model),
+            Some(mesh),
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let solved = solve_transient_system(
+            &summary,
+            TransientSolveOptions {
+                time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 2 },
+                ..TransientSolveOptions::default()
+            },
+            ComputeBackend::Cpu,
+        )
+        .expect("constant prescribed displacement must converge at every tested scale");
+        assert_eq!(solved.converged_steps, 2);
+        for state in solved.displacement_snapshots.iter().skip(1) {
+            assert!((state[0] - prescribed_m).abs() <= 1.0e-10);
+        }
+        assert!(solved
+            .residual_norms
+            .iter()
+            .all(|value| value.is_finite() && *value <= 1.0e-6));
+    }
+}
+
+#[test]
 fn nonlinear_accepted_states_preserve_complete_constraint_kinematics() {
     let (mut model, mesh) = model_and_mesh();
     model.excitations.clear();
