@@ -10,22 +10,24 @@ use runmat_analysis_execution::{
     prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
     prepare_structural_transient_sequence, prepare_structural_transient_workload_objects,
-    AnalysisHostResponse, PreparedStructuralTransientBlockTask,
-    PreparedStructuralTransientResultTask, StructuralModalTransientStudyCoordinator,
-    StructuralModalTransientStudyPreparation, StructuralTransientBlockPreparation,
-    StructuralTransientResultPreparation, StructuralTransientSequenceCoordinator,
-    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
+    AnalysisHostResponse, AnalysisKernel, AnalysisKernelInvocation,
+    PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
+    StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
+    StructuralTransientBlockPreparation, StructuralTransientResultPreparation,
+    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
+    StructuralTransientSequencePreparationInput,
 };
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, CanonicalSemanticState, CanonicalSemanticStateInput,
-        CanonicalSemanticStatePayload, SequenceIdentity, SolverResultIdentity, StepIdentity,
-        StructuralModalTransientTemplate, StructuralModalWorkload, StructuralModalWorkloadInput,
-        StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,
-        StructuralTransientBlockRequest, StructuralTransientSolverPlan,
-        StructuralTransientWorkload,
+        AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
+        CanonicalSemanticStateInput, CanonicalSemanticStatePayload, SequenceIdentity,
+        SolverResultIdentity, StepIdentity, StructuralModalTransientTemplate,
+        StructuralModalWorkload, StructuralModalWorkloadInput, StructuralStepWorkload,
+        StructuralStudyWorkloads, StructuralTransientBlockPlan, StructuralTransientBlockRequest,
+        StructuralTransientSolverPlan, StructuralTransientWorkload,
     },
     fixtures::{fixture_model, FixtureId},
+    planning::resource::{build_resource_plan, ByteCount, FeaResourceDemand, FeaResourcePhase},
     solve::transient::StructuralTimeStepPolicy,
     ComputeBackend, ModalSolveOptions, ModalTruncationPolicy,
 };
@@ -467,6 +469,69 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
             inventory_limits: limits,
         })
         .unwrap();
+    assert_eq!(
+        result_task.resource_plan.input.phase,
+        FeaResourcePhase::StructuralTransientResultAssembly(result_task.request.identity)
+    );
+    let FeaResourceDemand::StructuralTransientResultAssembly(demand) =
+        &result_task.resource_plan.input.demand
+    else {
+        panic!("transient fan-in must carry its own resource demand");
+    };
+    assert_eq!(demand.segment_count.0, 2);
+    assert_eq!(demand.sample_count.0, 5);
+    assert_eq!(
+        result_task.resource_plan_objects.manifest.logical_identity,
+        result_task.resource_plan.identity.digest()
+    );
+    let mut understated_input = result_task.resource_plan.input.clone();
+    understated_input.worker.fixed_memory_bytes =
+        ByteCount(understated_input.worker.fixed_memory_bytes.0 - 1);
+    let understated = build_resource_plan(understated_input).unwrap();
+    let understated_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        understated.identity.digest(),
+        &understated.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    let mut substituted_inputs = result_task.inputs.clone();
+    substituted_inputs[1] = understated_objects;
+    assert!(NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::AssembleStructuralTransientResult,
+            host: &result_task.host,
+            inputs: &substituted_inputs,
+        })
+        .is_err());
+    let mut understated_input_facts = result_task.resource_plan.input.clone();
+    let FeaResourceDemand::StructuralTransientResultAssembly(demand) =
+        &mut understated_input_facts.demand
+    else {
+        unreachable!()
+    };
+    demand.inputs.decoded_resident_bytes_admission_budget.0 -= 1;
+    let understated = build_resource_plan(understated_input_facts).unwrap();
+    substituted_inputs[1] = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        understated.identity.digest(),
+        &understated.canonical_bytes().unwrap(),
+        256,
+        ObjectNamespace::InputValue,
+        limits,
+    )
+    .unwrap();
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::AssembleStructuralTransientResult,
+            host: &result_task.host,
+            inputs: &substituted_inputs,
+        })
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("input facts"));
     let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
         &store_root,
         limits.max_object_bytes,

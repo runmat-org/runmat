@@ -7,12 +7,14 @@ use runmat_analysis_execution::{
     StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
+use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::TaskId;
 
 use crate::analysis_sequence::StructuralSequenceExecutionPolicy;
 use crate::analysis_task::{prepare_analysis_task, AnalysisTaskPolicy};
 use crate::analysis_task_pool::{
-    configure_local_analysis, AnalysisTaskPool, LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
+    configure_local_analysis, planned_resource_attempt, AnalysisTaskPool, ExecutedAnalysisTask,
+    LocalAnalysisTaskPool, RemoteAnalysisTaskPool,
 };
 use crate::{
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
@@ -131,6 +133,7 @@ pub(crate) async fn execute_structural_transient_with_pool(
             &prepared.program,
             logical_dependencies,
             live_dependencies,
+            None,
             &policy,
         )
         .await?;
@@ -157,6 +160,7 @@ pub(crate) async fn execute_structural_transient_with_pool(
         &prepared.program,
         logical_dependencies,
         live_dependencies,
+        Some(&prepared.resource_plan),
         &policy,
     )
     .await?;
@@ -173,6 +177,7 @@ async fn execute_task(
     program: &PreparedAnalysisProgram,
     dependency_identities: Vec<AnalysisTaskIdentity>,
     dependency_tasks: BTreeSet<TaskId>,
+    resource_plan: Option<&FeaResourcePlan>,
     policy: &StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<(
     runmat_execution_artifact::ProgramExecutionResponse,
@@ -180,6 +185,9 @@ async fn execute_task(
     TaskId,
 )> {
     pool.register_program(program)?;
+    let resources = resource_plan
+        .map(|plan| plan.request.clone())
+        .unwrap_or_else(|| policy.resources.clone());
     let (submission, identity) = prepare_analysis_task(
         pool.scope_id(),
         pool.pool_id(),
@@ -188,8 +196,8 @@ async fn execute_task(
         dependency_identities,
         dependency_tasks,
         AnalysisTaskPolicy {
-            resources: policy.resources.clone(),
-            resource_plan: None,
+            resources: resources.clone(),
+            resource_plan,
             retry: policy.retry,
             deadline_unix_millis: policy.deadline_unix_millis,
             priority: policy.priority,
@@ -199,10 +207,10 @@ async fn execute_task(
     let mut responses = pool
         .execute_batch(
             vec![(program.request.clone(), submission)],
-            policy.resources.max_wall_millis,
+            resources.max_wall_millis,
         )
         .await?;
-    let (response, _) = responses.pop().ok_or_else(|| {
+    let (response, attempt) = responses.pop().ok_or_else(|| {
         NativeExecutionError::Protocol("transient task returned no response".into())
     })?;
     if !responses.is_empty() {
@@ -210,7 +218,16 @@ async fn execute_task(
             "transient task returned more than one response".into(),
         ));
     }
-    Ok((response, identity, task_id))
+    let executed = ExecutedAnalysisTask {
+        identity,
+        task_id,
+        response,
+        attempt,
+    };
+    if let Some(plan) = resource_plan {
+        planned_resource_attempt(plan, &executed)?;
+    }
+    Ok((executed.response, identity, task_id))
 }
 
 fn matching_live_dependencies(

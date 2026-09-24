@@ -699,7 +699,7 @@ fn observation_history_checkpoint_payload_bytes(
         })
 }
 
-fn post_process_worker() -> WorkerResourcePolicy {
+pub(super) fn post_process_worker() -> WorkerResourcePolicy {
     WorkerResourcePolicy {
         cpu_millicores: POST_PROCESS_CPU_MILLICORES,
         maximum_wall_milliseconds: POST_PROCESS_WALL_MILLISECONDS,
@@ -710,7 +710,7 @@ fn post_process_worker() -> WorkerResourcePolicy {
     }
 }
 
-fn post_process_ceiling() -> AccuracyResourceCeiling {
+pub(super) fn post_process_ceiling() -> AccuracyResourceCeiling {
     AccuracyResourceCeiling {
         maximum_refinement_cycles: 0,
         maximum_solver_tightenings: 0,
@@ -724,7 +724,7 @@ fn byte_len(bytes: &[u8]) -> Result<u64, ResourcePlanningError> {
     count(bytes.len(), "canonical payload bytes")
 }
 
-fn derived_output_payload_bytes_upper_bound(
+pub(super) fn derived_output_payload_bytes_upper_bound(
     inputs: &PreparedInputResourceFacts,
     output_record_count: u64,
     generated_numeric_value_count: u64,
@@ -757,7 +757,7 @@ fn derived_output_payload_bytes_upper_bound(
     )
 }
 
-fn validate_projected_output(
+pub(super) fn validate_projected_output(
     output: &PreparedOutputResourceFacts,
     payload_bytes_upper_bound: u64,
     domain: &'static str,

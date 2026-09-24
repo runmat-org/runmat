@@ -17,8 +17,17 @@ use crate::execution::{
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
     StructuralRandomResponseAssemblyRequestIdentity,
     StructuralRandomResponseIntervalRequestIdentity,
+    StructuralTransientResultAssemblyRequestIdentity,
 };
 use crate::pipeline::structural_linearization::StructuralLinearizationIdentity;
+
+mod assembly_demand;
+pub use assembly_demand::{
+    StructuralFrequencyResultAssemblyResourceDemand,
+    StructuralModalResponseSpectrumAssemblyResourceDemand,
+    StructuralRandomResponseAssemblyResourceDemand,
+    StructuralTransientResultAssemblyResourceDemand,
+};
 
 pub use super::solve_policy::{
     NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
@@ -209,6 +218,7 @@ pub enum FeaResourcePhase {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
     StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
+    StructuralTransientResultAssembly(StructuralTransientResultAssemblyRequestIdentity),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionRequestIdentity,
     ),
@@ -411,19 +421,6 @@ pub struct ObservationAssemblyResourceDemand {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct StructuralFrequencyResultAssemblyResourceDemand {
-    pub scope_digest: Digest,
-    pub entry_count: Count,
-    pub entry_encoded_bytes: ByteCount,
-    pub physical_dof_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub ordering_workspace_bytes_upper_bound: ByteCount,
-    pub result_output: PreparedOutputResourceFacts,
-    pub receipt_output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StructuralModalResponseSpectrumDirectionResourceDemand {
     pub operator: StructuralOperatorResourceDemand,
     pub spectrum_point_count: Count,
@@ -432,25 +429,6 @@ pub struct StructuralModalResponseSpectrumDirectionResourceDemand {
     pub response_vector_count_upper_bound: Count,
     pub inputs: PreparedInputResourceFacts,
     pub output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
-    pub scope_digest: Digest,
-    pub direction_count: Count,
-    pub direction_encoded_bytes: ByteCount,
-    pub physical_dof_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub ordering_workspace_bytes_upper_bound: ByteCount,
-    pub field_recovery_workspace_bytes_upper_bound: ByteCount,
-    pub missing_mass_static_solve_count: Count,
-    pub missing_mass_reduced_dof_count: Count,
-    pub missing_mass_system_workspace_bytes_upper_bound: ByteCount,
-    pub missing_mass_total_iteration_count_upper_bound: Count,
-    pub result_output: PreparedOutputResourceFacts,
-    pub receipt_output: PreparedOutputResourceFacts,
-    pub field_recovery_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -470,20 +448,6 @@ pub struct StructuralRandomResponseIntervalResourceDemand {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralRandomResponseAssemblyResourceDemand {
-    pub scope_digest: Digest,
-    pub task_count: Count,
-    pub interval_count: Count,
-    pub interval_encoded_bytes: ByteCount,
-    pub response_value_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub ordering_workspace_bytes_upper_bound: ByteCount,
-    pub result_output: PreparedOutputResourceFacts,
-    pub receipt_output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
@@ -496,6 +460,7 @@ pub enum FeaResourceDemand {
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
     StructuralObservationAssembly(ObservationAssemblyResourceDemand),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
+    StructuralTransientResultAssembly(StructuralTransientResultAssemblyResourceDemand),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionResourceDemand,
     ),
@@ -556,6 +521,14 @@ impl FeaResourceDemand {
             ) => Some(&demand.result_output),
             (
                 Self::StructuralFrequencyResultAssembly(demand),
+                AnalysisNumericalObjectKind::NumericalReceipt,
+            ) => Some(&demand.receipt_output),
+            (
+                Self::StructuralTransientResultAssembly(demand),
+                AnalysisNumericalObjectKind::SolverResult,
+            ) => Some(&demand.result_output),
+            (
+                Self::StructuralTransientResultAssembly(demand),
                 AnalysisNumericalObjectKind::NumericalReceipt,
             ) => Some(&demand.receipt_output),
             (
@@ -624,6 +597,7 @@ impl FeaResourcePlanningInput {
             }
             FeaResourceDemand::StructuralObservationAssembly(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand) => demand.scope_digest,
+            FeaResourceDemand::StructuralTransientResultAssembly(demand) => demand.scope_digest,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 demand.operator.topology_digest
             }
@@ -652,7 +626,8 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
-            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&demand.operator.observations)
             }
@@ -677,7 +652,8 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
-            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => {
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::StructuralTransientResultAssembly(_) => {
                 static MONOLITHIC: PartitioningPolicy = PartitioningPolicy::Monolithic;
                 &MONOLITHIC
             }
@@ -709,7 +685,8 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
-            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&demand.operator)
             }
@@ -732,7 +709,8 @@ impl FeaResourcePlanningInput {
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
-            | FeaResourceDemand::StructuralFrequencyResultAssembly(_) => None,
+            | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
+            | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 Some(&mut demand.operator)
             }

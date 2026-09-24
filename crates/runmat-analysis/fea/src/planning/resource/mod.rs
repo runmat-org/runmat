@@ -18,6 +18,7 @@ mod scoped_execution;
 mod solve_policy;
 mod structural_facts;
 mod symbolic;
+mod transient_result;
 mod usage;
 
 pub use admission::{
@@ -44,8 +45,8 @@ pub use contract::{
     StructuralModalResponseSpectrumAssemblyResourceDemand,
     StructuralModalResponseSpectrumDirectionResourceDemand, StructuralOperatorResourceDemand,
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
-    TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
-    RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    StructuralTransientResultAssemblyResourceDemand, TopologyResourceFacts, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{
@@ -91,6 +92,11 @@ pub use scoped_execution::{
     execute_scoped_chunks, execute_scoped_slices_mut, ScopedLocalExecutionError,
 };
 pub use symbolic::StructuralSymbolicOperators;
+pub use transient_result::{
+    build_structural_transient_result_assembly_resource_plan,
+    structural_transient_receipt_payload_bytes_upper_bound,
+    structural_transient_result_payload_bytes_upper_bound,
+};
 pub use usage::{
     AnalysisResourceUsage, ResourceOverrun, ResourceUsageAttempt, ResourceUsageAttemptOverrun,
     ResourceUsageEvidence, ResourceUsageEvidenceIdentity,

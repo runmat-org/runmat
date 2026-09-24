@@ -139,6 +139,31 @@ pub(super) fn build_frequency_result_assembly_resource_plan(
     )
 }
 
+pub(super) fn build_transient_result_assembly_resource_plan(
+    input: FeaResourcePlanningInput,
+    demand: &StructuralTransientResultAssemblyResourceDemand,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    if demand.segment_count.0 == 0
+        || demand.sample_count.0 == 0
+        || demand.physical_dof_count.0 == 0
+        || demand.ordering_workspace_bytes_upper_bound.0 == 0
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "transient result assembly resource cardinalities must be nonzero".into(),
+        ));
+    }
+    build_post_process_resource_plan(
+        input,
+        PostProcessAccounting::host_only(
+            demand.scope_digest,
+            &demand.inputs,
+            demand.ordering_workspace_bytes_upper_bound,
+            ByteCount(0),
+            &[&demand.result_output, &demand.receipt_output],
+        ),
+    )
+}
+
 pub(super) fn build_response_spectrum_assembly_resource_plan(
     input: FeaResourcePlanningInput,
     demand: &StructuralModalResponseSpectrumAssemblyResourceDemand,

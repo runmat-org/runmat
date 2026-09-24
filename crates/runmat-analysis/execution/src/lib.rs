@@ -345,9 +345,9 @@ pub use transient_result_access::{
     StructuralTransientResultSampleImport,
 };
 pub use transient_result_task::{
-    import_structural_transient_result, prepare_structural_transient_result_task,
-    ImportedStructuralTransientResult, PreparedStructuralTransientResultTask,
-    StructuralTransientResultPreparation,
+    build_prepared_structural_transient_result_resource_plan, import_structural_transient_result,
+    prepare_structural_transient_result_task, ImportedStructuralTransientResult,
+    PreparedStructuralTransientResultTask, StructuralTransientResultPreparation,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

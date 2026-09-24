@@ -2,7 +2,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, StructuralTransientNumericalReceipt,
-    StructuralTransientResultAssemblyRequest, StructuralTransientSolverResult,
+    StructuralTransientResultAssemblyRequest, StructuralTransientSegment,
+    StructuralTransientSolverResult,
+};
+use runmat_analysis_fea::planning::resource::{
+    build_structural_transient_result_assembly_resource_plan,
+    structural_transient_receipt_payload_bytes_upper_bound,
+    structural_transient_result_payload_bytes_upper_bound, FeaResourcePlan,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -13,8 +19,9 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutio
 use crate::{
     decode_prepared_structural_transient_numerical_receipt,
     decode_prepared_structural_transient_solver_result, import_analysis_objects,
-    import_analysis_output_set, prepare_analysis_program,
-    prepare_structural_transient_result_assembly_request_objects, AnalysisBridgeError,
+    import_analysis_output_set, prepare_analysis_objects, prepare_analysis_program,
+    prepare_structural_transient_result_assembly_request_objects, prepared_input_resource_facts,
+    projected_output_resource_facts, projected_output_set_resource_facts, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisWorkloadInput, AnalysisWorkloadRequest, ImportedStructuralTransientBlock,
     PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
@@ -31,6 +38,8 @@ pub struct StructuralTransientResultPreparation {
 pub struct PreparedStructuralTransientResultTask {
     pub request: StructuralTransientResultAssemblyRequest,
     pub blocks: Vec<ImportedStructuralTransientBlock>,
+    pub resource_plan: FeaResourcePlan,
+    pub resource_plan_objects: PreparedAnalysisObjects,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
@@ -74,7 +83,27 @@ pub fn prepare_structural_transient_result_task(
         ObjectNamespace::InputValue,
         preparation.inventory_limits,
     )?;
-    let mut typed_inputs = vec![(request_objects, ValueRefKind::DriverObject)];
+    let mut numerical_inputs = vec![request_objects.clone()];
+    numerical_inputs.extend(blocks.iter().map(|block| block.objects.clone()));
+    let resource_plan = build_prepared_structural_transient_result_resource_plan(
+        &request,
+        &segments,
+        &numerical_inputs,
+    )?;
+    let resource_plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    let mut typed_inputs = vec![
+        (request_objects, ValueRefKind::DriverObject),
+        (resource_plan_objects.clone(), ValueRefKind::DriverObject),
+    ];
     typed_inputs.extend(
         blocks
             .iter()
@@ -114,10 +143,41 @@ pub fn prepare_structural_transient_result_task(
     Ok(PreparedStructuralTransientResultTask {
         request,
         blocks,
+        resource_plan,
+        resource_plan_objects,
         host,
         program,
         inputs,
     })
+}
+
+/// Re-derives the phase envelope from the same prepared numerical inputs at both the driver
+/// and worker boundaries. The ResourcePlan object itself is intentionally excluded.
+pub fn build_prepared_structural_transient_result_resource_plan(
+    request: &StructuralTransientResultAssemblyRequest,
+    segments: &[StructuralTransientSegment],
+    numerical_inputs: &[PreparedAnalysisObjects],
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    let input_facts = prepared_input_resource_facts(numerical_inputs)?;
+    let sample_count = u64::try_from(request.scope.schedule.points.len())
+        .map_err(|_| AnalysisBridgeError::Invalid("transient sample count overflows".into()))?;
+    let segment_count = u64::try_from(segments.len())
+        .map_err(|_| AnalysisBridgeError::Invalid("transient segment count overflows".into()))?;
+    let result_payload_upper_bound =
+        structural_transient_result_payload_bytes_upper_bound(&input_facts, sample_count)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let receipt_payload_upper_bound =
+        structural_transient_receipt_payload_bytes_upper_bound(&input_facts, segment_count)
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    build_structural_transient_result_assembly_resource_plan(
+        request,
+        segments,
+        input_facts,
+        projected_output_resource_facts(result_payload_upper_bound)?,
+        projected_output_resource_facts(receipt_payload_upper_bound)?,
+        projected_output_set_resource_facts(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
 }
 
 pub fn import_structural_transient_result(

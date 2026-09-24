@@ -1,10 +1,13 @@
+mod implicit_input;
 mod post_process;
+
+use implicit_input::implicit_resource_plan_input_facts;
 
 use post_process::{
     build_frequency_result_assembly_resource_plan, build_observation_assembly_resource_plan,
     build_observation_history_resource_plan, build_observation_partition_resource_plan,
     build_observation_reduction_resource_plan, build_random_response_assembly_resource_plan,
-    build_response_spectrum_assembly_resource_plan,
+    build_response_spectrum_assembly_resource_plan, build_transient_result_assembly_resource_plan,
 };
 
 use super::contract::{
@@ -16,32 +19,11 @@ use super::contract::{
     ResourceBreakdown, ResourcePlanningError, SolveResourcePolicy, SparseResourceFacts,
     StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand, StructuralOperatorResourceDemand,
-    StructuralRandomResponseAssemblyResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
+    StructuralRandomResponseAssemblyResourceDemand,
+    StructuralTransientResultAssemblyResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
     RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 use runmat_execution::{resource::ResourceRequest, Digest};
-
-fn implicit_resource_plan_input_facts() -> Result<PreparedInputResourceFacts, ResourcePlanningError>
-{
-    let decoded =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            RESOURCE_PLAN_MAX_ENCODED_BYTES,
-            1,
-        )
-        .ok_or(ResourcePlanningError::Overflow(
-            "resource-plan decoded residency budget",
-        ))?;
-    let transport = add(
-        RESOURCE_PLAN_MAX_ENCODED_BYTES,
-        crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
-        "resource-plan transport closure budget",
-    )?;
-    Ok(PreparedInputResourceFacts {
-        encoded_payload_bytes: ByteCount(RESOURCE_PLAN_MAX_ENCODED_BYTES),
-        transport_closure_bytes: ByteCount(transport),
-        decoded_resident_bytes_admission_budget: ByteCount(decoded),
-    })
-}
 
 pub fn build_resource_plan(
     input: FeaResourcePlanningInput,
@@ -94,6 +76,10 @@ pub fn build_resource_plan(
             FeaResourcePhase::StructuralFrequencyResultAssembly(_),
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand),
         ) => build_frequency_result_assembly_resource_plan(input.clone(), demand),
+        (
+            FeaResourcePhase::StructuralTransientResultAssembly(_),
+            FeaResourceDemand::StructuralTransientResultAssembly(demand),
+        ) => build_transient_result_assembly_resource_plan(input.clone(), demand),
         (
             FeaResourcePhase::StructuralModalResponseSpectrumDirection(_),
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand),

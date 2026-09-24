@@ -1,5 +1,6 @@
 use runmat_analysis_core::StateKind;
 use runmat_analysis_execution::{
+    build_prepared_structural_transient_result_resource_plan,
     decode_prepared_observation_history_checkpoint, decode_prepared_semantic_state,
     decode_prepared_structural_buckling_workload,
     decode_prepared_structural_frequency_entry_request,
@@ -176,6 +177,9 @@ fn execute_structural_transient_result_assembly(
         AnalysisNumericalObjectKind::StructuralTransientResultAssemblyRequest,
     )?;
     let request = decode_prepared_structural_transient_result_assembly_request(request_input)?;
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let segment_inputs = invocation
         .inputs
         .iter()
@@ -183,7 +187,7 @@ fn execute_structural_transient_result_assembly(
             input.manifest.kind == AnalysisNumericalObjectKind::StructuralTransientSegment
         })
         .collect::<Vec<_>>();
-    if invocation.inputs.len() != request.segments.len() + 1
+    if invocation.inputs.len() != request.segments.len() + 2
         || segment_inputs.len() != request.segments.len()
         || invocation.host.workload.outputs
             != vec![
@@ -197,6 +201,44 @@ fn execute_structural_transient_result_assembly(
         return Err(AnalysisBridgeError::Invalid(
             "structural transient result inputs or outputs differ from the workload contract"
                 .into(),
+        ));
+    }
+    let numerical_inputs = invocation
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan)
+        .cloned()
+        .collect::<Vec<_>>();
+    let input_facts = prepared_input_resource_facts(&numerical_inputs)?;
+    let FeaResourceDemand::StructuralTransientResultAssembly(demand) = &resource_plan.input.demand
+    else {
+        return Err(AnalysisBridgeError::Identity(
+            "transient result assembly requires its exact phase resource demand",
+        ));
+    };
+    let segment_count = u64::try_from(request.segments.len())
+        .map_err(|_| AnalysisBridgeError::Invalid("transient segment count overflows".into()))?;
+    let sample_count = u64::try_from(request.scope.schedule.points.len())
+        .map_err(|_| AnalysisBridgeError::Invalid("transient sample count overflows".into()))?;
+    let physical_dof_count = u64::try_from(request.scope.dof_count).map_err(|_| {
+        AnalysisBridgeError::Invalid("transient physical DOF count overflows".into())
+    })?;
+    if resource_plan_input.manifest.logical_identity != resource_plan.identity.digest()
+        || resource_plan.input.phase
+            != FeaResourcePhase::StructuralTransientResultAssembly(request.identity)
+        || demand.scope_digest
+            != request
+                .scope
+                .identity()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+                .digest()
+        || demand.inputs != input_facts
+        || demand.segment_count.0 != segment_count
+        || demand.sample_count.0 != sample_count
+        || demand.physical_dof_count.0 != physical_dof_count
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "transient result resource plan input facts differ from the prepared workload",
         ));
     }
     let decoded = segment_inputs
@@ -227,6 +269,21 @@ fn execute_structural_transient_result_assembly(
     if !remaining.is_empty() {
         return Err(AnalysisBridgeError::Identity(
             "structural transient result assembly contains an unrelated segment",
+        ));
+    }
+    let expected_resource_plan = build_prepared_structural_transient_result_resource_plan(
+        &request,
+        &segments,
+        &numerical_inputs,
+    )?;
+    if resource_plan_input.manifest.logical_identity != resource_plan.identity.digest()
+        || resource_plan.input.phase
+            != FeaResourcePhase::StructuralTransientResultAssembly(request.identity)
+        || !resource_plan.request.accelerators.is_empty()
+        || resource_plan != expected_resource_plan
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "transient result resource plan does not converge from authoritative inputs",
         ));
     }
     let result = StructuralTransientSolverResult::assemble(&request, &segments)?;
