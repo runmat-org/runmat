@@ -395,6 +395,12 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
     assert_eq!(buckling.mode_indices, vec![1]);
     assert_eq!(buckling.load_factors.len(), 1);
     assert_eq!(buckling.mode_shapes.len(), 1);
+    assert!(persisted
+        .run
+        .fields
+        .iter()
+        .all(|field| field.field_id != buckling.mode_shapes[0].field_id));
+    assert!(analysis_run_field_ids(&persisted).contains(&buckling.mode_shapes[0].field_id));
     let queried = analysis_results_op(
         &persisted,
         AnalysisResultsQuery::default(),
