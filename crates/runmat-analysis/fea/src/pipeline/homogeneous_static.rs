@@ -86,7 +86,7 @@ impl HomogeneousStaticSolver {
             .reduction
             .transpose_apply(full_load)
             .map_err(|error| FeaRunError::Solve(error.to_string()))?;
-        if norm(&reduced_load) <= f64::EPSILON {
+        if reduced_load.iter().all(|value| *value == 0.0) {
             let zero = vec![0.0; self.system.dof_count()];
             return Ok(HomogeneousStaticSolution {
                 displacement: self
@@ -228,15 +228,58 @@ mod tests {
                 }
             }
         }
-        let prepared = PreparedRealLinearSystem::try_new(
-            assembler.finish().unwrap(),
-            vec![1.0; 5],
+        let stiffness = assembler.finish().unwrap();
+        let system = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(
+                stiffness,
+                RealSparseMatrix::diagonal(
+                    vec![1.0; 5],
+                    OperatorRole::Mass,
+                    MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                )
+                .unwrap(),
+                RealSparseMatrix::diagonal(
+                    vec![0.0; 5],
+                    OperatorRole::Damping,
+                    MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+                )
+                .unwrap(),
+            )
+            .unwrap(),
             vec![false; 5],
+            vec![0.0; 5],
         )
         .unwrap();
-        assert_eq!(
-            correction_preconditioner(&prepared).unwrap().kind(),
-            SpdPreconditionerKind::Jacobi
+        let prepared = system.prepare_linear().unwrap();
+        let preconditioner = correction_preconditioner(&prepared).unwrap();
+        assert_eq!(preconditioner.kind(), SpdPreconditionerKind::Jacobi);
+
+        let expected = [1.0, -2.0, 0.5, 3.0, -1.0];
+        let load = values
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .zip(expected)
+                    .map(|(entry, value)| entry * value)
+                    .sum()
+            })
+            .collect::<Vec<f64>>();
+        let solved = solve_spd_system_cg(
+            &system,
+            &load,
+            SpdCgSolveOptions {
+                max_iters: homogeneous_static_iteration_limit(5),
+                tol: STATIC_TOLERANCE,
+                prepared_accelerator_system: None,
+                cpu_preconditioner: Some(preconditioner.as_ref()),
+                initial_guess: None,
+            },
         );
+        assert!(solved.converged);
+        for (actual, expected) in solved.vector.iter().zip(expected) {
+            assert!((actual - expected).abs() <= 1.0e-9);
+        }
+        let residual = subtract(&apply_k(&system, &solved.vector), &load).unwrap();
+        assert!(norm(&residual) / norm(&load) <= STATIC_TOLERANCE);
     }
 }

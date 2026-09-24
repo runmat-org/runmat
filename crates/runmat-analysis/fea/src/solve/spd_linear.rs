@@ -190,4 +190,53 @@ mod tests {
             assert!((solved.vector[1] / scale + 0.5).abs() <= 1.0e-12);
         }
     }
+
+    #[test]
+    fn scaled_coercive_operator_and_load_preserve_the_physical_solution() {
+        for scale in [1.0, 1.0e-20] {
+            let stiffness = RealSparseMatrix::diagonal(
+                vec![2.0 * scale, 4.0 * scale],
+                OperatorRole::Stiffness,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .unwrap();
+            let mass = RealSparseMatrix::diagonal(
+                vec![1.0; 2],
+                OperatorRole::Mass,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .unwrap();
+            let damping = RealSparseMatrix::diagonal(
+                vec![0.0; 2],
+                OperatorRole::Damping,
+                MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+            )
+            .unwrap();
+            let system = AssembledRealSystem::try_new(
+                CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
+                vec![false; 2],
+                vec![0.0; 2],
+            )
+            .unwrap();
+            let prepared = system.prepare_linear().unwrap();
+            for kind in [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0] {
+                let preconditioner = build_spd_preconditioner(&prepared, kind).unwrap();
+                let rhs = [2.0 * scale, -4.0 * scale];
+                let solved = solve_spd_system_cg(
+                    &system,
+                    &rhs,
+                    SpdCgSolveOptions {
+                        max_iters: 8,
+                        tol: 1.0e-10,
+                        prepared_accelerator_system: None,
+                        cpu_preconditioner: Some(preconditioner.as_ref()),
+                        initial_guess: None,
+                    },
+                );
+                assert!(solved.converged, "{kind:?} at scale {scale}");
+                assert!((solved.vector[0] - 1.0).abs() <= 1.0e-12);
+                assert!((solved.vector[1] + 1.0).abs() <= 1.0e-12);
+            }
+        }
+    }
 }

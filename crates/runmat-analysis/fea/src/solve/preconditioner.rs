@@ -47,15 +47,7 @@ impl JacobiPreconditioner {
         let mut inverse_diagonal = Vec::with_capacity(system.dof_count());
         for row in 0..system.dof_count() {
             let diagonal = system.matrix().get(row, row);
-            if !diagonal.is_finite() {
-                return Err(PreconditionerError::InvalidPivot { row });
-            }
-            if diagonal.abs() <= 1.0e-14 {
-                let row_is_empty = system.matrix().pattern().row_range(row).is_empty();
-                if row_is_empty && system.rhs()[row] == 0.0 {
-                    inverse_diagonal.push(1.0);
-                    continue;
-                }
+            if !admissible_positive_pivot(diagonal) {
                 return Err(PreconditionerError::InvalidPivot { row });
             }
             inverse_diagonal.push(diagonal.recip());
@@ -130,10 +122,13 @@ impl Ilu0Preconditioner {
             for lower_entry in lower_entries {
                 let pivot_row = column_indices[lower_entry];
                 let pivot = factors[diagonal_entries[pivot_row]];
-                if !pivot.is_finite() || pivot <= 1.0e-14 {
+                if !admissible_positive_pivot(pivot) {
                     return Err(PreconditionerError::InvalidPivot { row: pivot_row });
                 }
                 let multiplier = factors[lower_entry] / pivot;
+                if !multiplier.is_finite() {
+                    return Err(PreconditionerError::InvalidPivot { row: pivot_row });
+                }
                 factors[lower_entry] = multiplier;
                 for upper_entry in matrix.pattern().row_range(pivot_row) {
                     let column = column_indices[upper_entry];
@@ -146,7 +141,7 @@ impl Ilu0Preconditioner {
                 }
             }
             let pivot = factors[diagonal_entries[row]];
-            if !pivot.is_finite() || pivot <= 1.0e-14 {
+            if !admissible_positive_pivot(pivot) {
                 return Err(PreconditionerError::InvalidPivot { row });
             }
         }
@@ -157,6 +152,10 @@ impl Ilu0Preconditioner {
             diagonal_entries,
         })
     }
+}
+
+fn admissible_positive_pivot(pivot: f64) -> bool {
+    pivot > 0.0 && pivot.is_finite() && pivot.recip().is_finite()
 }
 
 impl SpdPreconditioner for Ilu0Preconditioner {
