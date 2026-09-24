@@ -29,7 +29,7 @@
     "unit": "builtins::io::tabular::readmatrix::tests",
     "integration": "builtins::io::tabular::readmatrix::tests::readmatrix_reads_csv_data"
   },
-  "description": "`readmatrix(filename)` reads numeric data from text or delimited files and returns a dense matrix. It follows MATLAB defaults for delimiter detection, import ranges, header skipping, and missing-value handling.",
+  "description": "`readmatrix(filename)` reads numeric data from text or delimited files and returns a dense matrix. It follows MATLAB defaults for delimiter detection, import ranges, header skipping, and missing-value handling.\n\nFor a complete example covering headers, missing values, and validation, see [Reading and writing CSV files in MATLAB](/resources/guides/how-to-read-and-write-csv-files-in-matlab).",
   "behaviors": [
     "Accepts character vectors or string scalars for the file name. String arrays must contain exactly one element.",
     "Supports option structs (from `detectImportOptions`) as well as name/value arguments such as `'Delimiter'`, `'NumHeaderLines'`, `'TreatAsMissing'`, `'DecimalSeparator'`, `'ThousandsSeparator'`, and `'EmptyValue'`.",

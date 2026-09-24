@@ -34,7 +34,7 @@
       "builtins::io::tabular::writematrix::tests::writematrix_preserves_typed_integer_matrix_values_exactly"
     ]
   },
-  "description": "`writematrix(A, filename)` serializes a numeric or string matrix to a delimited text file. Native integer matrices retain their exact decimal values.",
+  "description": "`writematrix(A, filename)` serializes a numeric or string matrix to a delimited text file. Native integer matrices retain their exact decimal values.\n\nFor a complete import, validation, and export workflow, see [Reading and writing CSV files in MATLAB](/resources/guides/how-to-read-and-write-csv-files-in-matlab).",
   "behaviors": [
     "Accepts real numeric, logical, or string arrays with up to two dimensions (trailing singleton dimensions are ignored). Heterogeneous data requires `writecell` instead.",
     "Default delimiters follow MATLAB: comma for `.csv`, tab for `.tsv`, whitespace for `.txt` and `.dat`, and comma for other extensions. Specify `'Delimiter', value` to override.",

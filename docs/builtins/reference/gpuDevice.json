@@ -28,7 +28,7 @@
     "integration": "tests::gpu::gpu_device_returns_struct",
     "wgpu": "builtins::acceleration::gpu::gpudevice::tests::gpu_device_wgpu_reports_metadata"
   },
-  "description": "`info = gpuDevice()` returns a struct describing the active GPU provider/device. Reported fields include identifiers, vendor/backend information, memory hints, and precision capability, following MATLAB-style metadata semantics in RunMat.",
+  "description": "`info = gpuDevice()` returns a struct describing the active GPU provider/device. Reported fields include identifiers, vendor/backend information, memory hints, and precision capability, following MATLAB-style metadata semantics in RunMat.\n\nFor checking your NVIDIA setup and understanding the available hardware paths, see [How to use a GPU with MATLAB](/blog/how-to-use-gpu-in-matlab).",
   "behaviors": [
     "Requires an acceleration provider that implements RunMat Accelerate's `AccelProvider` trait.",
     "Returns a struct so you can access fields with dot notation: `gpuDevice().name`.",
