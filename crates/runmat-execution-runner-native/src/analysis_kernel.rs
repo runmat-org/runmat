@@ -22,9 +22,7 @@ use runmat_analysis_execution::{
     validate_observation_resource_usage, AnalysisBridgeError, AnalysisBridgeResult, AnalysisKernel,
     AnalysisKernelInvocation, AnalysisKernelOutput, AnalysisKernelOutputPartition,
 };
-use runmat_analysis_fea::constraints::{
-    CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult,
-};
+use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AnalysisNumericalObjectKind, AnalysisWorkKind,
     CanonicalSemanticState, ConstraintPlanIdentity, FieldRecoveryRequest, FieldRecoverySource,
@@ -796,13 +794,9 @@ fn execute_structural_linear(
             None,
         )
     };
-    let constraint_result = CanonicalStructuralConstraintResult::recover_for_model(
-        &constraint_plan,
-        &solver_model,
-        mesh.as_ref(),
-        &run.fields,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_result = run.structural_constraint_result.as_deref().cloned().ok_or(
+        AnalysisBridgeError::Identity("structural solve omitted its canonical constraint result"),
+    )?;
     let result = match linearization {
         Some(linearization) => StructuralLinearWorkloadResult::with_linearization(
             run,
