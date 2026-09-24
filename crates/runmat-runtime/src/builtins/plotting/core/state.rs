@@ -1132,6 +1132,10 @@ thread_local! {
 #[doc(hidden)]
 pub struct PlotTestLockGuard {
     _guard: std::sync::MutexGuard<'static, ()>,
+    // Plot tests also enter acceleration/RNG helpers. Acquire their shared
+    // guard first so concurrent tests cannot invert the two lock orders.
+    #[cfg(test)]
+    _global_guard: crate::builtins::common::test_support::GlobalStateTestGuard,
     disable_previous: Option<std::ffi::OsString>,
     host_previous: Option<std::ffi::OsString>,
 }
@@ -1165,6 +1169,8 @@ impl PlotTestLockGuard {
 
 #[doc(hidden)]
 pub fn lock_plot_test_registry() -> PlotTestLockGuard {
+    #[cfg(test)]
+    let global_guard = crate::builtins::common::test_support::global_state_test_guard();
     let guard = TEST_PLOT_REGISTRY_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -1174,6 +1180,8 @@ pub fn lock_plot_test_registry() -> PlotTestLockGuard {
     set_plot_test_env_vars();
     PlotTestLockGuard {
         _guard: guard,
+        #[cfg(test)]
+        _global_guard: global_guard,
         disable_previous,
         host_previous,
     }
