@@ -437,6 +437,16 @@ pub fn clone_geometry_scene(handle: u32) -> Option<runmat_plot::GeometryScene> {
 }
 
 #[cfg(feature = "plot-core")]
+pub fn replace_geometry_scene(
+    handle: u32,
+    scene: runmat_plot::GeometryScene,
+) -> crate::BuiltinResult<()> {
+    with_geometry_scene_mut(handle, |current| {
+        *current = scene;
+    })
+}
+
+#[cfg(feature = "plot-core")]
 pub fn append_geometry_scene_chunks(
     handle: u32,
     chunks: Vec<runmat_plot::GeometrySceneChunk>,
