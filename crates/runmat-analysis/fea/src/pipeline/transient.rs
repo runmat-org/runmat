@@ -90,6 +90,33 @@ struct PreparedTransientBlockBasis {
     schedule: crate::execution::StructuralTransientSchedule,
 }
 
+fn admit_transient_minimum_samples(
+    interval_count: usize,
+    maximum_samples: usize,
+) -> Result<(), FeaRunError> {
+    let minimum_samples = interval_count.checked_add(1).ok_or_else(|| {
+        FeaRunError::InvalidModel("structural transient sample count overflows".into())
+    })?;
+    if minimum_samples > maximum_samples {
+        return Err(FeaRunError::InvalidModel(format!(
+            "structural transient schedule requires at least {minimum_samples} samples, exceeding the authored ceiling of {maximum_samples}"
+        )));
+    }
+    Ok(())
+}
+
+fn admit_transient_schedule_samples(
+    actual_samples: usize,
+    maximum_samples: usize,
+) -> Result<(), FeaRunError> {
+    if actual_samples > maximum_samples {
+        return Err(FeaRunError::InvalidModel(format!(
+            "structural transient schedule requires {actual_samples} samples, exceeding the authored ceiling of {maximum_samples}"
+        )));
+    }
+    Ok(())
+}
+
 fn realize_transient_initial_state(
     active_model: &AnalysisModel,
     execution_step: &ProcedureStep,
@@ -159,6 +186,10 @@ fn prepare_transient_block_basis(
     )?
     .clone();
     validate_model(model).map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    admit_transient_minimum_samples(
+        options.time_step_policy.interval_count(),
+        execution_step.accuracy.resources.maximum_samples,
+    )?;
     let mut required_history_samples = required_time_history_samples(&execution_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let time_grid = crate::excitation::ProcedureTimeGrid::from_interval_count(
@@ -200,6 +231,13 @@ fn prepare_transient_block_basis(
         &step_boundaries,
     )
     .map_err(FeaRunError::Solve)?;
+    // Breakpoints and requested history coordinates can add accepted states beyond the
+    // authored interval count. Check the actual schedule before the first structural assembly;
+    // the block scope and every worker block use this same preparation boundary.
+    admit_transient_schedule_samples(
+        schedule.points.len(),
+        execution_step.accuracy.resources.maximum_samples,
+    )?;
     let excitations = realize_step_excitations(
         &active_model,
         &execution_step,
@@ -409,6 +447,10 @@ pub fn run_transient_with_options(
     );
     check_cancelled("fea.run_transient")?;
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    admit_transient_minimum_samples(
+        options.time_step_policy.interval_count(),
+        execution_step.accuracy.resources.maximum_samples,
+    )?;
     let mut required_history_samples = required_time_history_samples(execution_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     emit_phase(
@@ -433,6 +475,35 @@ pub fn run_transient_with_options(
     let structural_motions =
         StructuralMotionSet::materialize(&active_model, execution_step, start_time_s, end_time_s)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    required_history_samples.extend(
+        structural_motions
+            .breakpoints_s()
+            .iter()
+            .copied()
+            .filter(|time| *time >= start_time_s && *time <= end_time_s),
+    );
+    required_history_samples.sort_by(f64::total_cmp);
+    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let discontinuities = time_breakpoints(&active_model, execution_step, start_time_s, end_time_s)
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let step_boundaries = canonical_transient_step_boundaries(
+        &discontinuities,
+        &required_history_samples,
+        start_time_s,
+        end_time_s,
+    )
+    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+    let schedule = crate::solve::transient::canonical_transient_schedule(
+        options.time_step_policy.interval_count(),
+        start_time_s,
+        end_time_s,
+        &step_boundaries,
+    )
+    .map_err(FeaRunError::Solve)?;
+    admit_transient_schedule_samples(
+        schedule.points.len(),
+        execution_step.accuracy.resources.maximum_samples,
+    )?;
     let excitations = realize_step_excitations(
         &active_model,
         execution_step,
@@ -487,24 +558,6 @@ pub fn run_transient_with_options(
         Some(2),
         Some(5),
     );
-    required_history_samples.extend(
-        structural_motions
-            .breakpoints_s()
-            .iter()
-            .copied()
-            .filter(|time| *time >= start_time_s && *time <= end_time_s),
-    );
-    required_history_samples.sort_by(f64::total_cmp);
-    required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    let discontinuities = time_breakpoints(&active_model, execution_step, start_time_s, end_time_s)
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let step_boundaries = canonical_transient_step_boundaries(
-        &discontinuities,
-        &required_history_samples,
-        start_time_s,
-        end_time_s,
-    )
-    .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let assemble_at = |time_s, approach| {
         let excitations = realize_step_excitations(
             &active_model,
@@ -578,4 +631,73 @@ pub fn run_transient_with_options(
         },
         transient,
     )
+}
+
+#[cfg(test)]
+mod resource_schedule_tests {
+    use super::*;
+    use crate::fixtures::{fixture_model, FixtureId};
+
+    #[test]
+    fn scope_preparation_rejects_accepted_schedule_over_sample_ceiling_before_assembly() {
+        let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
+        let options = TransientSolveOptions {
+            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
+                interval_count: 2,
+            },
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            ..TransientSolveOptions::default()
+        };
+        let error = match prepare_transient_block_basis(&model, &options) {
+            Ok(_) => panic!("over-ceiling transient schedule was admitted"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires at least 3 samples") && message.contains("ceiling of 2")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn motion_breakpoint_samples_count_against_transient_ceiling() {
+        let mut model = fixture_model(FixtureId::StructuralTransientTet4SupportMotionReference);
+        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
+        let options = TransientSolveOptions {
+            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
+                interval_count: 1,
+            },
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            ..TransientSolveOptions::default()
+        };
+        let error = match prepare_transient_block_basis(&model, &options) {
+            Ok(_) => panic!("over-ceiling motion schedule was admitted"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires 3 samples") && message.contains("ceiling of 2")),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn direct_host_transient_checks_schedule_before_initial_assembly() {
+        let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+        model.sequence.steps[0].accuracy.resources.maximum_samples = 2;
+        let options = TransientSolveOptions {
+            time_step_policy: crate::solve::transient::StructuralTimeStepPolicy::Fixed {
+                interval_count: 2,
+            },
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            ..TransientSolveOptions::default()
+        };
+        let error = match run_transient_with_options(&model, ComputeBackend::Cpu, options) {
+            Ok(_) => panic!("over-ceiling direct transient schedule was admitted"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, FeaRunError::InvalidModel(message) if message.contains("requires at least 3 samples") && message.contains("ceiling of 2")),
+            "{error}"
+        );
+    }
 }
