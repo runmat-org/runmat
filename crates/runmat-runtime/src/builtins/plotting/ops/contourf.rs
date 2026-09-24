@@ -660,6 +660,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let res = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0])),
@@ -840,6 +841,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_target_axes_and_does_not_alias_integer_z_as_a_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let ax = crate::builtins::plotting::axes::axes_builtin(Vec::new()).expect("axes");
         let z = Value::Tensor(
@@ -852,6 +854,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_invalid_grid_uses_stable_identifier() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let err = contourf_builtin(Value::Num(0.0), Vec::new()).expect_err("invalid z");
         assert_eq!(err.identifier(), CONTOURF_ERROR_INVALID_ARGUMENT.identifier);
@@ -859,6 +862,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_returns_handle() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(
@@ -872,6 +876,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_explicit_axes_and_scalar_level_count() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -889,6 +894,7 @@ pub(crate) mod tests {
 
     #[test]
     fn contourf_accepts_non_square_meshgrid_axes() {
+        let _guard = lock_plot_test_context();
         setup_plot_tests();
         let handle = contourf_builtin(
             Value::Tensor(matrix_from(&[10.0, 10.0, 20.0, 20.0, 30.0, 30.0], 2, 3)),

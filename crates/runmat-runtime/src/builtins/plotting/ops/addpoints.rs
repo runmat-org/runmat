@@ -356,7 +356,7 @@ mod tests {
     fn addpoints_rejects_non_animatedline_handles() {
         let _guard = setup();
         let err = block_on(addpoints_builtin(vec![
-            Value::Num(1.0),
+            Value::Num(current_figure_handle().as_u32() as f64),
             vector(&[1.0]),
             vector(&[2.0]),
         ]))
