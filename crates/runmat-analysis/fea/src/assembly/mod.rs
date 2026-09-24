@@ -1378,6 +1378,7 @@ fn assemble_linear_system_impl(
                 coordinates_m: &coordinates_m,
                 node_identities: &node_identities,
             },
+            local_execution,
             &mut connector_stiffness,
             &mut connector_damping,
             |connector, target, role| match role {
@@ -1450,7 +1451,6 @@ fn assemble_linear_system_impl(
         }
         stiffness_upper.fill(0.0);
     }
-
     let constrained_dof_count = affine_constraint_reduction
         .as_ref()
         .map(|reduction| reduction.pivot_dof_indices.len())
@@ -1848,6 +1848,7 @@ fn assemble_explicit_structural_system(
         structural,
         &topology,
         &structural_dof_layout,
+        local_execution,
         &mut connector_stiffness_assembler,
         &mut connector_damping_assembler,
     )?;
@@ -1857,7 +1858,6 @@ fn assemble_explicit_structural_system(
     let connector_damping = connector_damping_assembler
         .finish()
         .map_err(|error| StructuralAssemblyError::SparseOperator(format!("{error:?}")))?;
-
     let source_projection = compile_explicit_load_plan(
         structural,
         &properties,

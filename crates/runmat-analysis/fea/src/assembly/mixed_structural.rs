@@ -171,6 +171,7 @@ pub(super) fn assemble_mixed_structural_system(
             coordinates_m: &connector_coordinates_m,
             node_identities: &connector_node_identities,
         },
+        local_execution,
         &mut connector_stiffness_assembler,
         &mut connector_damping_assembler,
         |connector, target, role| {
@@ -392,7 +393,6 @@ pub(super) fn assemble_mixed_structural_system(
         nullspace_evidence,
     )
     .map_err(|error| LinearAssemblyError::SparseOperator(error.to_string()))?;
-
     Ok(AssemblySummary {
         dof_count,
         structural_node_count: layout.node_count(),
@@ -451,7 +451,6 @@ pub(super) fn assemble_mixed_structural_system(
         operator,
     })
 }
-
 fn constraint_boundary_implementations(
     plan: &CanonicalStructuralConstraintPlan,
 ) -> Vec<BoundaryTransferImplementation> {
@@ -472,7 +471,6 @@ fn constraint_boundary_implementations(
         implementations
     }
 }
-
 fn resolve_target(
     target_id: &str,
     target: &runmat_analysis_core::RegionTarget,

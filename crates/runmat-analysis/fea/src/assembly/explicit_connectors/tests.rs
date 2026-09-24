@@ -2,6 +2,8 @@ use super::*;
 use crate::{
     algebra::{MatrixProperties, OperatorRole},
     assembly::dofs::StructuralNodeDofSet,
+    planning::resource::{execute_scoped_chunks, LocalExecutionPlan, LocalThreadCount},
+    progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext},
 };
 
 #[test]
@@ -69,6 +71,192 @@ fn surface_foundation_scales_with_area_not_node_count() {
     );
     assert!((coarse - 20.0).abs() < 1.0e-12);
     assert!((refined - coarse).abs() < 1.0e-12);
+}
+
+#[test]
+fn scoped_surface_foundation_preserves_canonical_sparse_accumulation_across_waves() {
+    let layout =
+        StructuralDofLayout::from_node_sets(vec![StructuralNodeDofSet::translational(); 6]);
+    let connector = AnalysisConnector {
+        connector_id: "foundation".into(),
+        kind: ConnectorKind::SurfaceNormalFoundation {
+            target: RegionTarget::boundary("face:1"),
+            modulus: runmat_analysis_core::FoundationModulus::new(20.0),
+        },
+    };
+    let samples = (0..29)
+        .map(|ordinal| SurfaceFoundationSample {
+            node_indices: (0..6).collect(),
+            shape_values: vec![
+                0.1 + ordinal as f64 * 0.001,
+                0.2,
+                0.15,
+                0.2,
+                0.15,
+                0.2 - ordinal as f64 * 0.001,
+            ],
+            unit_normal: [0.25, 0.5, 0.75],
+            area_weight_m2: 0.01 + ordinal as f64 * 0.0001,
+        })
+        .collect::<Vec<_>>();
+    let assemble = || {
+        RealSparseAssembler::square(
+            layout.total_dof_count(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        )
+    };
+    let mut serial = assemble();
+    add_surface_normal_foundation(&mut serial, &layout, &samples, 20.0);
+    let reference = serial.finish().unwrap();
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    for _ in 0..2 {
+        let mut scoped = assemble();
+        scoped::add_surface_normal_foundation_scoped(
+            &connector,
+            &mut scoped,
+            &layout,
+            &samples,
+            20.0,
+            plan,
+        )
+        .unwrap();
+        assert_eq!(scoped.finish().unwrap(), reference);
+    }
+    assert!(
+        std::mem::size_of::<(usize, usize, f64)>() * 18 * 18 * 4 <= 128 * 1024,
+        "a worker's retained connector wave must fit the fixed assembly scratch"
+    );
+    let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+        let mut scoped = assemble();
+        Ok::<_, ()>(scoped::add_surface_normal_foundation_scoped(
+            &connector,
+            &mut scoped,
+            &layout,
+            &samples,
+            20.0,
+            plan,
+        ))
+    })
+    .unwrap();
+    assert!(matches!(
+        &nested[0],
+        Err(StructuralAssemblyError::LocalExecution(message))
+            if message.contains("nested local numerical execution")
+    ));
+
+    let cancellation = FeaCancellationToken::new();
+    cancellation.cancel();
+    let _context = replace_fea_progress_context(FeaProgressContext {
+        cancellation,
+        ..FeaProgressContext::default()
+    });
+    let mut cancelled = assemble();
+    assert!(matches!(
+        scoped::add_surface_normal_foundation_scoped(
+            &connector,
+            &mut cancelled,
+            &layout,
+            &samples,
+            20.0,
+            plan,
+        ),
+        Err(StructuralAssemblyError::Cancelled)
+    ));
+    drop(_context);
+
+    let mut oversized = samples.clone();
+    oversized[0].node_indices.push(0);
+    oversized[0].shape_values.push(0.0);
+    assert!(matches!(
+        scoped::validate_surface_samples(&connector, &oversized),
+        Err(StructuralAssemblyError::InvalidExplicitConnector { connector_id, .. })
+            if connector_id == "foundation"
+    ));
+}
+
+#[test]
+fn scoped_connector_assembly_preserves_plan_provenance_and_mutable_resolution() {
+    let layout =
+        StructuralDofLayout::from_node_sets(vec![StructuralNodeDofSet::translational(); 6]);
+    let connector = AnalysisConnector {
+        connector_id: "foundation".into(),
+        kind: ConnectorKind::SurfaceNormalFoundation {
+            target: RegionTarget::boundary("face:1"),
+            modulus: runmat_analysis_core::FoundationModulus::new(20.0),
+        },
+    };
+    let coordinates = (0..6)
+        .map(|index| [index as f64, 0.0, 0.0])
+        .collect::<Vec<_>>();
+    let identities = (1..=6)
+        .map(|value| runmat_meshing_core::StableDigest::from_bytes([value; 32]))
+        .collect::<Vec<_>>();
+    let samples = (0..29)
+        .map(|ordinal| SurfaceFoundationSample {
+            node_indices: (0..6).collect(),
+            shape_values: vec![
+                0.1 + ordinal as f64 * 0.001,
+                0.2,
+                0.15,
+                0.2,
+                0.15,
+                0.2 - ordinal as f64 * 0.001,
+            ],
+            unit_normal: [0.0, 0.0, 1.0],
+            area_weight_m2: 0.01,
+        })
+        .collect::<Vec<_>>();
+    let assemble = |execution| {
+        let mut stiffness = RealSparseAssembler::square(
+            layout.total_dof_count(),
+            OperatorRole::Stiffness,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let mut damping = RealSparseAssembler::square(
+            layout.total_dof_count(),
+            OperatorRole::Damping,
+            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
+        );
+        let mut resolution_count = 0;
+        let summary = assemble_connectors_with_resolver(
+            std::slice::from_ref(&connector),
+            ConnectorAssemblyContext {
+                topology_identity:
+                    crate::physics::structural::topology::CanonicalStructuralTopologyIdentity::Solid {
+                        mesh_digest: runmat_meshing_core::StableDigest::from_bytes([99; 32]),
+                    },
+                layout: &layout,
+                coordinates_m: &coordinates,
+                node_identities: &identities,
+            },
+            execution,
+            &mut stiffness,
+            &mut damping,
+            |_, _, role| {
+                assert_eq!(role, ConnectorTargetRole::Surface);
+                resolution_count += 1;
+                Ok(ResolvedConnectorTarget {
+                    node_indices: (0..6).collect(),
+                    surface_samples: samples.clone(),
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(resolution_count, 1);
+        (
+            summary,
+            stiffness.finish().unwrap(),
+            damping.finish().unwrap(),
+        )
+    };
+    let reference = assemble(LocalExecutionPlan::serial());
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    assert_eq!(assemble(plan), reference);
+    assert_eq!(assemble(plan), reference);
+    assert_eq!(reference.0.stiffness_count, 1);
+    assert_eq!(reference.0.damping_count, 0);
+    assert_eq!(reference.1.contributions().len(), 1);
 }
 
 fn foundation_rigid_normal_stiffness(

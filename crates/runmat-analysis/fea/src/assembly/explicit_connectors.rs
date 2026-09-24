@@ -15,7 +15,10 @@ use crate::{
     physics::structural::topology::{
         explicit_surface::explicit_shell_surface_geometry, node_space::CanonicalStructuralNodeSpace,
     },
+    planning::resource::LocalExecutionPlan,
 };
+
+mod scoped;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExplicitConnectorSummary {
@@ -57,6 +60,7 @@ pub(super) fn assemble_explicit_connectors(
     structural: &StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
     layout: &StructuralDofLayout,
+    local_execution: LocalExecutionPlan,
     stiffness: &mut RealSparseAssembler,
     damping: &mut RealSparseAssembler,
 ) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
@@ -78,6 +82,7 @@ pub(super) fn assemble_explicit_connectors(
             coordinates_m: &coordinates_m,
             node_identities: &node_identities,
         },
+        local_execution,
         stiffness,
         damping,
         |connector, target, role| match role {
@@ -96,6 +101,7 @@ pub(super) fn assemble_explicit_connectors(
 pub(super) fn assemble_connectors_with_resolver(
     connectors: &[AnalysisConnector],
     context: ConnectorAssemblyContext<'_>,
+    local_execution: LocalExecutionPlan,
     stiffness: &mut RealSparseAssembler,
     damping: &mut RealSparseAssembler,
     mut resolve: impl FnMut(
@@ -192,12 +198,24 @@ pub(super) fn assemble_connectors_with_resolver(
                         "surface foundation resolved no physical surface quadrature",
                     ));
                 }
-                add_surface_normal_foundation(
-                    stiffness,
-                    context.layout,
-                    &resolved.surface_samples,
-                    modulus.newtons_per_cubic_meter,
-                );
+                scoped::validate_surface_samples(connector, &resolved.surface_samples)?;
+                if local_execution.is_serial() {
+                    add_surface_normal_foundation(
+                        stiffness,
+                        context.layout,
+                        &resolved.surface_samples,
+                        modulus.newtons_per_cubic_meter,
+                    );
+                } else {
+                    scoped::add_surface_normal_foundation_scoped(
+                        connector,
+                        stiffness,
+                        context.layout,
+                        &resolved.surface_samples,
+                        modulus.newtons_per_cubic_meter,
+                        local_execution,
+                    )?;
+                }
                 stiffness.add_contribution(provenance(connector));
                 entries.push(CanonicalConnectorEntry::SurfaceNormalFoundation {
                     connector_id: connector.connector_id.clone(),
