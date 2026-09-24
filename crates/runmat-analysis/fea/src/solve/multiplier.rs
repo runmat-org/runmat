@@ -1,7 +1,10 @@
 //! Exact sparse constraint enforcement through a matrix-free saddle-point system.
 
 use crate::{
-    algebra::{apply_k, dot_scoped, spmv_scoped, PreparedRealLinearSystem, ScopedSpmvError},
+    algebra::{
+        apply_k, axpy_scoped, dot_scoped, scale_scoped, spmv_scoped, PreparedRealLinearSystem,
+        ScopedSpmvError,
+    },
     assembly::AssemblySummary,
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
@@ -268,19 +271,26 @@ fn apply_saddle(
     } else {
         constraints.transpose_apply_validated(&value[dofs..])
     };
-    for (target, contribution) in physical.iter_mut().zip(transpose) {
-        *target += equation_scale * contribution;
+    if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
+        axpy_scoped(equation_scale, &transpose, &mut physical, plan)?;
+    } else {
+        for (target, contribution) in physical.iter_mut().zip(transpose) {
+            *target += equation_scale * contribution;
+        }
     }
-    let constraint_rows = if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
+    let mut constraint_rows = if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
         constraints.apply_validated_scoped(&value[..dofs], plan)?
     } else {
         constraints.apply_validated(&value[..dofs])
     };
-    physical.extend(
-        constraint_rows
-            .into_iter()
-            .map(|entry| entry * equation_scale),
-    );
+    if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
+        scale_scoped(&mut constraint_rows, equation_scale, plan)?;
+    } else {
+        for entry in &mut constraint_rows {
+            *entry *= equation_scale;
+        }
+    }
+    physical.extend(constraint_rows);
     Ok(physical)
 }
 

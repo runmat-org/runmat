@@ -30,6 +30,6 @@ pub use operator::{
 };
 pub use pattern::{SparseIndexWidth, SparsePattern, SparsePatternError};
 pub use reference::{
-    axpy_scoped, direction_update_scoped, dot_scoped, normalized_copy_scoped, residual, spmv,
-    spmv_scoped, vector_sub_scoped, ScopedSpmvError, SpmvWorkError,
+    axpy_scoped, direction_update_scoped, dot_scoped, normalized_copy_scoped, residual,
+    scale_scoped, spmv, spmv_scoped, vector_sub_scoped, ScopedSpmvError, SpmvWorkError,
 };

@@ -73,6 +73,26 @@ pub fn axpy_scoped(
     Ok(())
 }
 
+/// In-place scaling of disjoint vector slices under the admitted local CPU plan.
+/// The reference multiplication order is unchanged and no extra full vector is retained.
+pub fn scale_scoped(
+    values: &mut [f64],
+    factor: f64,
+    plan: LocalExecutionPlan,
+) -> Result<(), ScopedSpmvError> {
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, values, |_chunk, output| {
+        for value in output {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            *value *= factor;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// In-place PCG direction recurrence `y = x + beta*y`, preserving the reference
 /// operation order independently for every vector entry.
 pub fn direction_update_scoped(
@@ -280,6 +300,12 @@ mod tests {
             axpy_scoped(-0.25, &x, &mut actual, plan).unwrap();
             direction_update_scoped(&x, &mut actual, 0.75, plan).unwrap();
             assert_eq!(actual, expected);
+            scale_scoped(&mut actual, -1.25, plan).unwrap();
+            let mut scaled_expected = expected;
+            for value in &mut scaled_expected {
+                *value *= -1.25;
+            }
+            assert_eq!(actual, scaled_expected);
             assert_eq!(
                 vector_sub_scoped(&actual, &x, plan).unwrap(),
                 actual
@@ -315,6 +341,7 @@ mod tests {
         let mut values = [1.0; 8];
         for result in [
             axpy_scoped(2.0, &[1.0; 8], &mut values, plan).map(|_| Vec::new()),
+            scale_scoped(&mut values, 2.0, plan).map(|_| Vec::new()),
             vector_sub_scoped(&[2.0; 8], &[1.0; 8], plan),
             normalized_copy_scoped(&[2.0; 8], 2.0, plan),
         ] {
