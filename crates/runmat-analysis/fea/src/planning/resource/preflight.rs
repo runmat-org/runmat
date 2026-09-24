@@ -27,7 +27,8 @@ const STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const STRUCTURAL_ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
-const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 8;
+// Scoped SpMV retains one complete set of chunk outputs while merging its result vector.
+const STRUCTURAL_SOLVE_VECTOR_COUNT: u64 = 9;
 // Five recovered solid arrays retain 61 f64 values per element (6 strain, 6 stress,
 // 1 energy density, and 4 x 6 each of integration-point strain and stress). Scoped
 // recovery can temporarily own one complete set of chunk arrays while merging them.

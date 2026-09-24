@@ -4,6 +4,8 @@ use runmat_analysis_core::{
 };
 use runmat_execution::Digest;
 
+mod solve;
+
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -40,10 +42,7 @@ use crate::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
         observation::{evaluate_structural_observations, ObservationLimits},
     },
-    solve::{
-        backend::build_backend, linear::solve_linear_system, recover_structural_static_balance,
-        StructuralStaticBalanceEvidence,
-    },
+    solve::{recover_structural_static_balance, StructuralStaticBalanceEvidence},
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -214,22 +213,7 @@ fn run_linear_static_with_constraint_plan(
         Some(2),
         Some(5),
     );
-    let algebra_backend = build_backend(options.algebra_backend_kind);
-    if options.initial_displacement.as_ref().is_some_and(|values| {
-        values.len() != summary.dof_count || values.iter().any(|value| !value.is_finite())
-    }) {
-        return Err(FeaRunError::InvalidModel(format!(
-            "initial displacement state must contain exactly {} finite solver DOFs",
-            summary.dof_count
-        )));
-    }
-    let solve_result = solve_linear_system(
-        &summary,
-        options.preconditioner_kind,
-        options.algebra_backend_kind,
-        algebra_backend.as_ref(),
-        options.initial_displacement.as_deref(),
-    );
+    let solve_result = solve::solve_static_system(&summary, &options)?;
     let static_balance = recover_structural_static_balance(&summary, &solve_result.solution)
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let structural_constraint_result =

@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 use crate::{
     algebra::{
         validate_prepared_solver_compatibility, AssembledRealSystem, CompatibilityError,
-        RealPreconditioner, RealSolver, RealSystemError,
+        PreparedRealLinearSystem, RealPreconditioner, RealSolver, RealSystemError, ScopedSpmvError,
     },
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    planning::resource::LocalExecutionPlan,
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
@@ -129,6 +130,60 @@ pub fn solve_linear_system(
     )
 }
 
+/// Uses the admitted local CPU plan for the ordinary prepared SPD operator. Constraint-reduced
+/// and multiplier systems retain their existing serial solver until their transforms have an
+/// independently accounted, fallible scoped execution path.
+pub fn solve_linear_system_with_execution(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    if summary.affine_constraint_reduction.is_some() || summary.constraint_matrix.is_some() {
+        return Ok(solve_linear_system(
+            summary,
+            preconditioner_kind,
+            backend_kind,
+            algebra_backend,
+            initial_guess,
+        ));
+    }
+    solve_operator_system_scoped(
+        &summary.operator,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        plan,
+    )
+}
+
+fn solve_operator_system_scoped(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_operator_system_with_apply(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        |prepared, x| {
+            if plan.is_serial() {
+                Ok(crate::algebra::apply_prepared(prepared, x))
+            } else {
+                crate::algebra::spmv_scoped(prepared.matrix(), x, plan)
+            }
+        },
+    )
+}
+
 pub fn solve_operator_system(
     operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
@@ -136,11 +191,30 @@ pub fn solve_operator_system(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
 ) -> LinearSolveResult {
+    solve_operator_system_with_apply(
+        operator,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        |prepared, x| Ok(crate::algebra::apply_prepared(prepared, x)),
+    )
+    .expect("reference sparse application is infallible for a prepared system")
+}
+
+fn solve_operator_system_with_apply(
+    operator: &AssembledRealSystem,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    apply: impl Fn(&PreparedRealLinearSystem, &[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     let mut effective_backend_kind = backend_kind;
     let mut accelerator_fallback = false;
     let has_dofs = operator.dof_count() > 0;
     if !has_dofs {
-        return LinearSolveResult {
+        return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: 0.0,
             converged: false,
@@ -157,19 +231,19 @@ pub fn solve_operator_system(
                 severity: FeaDiagnosticSeverity::Warning,
                 message: "linear solve skipped because assembled system has zero DOFs".to_string(),
             }],
-        };
+        });
     }
 
     let tol = 1.0e-8;
     let prepared = match operator.prepare_linear() {
         Ok(prepared) => prepared,
         Err(error) => {
-            return invalid_system_result(
+            return Ok(invalid_system_result(
                 operator,
                 effective_backend_kind,
                 preconditioner_kind,
                 error,
-            )
+            ))
         }
     };
     if let Err(error) = validate_prepared_solver_compatibility(
@@ -180,12 +254,12 @@ pub fn solve_operator_system(
             SpdPreconditionerKind::Ilu0 => RealPreconditioner::Ilu0,
         },
     ) {
-        return incompatible_system_result(
+        return Ok(incompatible_system_result(
             operator,
             effective_backend_kind,
             preconditioner_kind,
             error,
-        );
+        ));
     }
     // Compatibility is a solver-independent admission boundary. A runtime provider must never
     // receive a system that the reference path would reject, and provider fallback must not alter
@@ -198,19 +272,22 @@ pub fn solve_operator_system(
             },
         ) {
             Ok(output) => {
-                return linear_result_from_accelerator_output(output, preconditioner_kind)
+                return Ok(linear_result_from_accelerator_output(
+                    output,
+                    preconditioner_kind,
+                ))
             }
             Err(error) if error.permits_cpu_fallback() => {
                 effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
                 accelerator_fallback = true;
             }
             Err(error) => {
-                return linear_result_from_accelerator_error(
+                return Ok(linear_result_from_accelerator_error(
                     operator.dof_count(),
                     operator.load(),
                     preconditioner_kind,
                     error,
-                )
+                ))
             }
         }
     }
@@ -227,13 +304,13 @@ pub fn solve_operator_system(
     let preconditioner = match build_spd_preconditioner(&prepared, preconditioner_kind) {
         Ok(preconditioner) => preconditioner,
         Err(error) => {
-            return rejected_system_result(
+            return Ok(rejected_system_result(
                 operator,
                 effective_backend_kind,
                 preconditioner_kind,
                 "FEA_PRECONDITIONER_SETUP_FAILED",
                 error.to_string(),
-            )
+            ))
         }
     };
     let b = prepared.rhs();
@@ -245,13 +322,13 @@ pub fn solve_operator_system(
             values.to_vec()
         }
         Some(_) => {
-            return rejected_system_result(
+            return Ok(rejected_system_result(
                 operator,
                 effective_backend_kind,
                 preconditioner_kind,
                 "FEA_INVALID_INITIAL_GUESS",
                 "initial guess must contain one finite value per solver DOF".to_string(),
-            )
+            ))
         }
         None => vec![0.0; operator.dof_count()],
     };
@@ -261,7 +338,7 @@ pub fn solve_operator_system(
         }
     }
 
-    let mut r = algebra_backend.vec_sub(b, &crate::algebra::apply_prepared(&prepared, &x));
+    let mut r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
     let mut z = preconditioner.apply(&r);
     let mut p = z.clone();
     let mut rz_old = algebra_backend.dot(&r, &z);
@@ -278,7 +355,7 @@ pub fn solve_operator_system(
     });
 
     if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
-        return LinearSolveResult {
+        return Ok(LinearSolveResult {
             iterations: 0,
             residual_norm: algebra_backend.dot(&r, &r).sqrt(),
             converged: true,
@@ -291,7 +368,7 @@ pub fn solve_operator_system(
             solver_method: SolverMethod::MatrixFreePcg,
             preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
             diagnostics,
-        };
+        });
     }
 
     let mut iterations = 0u32;
@@ -299,7 +376,7 @@ pub fn solve_operator_system(
         if crate::is_fea_cancelled() {
             break;
         }
-        let ap = crate::algebra::apply_prepared(&prepared, &p);
+        let ap = apply(&prepared, &p)?;
         let denom = algebra_backend.dot(&p, &ap);
         // PCG is scale invariant. An absolute cutoff here rejects valid systems when the
         // preconditioned search direction is small (a common case for dynamics operators and a
@@ -332,7 +409,7 @@ pub fn solve_operator_system(
     // Recurrence residuals can drift from b - A*x. Make the public convergence decision from a
     // freshly evaluated equation residual so downstream physics never inherits a false positive
     // or false negative from recurrence roundoff.
-    r = algebra_backend.vec_sub(b, &crate::algebra::apply_prepared(&prepared, &x));
+    r = algebra_backend.vec_sub(b, &apply(&prepared, &x)?);
     let residual_norm = algebra_backend.dot(&r, &r).sqrt();
     let converged = residual_norm / b_norm <= tol;
     if !converged {
@@ -346,7 +423,7 @@ pub fn solve_operator_system(
         });
     }
 
-    LinearSolveResult {
+    Ok(LinearSolveResult {
         iterations,
         residual_norm,
         converged,
@@ -359,7 +436,7 @@ pub fn solve_operator_system(
         solver_method: SolverMethod::MatrixFreePcg,
         preconditioner: SolverPreconditioner::from_spd(preconditioner.kind()),
         diagnostics,
-    }
+    })
 }
 
 pub(crate) fn linear_result_from_accelerator_output(
@@ -459,157 +536,5 @@ fn iteration_limit(operator: &AssembledRealSystem, base_max_iters: usize) -> usi
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        algebra::{
-            CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseAssembler,
-            RealSparseMatrix,
-        },
-        solve::backend::cpu_reference::CpuReferenceBackend,
-    };
-
-    fn system(stiffness_diagonal: [f64; 2]) -> AssembledRealSystem {
-        let mut stiffness = RealSparseAssembler::square(
-            2,
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        );
-        stiffness.add(0, 0, stiffness_diagonal[0]);
-        stiffness.add(0, 1, -1.0);
-        stiffness.add(1, 0, -1.0);
-        stiffness.add(1, 1, stiffness_diagonal[1]);
-        let mass = RealSparseMatrix::diagonal(
-            vec![1.0; 2],
-            OperatorRole::Mass,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let damping = RealSparseMatrix::diagonal(
-            vec![0.0; 2],
-            OperatorRole::Damping,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .unwrap();
-        AssembledRealSystem::try_new(
-            CanonicalRealOperators::try_new(stiffness.finish().unwrap(), mass, damping).unwrap(),
-            vec![false; 2],
-            vec![1.0, 2.0],
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn cpu_reference_solve_converges_with_small_canonical_residual() {
-        let operator = system([4.0, 3.0]);
-        let result = solve_operator_system(
-            &operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &CpuReferenceBackend,
-            None,
-        );
-        assert!(result.converged);
-        assert!(result.residual_norm <= 1.0e-8);
-    }
-
-    #[test]
-    fn cpu_reference_warm_start_does_not_use_an_absolute_breakdown_threshold() {
-        let stiffness = RealSparseMatrix::diagonal(
-            vec![1.0e12, 2.0e12],
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let mass = RealSparseMatrix::diagonal(
-            vec![1.0; 2],
-            OperatorRole::Mass,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let damping = RealSparseMatrix::diagonal(
-            vec![0.0; 2],
-            OperatorRole::Damping,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .unwrap();
-        let operator = AssembledRealSystem::try_new(
-            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
-            vec![false; 2],
-            vec![1.0, 2.0],
-        )
-        .unwrap();
-        let initial_guess = [1.0e-12 - 1.0e-19, 1.0e-12 + 1.0e-19];
-
-        let result = solve_operator_system(
-            &operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &CpuReferenceBackend,
-            Some(&initial_guess),
-        );
-
-        assert!(result.converged, "diagnostics={:?}", result.diagnostics);
-        assert!(result.residual_norm <= 1.0e-8);
-    }
-
-    #[test]
-    fn noncoercive_operator_is_rejected_before_preconditioner_setup() {
-        let operator = system([0.0, 3.0]);
-        let result = solve_operator_system(
-            &operator,
-            SpdPreconditionerKind::Jacobi,
-            LinearAlgebraBackendKind::CpuReference,
-            &CpuReferenceBackend,
-            None,
-        );
-        assert!(!result.converged);
-        assert_eq!(result.iterations, 0);
-        assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
-    }
-
-    #[test]
-    fn cpu_and_accelerator_reject_unproved_semidefinite_system_before_iteration() {
-        let stiffness = RealSparseMatrix::diagonal(
-            vec![1.0, 0.0],
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .unwrap();
-        let mass = RealSparseMatrix::diagonal(
-            vec![1.0; 2],
-            OperatorRole::Mass,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let damping = RealSparseMatrix::diagonal(
-            vec![0.0; 2],
-            OperatorRole::Damping,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .unwrap();
-        let operator = AssembledRealSystem::try_new(
-            CanonicalRealOperators::try_new(stiffness, mass, damping).unwrap(),
-            vec![false; 2],
-            vec![1.0, 0.0],
-        )
-        .unwrap();
-
-        for backend in [
-            LinearAlgebraBackendKind::CpuReference,
-            LinearAlgebraBackendKind::Accelerator,
-        ] {
-            let result = solve_operator_system(
-                &operator,
-                SpdPreconditionerKind::Jacobi,
-                backend,
-                &CpuReferenceBackend,
-                None,
-            );
-            assert!(!result.converged);
-            assert_eq!(result.iterations, 0);
-            assert_eq!(result.device_apply_k_attempt_count, 0);
-            assert_eq!(result.diagnostics[0].code, "FEA_INVALID_REAL_SYSTEM");
-        }
-    }
-}
+#[path = "linear/tests.rs"]
+mod tests;

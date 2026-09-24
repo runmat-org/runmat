@@ -323,6 +323,16 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         3 * 128 * 1024
     );
     assert_ne!(parallel_plan.identity, plan.identity);
+    let SolveResourcePolicy::Iterative { vector_count, .. } =
+        &parallel_plan.input.structural_operator().unwrap().solve
+    else {
+        panic!("structural preflight must use an iterative solve policy");
+    };
+    assert_eq!(
+        *vector_count,
+        Count(9),
+        "scoped SpMV merge needs one extra vector"
+    );
     let recovery_bound = plan
         .input
         .structural_operator()

@@ -17,7 +17,7 @@
   "crates/runmat-analysis/fea/src/pipeline/electro_thermal.rs": 1108,
   "crates/runmat-analysis/fea/src/planning/resource/contract.rs": 1076,
   "crates/runmat-analysis/fea/src/planning/resource/estimate.rs": 1053,
-  "crates/runmat-analysis/fea/src/pipeline/linear_static.rs": 1047,
+  "crates/runmat-analysis/fea/src/pipeline/linear_static.rs": 1032,
   "crates/runmat-analysis/fea/src/results/field/contract.rs": 1019,
   "crates/runmat-analysis/core/src/lib.rs": 1000,
   "crates/runmat-analysis/fea/src/results/accuracy/mod.rs": 987,
