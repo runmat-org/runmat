@@ -138,6 +138,7 @@ fn solve_multiplier_constraint_system_with_apply(
             value,
             equation_scale,
             &apply_stiffness,
+            vector_plan,
         )
     };
     let tolerance = 1.0e-8;
@@ -258,16 +259,25 @@ fn apply_saddle(
     value: &[f64],
     equation_scale: f64,
     apply_stiffness: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    constraint_plan: Option<LocalExecutionPlan>,
 ) -> Result<Vec<f64>, ScopedSpmvError> {
     let dofs = summary.dof_count;
     let mut physical = apply_stiffness(&value[..dofs])?;
-    let transpose = constraints.transpose_apply_validated(&value[dofs..]);
+    let transpose = if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
+        constraints.transpose_apply_validated_scoped(&value[dofs..], plan)?
+    } else {
+        constraints.transpose_apply_validated(&value[dofs..])
+    };
     for (target, contribution) in physical.iter_mut().zip(transpose) {
         *target += equation_scale * contribution;
     }
+    let constraint_rows = if let Some(plan) = constraint_plan.filter(|plan| !plan.is_serial()) {
+        constraints.apply_validated_scoped(&value[..dofs], plan)?
+    } else {
+        constraints.apply_validated(&value[..dofs])
+    };
     physical.extend(
-        constraints
-            .apply_validated(&value[..dofs])
+        constraint_rows
             .into_iter()
             .map(|entry| entry * equation_scale),
     );
