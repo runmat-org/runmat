@@ -113,13 +113,24 @@ pub(super) fn recover_transient_fields(
     let mut connector_stored_energy_snapshots = Vec::with_capacity(snapshot_count);
     let mut spatial_projection_evidence = Vec::new();
     let mut electro_thermal_summaries = Vec::with_capacity(snapshot_count);
-    for (index, mut summary) in std::mem::take(&mut transient.assembly_snapshots)
-        .into_iter()
-        .enumerate()
+    // Raw solver vectors are no longer needed after their accepted state is
+    // recovered. Consume them alongside the assemblies so processed vectors
+    // do not stay resident alongside the retained typed field histories.
+    let displacements = std::mem::take(&mut transient.displacement_snapshots);
+    let velocities = std::mem::take(&mut transient.velocity_snapshots);
+    let accelerations = std::mem::take(&mut transient.acceleration_snapshots);
+    let reactions = std::mem::take(&mut transient.reaction_snapshots);
+    for (index, ((((mut summary, displacement), velocity), acceleration), reaction)) in
+        std::mem::take(&mut transient.assembly_snapshots)
+            .into_iter()
+            .zip(displacements)
+            .zip(velocities)
+            .zip(accelerations)
+            .zip(reactions)
+            .enumerate()
     {
-        let mut fields =
-            recover_deformation_result_fields(&summary, &transient.displacement_snapshots[index])
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let mut fields = recover_deformation_result_fields(&summary, &displacement)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         if index + 1 == snapshot_count {
             final_deformation_fields = fields
                 .iter()
@@ -163,32 +174,25 @@ pub(super) fn recover_transient_fields(
             fea_transient_strain_energy_density_field_id(index),
             &mut strain_energy_density_snapshots,
         );
-        let velocity = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.velocity_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let acceleration = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.acceleration_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let reaction = project_structural_nodal_snapshot(
-            &summary.structural_dof_layout,
-            &transient.reaction_snapshots[index],
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let projected_velocity =
+            project_structural_nodal_snapshot(&summary.structural_dof_layout, &velocity)
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let acceleration =
+            project_structural_nodal_snapshot(&summary.structural_dof_layout, &acceleration)
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let reaction = project_structural_nodal_snapshot(&summary.structural_dof_layout, &reaction)
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let shape = nodal_vector_shape(&summary.structural_dof_layout);
         velocity_snapshots.push(AnalysisField::host_f64(
             fea_transient_velocity_field_id(index),
             shape.clone(),
-            velocity.translations,
+            projected_velocity.translations,
         ));
         if summary.structural_dof_layout.rotational_dof_count() > 0 {
             angular_velocity_snapshots.push(AnalysisField::host_f64(
                 fea_transient_angular_velocity_field_id(index),
                 shape.clone(),
-                velocity.rotations,
+                projected_velocity.rotations,
             ));
         }
         let connector_plan = summary
@@ -204,8 +208,8 @@ pub(super) fn recover_transient_fields(
         let connector_result = CanonicalStructuralConnectorResult::recover_dynamic(
             connector_plan,
             &summary.structural_dof_layout,
-            &transient.displacement_snapshots[index],
-            &transient.velocity_snapshots[index],
+            &displacement,
+            &velocity,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let connector_fields = recover_connector_observable_fields(&connector_result)
@@ -356,11 +360,11 @@ fn validate_snapshot_shape(
             "transient accepted state {index} changed structural DOF ownership"
         )));
     }
-    // A stable DOF layout alone is not a stable recovery count envelope: an
-    // accepted state could add or remove elements while keeping the same nodes.
-    // This checks cardinality for field histories and later resource planning;
-    // it does not establish full element-identity or geometry equivalence.
+    // Count stability bounds the field-history shape, while element and
+    // connector identity/geometry stability prevents silently assigning one
+    // accepted state's values to another topology with the same counts.
     if summary.structural_node_count != reference.structural_node_count
+        || summary.structural_explicit_node_indices != reference.structural_explicit_node_indices
         || summary.structural_solid_recovery.len() != reference.structural_solid_recovery.len()
         || summary.structural_beam_recovery.len() != reference.structural_beam_recovery.len()
         || summary.structural_shell_recovery.len() != reference.structural_shell_recovery.len()
@@ -372,6 +376,38 @@ fn validate_snapshot_shape(
                 .structural_connector_plan
                 .as_ref()
                 .map(|plan| plan.entries.len())
+        || summary
+            .structural_solid_recovery
+            .iter()
+            .zip(&reference.structural_solid_recovery)
+            .any(|(current, first)| {
+                current.element_id != first.element_id
+                    || current.region_id != first.region_id
+                    || current.geometry != first.geometry
+            })
+        || summary
+            .structural_beam_recovery
+            .iter()
+            .zip(&reference.structural_beam_recovery)
+            .any(|(current, first)| {
+                current.element_id != first.element_id
+                    || current.region_id != first.region_id
+                    || current.node_i_index != first.node_i_index
+                    || current.node_j_index != first.node_j_index
+                    || current.length_m != first.length_m
+                    || current.transform_global_to_local != first.transform_global_to_local
+            })
+        || summary
+            .structural_shell_recovery
+            .iter()
+            .zip(&reference.structural_shell_recovery)
+            .any(|(current, first)| {
+                current.element_id != first.element_id
+                    || current.region_id != first.region_id
+                    || current.node_indices != first.node_indices
+                    || current.geometry != first.geometry
+            })
+        || summary.structural_connector_plan != reference.structural_connector_plan
     {
         return Err(FeaRunError::Assembly(format!(
             "transient accepted state {index} changed structural recovery topology"

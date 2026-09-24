@@ -38,6 +38,12 @@ fn recovery_rejects_changed_dof_ownership_and_malformed_state_vectors() {
     for change in [
         |summary: &mut AssemblySummary| summary.structural_node_count += 1,
         |summary: &mut AssemblySummary| summary.structural_beam_recovery.clear(),
+        |summary: &mut AssemblySummary| {
+            summary.structural_beam_recovery[0]
+                .element_id
+                .push_str("-other")
+        },
+        |summary: &mut AssemblySummary| summary.structural_beam_recovery[0].node_i_index += 1,
     ] {
         let mut changed = summary.clone();
         change(&mut changed);
@@ -46,9 +52,33 @@ fn recovery_rejects_changed_dof_ownership_and_malformed_state_vectors() {
             Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
         ));
     }
+    let mut changed_material = summary.clone();
+    changed_material.structural_beam_recovery[0]
+        .material
+        .youngs_modulus_pa *= 0.9;
+    assert!(validate_snapshot_shape(
+        &summary,
+        &changed_material,
+        1,
+        &state,
+        &state,
+        &state,
+        &state,
+    )
+    .is_ok());
     assert!(summary.structural_connector_plan.is_some());
     let mut changed = summary.clone();
     changed.structural_connector_plan = None;
+    assert!(matches!(
+        validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+        Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
+    ));
+    let mut changed = summary.clone();
+    changed
+        .structural_connector_plan
+        .as_mut()
+        .expect("beam fixture has a canonical connector plan")
+        .node_count += 1;
     assert!(matches!(
         validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
         Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
@@ -93,6 +123,69 @@ fn recovery_rejects_changed_shell_recovery_count_with_stable_dofs() {
         validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
         Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
     ));
+    let mut changed = summary.clone();
+    changed.structural_shell_recovery[0].node_indices.swap(0, 1);
+    assert!(matches!(
+        validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+        Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
+    ));
+}
+
+#[test]
+fn recovery_rejects_same_count_solid_relabel_or_geometry_but_allows_material_change() {
+    let model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let excitations = realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        ExcitationSamplePoint::time(0.0),
+    )
+    .unwrap();
+    let summary = assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh),
+        StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .unwrap();
+    assert_eq!(summary.structural_solid_recovery.len(), 1);
+    let state = vec![0.0; summary.dof_count];
+    for change in [
+        |summary: &mut AssemblySummary| {
+            summary.structural_solid_recovery[0]
+                .element_id
+                .push_str("-other")
+        },
+        |summary: &mut AssemblySummary| {
+            let crate::assembly::SolidRecoveryGeometry::Tetrahedron4 { node_indices, .. } =
+                &mut summary.structural_solid_recovery[0].geometry
+            else {
+                panic!("fixture must be Tet4")
+            };
+            node_indices.swap(0, 1);
+        },
+    ] {
+        let mut changed = summary.clone();
+        change(&mut changed);
+        assert!(matches!(
+            validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+            Err(FeaRunError::Assembly(message)) if message.contains("changed structural recovery topology")
+        ));
+    }
+    let mut changed_material = summary.clone();
+    changed_material.structural_solid_recovery[0]
+        .material
+        .youngs_modulus_pa *= 0.9;
+    assert!(validate_snapshot_shape(
+        &summary,
+        &changed_material,
+        1,
+        &state,
+        &state,
+        &state,
+        &state,
+    )
+    .is_ok());
 }
 
 #[test]
@@ -123,6 +216,10 @@ fn recovery_consumes_reporting_assemblies_in_accepted_order() {
     assert_eq!(solved.assembly_snapshots.len(), 3);
     let recovered = recover_transient_fields(&mut solved, None).unwrap();
     assert!(solved.assembly_snapshots.is_empty());
+    assert!(solved.displacement_snapshots.is_empty());
+    assert!(solved.velocity_snapshots.is_empty());
+    assert!(solved.acceleration_snapshots.is_empty());
+    assert!(solved.reaction_snapshots.is_empty());
     assert_eq!(recovered.displacement_snapshots.len(), 3);
     assert_eq!(recovered.velocity_snapshots.len(), 3);
     assert_eq!(recovered.acceleration_snapshots.len(), 3);

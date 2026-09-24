@@ -105,12 +105,8 @@ pub(super) fn finish_transient_run(
     )?;
     let recovered =
         recovery::recover_transient_fields(&mut transient, empty_connector_plan.as_ref())?;
-    // Recovery has transferred these solver-owned state vectors into typed
-    // histories. Do not retain both representations through observation work.
-    transient.displacement_snapshots.clear();
-    transient.velocity_snapshots.clear();
-    transient.acceleration_snapshots.clear();
-    transient.reaction_snapshots.clear();
+    // Recovery consumed the solver-owned state vectors as it built the typed
+    // histories; no duplicate raw history survives into observation work.
     for connector_result in &recovered.connector_results {
         connector_result
             .plan
