@@ -9,7 +9,7 @@ use crate::{
     planning::resource::LocalExecutionPlan,
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
-        krylov::{restarted_gmres, GmresPolicy},
+        krylov::{restarted_gmres, restarted_gmres_scoped, GmresPolicy},
         linear::LinearSolveResult,
     },
 };
@@ -28,6 +28,7 @@ pub(super) fn solve_multiplier_constraint_system(
         initial_guess,
         |physical| Ok(apply_k(&summary.operator, physical)),
         |left, right| Ok(algebra.dot(left, right)),
+        None,
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -59,6 +60,7 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
                 dot_scoped(left, right, plan)
             }
         },
+        Some(plan),
     )
 }
 
@@ -69,6 +71,7 @@ fn solve_multiplier_constraint_system_with_apply(
     initial_guess: Option<&[f64]>,
     apply_stiffness: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
     dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+    vector_plan: Option<LocalExecutionPlan>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let dofs = summary.dof_count;
     let rows = constraints.row_count();
@@ -156,18 +159,31 @@ fn solve_multiplier_constraint_system_with_apply(
         });
     }
 
-    let result = restarted_gmres(
-        &right_hand_side,
-        &initial,
-        GmresPolicy {
-            relative_tolerance: tolerance,
-            restart,
-            maximum_iterations,
-        },
-        apply,
-        dot,
-        crate::is_fea_cancelled,
-    )?;
+    let policy = GmresPolicy {
+        relative_tolerance: tolerance,
+        restart,
+        maximum_iterations,
+    };
+    let result = if let Some(plan) = vector_plan.filter(|plan| !plan.is_serial()) {
+        restarted_gmres_scoped(
+            &right_hand_side,
+            &initial,
+            policy,
+            apply,
+            dot,
+            crate::is_fea_cancelled,
+            plan,
+        )?
+    } else {
+        restarted_gmres(
+            &right_hand_side,
+            &initial,
+            policy,
+            apply,
+            dot,
+            crate::is_fea_cancelled,
+        )?
+    };
     let Some(result) = result else {
         return Ok(rejected_multiplier_system(
             summary,

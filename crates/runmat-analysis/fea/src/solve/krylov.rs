@@ -1,5 +1,7 @@
 //! Small matrix-free Krylov authority shared by indefinite structural solve domains.
 
+use crate::{algebra::ScopedSpmvError, planning::resource::LocalExecutionPlan};
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct GmresPolicy {
     pub relative_tolerance: f64,
@@ -25,6 +27,92 @@ pub(super) fn restarted_gmres<E>(
     dot: impl Fn(&[f64], &[f64]) -> Result<f64, E>,
     cancelled: impl Fn() -> bool,
 ) -> Result<Option<GmresResult>, E> {
+    restarted_gmres_with_updates(
+        right_hand_side,
+        initial,
+        policy,
+        apply,
+        dot,
+        cancelled,
+        SerialUpdates,
+    )
+}
+
+/// Runs the same GMRES recurrence with allocation-bound in-place vector updates. The
+/// direct-harmonic caller retains the serial numerical policy through `restarted_gmres`.
+pub(super) fn restarted_gmres_scoped(
+    right_hand_side: &[f64],
+    initial: &[f64],
+    policy: GmresPolicy,
+    apply: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
+    cancelled: impl Fn() -> bool,
+    plan: LocalExecutionPlan,
+) -> Result<Option<GmresResult>, ScopedSpmvError> {
+    restarted_gmres_with_updates(
+        right_hand_side,
+        initial,
+        policy,
+        apply,
+        dot,
+        cancelled,
+        ScopedUpdates(plan),
+    )
+}
+
+trait VectorUpdates<E> {
+    fn axpy(&self, alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), E>;
+    fn subtract(&self, left: &[f64], right: &[f64]) -> Result<Option<Vec<f64>>, E>;
+    fn normalized(&self, input: &[f64], divisor: f64) -> Result<Vec<f64>, E>;
+}
+
+struct SerialUpdates;
+
+impl<E> VectorUpdates<E> for SerialUpdates {
+    fn axpy(&self, alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), E> {
+        axpy(alpha, x, y);
+        Ok(())
+    }
+
+    fn subtract(&self, left: &[f64], right: &[f64]) -> Result<Option<Vec<f64>>, E> {
+        Ok(subtract(left, right))
+    }
+
+    fn normalized(&self, input: &[f64], divisor: f64) -> Result<Vec<f64>, E> {
+        Ok(input.iter().map(|value| value / divisor).collect())
+    }
+}
+
+struct ScopedUpdates(LocalExecutionPlan);
+
+impl VectorUpdates<ScopedSpmvError> for ScopedUpdates {
+    fn axpy(&self, alpha: f64, x: &[f64], y: &mut [f64]) -> Result<(), ScopedSpmvError> {
+        crate::algebra::axpy_scoped(alpha, x, y, self.0)
+    }
+
+    fn subtract(&self, left: &[f64], right: &[f64]) -> Result<Option<Vec<f64>>, ScopedSpmvError> {
+        if left.len() != right.len() {
+            return Ok(None);
+        }
+        Ok(Some(crate::algebra::vector_sub_scoped(
+            left, right, self.0,
+        )?))
+    }
+
+    fn normalized(&self, input: &[f64], divisor: f64) -> Result<Vec<f64>, ScopedSpmvError> {
+        crate::algebra::normalized_copy_scoped(input, divisor, self.0)
+    }
+}
+
+fn restarted_gmres_with_updates<E>(
+    right_hand_side: &[f64],
+    initial: &[f64],
+    policy: GmresPolicy,
+    apply: impl Fn(&[f64]) -> Result<Vec<f64>, E>,
+    dot: impl Fn(&[f64], &[f64]) -> Result<f64, E>,
+    cancelled: impl Fn() -> bool,
+    updates: impl VectorUpdates<E>,
+) -> Result<Option<GmresResult>, E> {
     let size = right_hand_side.len();
     if size == 0
         || initial.len() != size
@@ -41,7 +129,7 @@ pub(super) fn restarted_gmres<E>(
     }
     let restart = policy.restart.min(size).min(policy.maximum_iterations);
     let mut solution = initial.to_vec();
-    let Some(mut residual) = subtract(right_hand_side, &apply(&solution)?) else {
+    let Some(mut residual) = updates.subtract(right_hand_side, &apply(&solution)?)? else {
         return Ok(None);
     };
     let rhs_norm = dot(right_hand_side, right_hand_side)?.sqrt().max(1.0);
@@ -65,10 +153,7 @@ pub(super) fn restarted_gmres<E>(
             breakdown = true;
             break;
         }
-        let mut basis = vec![residual
-            .iter()
-            .map(|value| value / beta)
-            .collect::<Vec<_>>()];
+        let mut basis = vec![updates.normalized(&residual, beta)?];
         let mut hessenberg = vec![vec![0.0; restart]; restart + 1];
         let mut cosines = vec![0.0; restart];
         let mut sines = vec![0.0; restart];
@@ -87,18 +172,14 @@ pub(super) fn restarted_gmres<E>(
             }
             for row in 0..=column {
                 hessenberg[row][column] = dot(&basis[row], &next)?;
-                axpy(-hessenberg[row][column], &basis[row], &mut next);
+                updates.axpy(-hessenberg[row][column], &basis[row], &mut next)?;
             }
             let Some(next_norm) = norm(&next, &dot)? else {
                 return Ok(None);
             };
             hessenberg[column + 1][column] = next_norm;
             if hessenberg[column + 1][column] > f64::MIN_POSITIVE {
-                basis.push(
-                    next.iter()
-                        .map(|value| value / hessenberg[column + 1][column])
-                        .collect(),
-                );
+                basis.push(updates.normalized(&next, hessenberg[column + 1][column])?);
             }
             for row in 0..column {
                 let first = hessenberg[row][column];
@@ -137,9 +218,9 @@ pub(super) fn restarted_gmres<E>(
             break;
         };
         for (coefficient, direction) in coefficients.iter().zip(&basis) {
-            axpy(*coefficient, direction, &mut solution);
+            updates.axpy(*coefficient, direction, &mut solution)?;
         }
-        let Some(next_residual) = subtract(right_hand_side, &apply(&solution)?) else {
+        let Some(next_residual) = updates.subtract(right_hand_side, &apply(&solution)?)? else {
             return Ok(None);
         };
         residual = next_residual;
@@ -199,6 +280,9 @@ fn back_substitute(matrix: &[Vec<f64>], rhs: &[f64], size: usize) -> Option<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planning::resource::{
+        execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError,
+    };
 
     fn dot(left: &[f64], right: &[f64]) -> Result<f64, std::convert::Infallible> {
         Ok(left.iter().zip(right).map(|(a, b)| a * b).sum())
@@ -277,5 +361,68 @@ mod tests {
             || false,
         );
         assert_eq!(result, Err("scoped reduction failed"));
+    }
+
+    #[test]
+    fn scoped_gmres_updates_match_the_independent_dense_solution_and_repeat() {
+        let apply = |x: &[f64]| {
+            Ok::<_, ScopedSpmvError>(vec![
+                4.0 * x[0] + x[1],
+                -2.0 * x[0] + 3.0 * x[1] + x[2],
+                -x[1] + 2.0 * x[2],
+            ])
+        };
+        let dot = |left: &[f64], right: &[f64]| {
+            Ok::<_, ScopedSpmvError>(left.iter().zip(right).map(|(a, b)| a * b).sum())
+        };
+        let policy = GmresPolicy {
+            relative_tolerance: 1.0e-12,
+            restart: 3,
+            maximum_iterations: 24,
+        };
+        let serial = restarted_gmres(&[6.0, 3.0, -4.0], &[0.0; 3], policy, apply, dot, || false)
+            .unwrap()
+            .unwrap();
+        assert!(serial.converged);
+        for (actual, expected) in serial.solution.iter().zip([1.0, 2.0, -1.0]) {
+            assert!((actual - expected).abs() < 1.0e-11);
+        }
+        for threads in [2, 3, 4] {
+            let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
+            let run = || {
+                restarted_gmres_scoped(
+                    &[6.0, 3.0, -4.0],
+                    &[0.0; 3],
+                    policy,
+                    apply,
+                    dot,
+                    || false,
+                    plan,
+                )
+                .unwrap()
+                .unwrap()
+            };
+            assert_eq!(run(), serial);
+            assert_eq!(run(), run());
+        }
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap();
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            Ok::<_, ()>(restarted_gmres_scoped(
+                &[6.0, 3.0, -4.0],
+                &[0.0; 3],
+                policy,
+                apply,
+                dot,
+                || false,
+                plan,
+            ))
+        })
+        .unwrap();
+        assert!(matches!(
+            &nested[0],
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::NestedExecution
+            ))
+        ));
     }
 }

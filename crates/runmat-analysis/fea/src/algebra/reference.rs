@@ -97,6 +97,50 @@ pub fn direction_update_scoped(
     Ok(())
 }
 
+/// Builds `left - right` in one result buffer under the admitted plan.
+pub fn vector_sub_scoped(
+    left: &[f64],
+    right: &[f64],
+    plan: LocalExecutionPlan,
+) -> Result<Vec<f64>, ScopedSpmvError> {
+    if left.len() != right.len() {
+        return Err(ScopedSpmvError::VectorDimensionMismatch);
+    }
+    let mut result = vec![0.0; left.len()];
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, &mut result, |chunk, output| {
+        for (offset, value) in output.iter_mut().enumerate() {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            let index = chunk.start() as usize + offset;
+            *value = left[index] - right[index];
+        }
+        Ok(())
+    })?;
+    Ok(result)
+}
+
+/// Builds a normalized Krylov basis vector without retaining a second output copy.
+pub fn normalized_copy_scoped(
+    input: &[f64],
+    divisor: f64,
+    plan: LocalExecutionPlan,
+) -> Result<Vec<f64>, ScopedSpmvError> {
+    let mut result = vec![0.0; input.len()];
+    let cancellation = crate::progress::cancellation_token();
+    execute_scoped_slices_mut(plan, &mut result, |chunk, output| {
+        for (offset, value) in output.iter_mut().enumerate() {
+            if cancellation.is_cancelled() {
+                return Err(SpmvWorkError::Cancelled);
+            }
+            *value = input[chunk.start() as usize + offset] / divisor;
+        }
+        Ok(())
+    })?;
+    Ok(result)
+}
+
 pub fn spmv(matrix: &RealSparseMatrix, x: &[f64]) -> Result<Vec<f64>, &'static str> {
     if x.len() != matrix.columns() {
         return Err("sparse matrix/vector dimension mismatch");
@@ -236,11 +280,54 @@ mod tests {
             axpy_scoped(-0.25, &x, &mut actual, plan).unwrap();
             direction_update_scoped(&x, &mut actual, 0.75, plan).unwrap();
             assert_eq!(actual, expected);
+            assert_eq!(
+                vector_sub_scoped(&actual, &x, plan).unwrap(),
+                actual
+                    .iter()
+                    .zip(x)
+                    .map(|(left, right)| left - right)
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                normalized_copy_scoped(&actual, 2.5, plan).unwrap(),
+                actual.iter().map(|value| value / 2.5).collect::<Vec<_>>()
+            );
         }
         assert!(matches!(
             axpy_scoped(1.0, &x[..6], &mut expected, LocalExecutionPlan::serial()),
             Err(ScopedSpmvError::VectorDimensionMismatch)
         ));
+        assert!(matches!(
+            vector_sub_scoped(&x[..6], &expected, LocalExecutionPlan::serial()),
+            Err(ScopedSpmvError::VectorDimensionMismatch)
+        ));
+    }
+
+    #[test]
+    fn scoped_vector_updates_propagate_cancellation_without_a_result() {
+        let cancellation = FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context = replace_fea_progress_context(FeaProgressContext {
+            cancellation,
+            ..FeaProgressContext::default()
+        });
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        let mut values = [1.0; 8];
+        for result in [
+            axpy_scoped(2.0, &[1.0; 8], &mut values, plan).map(|_| Vec::new()),
+            vector_sub_scoped(&[2.0; 8], &[1.0; 8], plan),
+            normalized_copy_scoped(&[2.0; 8], 2.0, plan),
+        ] {
+            assert!(matches!(
+                result,
+                Err(ScopedSpmvError::Execution(
+                    ScopedLocalExecutionError::Work {
+                        source: SpmvWorkError::Cancelled,
+                        ..
+                    }
+                ))
+            ));
+        }
     }
 
     #[test]
