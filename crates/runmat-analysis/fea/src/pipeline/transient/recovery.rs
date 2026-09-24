@@ -1,6 +1,7 @@
 use runmat_analysis_core::AnalysisField;
 
 use crate::{
+    assembly::AssemblySummary,
     connectors::CanonicalStructuralConnectorResult,
     contracts::{
         fea_transient_acceleration_field_id, fea_transient_angular_acceleration_field_id,
@@ -14,6 +15,7 @@ use crate::{
         FEA_FIELD_STRUCTURAL_STRAIN, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_VON_MISES,
     },
+    execution::StructuralTransientSchedule,
     pipeline::structural_nodal::{nodal_vector_shape, project_structural_nodal_snapshot},
     post::{fields::recover_deformation_result_fields, recover_connector_observable_fields},
     solve::transient::TransientSolveResult,
@@ -73,6 +75,19 @@ pub(super) fn recover_transient_fields(
         return Err(FeaRunError::Assembly(
             "transient solve produced no accepted state to recover".into(),
         ));
+    }
+    validate_schedule_points(&transient.schedule, &transient.time_points_s)?;
+    let reference = &transient.assembly_snapshots[0];
+    for index in 0..snapshot_count {
+        validate_snapshot_shape(
+            reference,
+            &transient.assembly_snapshots[index],
+            index,
+            &transient.displacement_snapshots[index],
+            &transient.velocity_snapshots[index],
+            &transient.acceleration_snapshots[index],
+            &transient.reaction_snapshots[index],
+        )?;
     }
     // Move each recovered field into its history as soon as the snapshot is ready.
     // Only the final state is cloned for the ordinary result-field view; there is
@@ -288,6 +303,60 @@ pub(super) fn recover_transient_fields(
     })
 }
 
+fn validate_schedule_points(
+    schedule: &StructuralTransientSchedule,
+    time_points_s: &[f64],
+) -> Result<(), FeaRunError> {
+    schedule
+        .validate()
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    if schedule.points.len() != time_points_s.len()
+        || schedule
+            .points
+            .iter()
+            .zip(time_points_s)
+            .any(|(scheduled, accepted)| scheduled.time_s.to_bits() != accepted.to_bits())
+    {
+        return Err(FeaRunError::Assembly(
+            "transient recovered states differ from the canonical accepted schedule".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_snapshot_shape(
+    reference: &AssemblySummary,
+    summary: &AssemblySummary,
+    index: usize,
+    displacement: &[f64],
+    velocity: &[f64],
+    acceleration: &[f64],
+    reaction: &[f64],
+) -> Result<(), FeaRunError> {
+    if summary.dof_count != reference.dof_count
+        || summary.structural_dof_layout != reference.structural_dof_layout
+    {
+        return Err(FeaRunError::Assembly(format!(
+            "transient accepted state {index} changed structural DOF ownership"
+        )));
+    }
+    for (kind, values) in [
+        ("displacement", displacement),
+        ("velocity", velocity),
+        ("acceleration", acceleration),
+        ("dynamic reaction", reaction),
+    ] {
+        if values.len() != summary.dof_count {
+            return Err(FeaRunError::Assembly(format!(
+                "transient {kind} state {index} has {} values, expected {} structural DOFs",
+                values.len(),
+                summary.dof_count,
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy)]
 enum RecoveredFieldPolicy {
     Required,
@@ -348,6 +417,85 @@ pub(super) fn require_snapshot_count(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::{
+        StructuralTransientContinuationApproach, StructuralTransientScheduleArrival,
+        StructuralTransientSchedulePoint,
+    };
+    use crate::{
+        assembly::{
+            assemble_structural_system, dofs::StructuralDofLayout, StructuralFormulationRequirement,
+        },
+        excitation::{realize_step_excitations, ExcitationSamplePoint},
+        fixtures::{fixture_model, FixtureId},
+    };
+
+    #[test]
+    fn recovery_requires_the_exact_accepted_schedule() {
+        let schedule = StructuralTransientSchedule::new(vec![
+            StructuralTransientSchedulePoint {
+                time_s: 0.0,
+                arrival: StructuralTransientScheduleArrival::Initial,
+                continuation: StructuralTransientContinuationApproach::At,
+            },
+            StructuralTransientSchedulePoint {
+                time_s: 1.0,
+                arrival: StructuralTransientScheduleArrival::Continuous,
+                continuation: StructuralTransientContinuationApproach::At,
+            },
+        ])
+        .unwrap();
+        assert!(validate_schedule_points(&schedule, &[0.0, 1.0]).is_ok());
+        for wrong in [&[0.0][..], &[0.0, 1.25][..], &[1.0, 0.0][..]] {
+            assert!(matches!(
+                validate_schedule_points(&schedule, wrong),
+                Err(FeaRunError::Assembly(message)) if message.contains("canonical accepted schedule")
+            ));
+        }
+    }
+
+    #[test]
+    fn recovery_rejects_changed_dof_ownership_and_malformed_state_vectors() {
+        let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let excitations = realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let summary = assemble_structural_system(
+            &model,
+            &excitations,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let state = vec![0.0; summary.dof_count];
+        assert!(
+            validate_snapshot_shape(&summary, &summary, 1, &state, &state, &state, &state).is_ok()
+        );
+
+        let mut changed = summary.clone();
+        changed.structural_dof_layout =
+            StructuralDofLayout::reduced_translational_rows(summary.dof_count);
+        assert!(matches!(
+            validate_snapshot_shape(&summary, &changed, 1, &state, &state, &state, &state),
+            Err(FeaRunError::Assembly(message)) if message.contains("changed structural DOF ownership")
+        ));
+        let short = &state[..state.len() - 1];
+        for (displacement, velocity, acceleration, reaction) in [
+            (short, state.as_slice(), state.as_slice(), state.as_slice()),
+            (state.as_slice(), short, state.as_slice(), state.as_slice()),
+            (state.as_slice(), state.as_slice(), short, state.as_slice()),
+            (state.as_slice(), state.as_slice(), state.as_slice(), short),
+        ] {
+            assert!(matches!(
+                validate_snapshot_shape(
+                    &summary, &summary, 1, displacement, velocity, acceleration, reaction
+                ),
+                Err(FeaRunError::Assembly(message)) if message.contains("expected")
+            ));
+        }
+    }
 
     #[test]
     fn streamed_snapshot_field_moves_its_storage_without_copying_the_history() {
