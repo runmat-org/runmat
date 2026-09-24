@@ -150,7 +150,7 @@ fn solve_affine_constraint_system_with_apply(
 
     let mut residual = algebra_backend.vec_sub(
         &reduced_rhs,
-        &apply_reduced_operator(reduction, &reduced_solution, &apply_full)?,
+        &apply_reduced_operator(reduction, &reduced_solution, &apply_full, vector_plan)?,
     );
     let mut direction = residual.clone();
     let mut residual_squared = dot(&residual, &residual)?;
@@ -169,7 +169,8 @@ fn solve_affine_constraint_system_with_apply(
             });
             break;
         }
-        let operator_direction = apply_reduced_operator(reduction, &direction, &apply_full)?;
+        let operator_direction =
+            apply_reduced_operator(reduction, &direction, &apply_full, vector_plan)?;
         let denominator = dot(&direction, &operator_direction)?;
         if !denominator.is_finite() || denominator <= 1.0e-18 {
             diagnostics.push(FeaDiagnostic {
@@ -222,7 +223,7 @@ fn solve_affine_constraint_system_with_apply(
         device_apply_k_count: 0,
         device_apply_k_attempt_count: 0,
         accelerator_evidence: None,
-        solution: expand(reduction, &reduced_solution),
+        solution: expand(reduction, &reduced_solution, vector_plan)?,
         solver_method: SolverMethod::MatrixFreePcg,
         preconditioner: SolverPreconditioner::None,
         diagnostics,
@@ -260,32 +261,62 @@ fn apply_reduced_operator(
     reduction: &AffineConstraintReduction,
     reduced: &[f64],
     apply_full: &impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
+    plan: Option<LocalExecutionPlan>,
 ) -> Result<Vec<f64>, ScopedSpmvError> {
-    let full = expand_linear(reduction, reduced);
+    let full = expand_linear(reduction, reduced, plan)?;
     Ok(transpose_apply(reduction, &apply_full(&full)?))
 }
 
-fn expand(reduction: &AffineConstraintReduction, reduced: &[f64]) -> Vec<f64> {
-    let mut full = expand_linear(reduction, reduced);
-    for (value, offset) in full.iter_mut().zip(&reduction.offset) {
-        *value += offset;
+fn expand(
+    reduction: &AffineConstraintReduction,
+    reduced: &[f64],
+    plan: Option<LocalExecutionPlan>,
+) -> Result<Vec<f64>, ScopedSpmvError> {
+    let mut full = expand_linear(reduction, reduced, plan)?;
+    if let Some(plan) = plan.filter(|plan| !plan.is_serial()) {
+        crate::algebra::axpy_scoped(1.0, &reduction.offset, &mut full, plan)?;
+    } else {
+        for (value, offset) in full.iter_mut().zip(&reduction.offset) {
+            *value += offset;
+        }
     }
-    full
+    Ok(full)
 }
 
-fn expand_linear(reduction: &AffineConstraintReduction, reduced: &[f64]) -> Vec<f64> {
-    (0..reduction.full_dof_count)
-        .map(|row| {
-            let start = reduction.recovery_row_offsets[row];
-            let end = reduction.recovery_row_offsets[row + 1];
-            (start..end)
-                .map(|entry| {
-                    reduction.recovery_coefficients[entry]
-                        * reduced[reduction.recovery_column_indices[entry]]
-                })
-                .sum()
+fn expand_linear(
+    reduction: &AffineConstraintReduction,
+    reduced: &[f64],
+    plan: Option<LocalExecutionPlan>,
+) -> Result<Vec<f64>, ScopedSpmvError> {
+    let mut full = vec![0.0; reduction.full_dof_count];
+    if let Some(plan) = plan.filter(|plan| !plan.is_serial()) {
+        let cancellation = crate::progress::cancellation_token();
+        crate::planning::resource::execute_scoped_slices_mut(plan, &mut full, |chunk, output| {
+            for (offset, value) in output.iter_mut().enumerate() {
+                if cancellation.is_cancelled() {
+                    return Err(crate::algebra::SpmvWorkError::Cancelled);
+                }
+                *value = recovery_row(reduction, reduced, chunk.start() as usize + offset);
+            }
+            Ok(())
+        })?;
+    } else {
+        for (row, value) in full.iter_mut().enumerate() {
+            *value = recovery_row(reduction, reduced, row);
+        }
+    }
+    Ok(full)
+}
+
+fn recovery_row(reduction: &AffineConstraintReduction, reduced: &[f64], row: usize) -> f64 {
+    let start = reduction.recovery_row_offsets[row];
+    let end = reduction.recovery_row_offsets[row + 1];
+    (start..end)
+        .map(|entry| {
+            reduction.recovery_coefficients[entry]
+                * reduced[reduction.recovery_column_indices[entry]]
         })
-        .collect()
+        .sum()
 }
 
 fn transpose_apply(reduction: &AffineConstraintReduction, full: &[f64]) -> Vec<f64> {
@@ -299,4 +330,85 @@ fn transpose_apply(reduction: &AffineConstraintReduction, full: &[f64]) -> Vec<f
         }
     }
     reduced
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        planning::resource::{execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError},
+        progress::{replace_fea_progress_context, FeaCancellationToken, FeaProgressContext},
+    };
+
+    fn coupled_reduction() -> AffineConstraintReduction {
+        let reduction = AffineConstraintReduction {
+            full_dof_count: 8,
+            reduced_dof_count: 3,
+            free_dof_indices: vec![0, 1, 2],
+            pivot_dof_indices: vec![3, 4, 5, 6, 7],
+            recovery_row_offsets: vec![0, 1, 2, 3, 5, 5, 7, 8, 10],
+            recovery_column_indices: vec![0, 1, 2, 0, 2, 0, 1, 2, 1, 2],
+            recovery_coefficients: vec![1.0, 1.0, 1.0, 0.25, -0.75, 2.0, -0.5, 1.5, -1.0, 0.125],
+            offset: vec![0.0, 0.0, 0.0, 0.001, -0.002, 0.0, 0.004, -0.001],
+        };
+        reduction.validate().unwrap();
+        reduction
+    }
+
+    #[test]
+    fn scoped_affine_forward_projection_and_lift_preserve_serial_bits() {
+        let reduction = coupled_reduction();
+        let reduced = [0.75, -2.0, 1.25];
+        let serial_linear = expand_linear(&reduction, &reduced, None).unwrap();
+        let serial_full = expand(&reduction, &reduced, None).unwrap();
+        for threads in [2, 3, 7, 8] {
+            let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
+            assert_eq!(
+                expand_linear(&reduction, &reduced, Some(plan)).unwrap(),
+                serial_linear
+            );
+            assert_eq!(
+                expand(&reduction, &reduced, Some(plan)).unwrap(),
+                serial_full
+            );
+            assert_eq!(
+                apply_reduced_operator(&reduction, &reduced, &|full| Ok(full.to_vec()), Some(plan))
+                    .unwrap(),
+                transpose_apply(&reduction, &serial_linear),
+            );
+        }
+    }
+
+    #[test]
+    fn scoped_affine_projection_rejects_nested_execution_and_cancellation() {
+        let reduction = coupled_reduction();
+        let reduced = [0.75, -2.0, 1.25];
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+        let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
+            Ok::<_, ()>(expand_linear(&reduction, &reduced, Some(plan)))
+        })
+        .unwrap();
+        assert!(matches!(
+            &nested[0],
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::NestedExecution
+            ))
+        ));
+
+        let cancellation = FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context = replace_fea_progress_context(FeaProgressContext {
+            cancellation,
+            ..FeaProgressContext::default()
+        });
+        assert!(matches!(
+            expand_linear(&reduction, &reduced, Some(plan)),
+            Err(ScopedSpmvError::Execution(
+                ScopedLocalExecutionError::Work {
+                    source: crate::algebra::SpmvWorkError::Cancelled,
+                    ..
+                }
+            ))
+        ));
+    }
 }
