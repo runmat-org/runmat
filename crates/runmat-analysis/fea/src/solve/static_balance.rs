@@ -85,19 +85,25 @@ impl StructuralStaticBalanceEvidence {
             .internal_work_joules
             .abs()
             .max(self.applied_load_work_joules.abs())
-            .max(self.constraint_work_joules.abs())
-            .max(1.0);
+            .max(self.constraint_work_joules.abs());
         let accepted = self.work_balance_relative_error <= self.relative_tolerance
             && self.equilibrium_relative_error <= self.relative_tolerance;
         if values.iter().any(|value| !value.is_finite())
             || self.work_balance_relative_error < 0.0
             || self.equilibrium_residual_norm_newtons < 0.0
-            || self.equilibrium_scale_newtons < 1.0
+            || self.equilibrium_scale_newtons < 0.0
             || self.equilibrium_relative_error < 0.0
             || self.relative_tolerance <= 0.0
             || (work_residual - self.work_balance_residual_joules).abs()
                 > work_scale * f64::EPSILON * 16.0
-            || (work_residual.abs() / work_scale - self.work_balance_relative_error).abs()
+            || (relative_error(work_residual.abs(), work_scale) - self.work_balance_relative_error)
+                .abs()
+                > f64::EPSILON * 16.0
+            || (relative_error(
+                self.equilibrium_residual_norm_newtons,
+                self.equilibrium_scale_newtons,
+            ) - self.equilibrium_relative_error)
+                .abs()
                 > f64::EPSILON * 16.0
             || self.accepted != accepted
         {
@@ -134,9 +140,9 @@ pub(crate) fn recover_structural_static_balance(
     let equilibrium_residual_norm_newtons = norm(&free_residual, local_execution)?;
     let equilibrium_scale_newtons = norm(&internal_force, local_execution)?
         .max(norm(&summary.physical_load, local_execution)?)
-        .max(norm(&reaction, local_execution)?)
-        .max(1.0);
-    let equilibrium_relative_error = equilibrium_residual_norm_newtons / equilibrium_scale_newtons;
+        .max(norm(&reaction, local_execution)?);
+    let equilibrium_relative_error =
+        relative_error(equilibrium_residual_norm_newtons, equilibrium_scale_newtons);
     let internal_work_joules = dot_scoped(displacement, &internal_force, local_execution)?;
     let applied_load_work_joules =
         dot_scoped(displacement, &summary.physical_load, local_execution)?;
@@ -146,9 +152,9 @@ pub(crate) fn recover_structural_static_balance(
     let work_scale = internal_work_joules
         .abs()
         .max(applied_load_work_joules.abs())
-        .max(constraint_work_joules.abs())
-        .max(1.0);
-    let work_balance_relative_error = work_balance_residual_joules.abs() / work_scale;
+        .max(constraint_work_joules.abs());
+    let work_balance_relative_error =
+        relative_error(work_balance_residual_joules.abs(), work_scale);
     let accepted = work_balance_relative_error <= RELATIVE_TOLERANCE
         && equilibrium_relative_error <= RELATIVE_TOLERANCE;
     let evidence = StructuralStaticBalanceEvidence {
@@ -171,6 +177,18 @@ fn norm(values: &[f64], local_execution: LocalExecutionPlan) -> Result<f64, Scop
     Ok(dot_scoped(values, values, local_execution)?.sqrt())
 }
 
+fn relative_error(residual: f64, scale: f64) -> f64 {
+    if scale == 0.0 {
+        if residual == 0.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        }
+    } else {
+        residual / scale
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use runmat_analysis_core::{
@@ -186,7 +204,10 @@ mod tests {
         },
         constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralConstraintResult},
         excitation::{realize_step_excitations, ExcitationSamplePoint},
-        fixtures::{fixture_model, replace_fixture_excitations, FixtureId},
+        fixtures::{
+            fixture_model, replace_fixture_excitations, FixtureExcitation, FixtureExcitationKind,
+            FixtureId,
+        },
         planning::resource::{execute_scoped_chunks, LocalThreadCount},
         solve::{
             backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
@@ -194,6 +215,91 @@ mod tests {
             preconditioner::SpdPreconditionerKind,
         },
     };
+
+    #[test]
+    fn static_balance_evidence_uses_physical_scale_even_below_one() {
+        assert_eq!(relative_error(0.0, 0.0), 0.0);
+        assert_eq!(relative_error(5.0e-13, 1.0e-12), 0.5);
+
+        let evidence = StructuralStaticBalanceEvidence {
+            internal_work_joules: 1.0e-12,
+            applied_load_work_joules: 0.0,
+            constraint_work_joules: 0.0,
+            work_balance_residual_joules: 1.0e-12,
+            work_balance_relative_error: 1.0,
+            equilibrium_residual_norm_newtons: 5.0e-13,
+            equilibrium_scale_newtons: 1.0e-12,
+            equilibrium_relative_error: 0.5,
+            relative_tolerance: RELATIVE_TOLERANCE,
+            accepted: false,
+        };
+        evidence.validate().unwrap();
+
+        let mut understated_work = evidence.clone();
+        understated_work.work_balance_relative_error = 1.0e-12;
+        assert!(understated_work.validate().is_err());
+
+        let mut understated_equilibrium = evidence;
+        understated_equilibrium.equilibrium_relative_error = 5.0e-13;
+        assert!(understated_equilibrium.validate().is_err());
+    }
+
+    #[test]
+    fn tiny_physical_moment_does_not_hide_an_incorrect_static_solution() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        replace_fixture_excitations(
+            &mut model,
+            vec![FixtureExcitation {
+                id: "tiny_tip_moment".into(),
+                region_id: "node:2".into(),
+                kind: FixtureExcitationKind::Moment([0.0, 0.0, 1.0e-9]),
+            }],
+        );
+        let excitations = realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let summary = assemble_structural_system(
+            &model,
+            &excitations,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let solve = solve_linear_system(
+            &summary,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+        );
+        assert!(solve.converged, "{:?}", solve.diagnostics);
+        let correct = recover_structural_static_balance(
+            &summary,
+            &solve.solution,
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap();
+        assert!(correct.evidence.accepted, "{:?}", correct.evidence);
+        assert!(correct.evidence.equilibrium_scale_newtons < 1.0);
+        assert!(correct.evidence.internal_work_joules.abs() < 1.0);
+
+        let half_solution = solve
+            .solution
+            .iter()
+            .map(|value| value * 0.5)
+            .collect::<Vec<_>>();
+        let incorrect = recover_structural_static_balance(
+            &summary,
+            &half_solution,
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap();
+        assert!(!incorrect.evidence.accepted, "{:?}", incorrect.evidence);
+        assert!(incorrect.evidence.equilibrium_relative_error > 0.1);
+    }
 
     #[test]
     fn prescribed_beam_extension_closes_reaction_and_work_against_closed_form() {
