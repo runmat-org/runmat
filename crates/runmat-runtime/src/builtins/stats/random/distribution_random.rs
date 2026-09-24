@@ -1301,7 +1301,7 @@ mod tests {
 
     #[test]
     fn gamrnd_typed_integer_roles_are_independently_gated() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         reset();
         let cases = [
@@ -1336,7 +1336,7 @@ mod tests {
 
     #[test]
     fn gamrnd_integer_sizes_are_exact_and_floating_boundaries_reject_loss() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset();
         let output = block_on(gamrnd::gamrnd_builtin(vec![
@@ -1376,7 +1376,7 @@ mod tests {
     fn gamrnd_documented_floating_gpu_input_is_ungated_and_restores_residency() {
         use crate::builtins::common::test_support;
 
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         test_support::with_test_provider(|provider| {
             let parameter = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
@@ -1406,7 +1406,7 @@ mod tests {
         use crate::builtins::common::test_support;
 
         let _accel_guard = test_support::accel_test_lock();
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
@@ -1740,7 +1740,7 @@ mod tests {
 
     #[test]
     fn wblrnd_typed_integer_roles_are_independently_gated() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         reset();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let cases = [
@@ -1775,7 +1775,7 @@ mod tests {
 
     #[test]
     fn wblrnd_rejects_lossy_wide_parameter_and_preserves_single_output() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         reset();
         let error = block_on(wblrnd::wblrnd_builtin(vec![

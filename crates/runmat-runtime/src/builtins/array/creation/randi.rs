@@ -1422,7 +1422,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_samples_complete_signed_and_unsigned_64_bit_domains_exactly() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
 
         reset_rng_clean();
@@ -1468,7 +1468,7 @@ pub(crate) mod tests {
 
     #[test]
     fn randi_full_width_sequence_is_reproducible_and_floating_outputs_remain_bounded() {
-        let _guard = random::test_lock().lock().unwrap();
+        let _guard = random::test_guard();
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
             .expect("uint64 full-width bounds");
