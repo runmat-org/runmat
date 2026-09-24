@@ -428,28 +428,42 @@ impl NativeMexLane {
         receiver: oneshot::Receiver<Result<T, String>>,
         operation: &str,
     ) -> Result<T, String> {
+        enum WaitEvent<T> {
+            Response(Result<Result<T, String>, oneshot::Canceled>),
+            Callback(Option<BoundaryEnvelope>),
+        }
+
         let mut result = receiver.fuse();
         loop {
-            let callback = async {
-                let mut callbacks = self.callbacks.lock().await;
-                callbacks.next().await
-            }
-            .fuse();
-            futures::pin_mut!(callback);
-            futures::select! {
-                response = result => {
-                    let response = response.map_err(|_| {
-                        format!("the MEX native lane stopped during {operation}")
-                    })?;
+            let event = {
+                let callback = async {
+                    let mut callbacks = self.callbacks.lock().await;
+                    callbacks.next().await
+                }
+                .fuse();
+                futures::pin_mut!(callback);
+                futures::select! {
+                    response = result => WaitEvent::Response(response),
+                    envelope = callback => WaitEvent::Callback(envelope),
+                }
+            };
+
+            match event {
+                WaitEvent::Response(response) => {
+                    let response = response
+                        .map_err(|_| format!("the MEX native lane stopped during {operation}"))?;
                     self.drain_ready_callbacks();
                     return response;
                 }
-                envelope = callback => {
+                WaitEvent::Callback(envelope) => {
                     let Some(envelope) = envelope else {
                         return result.await.map_err(|_| {
                             format!("the MEX native lane stopped during {operation}")
                         })?;
                     };
+                    // Dispatch only after the callback future has left scope and
+                    // released the receiver lock. Host services may synchronously
+                    // re-enter this lane and must be able to receive callbacks.
                     self.service_envelope(envelope);
                 }
             }
