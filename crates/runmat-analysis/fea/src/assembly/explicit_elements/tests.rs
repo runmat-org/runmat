@@ -134,3 +134,96 @@ fn scoped_beam_scatter_preserves_interleaved_shell_operators() {
     assert_eq!(parallel.beam_recovery, serial.beam_recovery);
     assert_eq!(parallel.shell_recovery, serial.shell_recovery);
 }
+
+#[test]
+fn scoped_shell_waves_preserve_damped_operators_and_recovery_order() {
+    let mut model = fixture_model(FixtureId::StructuralShellPlateMomentReference);
+    model.materials[0].damping = Some(runmat_analysis_core::MechanicalDampingModel::Rayleigh {
+        mass_coefficient: runmat_analysis_core::RayleighMassCoefficient::new(0.1),
+        stiffness_coefficient: runmat_analysis_core::RayleighStiffnessCoefficient::new(1.0e-5),
+    });
+    let structural = model.structural.as_mut().expect("shell fixture topology");
+    let prototype_nodes = structural.nodes.clone();
+    let prototype = structural.elements[0].clone();
+    structural.nodes = (0..19)
+        .flat_map(|element_index| {
+            prototype_nodes
+                .iter()
+                .enumerate()
+                .map(move |(local, node)| StructuralNode {
+                    node_id: (3 * element_index + local + 1) as u32,
+                    coordinates_m: [
+                        node.coordinates_m[0] + 10.0 * element_index as f64,
+                        node.coordinates_m[1],
+                        node.coordinates_m[2],
+                    ],
+                    solid_attachment: None,
+                })
+        })
+        .collect();
+    structural.elements = (0..19)
+        .map(|element_index| {
+            let mut element = prototype.clone();
+            element.element_id = format!("shell_{element_index}");
+            let StructuralElementKind::Shell(shell) = &mut element.kind else {
+                panic!("shell fixture must contain a shell");
+            };
+            shell.node_ids = [
+                (3 * element_index + 1) as u32,
+                (3 * element_index + 2) as u32,
+                (3 * element_index + 3) as u32,
+            ];
+            element
+        })
+        .collect();
+    let properties = compile_property_map(&model, None).expect("shell property coverage");
+    let layout = StructuralDofLayout::from_node_sets(vec![
+        StructuralNodeDofSet::translational_rotational();
+        57
+    ]);
+    let node_indices = (0..57).collect::<Vec<_>>();
+    let structural = model.structural.as_ref().unwrap();
+    let assemble =
+        |plan| assemble_explicit_elements(structural, &properties, &layout, &node_indices, plan);
+    let serial = assemble(LocalExecutionPlan::serial()).expect("serial shells");
+    let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
+    let parallel = assemble(plan).expect("scoped shells");
+    let repeated = assemble(plan).expect("repeated scoped shells");
+    assert_eq!(parallel.stiffness, serial.stiffness);
+    assert_eq!(parallel.mass, serial.mass);
+    assert_eq!(parallel.damping, serial.damping);
+    assert_eq!(parallel.shell_recovery, serial.shell_recovery);
+    assert_eq!(repeated.stiffness, parallel.stiffness);
+    assert_eq!(repeated.damping, parallel.damping);
+    assert_eq!(repeated.shell_recovery, parallel.shell_recovery);
+    assert_eq!(parallel.shell_count, 19);
+    for row in 0..layout.total_dof_count() {
+        for column in 0..layout.total_dof_count() {
+            let expected =
+                0.1 * parallel.mass.get(row, column) + 1.0e-5 * parallel.stiffness.get(row, column);
+            let actual = parallel.damping.get(row, column);
+            assert!(
+                (actual - expected).abs() <= 1.0e-8 * expected.abs().max(1.0),
+                "shell Rayleigh damping differs at ({row}, {column}): {actual} vs {expected}"
+            );
+        }
+    }
+    assert!(
+        std::mem::size_of::<super::ShellElementContribution>() * 8 <= 128 * 1024,
+        "a retained shell wave must fit the fixed per-worker assembly scratch"
+    );
+
+    let mut invalid = model.clone();
+    invalid.structural.as_mut().unwrap().elements[9].region_id = "unassigned".into();
+    assert!(matches!(
+        assemble_explicit_elements(
+            invalid.structural.as_ref().unwrap(),
+            &properties,
+            &layout,
+            &node_indices,
+            plan,
+        ),
+        Err(super::StructuralAssemblyError::UnassignedExplicitRegion { region_id, .. })
+            if region_id == "unassigned"
+    ));
+}

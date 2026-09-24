@@ -18,10 +18,11 @@ use super::{
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
-// Scoped solid or explicit-beam assembly retains at most eight contributions per active worker.
-// Tet10's two 30x30 f64 matrices (~14.1 KiB) dominate a beam's 12x12 stiffness, 12-entry mass,
-// and recovery summary. The 8 KiB per element plus 128 KiB per worker bounds the retained wave
-// and element-local construction scratch. Sparse rows are counted separately.
+// Scoped solid or explicit beam/shell assembly retains at most eight contributions per worker.
+// Tet10's two 30x30 f64 matrices (~14.1 KiB) dominate the beam payload; a shell retains three
+// 18x18 f64 matrices at most (~7.6 KiB), DOF indices, and recovery. The 8 KiB per element plus
+// 128 KiB per worker bounds the retained wave and element-local construction scratch. Sparse
+// rows are counted separately.
 const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
