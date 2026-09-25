@@ -151,7 +151,7 @@ fn connected_tet4_static_dirichlet_patch_recovers_affine_interior_and_boundary_t
     }
 }
 
-fn traction_patch_model() -> runmat_analysis_core::AnalysisModel {
+pub(super) fn traction_patch_model() -> runmat_analysis_core::AnalysisModel {
     let mut model = patch_model();
     // Six zero-valued DOFs remove rigid translations and rotations without
     // imposing a strain incompatible with u=(0.1x,0.2y,0.3z).
