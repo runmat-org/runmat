@@ -13,6 +13,7 @@ mod mixed_structural;
 mod moment_projection;
 mod reduced_rhs;
 mod solid_matrix;
+mod solid_properties;
 pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
@@ -829,6 +830,13 @@ pub(super) fn assemble_linear_system_impl(
         ));
     }
 
+    let solid_properties = solid_properties::compile_for_assembly(
+        model,
+        solver_mesh,
+        structural_requirement,
+        thermo_mechanical_context.is_some(),
+    )?;
+
     let base_dof_count = (excitations.len() * 3).max(3);
     let solid_topology = solver_mesh
         .map(solver_solid_topology)
@@ -1188,15 +1196,6 @@ pub(super) fn assemble_linear_system_impl(
         });
     }
 
-    let solid_properties = solver_mesh
-        .filter(|_| structural_requirement.is_some())
-        .map(|mesh| crate::properties::compile_structural_property_map(model, Some(mesh)))
-        .transpose()
-        .map_err(|error| {
-            LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::InvalidMaterialCoverage(
-                error.to_string(),
-            ))
-        })?;
     let structural_solid_recovery = solver_mesh
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())

@@ -1,6 +1,6 @@
 use runmat_analysis_core::{
-    AnalysisSequence, AuthoredMeshRef, AuthoredModel, FormulationRequirement, ProcedureStep,
-    RealizedGeometryInstance, RealizedStudy,
+    AnalysisProcedure, AnalysisSequence, AuthoredMeshRef, AuthoredModel, CoupledPhysicsFamily,
+    FormulationRequirement, ProcedureStep, RealizedGeometryInstance, RealizedStudy,
 };
 use runmat_geometry_core::{
     GeometryAuthoringCapabilities, GeometryDefinitionRef, GeometryDefinitionSource, GeometryDigest,
@@ -131,6 +131,68 @@ fn thermal_study_compilation_rejects_uncapable_and_substituted_properties() {
                 ..
             }
         ))
+    ));
+}
+
+#[test]
+fn thermomechanical_study_requires_the_union_of_solid_capabilities() {
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    model.sequence = AnalysisSequence::from_steps(
+        "thermomechanical",
+        vec![ProcedureStep::coupled(
+            "static",
+            CoupledPhysicsFamily::Thermomechanical,
+            AnalysisProcedure::Static,
+        )],
+    );
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    compile_study_properties(&model, &mesh).expect("coupled solid has both capabilities");
+
+    let mut no_thermal = model.clone();
+    no_thermal.materials[0].thermal = None;
+    assert!(matches!(
+        compile_study_properties(&no_thermal, &mesh),
+        Err(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                role: "thermal solid",
+                capability: runmat_analysis_core::MaterialCapability::Thermal,
+                ..
+            }
+        )
+    ));
+    let substituted = CompiledAnalysisStudy {
+        module_path: "tests/thermomechanical.fea".into(),
+        study_id: "thermomechanical".into(),
+        formulation_requirement: FormulationRequirement::Experimental,
+        study_inputs: Vec::new(),
+        outputs: Vec::new(),
+        properties: crate::properties::compile_property_map(&no_thermal, Some(&mesh))
+            .expect("generic ownership remains valid"),
+        model: no_thermal,
+        solver_mesh_digest: mesh.canonical_digest,
+    };
+    assert!(matches!(
+        substituted.definition_digest(),
+        Err(AnalysisStudyCompilationError::Properties(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                role: "thermal solid",
+                capability: runmat_analysis_core::MaterialCapability::Thermal,
+                ..
+            }
+        ))
+    ));
+
+    model.materials[0].elasticity = None;
+    assert!(matches!(
+        compile_study_properties(&model, &mesh),
+        Err(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                role: "structural solid",
+                capability: runmat_analysis_core::MaterialCapability::IsotropicLinearElasticity,
+                ..
+            }
+        )
     ));
 }
 

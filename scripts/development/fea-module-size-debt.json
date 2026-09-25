@@ -1,6 +1,6 @@
 {
   "crates/runmat-runtime/src/analysis/mod.rs": 7699,
-  "crates/runmat-analysis/fea/src/assembly/mod.rs": 4662,
+  "crates/runmat-analysis/fea/src/assembly/mod.rs": 4661,
   "crates/runmat-runtime/src/analysis/figures.rs": 3848,
   "crates/runmat-analysis/fea/src/pipeline/electromagnetic.rs": 3722,
   "crates/runmat-runtime/src/analysis/contracts.rs": 3267,

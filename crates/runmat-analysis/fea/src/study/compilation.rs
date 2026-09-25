@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     realize_analysis_model, validate_authored_outputs, AnalysisModel,
     AnalysisModelRealizationError, AnalysisModelRealizationInput, AuthoredMaterialRef,
-    AuthoredOutput, AuthoredStudyInputBinding, FormulationRequirement, MaterialModel,
-    PhysicsFamily, RealizedStudy,
+    AuthoredOutput, AuthoredStudyInputBinding, CoupledPhysicsFamily, FormulationRequirement,
+    MaterialModel, PhysicsFamily, RealizedStudy,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -177,19 +177,22 @@ fn compile_study_properties(
 }
 
 fn requires_thermal_solid_capabilities(model: &AnalysisModel) -> bool {
-    model
-        .sequence
-        .steps
-        .iter()
-        .any(|step| step.family == PhysicsFamily::Thermal)
+    model.sequence.steps.iter().any(|step| {
+        matches!(
+            step.family,
+            PhysicsFamily::Thermal | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+        )
+    })
 }
 
 fn requires_structural_solid_capabilities(model: &AnalysisModel) -> bool {
-    model
-        .sequence
-        .steps
-        .iter()
-        .any(|step| step.family == PhysicsFamily::Structural)
+    model.sequence.steps.iter().any(|step| {
+        matches!(
+            step.family,
+            PhysicsFamily::Structural
+                | PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
+        )
+    })
 }
 
 fn validate_study_inputs(

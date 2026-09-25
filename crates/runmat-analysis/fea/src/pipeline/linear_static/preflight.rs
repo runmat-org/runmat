@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisModel, ProcedureStep};
+use runmat_analysis_core::{AnalysisModel, CoupledPhysicsFamily, PhysicsFamily, ProcedureStep};
 
 use crate::{
     assembly::{explicit_connectors::compile_model_connector_plan, AssemblySummary},
@@ -75,9 +75,14 @@ pub(super) fn prepare_static_preassembly(
     let constraints = prepared_constraints
         .or(compiled_constraints.as_ref())
         .expect("CPU physical preassembly has compiled or prepared constraints");
-    let _properties =
+    let properties =
         crate::properties::compile_structural_property_map(model, options.solver_mesh.as_ref())
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    if step.family == PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical) {
+        properties
+            .validate_thermal_solid_capabilities()
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    }
     let connectors = compile_model_connector_plan(
         model,
         options.solver_mesh.as_ref(),
@@ -175,6 +180,7 @@ pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> b
 mod tests {
     use super::*;
     use crate::fixtures::{fixture_model, FixtureId};
+    use runmat_analysis_core::{AnalysisProcedure, AnalysisSequence};
 
     #[test]
     fn physical_static_rejects_missing_solid_capabilities_before_resource_planning() {
@@ -231,6 +237,50 @@ mod tests {
             FeaRunError::Assembly(message)
                 if message.contains("structural solid")
                     && message.contains("MassDensity")
+        ));
+    }
+
+    #[test]
+    fn coupled_static_rejects_missing_thermal_capability_before_resource_planning() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.sequence = AnalysisSequence::from_steps(
+            "thermomechanical",
+            vec![ProcedureStep::coupled(
+                "static",
+                CoupledPhysicsFamily::Thermomechanical,
+                AnalysisProcedure::Static,
+            )],
+        );
+        let options = LinearStaticSolveOptions {
+            solver_mesh: Some(crate::tests::single_tetrahedron_solver_mesh_for_model(
+                &model,
+            )),
+            ..LinearStaticSolveOptions::default()
+        };
+        prepare_static_preassembly(
+            &model,
+            &model.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &options,
+            None,
+            None,
+        )
+        .expect("capable coupled solid passes preassembly");
+        model.materials[0].thermal = None;
+        let error = prepare_static_preassembly(
+            &model,
+            &model.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &options,
+            None,
+            None,
+        )
+        .err()
+        .expect("missing thermal capability must fail before planning");
+        assert!(matches!(
+            error,
+            FeaRunError::Assembly(message)
+                if message.contains("thermal solid") && message.contains("Thermal")
         ));
     }
 
