@@ -52,6 +52,10 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         for (load, doubled_load) in [
             (
+                FixtureExcitationKind::Force([0.0, -12.0, 0.0]),
+                FixtureExcitationKind::Force([0.0, -24.0, 0.0]),
+            ),
+            (
                 FixtureExcitationKind::Pressure(12.0),
                 FixtureExcitationKind::Pressure(24.0),
             ),
@@ -87,6 +91,7 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
                 (points[0][axis] + points[1][axis] + points[2][axis]) / 3.0
             });
             let expected_force = match load {
+                FixtureExcitationKind::Force(components) => components,
                 FixtureExcitationKind::Pressure(pascals) => {
                     oriented_area.map(|area| pascals * area)
                 }
@@ -189,9 +194,14 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
                 .unwrap()[0];
             assert!(energy > 0.0);
             close_scaled(doubled_energy, 4.0 * energy, energy);
-            if order == ElementOrder::Tet4 && matches!(load, FixtureExcitationKind::Pressure(_)) {
+            if order == ElementOrder::Tet4
+                && matches!(
+                    load,
+                    FixtureExcitationKind::Force(_) | FixtureExcitationKind::Pressure(_)
+                )
+            {
                 // The base triangle fixes nodes 1-3. The opposite node has one
-                // shear DOF under the y-directed face pressure: K_yy=mu V=mu/6,
+                // shear DOF under the y-directed face force or pressure: K_yy=mu V=mu/6,
                 // and its consistent nodal force is one third of the face resultant.
                 let shear_modulus = 200.0e9 / (2.0 * (1.0 + 0.3));
                 let expected_tip_y = 2.0 * expected_force[1] / shear_modulus;
