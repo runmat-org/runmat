@@ -29,17 +29,21 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
+    planning::resource::build_static_resource_plan,
     post::{
         fields::{
             recover_result_fields, structural_field_recovery_metrics,
-            take_structural_observable_fields,
+            structural_observable_field_definitions, take_structural_observable_fields,
         },
         recover_connector_observable_fields, recover_constraint_group_observable_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     results::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
-        observation::{evaluate_structural_observations, ObservationLimits},
+        observation::{
+            evaluate_structural_observations, resolve_structural_observation_plan,
+            ObservationExecutionPolicy, ObservationLimits,
+        },
     },
     solve::StructuralStaticBalanceEvidence,
 };
@@ -141,6 +145,50 @@ fn run_linear_static_with_constraint_plan(
         Some(5),
     );
     check_cancelled("fea.run_linear_static")?;
+
+    // Direct CPU physical solves have no portable scheduler to admit their resource envelope.
+    // Derive the same topology, constraint, observation, and recovery demand here before
+    // excitation realization or matrix assembly. The GPU path lacks an inline accelerator
+    // request, and connector observations require connector-aware preassembly resolution;
+    // neither can be admitted through this direct envelope yet. Portable solves have already
+    // validated their resource plan against authoritative inputs at the runner boundary.
+    if constraint_plan.is_none()
+        && backend == ComputeBackend::Cpu
+        && model.connectors.is_empty()
+        && (options.solver_mesh.is_some() || model_has_explicit_structural_elements(model))
+    {
+        let constraints = CanonicalStructuralConstraintPlan::compile_for_model(
+            model,
+            options.solver_mesh.as_ref(),
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let _properties =
+            crate::properties::compile_property_map(model, options.solver_mesh.as_ref())
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let fields = structural_observable_field_definitions()
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let observations = resolve_structural_observation_plan(
+            execution_step,
+            model,
+            options.solver_mesh.as_ref(),
+            &constraints,
+            &fields,
+            ObservationLimits::default(),
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        build_static_resource_plan(
+            model,
+            execution_step,
+            backend,
+            options.preconditioner_kind,
+            ObservationExecutionPolicy::serial(),
+            options.solver_mesh.as_ref(),
+            &constraints,
+            &observations,
+            &[],
+            options.local_execution,
+        )?;
+    }
 
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)

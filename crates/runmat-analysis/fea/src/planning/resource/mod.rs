@@ -81,6 +81,7 @@ pub use post_process::{
     structural_frequency_receipt_payload_bytes_upper_bound,
     structural_frequency_result_payload_bytes_upper_bound, ObservationPartitionResourcePlanning,
 };
+pub(crate) use preflight::build_static_resource_plan;
 pub use preflight::build_structural_resource_plan;
 pub use random_response::{
     structural_random_response_assembly_payload_bytes_upper_bound,

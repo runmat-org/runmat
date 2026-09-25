@@ -4,9 +4,13 @@ use crate::{
         AffineConstraintReduction, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
     },
     execution::{FieldRecoveryPlan, StructuralLinearWorkload},
-    results::{field::StructuralRecoveredFieldTopology, observation::ResolvedObservationPlan},
+    results::{
+        field::StructuralRecoveredFieldTopology,
+        observation::{ObservationExecutionPolicy, ResolvedObservationPlan},
+    },
     solve::preconditioner::SpdPreconditionerKind,
 };
+use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -54,7 +58,39 @@ pub fn build_structural_resource_plan(
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let facts = derive_structural_resource_facts(&workload.model, mesh, constraints)?;
+    let step = workload
+        .procedure_step()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    build_static_resource_plan(
+        &workload.model,
+        step,
+        workload.backend,
+        workload.preconditioner,
+        workload.observation_execution,
+        mesh,
+        constraints,
+        observations,
+        accelerator_requests,
+        local_execution,
+    )
+}
+
+/// The shared numerical preflight for portable and direct static execution. The portable
+/// entry point additionally validates the workload's sequencing and replay contract.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_static_resource_plan(
+    model: &AnalysisModel,
+    step: &ProcedureStep,
+    backend: crate::ComputeBackend,
+    preconditioner: SpdPreconditionerKind,
+    observation_execution: ObservationExecutionPolicy,
+    mesh: Option<&SolverMeshArtifact>,
+    constraints: &CanonicalStructuralConstraintPlan,
+    observations: &ResolvedObservationPlan,
+    accelerator_requests: &[AcceleratorRequest],
+    local_execution: LocalExecutionPlan,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let facts = derive_structural_resource_facts(model, mesh, constraints)?;
     if observations.topology_digest != facts.topology_digest {
         return Err(ResourcePlanningError::Invalid(
             "observation plan and structural constraints name different topology".into(),
@@ -76,12 +112,8 @@ pub fn build_structural_resource_plan(
             ))?,
         facts.connector_quadrature_bytes,
     )?;
-    let observations =
-        ObservationResourceFacts::from_plan(observations, workload.observation_execution)?;
-    let step = workload
-        .procedure_step()
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let recovery_topology = StructuralRecoveredFieldTopology::derive(&workload.model, mesh)
+    let observations = ObservationResourceFacts::from_plan(observations, observation_execution)?;
+    let recovery_topology = StructuralRecoveredFieldTopology::derive(model, mesh)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let field_recovery = FieldRecoveryResourceFacts::from_plan(
         &FieldRecoveryPlan::resolve(step, recovery_topology, constraints.groups.len())
@@ -113,7 +145,7 @@ pub fn build_structural_resource_plan(
         resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
     };
     let solve = solve_policy(
-        workload.preconditioner,
+        preconditioner,
         dofs,
         u64::try_from(facts.constraint_matrix.row_count())
             .map_err(|_| ResourcePlanningError::Overflow("constraint row count"))?,
@@ -177,7 +209,7 @@ pub fn build_structural_resource_plan(
         STRUCTURAL_ARTIFACT_OVERHEAD_BYTES,
         "structural checkpoint bytes",
     )?;
-    let accelerators = structural_accelerator_requirements(workload, accelerator_requests)?;
+    let accelerators = structural_accelerator_requirements(backend, accelerator_requests)?;
     let required_capabilities = accelerators
         .iter()
         .map(|accelerator| {
@@ -245,10 +277,10 @@ pub fn build_structural_resource_plan(
 }
 
 fn structural_accelerator_requirements(
-    workload: &StructuralLinearWorkload,
+    backend: crate::ComputeBackend,
     requests: &[AcceleratorRequest],
 ) -> Result<Vec<super::AcceleratorRequirement>, ResourcePlanningError> {
-    if workload.backend != crate::ComputeBackend::Gpu {
+    if backend != crate::ComputeBackend::Gpu {
         return Ok(Vec::new());
     }
     let [request] = requests else {

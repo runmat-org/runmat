@@ -295,6 +295,27 @@ fn run_linear_static_with_single_tetrahedron_mesh(
     )
 }
 
+#[test]
+fn direct_physical_static_rejects_accuracy_memory_ceiling_before_assembly() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let error = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
+        .expect_err("direct physical solve must admit its resource plan before assembly");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                maximum: 1,
+                ..
+            }
+        )
+    ));
+}
+
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,
