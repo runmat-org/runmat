@@ -16,6 +16,7 @@ const RESOURCE_USAGE_LIMITS: CanonicalLimits =
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+/// Scheduler allocation accounting, not sampled process or device utilization.
 pub struct AnalysisResourceUsage {
     pub scheduler: ResourceUsage,
     pub peak_cpu_millicores: u32,
@@ -125,6 +126,8 @@ pub struct ResourceUsageEvidence {
     pub workload_digest: Digest,
     pub result_digest: Digest,
     pub attempts: Vec<ResourceUsageAttempt>,
+    /// Aggregated reserved allocations and observed transfer/artifact amounts; memory peaks are
+    /// reservation peaks, not measured worker RSS.
     pub actual: AnalysisResourceUsage,
     pub overruns: Vec<ResourceUsageAttemptOverrun>,
 }
