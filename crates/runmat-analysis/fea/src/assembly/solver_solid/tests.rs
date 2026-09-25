@@ -3,7 +3,8 @@ use runmat_analysis_core::{
     MechanicalDampingModel, RayleighMassCoefficient, RayleighStiffnessCoefficient,
 };
 use runmat_meshing_core::{
-    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, SolverMeshArtifact,
+    fixtures::{canonical_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh},
+    ElementOrder, SolverMeshArtifact,
 };
 
 #[test]
@@ -23,6 +24,46 @@ fn scoped_solid_assembly_matches_serial_operators_exactly() {
             assert_eq!(parallel, serial);
         }
     }
+}
+
+#[test]
+fn connected_tet4_affine_patch_balances_independent_boundary_tractions() {
+    // u = (0.1 x, 0.2 y, 0.3 z), E = 100 Pa, nu = 0.25 gives the constant
+    // stress diag(32, 40, 48) Pa. Analytically integrating sigma*n*N_i over
+    // the four outer triangles gives these nodal resultants. The centroid is
+    // interior, so its assembled force must cancel across the four elements.
+    let mesh = connected_tetrahedron_solver_mesh();
+    let operators =
+        assemble_solver_solid_operators(&mesh, &inventory(&mesh, material(100.0, 1.0))).unwrap();
+    let displacement = mesh
+        .topology
+        .nodes
+        .iter()
+        .flat_map(|node| {
+            let [x, y, z] = node.coordinates_m;
+            [0.1 * x, 0.2 * y, 0.3 * z]
+        })
+        .collect::<Vec<_>>();
+    let internal_force = crate::algebra::spmv(&operators.stiffness, &displacement).unwrap();
+    let expected = [
+        [-16.0 / 3.0, -20.0 / 3.0, -8.0],
+        [16.0 / 3.0, 0.0, 0.0],
+        [0.0, 20.0 / 3.0, 0.0],
+        [0.0, 0.0, 8.0],
+        [0.0, 0.0, 0.0],
+    ];
+    for (actual, expected) in internal_force.chunks_exact(3).zip(expected) {
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert_relative(*actual, expected, 1.0e-12);
+        }
+    }
+    let energy = 0.5
+        * displacement
+            .iter()
+            .zip(&internal_force)
+            .map(|(u, f)| u * f)
+            .sum::<f64>();
+    assert_relative(energy, 12.8 / 6.0, 1.0e-12);
 }
 
 #[test]

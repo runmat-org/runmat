@@ -1,5 +1,7 @@
+mod connected;
 mod solver_mesh;
 
+pub use connected::connected_tetrahedron_solver_mesh;
 pub use solver_mesh::{
     canonical_tetrahedron_meshing_evidence, canonical_tetrahedron_solver_mesh,
     three_region_tetrahedron_solver_mesh,
