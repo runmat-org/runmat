@@ -1,6 +1,7 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
 mod admission;
+mod assembly_sizing;
 mod buckling;
 mod connector_buffers;
 mod contract;

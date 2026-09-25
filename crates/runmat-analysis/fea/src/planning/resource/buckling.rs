@@ -11,7 +11,11 @@ use crate::{
 };
 
 use super::{
-    build_resource_plan, structural_facts::derive_structural_resource_facts,
+    assembly_sizing::{
+        ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+    },
+    build_resource_plan,
+    structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
@@ -21,8 +25,6 @@ use super::{
 };
 
 const BOUNDARY_PROBE_WIDTH: u64 = 4;
-const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
-const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const RESULT_FIXED_BYTES: u64 = 64 * 1024;
@@ -235,7 +237,9 @@ pub fn build_structural_buckling_resource_plan(
                         )?,
                     ),
                     scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-                    fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
+                    fixed_scratch_bytes_per_worker: ByteCount(
+                        FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+                    ),
                 },
                 solve: SolveResourcePolicy::SymmetricSubspaceIteration {
                     full_dimension: Count(full_dimension),

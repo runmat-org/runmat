@@ -11,7 +11,11 @@ use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use super::{
-    build_resource_plan, structural_facts::derive_structural_resource_facts,
+    assembly_sizing::{
+        ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+    },
+    build_resource_plan,
+    structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
@@ -20,13 +24,6 @@ use super::{
     WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
-// Scoped solid or explicit beam/shell assembly retains at most eight contributions per worker.
-// Tet10's two 30x30 f64 matrices (~14.1 KiB) dominate the beam payload; a shell retains three
-// 18x18 f64 matrices at most (~7.6 KiB), DOF indices, and recovery. The 8 KiB per element plus
-// 128 KiB per worker bounds the retained wave and element-local construction scratch. Sparse
-// rows are counted separately.
-const STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
-const STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 const STRUCTURAL_ARTIFACT_OVERHEAD_BYTES: u64 = 64 * 1024;
@@ -181,7 +178,7 @@ pub fn build_structural_resource_plan(
         .checked_cpu_millicores()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let fixed_assembly_scratch = local_execution
-        .checked_fixed_scratch_bytes(ByteCount(STRUCTURAL_FIXED_ASSEMBLY_SCRATCH_BYTES))
+        .checked_fixed_scratch_bytes(ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER))
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
@@ -195,7 +192,7 @@ pub fn build_structural_resource_plan(
             assembly: AssemblyResourcePolicy {
                 contribution_nonzero_upper_bound: Count(contribution_nonzeros),
                 contribution_bytes_upper_bound: ByteCount(contribution_bytes),
-                scratch_bytes_per_element: ByteCount(STRUCTURAL_ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
+                scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
                 fixed_scratch_bytes_per_worker: fixed_assembly_scratch,
             },
             solve,

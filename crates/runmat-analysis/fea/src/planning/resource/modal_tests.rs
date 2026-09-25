@@ -121,6 +121,10 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
         panic!("modal planning must preserve its typed demand")
     };
     assert_eq!(demand.operator.partitioning, PartitioningPolicy::Monolithic);
+    assert_eq!(
+        demand.operator.assembly.fixed_scratch_bytes_per_worker.0,
+        super::assembly_sizing::FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER
+    );
     assert!(demand.operator.sparse.operator_nonzeros.len() >= 2);
     let SolveResourcePolicy::SymmetricSubspaceIteration {
         requested_mode_count,

@@ -16,7 +16,11 @@ use crate::{
 };
 
 use super::{
-    build_resource_plan, structural_facts::derive_structural_resource_facts,
+    assembly_sizing::{
+        ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+    },
+    build_resource_plan,
+    structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
@@ -28,8 +32,6 @@ use super::{
 
 const FIXED_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
-const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 128 * 1024;
 // One point has only a f64 and two closed enum tags; 128 bytes covers its canonical map keys,
 // CBOR headers, and values without allocating an encoded schedule during admission.
 const SCOPE_BYTES_PER_SCHEDULE_POINT_UPPER_BOUND: u64 = 128;
@@ -307,7 +309,9 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                         contribution_nonzero_upper_bound: Count(contribution_nonzeros),
                         contribution_bytes_upper_bound: ByteCount(contribution_bytes),
                         scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-                        fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
+                        fixed_scratch_bytes_per_worker: ByteCount(
+                            FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+                        ),
                     },
                     solve: SolveResourcePolicy::NoSolve {
                         workspace_bytes_upper_bound: ByteCount(scope_workspace),

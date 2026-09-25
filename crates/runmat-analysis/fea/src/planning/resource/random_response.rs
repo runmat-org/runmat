@@ -12,7 +12,11 @@ use crate::{
 };
 
 use super::{
-    build_resource_plan, structural_facts::derive_structural_resource_facts,
+    assembly_sizing::{
+        ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
+    },
+    build_resource_plan,
+    structural_facts::derive_structural_resource_facts,
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
@@ -24,8 +28,6 @@ use super::{
 
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
-const FIXED_ASSEMBLY_SCRATCH_BYTES: u64 = 64 * 1024;
-const ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT: u64 = 8 * 1024;
 const INTERVAL_FIXED_PAYLOAD_BYTES: u64 = 256 * 1024;
 const INTERVAL_METADATA_BYTES: u64 = 64 * 1024;
 const ASSEMBLY_FIXED_PAYLOAD_BYTES: u64 = 256 * 1024;
@@ -119,7 +121,7 @@ impl StructuralRandomResponseResourceProjection {
                     )?,
                 ),
                 scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-                fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES),
+                fixed_scratch_bytes_per_worker: ByteCount(FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER),
             },
             basis: basis.identity(),
             operator_digest: basis.operator_digest(),

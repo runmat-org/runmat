@@ -19,6 +19,8 @@ use super::{
     solid_matrix::{empty_rows, rows_to_sparse, scatter_csr},
 };
 
+pub(crate) const MAX_SOLID_ELEMENT_CONTRIBUTIONS_PER_WORKER: usize = 8;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SolverSolidTopology {
     pub dof_count: usize,
@@ -193,10 +195,9 @@ fn assemble_solid_rows(
 ) -> Result<SolidOperatorRows, SolverSolidAssemblyError> {
     let mut rows = SolidOperatorRows::new(dof_count);
     let cancellation = crate::progress::cancellation_token();
-    // Each worker retains at most eight element matrices (Tet10: two 30x30 f64 matrices).
-    const ELEMENTS_PER_WORKER_WAVE: usize = 8;
+    // Each worker retains at most eight element contributions (Tet10: two 30x30 matrices).
     let wave_capacity = usize::from(local_execution.thread_count().get())
-        .checked_mul(ELEMENTS_PER_WORKER_WAVE)
+        .checked_mul(MAX_SOLID_ELEMENT_CONTRIBUTIONS_PER_WORKER)
         .ok_or_else(|| {
             SolverSolidAssemblyError::LocalExecution("assembly wave size overflow".into())
         })?;
