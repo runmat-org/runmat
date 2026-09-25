@@ -111,11 +111,11 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
     let (workload, mesh) = direct_scope_case();
     let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
     let first = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared,
+        &workload, &mesh, None, &prepared, None, None,
     )
     .unwrap();
     let second = crate::planning::resource::build_structural_transient_scope_resource_plan(
-        &workload, &mesh, None, &prepared,
+        &workload, &mesh, None, &prepared, None, None,
     )
     .unwrap();
     assert_eq!(first.identity, second.identity);
@@ -149,6 +149,8 @@ fn checkpoint_scope_resource_preflight_is_deterministic_and_precedes_assembly() 
         &mesh,
         None,
         &longer_prepared,
+        None,
+        None,
     )
     .unwrap();
     let longer_scope = prepare_transient_checkpoint_scope(&longer, &mesh, None).unwrap();
@@ -204,5 +206,74 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
                 ..
             }
         )
+    ));
+}
+
+#[test]
+fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
+    let (workload, mesh) = direct_scope_case();
+    let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
+    let baseline = crate::planning::resource::build_structural_transient_scope_resource_plan(
+        &workload, &mesh, None, &prepared, None, None,
+    )
+    .unwrap();
+    let crate::planning::resource::FeaResourceDemand::StructuralTransientScopePreparation(demand) =
+        &baseline.input.demand
+    else {
+        panic!("expected scope preparation demand");
+    };
+    let mut input_facts = demand.inputs.clone();
+    input_facts.transport_closure_bytes.0 += 1_024;
+    let output_set = crate::planning::resource::PreparedOutputSetResourceFacts {
+        encoded_bytes_upper_bound: crate::planning::resource::ByteCount(
+            demand.scope_output.encoded_payload_bytes_upper_bound.0 + 4_096,
+        ),
+    };
+    let task_plan = plan_transient_checkpoint_scope_task(
+        &workload,
+        &mesh,
+        None,
+        input_facts.clone(),
+        output_set.clone(),
+    )
+    .unwrap();
+    let crate::planning::resource::FeaResourceDemand::StructuralTransientScopePreparation(
+        task_demand,
+    ) = &task_plan.input.demand
+    else {
+        panic!("expected scope task demand");
+    };
+    assert_eq!(task_demand.inputs, input_facts);
+    assert_eq!(task_plan.input.output_set, Some(output_set.clone()));
+    assert!(task_plan.request.max_artifact_bytes > baseline.request.max_artifact_bytes);
+    assert_eq!(
+        task_plan.input.demand.output_facts(
+            crate::execution::AnalysisNumericalObjectKind::StructuralTransientCheckpointScope
+        ),
+        Some(&task_demand.scope_output)
+    );
+    assert!(matches!(
+        plan_transient_checkpoint_scope_task(
+            &workload,
+            &mesh,
+            None,
+            input_facts.clone(),
+            crate::planning::resource::PreparedOutputSetResourceFacts {
+                encoded_bytes_upper_bound: crate::planning::resource::ByteCount(
+                    demand.scope_output.encoded_payload_bytes_upper_bound.0 - 1,
+                ),
+            },
+        ),
+        Err(FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::Invalid(_)
+        ))
+    ));
+
+    input_facts.encoded_payload_bytes.0 -= 1;
+    assert!(matches!(
+        plan_transient_checkpoint_scope_task(&workload, &mesh, None, input_facts, output_set,),
+        Err(FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::Invalid(_)
+        ))
     ));
 }

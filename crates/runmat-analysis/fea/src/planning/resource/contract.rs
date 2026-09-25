@@ -36,7 +36,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 10;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 11;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -254,6 +254,7 @@ pub struct StructuralTransientScopeResourceDemand {
     pub source_workload_digest: Digest,
     pub operator: StructuralOperatorResourceDemand,
     pub inputs: PreparedInputResourceFacts,
+    pub scope_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -518,6 +519,10 @@ impl FeaResourceDemand {
                 AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult,
             ) => Some(&demand.output),
             (
+                Self::StructuralTransientScopePreparation(demand),
+                AnalysisNumericalObjectKind::StructuralTransientCheckpointScope,
+            ) => Some(&demand.scope_output),
+            (
                 Self::StructuralModalResponseSpectrumAssembly(demand),
                 AnalysisNumericalObjectKind::SolverResult,
             ) => Some(&demand.result_output),
@@ -546,10 +551,7 @@ impl FeaResourceDemand {
     }
 
     pub const fn governs_prepared_outputs(&self) -> bool {
-        !matches!(
-            self,
-            Self::StructuralLinearPipeline(_) | Self::StructuralTransientScopePreparation(_)
-        )
+        !matches!(self, Self::StructuralLinearPipeline(_))
     }
 }
 

@@ -18,8 +18,9 @@ use super::{
     AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, Count,
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy,
-    PreparedInputResourceFacts, ResourcePlanningError, SolveResourcePolicy,
-    StructuralOperatorResourceDemand, StructuralTransientScopeResourceDemand, WorkerResourcePolicy,
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy, StructuralOperatorResourceDemand,
+    StructuralTransientScopeResourceDemand, WorkerResourcePolicy,
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
@@ -56,6 +57,8 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     mesh: &SolverMeshArtifact,
     modal_state: Option<&CanonicalSemanticState>,
     prepared: &PreparedTransientPreassembly,
+    prepared_inputs: Option<PreparedInputResourceFacts>,
+    output_set: Option<PreparedOutputSetResourceFacts>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     workload
         .validate()
@@ -169,10 +172,24 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         .ok_or(ResourcePlanningError::Overflow("scope decoded inputs"))?;
     // Scope construction retains both the authored model and its active-constraint copy.
     // The projected materialization allowance also covers motion objects and mesh clones.
-    let inputs = PreparedInputResourceFacts {
-        encoded_payload_bytes: ByteCount(encoded_inputs),
-        transport_closure_bytes: ByteCount(encoded_inputs),
-        decoded_resident_bytes_admission_budget: ByteCount(decoded_inputs),
+    let inputs = match prepared_inputs {
+        Some(facts)
+            if facts.encoded_payload_bytes.0 == encoded_inputs
+                && facts.transport_closure_bytes.0 >= encoded_inputs
+                && facts.decoded_resident_bytes_admission_budget.0 >= encoded_inputs =>
+        {
+            facts
+        }
+        Some(_) => {
+            return Err(ResourcePlanningError::Invalid(
+                "prepared transient scope input facts differ from canonical inputs".into(),
+            ))
+        }
+        None => PreparedInputResourceFacts {
+            encoded_payload_bytes: ByteCount(encoded_inputs),
+            transport_closure_bytes: ByteCount(encoded_inputs),
+            decoded_resident_bytes_admission_budget: ByteCount(decoded_inputs),
+        },
     };
     let schedule_points = count(prepared.schedule.points.len(), "transient schedule points")?;
     let schedule_bytes = multiply(schedule_points, 128, "transient schedule residency")?;
@@ -192,6 +209,22 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
         .ok_or(ResourcePlanningError::Overflow(
             "transient scope output construction",
         ))?;
+    let scope_output = PreparedOutputResourceFacts {
+        encoded_payload_bytes_upper_bound: ByteCount(scope_payload_bytes),
+        transport_closure_bytes_upper_bound: ByteCount(scope_transport_bytes),
+        construction_resident_bytes_admission_budget: ByteCount(scope_construction_bytes),
+    };
+    let output_set = match output_set {
+        Some(facts) if facts.encoded_bytes_upper_bound.0 >= scope_payload_bytes => facts,
+        Some(_) => {
+            return Err(ResourcePlanningError::Invalid(
+                "transient scope output set is smaller than the planned scope payload".into(),
+            ))
+        }
+        None => PreparedOutputSetResourceFacts {
+            encoded_bytes_upper_bound: ByteCount(scope_payload_bytes),
+        },
+    };
     let phase_bytes = add(
         add(
             schedule_bytes,
@@ -256,11 +289,16 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                         collective_count: Count(0),
                     },
                     publication: CheckpointArtifactPolicy {
-                        result_artifact_bytes: ByteCount(scope_transport_bytes),
+                        // The bounded output set accounts for the scope payload itself.
+                        result_artifact_bytes: ByteCount(
+                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
+                        ),
                         checkpoint_bytes: ByteCount(0),
                         artifact_overhead_bytes: ByteCount(0),
                         relay_bytes: ByteCount(0),
-                        result_egress_bytes: ByteCount(scope_transport_bytes),
+                        result_egress_bytes: ByteCount(
+                            crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES,
+                        ),
                         checkpoint_egress_bytes: ByteCount(0),
                     },
                     partitioning: PartitioningPolicy::Monolithic,
@@ -271,9 +309,10 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
                     },
                 },
                 inputs,
+                scope_output,
             },
         ),
-        output_set: None,
+        output_set: Some(output_set),
         worker: WorkerResourcePolicy {
             cpu_millicores: 1_000,
             maximum_wall_milliseconds: prepared

@@ -200,6 +200,31 @@ pub fn prepare_transient_checkpoint_scope(
     .map_err(|error| FeaRunError::Solve(error.to_string()))
 }
 
+/// Projects the separately scheduled checkpoint-scope task before constructing any operator.
+/// Both submitter and worker provide facts for the same canonical input object closure.
+pub fn plan_transient_checkpoint_scope_task(
+    workload: &StructuralTransientWorkload,
+    solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
+    modal_state: Option<&crate::execution::CanonicalSemanticState>,
+    prepared_inputs: crate::planning::resource::PreparedInputResourceFacts,
+    output_set: crate::planning::resource::PreparedOutputSetResourceFacts,
+) -> Result<crate::planning::resource::FeaResourcePlan, FeaRunError> {
+    workload
+        .validate()
+        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    let prepared = prepare_transient_preassembly(&workload.model, workload.into())?;
+    Ok(
+        crate::planning::resource::build_structural_transient_scope_resource_plan(
+            workload,
+            solver_mesh,
+            modal_state,
+            &prepared,
+            Some(prepared_inputs),
+            Some(output_set),
+        )?,
+    )
+}
+
 fn prepare_transient_scope_basis(
     workload: &StructuralTransientWorkload,
     solver_mesh: &runmat_meshing_core::SolverMeshArtifact,
@@ -214,6 +239,8 @@ fn prepare_transient_scope_basis(
         solver_mesh,
         modal_state,
         &prepared,
+        None,
+        None,
     )?;
     let options = workload.solve_options(solver_mesh.clone());
     let basis = assemble_transient_block_basis(prepared, &options)?;
