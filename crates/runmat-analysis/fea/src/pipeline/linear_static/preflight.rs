@@ -15,8 +15,7 @@ use crate::{
 /// then pass the same compiled constraint plan into assembly and result recovery. Portable
 /// solves have already revalidated their bound resource plan at the runner boundary. Direct
 /// GPU lacks a bound accelerator request; connector-scoped observations need a connector-aware
-/// preassembly compiler. Solid-only connector couplings are not in the solid symbolic graph.
-/// These remain outside this admission envelope.
+/// preassembly compiler. These remain outside this admission envelope.
 pub(super) fn prepare_direct_static_constraints(
     model: &AnalysisModel,
     step: &ProcedureStep,
@@ -26,9 +25,7 @@ pub(super) fn prepare_direct_static_constraints(
 ) -> Result<Option<CanonicalStructuralConstraintPlan>, FeaRunError> {
     if prepared_plan_present
         || backend != ComputeBackend::Cpu
-        || (!model.connectors.is_empty()
-            && (has_connector_observation(step)
-                || !super::model_has_explicit_structural_elements(model)))
+        || (!model.connectors.is_empty() && has_connector_observation(step))
         || (options.solver_mesh.is_none() && !super::model_has_explicit_structural_elements(model))
     {
         return Ok(None);

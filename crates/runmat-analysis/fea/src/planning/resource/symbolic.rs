@@ -1,13 +1,13 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
+use runmat_analysis_core::{AnalysisModel, StructuralElementKind, StructuralModel};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     algebra::SparsePattern,
-    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
+    assembly::{dofs::StructuralDofKind, dofs::StructuralDofLayout, mixed_dof_layout},
     constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity},
     physics::structural::topology::{
         node_space::CanonicalStructuralNodeSpace, target::resolve_mixed_structural_target,
@@ -26,7 +26,8 @@ const REFERENCE_POINT_DOF_COUNT: usize = 6;
 ///
 /// The stiffness pattern contains every coupling that element assembly may emit, including
 /// coefficients that happen to evaluate to zero for a particular material or geometry. Solid-only
-/// mass and damping follow their admitted diagonal storage contracts. Mixed systems conservatively
+/// mass follows its admitted diagonal storage contract. Connector-bearing solid damping reserves
+/// the stiffness graph because axial dashpots can couple distinct nodes. Mixed systems conservatively
 /// reserve the complete element-and-connector stiffness bound for all three operators because
 /// explicit consistent mass and Rayleigh damping can populate those couplings. This plan is derived
 /// before numerical assembly and therefore can be used for allocation admission without doing the
@@ -95,8 +96,31 @@ impl StructuralSymbolicOperators {
                 }
             }
         }
+        if !model.connectors.is_empty() {
+            let topology = CanonicalStructuralNodeSpace::derive_solid(mesh)
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            let layout = mixed_dof_layout(&topology, constraints.reference_points.len());
+            if layout.total_dof_count() != total_dofs {
+                return Err(ResourcePlanningError::Invalid(
+                    "solid connector layout and symbolic DOF count differ".into(),
+                ));
+            }
+            add_mesh_connector_pattern(
+                &mut stiffness_rows,
+                model,
+                mesh,
+                &StructuralModel::default(),
+                &topology,
+                &layout,
+            )?;
+        }
         let stiffness_upper_bound = pattern_from_rows(stiffness_rows, total_dofs)?;
         let diagonal = diagonal_pattern(total_dofs)?;
+        let damping = if model.connectors.is_empty() {
+            diagonal.clone()
+        } else {
+            stiffness_upper_bound.clone()
+        };
         let pattern_identities = (
             stiffness_upper_bound
                 .identity()
@@ -104,7 +128,7 @@ impl StructuralSymbolicOperators {
             diagonal
                 .identity()
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-            diagonal
+            damping
                 .identity()
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
         );
@@ -118,7 +142,7 @@ impl StructuralSymbolicOperators {
         Ok(Self {
             stiffness_upper_bound,
             mass: diagonal.clone(),
-            damping: diagonal,
+            damping,
             identity: Digest::sha256(encoded),
         })
     }
@@ -278,34 +302,7 @@ impl StructuralSymbolicOperators {
             }
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
-        for connector in &model.connectors {
-            let mut connector_nodes = Vec::new();
-            let mut resolution_error = None;
-            connector.kind.visit_targets(|target| {
-                match resolve_mixed_structural_target(target, mesh, structural, &topology) {
-                    Ok(ownership) => connector_nodes.extend_from_slice(ownership.canonical_nodes()),
-                    Err(error) => resolution_error = Some(error),
-                }
-            });
-            if let Some(error) = resolution_error {
-                return Err(ResourcePlanningError::Invalid(error.to_string()));
-            }
-            connector_nodes.sort_unstable();
-            connector_nodes.dedup();
-            let mut connector_dofs = Vec::new();
-            for node in connector_nodes {
-                connector_dofs.extend(
-                    [
-                        StructuralDofKind::Ux,
-                        StructuralDofKind::Uy,
-                        StructuralDofKind::Uz,
-                    ]
-                    .into_iter()
-                    .filter_map(|dof| layout.index(node, dof)),
-                );
-            }
-            add_dense_element_pattern(&mut rows, &connector_dofs);
-        }
+        add_mesh_connector_pattern(&mut rows, model, mesh, structural, &topology, &layout)?;
         for (row, columns) in rows.iter_mut().enumerate() {
             columns.insert(row);
         }
@@ -364,6 +361,51 @@ impl StructuralSymbolicOperators {
     pub fn patterns(&self) -> [&SparsePattern; 3] {
         [&self.stiffness_upper_bound, &self.mass, &self.damping]
     }
+}
+
+fn add_mesh_connector_pattern(
+    rows: &mut [BTreeSet<usize>],
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    structural: &StructuralModel,
+    topology: &CanonicalStructuralNodeSpace,
+    layout: &StructuralDofLayout,
+) -> Result<(), ResourcePlanningError> {
+    for connector in &model.connectors {
+        let mut connector_nodes = Vec::new();
+        let mut resolution_error = None;
+        connector.kind.visit_targets(|target| {
+            match resolve_mixed_structural_target(target, mesh, structural, topology) {
+                Ok(ownership) => connector_nodes.extend_from_slice(ownership.canonical_nodes()),
+                Err(error) => resolution_error = Some(error),
+            }
+        });
+        if let Some(error) = resolution_error {
+            return Err(ResourcePlanningError::Invalid(error.to_string()));
+        }
+        connector_nodes.sort_unstable();
+        connector_nodes.dedup();
+        if connector_nodes.is_empty() {
+            return Err(ResourcePlanningError::Invalid(format!(
+                "connector `{}` resolves to no structural nodes",
+                connector.connector_id
+            )));
+        }
+        let mut connector_dofs = Vec::new();
+        for node in connector_nodes {
+            connector_dofs.extend(
+                [
+                    StructuralDofKind::Ux,
+                    StructuralDofKind::Uy,
+                    StructuralDofKind::Uz,
+                ]
+                .into_iter()
+                .filter_map(|dof| layout.index(node, dof)),
+            );
+        }
+        add_dense_element_pattern(rows, &connector_dofs);
+    }
+    Ok(())
 }
 
 fn add_dense_element_pattern(rows: &mut [BTreeSet<usize>], element_dofs: &[usize]) {

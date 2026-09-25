@@ -374,6 +374,58 @@ fn direct_connector_static_without_connector_observation_preflights_memory() {
     );
 }
 
+#[test]
+fn direct_solid_connector_static_preflights_memory() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let target_node = mesh.topology.nodes[1].node_id;
+    model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "solid_tip_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point(format!("node:{target_node}")),
+                stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
+            },
+        });
+    model.sequence.steps[0].observations.clear();
+    let admitted_limit = model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes;
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let error = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
+        .expect_err("solid connector must preflight before assembly");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                maximum: 1,
+                ..
+            }
+        )
+    ));
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = admitted_limit;
+    let result = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
+        .expect("admitted solid connector must solve");
+    assert_eq!(
+        result
+            .structural_connector_result
+            .as_ref()
+            .expect("connector response")
+            .responses
+            .len(),
+        1,
+    );
+}
+
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,

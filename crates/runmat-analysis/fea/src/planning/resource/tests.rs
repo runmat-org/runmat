@@ -714,6 +714,40 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
 }
 
 #[test]
+fn solid_connector_dashpot_reserves_off_diagonal_damping_pattern() {
+    let (mut model, mesh, projection, constraints) = structural_fixture();
+    let baseline =
+        StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
+    let first = mesh.topology.nodes[0].node_id;
+    let second = mesh.topology.nodes[1].node_id;
+    model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "solid_axial_dashpot".into(),
+            kind: runmat_analysis_core::ConnectorKind::AxialDashpot {
+                primary: runmat_analysis_core::RegionTarget::point(format!("node:{first}")),
+                secondary: runmat_analysis_core::RegionTarget::point(format!("node:{second}")),
+                damping: runmat_analysis_core::Damping::new(100.0),
+            },
+        });
+    let with_connector =
+        StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
+    assert_eq!(
+        with_connector.stiffness_upper_bound().column_indices(),
+        baseline.stiffness_upper_bound().column_indices(),
+    );
+    assert!(
+        with_connector.damping_upper_bound().column_indices().len()
+            > baseline.damping_upper_bound().column_indices().len()
+    );
+    assert_eq!(
+        with_connector.damping_upper_bound().column_indices(),
+        with_connector.stiffness_upper_bound().column_indices(),
+    );
+    assert_ne!(with_connector.identity(), baseline.identity());
+}
+
+#[test]
 fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
     let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
     let constraints = CanonicalStructuralConstraintPlan::compile_for_model(&model, None).unwrap();
