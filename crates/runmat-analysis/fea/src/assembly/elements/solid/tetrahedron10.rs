@@ -5,6 +5,7 @@ use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 use crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE;
 
 use super::{
+    jacobian_certificate::{certify_positive_jacobian, CertificateFailure},
     material::{elasticity_matrix, SolidMaterialError},
     SolidMaterial,
 };
@@ -25,98 +26,24 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 0.0, 1.0],
 ];
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
+const MASS_A: f64 = 0.785_714_285_714_285_7;
+const MASS_B: f64 = 0.071_428_571_428_571_42;
+const MASS_C: f64 = 0.399_403_576_166_799_2;
+const MASS_D: f64 = 0.100_596_423_833_200_8;
+const MASS_VERTEX_WEIGHT: f64 = 0.007_622_222_222_222_222;
+const MASS_EDGE_WEIGHT: f64 = 0.024_888_888_888_888_89;
 const MASS_QUADRATURE: [([f64; 4], f64); 11] = [
-    ([0.25, 0.25, 0.25, 0.25], -0.013_155_555_555_555_556),
-    (
-        [
-            0.785_714_285_714_285_7,
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-        ],
-        0.007_622_222_222_222_222,
-    ),
-    (
-        [
-            0.071_428_571_428_571_42,
-            0.785_714_285_714_285_7,
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-        ],
-        0.007_622_222_222_222_222,
-    ),
-    (
-        [
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-            0.785_714_285_714_285_7,
-            0.071_428_571_428_571_42,
-        ],
-        0.007_622_222_222_222_222,
-    ),
-    (
-        [
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-            0.071_428_571_428_571_42,
-            0.785_714_285_714_285_7,
-        ],
-        0.007_622_222_222_222_222,
-    ),
-    (
-        [
-            0.399_403_576_166_799_2,
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-            0.100_596_423_833_200_8,
-        ],
-        0.024_888_888_888_888_89,
-    ),
-    (
-        [
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-        ],
-        0.024_888_888_888_888_89,
-    ),
-    (
-        [
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-        ],
-        0.024_888_888_888_888_89,
-    ),
-    (
-        [
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-        ],
-        0.024_888_888_888_888_89,
-    ),
-    (
-        [
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-        ],
-        0.024_888_888_888_888_89,
-    ),
-    (
-        [
-            0.100_596_423_833_200_8,
-            0.100_596_423_833_200_8,
-            0.399_403_576_166_799_2,
-            0.399_403_576_166_799_2,
-        ],
-        0.024_888_888_888_89,
-    ),
+    ([0.25; 4], -0.013_155_555_555_555_556),
+    ([MASS_A, MASS_B, MASS_B, MASS_B], MASS_VERTEX_WEIGHT),
+    ([MASS_B, MASS_A, MASS_B, MASS_B], MASS_VERTEX_WEIGHT),
+    ([MASS_B, MASS_B, MASS_A, MASS_B], MASS_VERTEX_WEIGHT),
+    ([MASS_B, MASS_B, MASS_B, MASS_A], MASS_VERTEX_WEIGHT),
+    ([MASS_C, MASS_C, MASS_D, MASS_D], MASS_EDGE_WEIGHT),
+    ([MASS_C, MASS_D, MASS_C, MASS_D], MASS_EDGE_WEIGHT),
+    ([MASS_C, MASS_D, MASS_D, MASS_C], MASS_EDGE_WEIGHT),
+    ([MASS_D, MASS_C, MASS_C, MASS_D], MASS_EDGE_WEIGHT),
+    ([MASS_D, MASS_C, MASS_D, MASS_C], MASS_EDGE_WEIGHT),
+    ([MASS_D, MASS_D, MASS_C, MASS_C], 0.024_888_888_888_89),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -264,8 +191,10 @@ pub enum Tetrahedron10ElementError {
     NonFiniteCoordinate,
     #[error("Tetrahedron10 nodal displacement must be finite")]
     NonFiniteDisplacement,
-    #[error("Tetrahedron10 quadrature Jacobian must be positive and finite")]
+    #[error("Tetrahedron10 Jacobian must be positive and finite throughout the element")]
     DegenerateOrInverted,
+    #[error("Tetrahedron10 Jacobian could not be certified positive throughout the element")]
+    UncertifiedJacobian,
     #[error("Tetrahedron10 material is invalid: {0}")]
     InvalidMaterial(#[from] SolidMaterialError),
 }
@@ -541,11 +470,18 @@ fn jacobian(
 fn validate_nodes(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> Result<(), Tetrahedron10ElementError> {
-    if nodes_m.iter().flatten().all(|value| value.is_finite()) {
-        Ok(())
-    } else {
-        Err(Tetrahedron10ElementError::NonFiniteCoordinate)
+    if !nodes_m.iter().flatten().all(|value| value.is_finite()) {
+        return Err(Tetrahedron10ElementError::NonFiniteCoordinate);
     }
+    let vertex_jacobians = std::array::from_fn(|vertex| {
+        let mut barycentric = [0.0; 4];
+        barycentric[vertex] = 1.0;
+        jacobian(nodes_m, reference_shape_gradients(barycentric))
+    });
+    certify_positive_jacobian(vertex_jacobians).map_err(|failure| match failure {
+        CertificateFailure::InvertedOrDegenerate => Tetrahedron10ElementError::DegenerateOrInverted,
+        CertificateFailure::Inconclusive => Tetrahedron10ElementError::UncertifiedJacobian,
+    })
 }
 
 fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
@@ -706,6 +642,37 @@ mod tests {
         assert_eq!(
             global_stiffness_matrix(steel(), inverted).unwrap_err(),
             Tetrahedron10ElementError::DegenerateOrInverted
+        );
+    }
+
+    #[test]
+    fn tetrahedron10_rejects_a_corner_fold_missed_by_all_quadrature_points() {
+        let mut folded = straight_unit_tetrahedron();
+        // The 01 midside node moves from x=0.5 to x=0.8. Along that edge,
+        // det(J)=1+1.2(1-2*x), so it is negative at corner 1 even though every
+        // current stiffness and mass quadrature point still has a positive determinant.
+        folded.nodes_m[4][0] += 0.3;
+        for barycentric in QUADRATURE {
+            assert!(jacobian_determinant(folded.nodes_m, barycentric).is_ok());
+        }
+        for (barycentric, _) in MASS_QUADRATURE {
+            assert!(jacobian_determinant(folded.nodes_m, barycentric).is_ok());
+        }
+        assert_eq!(
+            validate_nodes(folded.nodes_m),
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+        );
+        assert_eq!(
+            global_stiffness_matrix(steel(), folded),
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+        );
+        assert_eq!(
+            consistent_mass_matrix(steel(), folded),
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
+        );
+        assert_eq!(
+            folded.volume_m3(),
+            Err(Tetrahedron10ElementError::DegenerateOrInverted)
         );
     }
 

@@ -1,3 +1,4 @@
+mod jacobian_certificate;
 pub mod material;
 pub mod quality;
 pub mod tetrahedron10;
