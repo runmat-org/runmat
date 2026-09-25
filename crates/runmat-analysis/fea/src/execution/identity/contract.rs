@@ -114,6 +114,7 @@ pub enum AnalysisWorkKind {
     RecoverField,
     PublishState,
     CheckpointObservationHistory,
+    PrepareStructuralTransientCheckpointScope,
     SolveStructuralTransientBlock,
     AssembleStructuralTransientResult,
     SolveStructuralFrequencyEntry,

@@ -60,6 +60,7 @@ mod transient_block_task;
 mod transient_object_access;
 mod transient_result_access;
 mod transient_result_task;
+mod transient_scope_task;
 mod transport;
 mod workload;
 
@@ -348,6 +349,11 @@ pub use transient_result_task::{
     build_prepared_structural_transient_result_resource_plan, import_structural_transient_result,
     prepare_structural_transient_result_task, ImportedStructuralTransientResult,
     PreparedStructuralTransientResultTask, StructuralTransientResultPreparation,
+};
+pub use transient_scope_task::{
+    import_structural_transient_scope, prepare_structural_transient_scope_task,
+    transient_scope_task_identity, ImportedStructuralTransientScope,
+    PreparedStructuralTransientScopeTask, StructuralTransientScopeTaskPreparation,
 };
 pub use transport::{prepare_analysis_program, PreparedAnalysisProgram};
 pub use workload::{

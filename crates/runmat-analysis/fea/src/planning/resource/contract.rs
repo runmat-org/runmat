@@ -21,6 +21,7 @@ use crate::execution::{
 };
 mod assembly_demand;
 mod modal_demand;
+mod transient_scope_demand;
 pub use assembly_demand::{
     StructuralFrequencyResultAssemblyResourceDemand,
     StructuralModalResponseSpectrumAssemblyResourceDemand,
@@ -28,6 +29,7 @@ pub use assembly_demand::{
     StructuralTransientResultAssemblyResourceDemand,
 };
 pub use modal_demand::StructuralModalResourceDemand;
+pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
 
 pub use super::solve_policy::{
     NumericalScalar, PreconditionerStorage, SolveResourcePolicy, SolverAdmissionResourcePolicy,
@@ -246,15 +248,6 @@ pub struct StructuralOperatorResourceDemand {
     pub publication: CheckpointArtifactPolicy,
     pub partitioning: PartitioningPolicy,
     pub accuracy_demand: AccuracyResourceDemand,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StructuralTransientScopeResourceDemand {
-    pub source_workload_digest: Digest,
-    pub operator: StructuralOperatorResourceDemand,
-    pub inputs: PreparedInputResourceFacts,
-    pub scope_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -103,6 +103,7 @@ mod random_response_tests;
 mod response_spectrum;
 #[cfg(test)]
 mod response_spectrum_tests;
+mod transient_scope;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NativeAnalysisKernel;
@@ -132,6 +133,9 @@ impl AnalysisKernel for NativeAnalysisKernel {
             }
             AnalysisWorkKind::SolveStructuralTransientBlock => {
                 execute_structural_transient_block(invocation)
+            }
+            AnalysisWorkKind::PrepareStructuralTransientCheckpointScope => {
+                transient_scope::execute_scope_preparation(invocation)
             }
             AnalysisWorkKind::AssembleStructuralTransientResult => {
                 execute_structural_transient_result_assembly(invocation)

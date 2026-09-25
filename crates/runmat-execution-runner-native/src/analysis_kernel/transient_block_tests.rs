@@ -6,16 +6,17 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_execution::{
     bind_upstream_state_transition, execute_serial_analysis, import_structural_transient_block,
-    import_structural_transient_result, prepare_analysis_objects,
-    prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
-    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
+    import_structural_transient_result, import_structural_transient_scope,
+    prepare_analysis_objects, prepare_structural_transient_block_request_objects,
+    prepare_structural_transient_block_task, prepare_structural_transient_checkpoint_objects,
+    prepare_structural_transient_result_task, prepare_structural_transient_scope_task,
     prepare_structural_transient_sequence, prepare_structural_transient_workload_objects,
     AnalysisHostResponse, AnalysisKernel, AnalysisKernelInvocation,
     PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
     StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
     StructuralTransientBlockPreparation, StructuralTransientResultPreparation,
-    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
-    StructuralTransientSequencePreparationInput,
+    StructuralTransientScopeTaskPreparation, StructuralTransientSequenceCoordinator,
+    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 use runmat_analysis_fea::{
     execution::{
@@ -335,6 +336,78 @@ fn execute_durable_result(
     AnalysisHostResponse::completed(&prepared.host, &completed)
         .unwrap()
         .program_response()
+}
+
+#[test]
+fn native_scope_task_rederives_its_plan_and_returns_the_exact_restart_scope() {
+    let (model, mesh) = transient_fixture();
+    let workload = StructuralTransientWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        solver: StructuralTransientSolverPlan::Direct,
+        time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
+        residual_target: 1.0e-10,
+    };
+    assert_scope_task_round_trip(workload, mesh, None);
+}
+
+#[test]
+fn native_modal_scope_task_binds_the_published_basis_state() {
+    let (workload, mesh, modal_state) = modal_transient_fixture();
+    assert_scope_task_round_trip(workload, mesh, Some(modal_state));
+}
+
+fn assert_scope_task_round_trip(
+    workload: StructuralTransientWorkload,
+    mesh: runmat_meshing_core::SolverMeshArtifact,
+    modal_state: Option<CanonicalSemanticState>,
+) {
+    let limits = ObjectInventoryLimits::default();
+    let prepared =
+        prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            workload: workload.clone(),
+            mesh: mesh.clone(),
+            modal_state: modal_state.clone(),
+            artifact_access: access(),
+            program_revision: revision(),
+            chunk_bytes: 256,
+            inventory_limits: limits,
+        })
+        .unwrap();
+    assert_eq!(
+        prepared.host.workload.kind,
+        AnalysisWorkKind::PrepareStructuralTransientCheckpointScope
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+        directory.path(),
+        limits.max_object_bytes,
+    )
+    .unwrap();
+    prepared.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &prepared.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    let response = AnalysisHostResponse::completed(&prepared.host, &completed)
+        .unwrap()
+        .program_response();
+    let imported = import_structural_transient_scope(&store, response, &prepared, limits).unwrap();
+    let direct = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
+        &workload,
+        &mesh,
+        modal_state.as_ref(),
+    )
+    .unwrap();
+    assert_eq!(imported.scope, direct);
+    assert!(prepared.resource_plan.request.max_artifact_bytes > 0);
 }
 
 #[test]
