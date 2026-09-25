@@ -409,6 +409,101 @@ mod tests {
     }
 
     #[test]
+    fn connected_tet4_affine_patch_recovers_analytic_strain_stress_and_energy() {
+        // Four conforming cells share the centroid of the unit tetrahedron. The imposed affine
+        // displacement has constant epsilon = diag(0.1, 0.2, 0.3) in every cell, independent of
+        // its shape functions or partitioning. E = 100 Pa and nu = 0.25 give lambda = mu = 40 Pa.
+        let coordinates = [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.25, 0.25, 0.25],
+        ];
+        let connectivity = [[4, 1, 2, 3], [0, 4, 2, 3], [0, 1, 4, 3], [0, 1, 2, 4]];
+        let elements = connectivity.map(|node_indices| SolidRecoveryElementSummary {
+            element_id: format!("tet-{node_indices:?}"),
+            region_id: "body".into(),
+            material: SolidMaterial {
+                youngs_modulus_pa: 100.0,
+                poisson_ratio: 0.25,
+                density_kg_per_m3: 1.0,
+            },
+            geometry: SolidRecoveryGeometry::Tetrahedron4 {
+                node_indices,
+                coordinates_m: node_indices.map(|node| coordinates[node]),
+            },
+        });
+        let displacement = coordinates
+            .into_iter()
+            .flat_map(|point| [0.1 * point[0], 0.2 * point[1], 0.3 * point[2]])
+            .collect::<Vec<_>>();
+        let recovered = recover_solid_fields_with_plan(
+            &elements,
+            &displacement,
+            LocalExecutionPlan::serial(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            recover_solid_fields_with_plan(&elements, &displacement, two_threads(), true).unwrap(),
+            recovered
+        );
+        let expected_strain = [0.1, 0.2, 0.3, 0.0, 0.0, 0.0];
+        let expected_stress = [32.0, 40.0, 48.0, 0.0, 0.0, 0.0];
+        for strain in recovered.strain.chunks_exact(6) {
+            for (actual, expected) in strain.iter().zip(expected_strain) {
+                assert!((actual - expected).abs() <= 1.0e-12);
+            }
+        }
+        for stress in recovered.stress.chunks_exact(6) {
+            for (actual, expected) in stress.iter().zip(expected_stress) {
+                assert!((actual - expected).abs() <= 1.0e-11);
+            }
+        }
+        for energy in &recovered.strain_energy_density {
+            assert!((energy - 12.8).abs() <= 1.0e-11);
+        }
+        for strain in recovered.integration_point_strain.chunks_exact(6) {
+            for (actual, expected) in strain.iter().zip(expected_strain) {
+                assert!((actual - expected).abs() <= 1.0e-12);
+            }
+        }
+        for stress in recovered.integration_point_stress.chunks_exact(6) {
+            for (actual, expected) in stress.iter().zip(expected_stress) {
+                assert!((actual - expected).abs() <= 1.0e-11);
+            }
+        }
+
+        let mut heterogeneous = elements.clone();
+        heterogeneous[1].material.youngs_modulus_pa = 200.0;
+        heterogeneous[3].material.youngs_modulus_pa = 200.0;
+        let mixed = recover_solid_fields_with_plan(
+            &heterogeneous,
+            &displacement,
+            LocalExecutionPlan::serial(),
+            true,
+        )
+        .unwrap();
+        assert_eq!(mixed.strain, recovered.strain);
+        for element in 0..4 {
+            let scale = if element % 2 == 1 { 2.0 } else { 1.0 };
+            for (actual, reference) in mixed.stress[element * 6..][..6]
+                .iter()
+                .zip(&recovered.stress[element * 6..][..6])
+            {
+                assert!((actual - scale * reference).abs() <= 1.0e-11);
+            }
+            assert!(
+                (mixed.strain_energy_density[element]
+                    - scale * recovered.strain_energy_density[element])
+                    .abs()
+                    <= 1.0e-11
+            );
+        }
+    }
+
+    #[test]
     fn tetrahedron10_recovery_uses_assigned_material_at_every_integration_point() {
         let corners = [
             [0.0, 0.0, 0.0],
