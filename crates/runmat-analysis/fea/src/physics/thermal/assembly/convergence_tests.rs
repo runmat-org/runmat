@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    AnalysisConstraint, PrescribedValue, RegionTarget, Temperature, ThermalConstraint,
-    ThermalConstraintKind,
+    AnalysisConstraint, PrescribedValue, PropertyRegionTarget, RegionTarget, Temperature,
+    ThermalConstraint, ThermalConstraintKind,
 };
 use runmat_meshing_core::{
     solver_boundary_face_identity, solver_volume_element_identity, BoundaryFaceRole,
@@ -23,6 +23,139 @@ use crate::{
 };
 
 const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
+
+#[test]
+fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant() {
+    // Independent steady 1-D reference: two half-meter layers in series, k=1 and k=4 W/(m K).
+    // T(0)=300 K, T(1)=400 K => interface T=380 K and heat flux magnitude=160 W/m².
+    let mut mesh = slab_mesh(2);
+    let left_region = entity(PersistentEntityKind::Region, "left_material");
+    let right_region = entity(PersistentEntityKind::Region, "right_material");
+    let mut left_elements = Vec::new();
+    let mut right_elements = Vec::new();
+    for element in &mut mesh.topology.volume_elements {
+        let left = element
+            .node_ids
+            .iter()
+            .all(|node_id| mesh.topology.nodes[*node_id as usize - 1].coordinates_m[0] <= 0.5);
+        if left {
+            element.region_id = left_region.clone();
+            left_elements.push(element.element_id);
+        } else {
+            element.region_id = right_region.clone();
+            right_elements.push(element.element_id);
+        }
+    }
+    assert_eq!(left_elements.len(), right_elements.len());
+    mesh.topology.regions = vec![
+        MeshRegion {
+            region_id: left_region,
+            element_ids: left_elements,
+        },
+        MeshRegion {
+            region_id: right_region,
+            element_ids: right_elements,
+        },
+    ];
+    mesh.seal_canonical_digest().expect("two-region slab mesh");
+
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.constraints.clear();
+    model.boundaries.clear();
+    model.excitations.clear();
+    model.materials[0]
+        .thermal
+        .as_mut()
+        .unwrap()
+        .conductivity_w_per_mk = 1.0;
+    model.materials[0].mass_density_kg_per_m3 = Some(1.0);
+    let mut right_material = model.materials[0].clone();
+    right_material.material_id = "right_conductor".into();
+    right_material
+        .thermal
+        .as_mut()
+        .unwrap()
+        .conductivity_w_per_mk = 4.0;
+    model.materials.push(right_material);
+    model.material_assignments[0].target = PropertyRegionTarget::solid("left_material");
+    let mut right_assignment = model.material_assignments[0].clone();
+    right_assignment.target = PropertyRegionTarget::solid("right_material");
+    right_assignment.assigned_material_id = "right_conductor".into();
+    right_assignment.expected_material_id = "right_conductor".into();
+    model.material_assignments.push(right_assignment);
+    for (id, region, temperature_k) in [
+        ("left_temperature", "slab_left", 300.0),
+        ("right_temperature", "slab_right", 400.0),
+    ] {
+        model
+            .constraints
+            .push(AnalysisConstraint::Thermal(ThermalConstraint {
+                constraint_id: id.into(),
+                kind: ThermalConstraintKind::Prescribed {
+                    target: RegionTarget::boundary(region),
+                    value: PrescribedValue::Constant(Temperature::new(temperature_k)),
+                },
+            }));
+    }
+
+    let solve = |model: &runmat_analysis_core::AnalysisModel| {
+        let assembly = assemble(
+            model,
+            &mesh,
+            &RealizedExcitations::default(),
+            ExcitationSamplePoint::Static,
+        )
+        .expect("assemble two-material thermal system");
+        let operator = assembly.steady_operator().expect("steady operator");
+        let result = solve_operator_system(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+        );
+        assert!(result.converged, "two-material solve did not converge");
+        (assembly, result.solution)
+    };
+    let (assembly, solution) = solve(&model);
+    for (node, temperature) in assembly.projection.nodes.iter().zip(&solution) {
+        let x = node.coordinates_m[0];
+        let expected = if x <= 0.5 {
+            300.0 + 160.0 * x
+        } else {
+            380.0 + 40.0 * (x - 0.5)
+        };
+        assert!(
+            (temperature - expected).abs() < 1.0e-7,
+            "node {} at x={x}: {temperature} K versus {expected} K",
+            node.node_id
+        );
+    }
+    assert!(assembly.element_conductivity_w_per_mk.contains(&1.0));
+    assert!(assembly.element_conductivity_w_per_mk.contains(&4.0));
+    for flux in assembly
+        .recover_element_heat_flux(&solution)
+        .expect("recover steady heat flux")
+    {
+        assert!(
+            (flux[0] + 160.0).abs() < 1.0e-6,
+            "incorrect series heat flux: {flux:?}"
+        );
+        assert!(flux[1].abs() < 1.0e-6 && flux[2].abs() < 1.0e-6);
+    }
+
+    model.materials.reverse();
+    model.material_assignments.reverse();
+    let (reordered, reordered_solution) = solve(&model);
+    assert_eq!(assembly.property_identity, reordered.property_identity);
+    assert_eq!(
+        assembly.element_conductivity_w_per_mk,
+        reordered.element_conductivity_w_per_mk
+    );
+    for (original, after_reorder) in solution.iter().zip(reordered_solution) {
+        assert!((original - after_reorder).abs() < 1.0e-10);
+    }
+}
 
 #[test]
 fn transient_slab_has_second_order_spatial_convergence() {
