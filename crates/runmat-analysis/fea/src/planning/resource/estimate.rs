@@ -656,6 +656,13 @@ fn validate_operator_demand(
             restart,
             maximum_iterations,
             workspace_bytes_upper_bound,
+        }
+        | SolveResourcePolicy::SaddlePointGmres {
+            block_dimension,
+            restart,
+            maximum_iterations,
+            workspace_bytes_upper_bound,
+            ..
         } if maximum_iterations.0 == 0
             || (block_dimension.0 == 0 && restart.0 != 0)
             || (block_dimension.0 != 0 && restart.0 == 0)
@@ -665,6 +672,37 @@ fn validate_operator_demand(
         {
             return Err(ResourcePlanningError::Invalid(
                 "restarted GMRES dimensions, iteration bounds, and workspace must be valid".into(),
+            ));
+        }
+        SolveResourcePolicy::SaddlePointGmres {
+            block_dimension,
+            restart,
+            maximum_iterations,
+            workspace_bytes_upper_bound,
+            ..
+        } if block_dimension.0
+            != add(
+                demand.sparse.rows.0,
+                demand.constraints.rows.0,
+                "saddle dimension",
+            )?
+            || restart.0 != block_dimension.0.min(32)
+            || maximum_iterations.0
+                != block_dimension
+                    .0
+                    .checked_mul(8)
+                    .ok_or(ResourcePlanningError::Overflow(
+                        "saddle GMRES iteration bound",
+                    ))?
+                    .max(256)
+            || workspace_bytes_upper_bound.0
+                < super::preflight::saddle_gmres_workspace_bytes(
+                    demand.sparse.rows.0,
+                    demand.constraints.rows.0,
+                )? =>
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "saddle GMRES dimensions or workspace disagree with structural facts".into(),
             ));
         }
         SolveResourcePolicy::ModalDenseHarmonic {
@@ -845,37 +883,16 @@ fn solve_storage(
                     resident_bytes_upper_bound.0
                 }
             };
-            let factor_payload_lower_bound = sum(
-                &[
-                    bytes(
-                        admission.factor_nonzero_upper_bound.0,
-                        demand.solve.scalar_bytes(),
-                        "solver-admission factor values",
-                    )?,
-                    bytes(
-                        admission.factor_nonzero_upper_bound.0,
-                        8,
-                        "solver-admission factor indices",
-                    )?,
-                    bytes(
-                        add(admission.dimension.0, 1, "solver-admission rows")?,
-                        8,
-                        "solver-admission row offsets",
-                    )?,
-                ],
-                "solver-admission factor payload",
+            validate_solver_admission(
+                admission,
+                demand.sparse.rows.0,
+                demand.solve.scalar_bytes(),
             )?;
-            if admission.dimension.0 == 0
-                || admission.dimension.0 > demand.sparse.rows.0
-                || admission.factor_nonzero_upper_bound.0 < admission.dimension.0
-                || admission.resident_bytes_upper_bound.0 < factor_payload_lower_bound
-            {
-                return Err(ResourcePlanningError::Invalid(
-                    "solver-admission fill, work, and resident bounds must cover the symbolic factor"
-                        .into(),
-                ));
-            }
             Ok((ByteCount(value), admission.resident_bytes_upper_bound))
+        }
+        SolveResourcePolicy::SaddlePointGmres { ref admission, .. } => {
+            validate_solver_admission(admission, demand.sparse.rows.0, 8)?;
+            Ok((ByteCount(0), admission.resident_bytes_upper_bound))
         }
         SolveResourcePolicy::DirectFactorization {
             factor_nonzero_upper_bound,
@@ -914,6 +931,44 @@ fn solve_storage(
             Ok((ByteCount(0), ByteCount(0)))
         }
     }
+}
+
+fn validate_solver_admission(
+    admission: &super::contract::SolverAdmissionResourcePolicy,
+    physical_dimension: u64,
+    scalar_bytes: u64,
+) -> Result<(), ResourcePlanningError> {
+    let factor_payload_lower_bound = sum(
+        &[
+            bytes(
+                admission.factor_nonzero_upper_bound.0,
+                scalar_bytes,
+                "solver-admission factor values",
+            )?,
+            bytes(
+                admission.factor_nonzero_upper_bound.0,
+                8,
+                "solver-admission factor indices",
+            )?,
+            bytes(
+                add(admission.dimension.0, 1, "solver-admission rows")?,
+                8,
+                "solver-admission row offsets",
+            )?,
+        ],
+        "solver-admission factor payload",
+    )?;
+    if admission.dimension.0 == 0
+        || admission.dimension.0 > physical_dimension
+        || admission.factor_nonzero_upper_bound.0 < admission.dimension.0
+        || admission.resident_bytes_upper_bound.0 < factor_payload_lower_bound
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "solver-admission fill, work, and resident bounds must cover the symbolic factor"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 fn bytes(count: u64, width: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {

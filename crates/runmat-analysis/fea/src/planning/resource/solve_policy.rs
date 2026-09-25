@@ -69,6 +69,14 @@ pub enum SolveResourcePolicy {
         maximum_iterations: Count,
         workspace_bytes_upper_bound: ByteCount,
     },
+    /// Structural saddle-point GMRES, including the temporary reduced SPD proof.
+    SaddlePointGmres {
+        block_dimension: Count,
+        restart: Count,
+        maximum_iterations: Count,
+        workspace_bytes_upper_bound: ByteCount,
+        admission: SolverAdmissionResourcePolicy,
+    },
     ModalDenseHarmonic {
         full_dimension: Count,
         mode_count: Count,
@@ -111,6 +119,7 @@ impl SolveResourcePolicy {
             | Self::DirectFactorization { vector_count, .. } => Some(vector_count.0),
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
+            | Self::SaddlePointGmres { .. }
             | Self::ModalDenseHarmonic { .. }
             | Self::TransientBlock { .. }
             | Self::SymmetricSubspaceIteration { .. } => None,
@@ -122,6 +131,7 @@ impl SolveResourcePolicy {
             Self::Iterative { scalar, .. } | Self::DirectFactorization { scalar, .. } => scalar,
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
+            | Self::SaddlePointGmres { .. }
             | Self::ModalDenseHarmonic { .. }
             | Self::TransientBlock { .. }
             | Self::SymmetricSubspaceIteration { .. } => return 8,
@@ -138,6 +148,10 @@ impl SolveResourcePolicy {
                 workspace_bytes_upper_bound,
             }
             | Self::RestartedGmres {
+                workspace_bytes_upper_bound,
+                ..
+            }
+            | Self::SaddlePointGmres {
                 workspace_bytes_upper_bound,
                 ..
             }

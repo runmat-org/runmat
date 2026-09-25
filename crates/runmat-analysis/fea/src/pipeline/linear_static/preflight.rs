@@ -98,11 +98,12 @@ pub(super) fn prepare_static_preassembly(
         accelerator_requests: &[],
         local_execution: options.local_execution,
     })?;
-    // All iterative branches prove a prepared SPD operator (reduced where needed) before PCG
-    // or multiplier GMRES. The latter's Krylov workspace still needs measured reconciliation.
+    // Both PCG and saddle-point GMRES prove a prepared SPD operator (reduced where needed).
+    // The multiplier's Krylov workspace still needs measured reconciliation.
     let solver_admission = match &resource_plan.input.demand {
         FeaResourceDemand::StructuralLinearPipeline(demand) => match &demand.solve {
-            SolveResourcePolicy::Iterative { admission, .. } => Some(admission.clone()),
+            SolveResourcePolicy::Iterative { admission, .. }
+            | SolveResourcePolicy::SaddlePointGmres { admission, .. } => Some(admission.clone()),
             _ => None,
         },
         _ => None,

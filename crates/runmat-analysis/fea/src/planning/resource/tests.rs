@@ -138,6 +138,54 @@ fn affine_transpose_index_bytes_are_included_in_solve_memory_and_identity() {
     assert!(indexed.request.memory_bytes >= base.request.memory_bytes + 1_000_000);
 }
 
+#[test]
+fn saddle_gmres_charges_workspace_and_admission_without_preconditioner() {
+    let mut planned_input = input(PartitioningPolicy::Monolithic);
+    let admission = match &operator_mut(&mut planned_input).solve {
+        SolveResourcePolicy::Iterative { admission, .. } => admission.clone(),
+        _ => unreachable!(),
+    };
+    operator_mut(&mut planned_input).solve = SolveResourcePolicy::SaddlePointGmres {
+        block_dimension: Count(5),
+        restart: Count(5),
+        maximum_iterations: Count(256),
+        workspace_bytes_upper_bound: ByteCount(4_096),
+        admission,
+    };
+    let plan = build_resource_plan(planned_input.clone()).unwrap();
+    assert_eq!(plan.input, planned_input);
+    assert_eq!(plan.breakdown.workspace_bytes, ByteCount(4_096));
+    assert_eq!(plan.breakdown.preconditioner_bytes, ByteCount(0));
+    assert_eq!(plan.breakdown.factorization_bytes, ByteCount(200));
+
+    let mut wrong_dimension = planned_input.clone();
+    if let SolveResourcePolicy::SaddlePointGmres {
+        block_dimension, ..
+    } = &mut operator_mut(&mut wrong_dimension).solve
+    {
+        *block_dimension = Count(4);
+    }
+    assert!(build_resource_plan(wrong_dimension).is_err());
+
+    let mut underpriced_workspace = planned_input.clone();
+    if let SolveResourcePolicy::SaddlePointGmres {
+        workspace_bytes_upper_bound,
+        ..
+    } = &mut operator_mut(&mut underpriced_workspace).solve
+    {
+        *workspace_bytes_upper_bound = ByteCount(8 * 5);
+    }
+    assert!(build_resource_plan(underpriced_workspace).is_err());
+
+    let mut missing_proof = planned_input;
+    if let SolveResourcePolicy::SaddlePointGmres { admission, .. } =
+        &mut operator_mut(&mut missing_proof).solve
+    {
+        admission.resident_bytes_upper_bound = ByteCount(0);
+    }
+    assert!(build_resource_plan(missing_proof).is_err());
+}
+
 fn inventory(memory_bytes: u64, scratch_bytes: u64) -> ResourceInventory {
     ResourceInventory {
         cpu_millicores: 2_000,

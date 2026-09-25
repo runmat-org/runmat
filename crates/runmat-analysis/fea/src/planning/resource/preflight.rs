@@ -335,6 +335,26 @@ fn solve_policy(
     admission: SolverAdmissionResourcePolicy,
     transpose_index_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
+    if enforcement == ConstraintEnforcement::LagrangeMultiplier {
+        let saddle = dofs
+            .checked_add(constraint_rows)
+            .ok_or(ResourcePlanningError::Overflow("saddle dimension"))?;
+        let restart = saddle.min(32);
+        let maximum_iterations = saddle
+            .checked_mul(8)
+            .ok_or(ResourcePlanningError::Overflow(
+                "saddle GMRES iteration bound",
+            ))?
+            .max(256);
+        let workspace_bytes = saddle_gmres_workspace_bytes(dofs, constraint_rows)?;
+        return Ok(SolveResourcePolicy::SaddlePointGmres {
+            block_dimension: Count(saddle),
+            restart: Count(restart),
+            maximum_iterations: Count(maximum_iterations),
+            workspace_bytes_upper_bound: ByteCount(workspace_bytes),
+            admission,
+        });
+    }
     let storage = match preconditioner {
         SpdPreconditionerKind::Jacobi => PreconditionerStorage::Diagonal,
         SpdPreconditionerKind::Ilu0 => {
@@ -366,6 +386,26 @@ fn solve_policy(
         admission,
         transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
     })
+}
+
+pub(super) fn saddle_gmres_workspace_bytes(
+    dofs: u64,
+    constraint_rows: u64,
+) -> Result<u64, ResourcePlanningError> {
+    let vector_count = structural_solve_vector_count(
+        dofs,
+        constraint_rows,
+        ConstraintEnforcement::LagrangeMultiplier,
+    )?;
+    checked_bytes(
+        vector_count
+            .checked_mul(dofs)
+            .ok_or(ResourcePlanningError::Overflow(
+                "saddle GMRES workspace values",
+            ))?,
+        8,
+        "saddle GMRES workspace bytes",
+    )
 }
 
 /// Bounds the retained restarted-GMRES basis and saddle work in units of full physical vectors.
@@ -447,6 +487,41 @@ fn checked_add(left: u64, right: u64, label: &'static str) -> Result<u64, Resour
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn multiplier_preflight_names_gmres_without_charging_an_unused_preconditioner() {
+        let admission = SolverAdmissionResourcePolicy {
+            dimension: Count(8),
+            factor_nonzero_upper_bound: Count(36),
+            update_count_upper_bound: Count(100),
+            resident_bytes_upper_bound: ByteCount(1_000),
+        };
+        let policy = solve_policy(
+            SpdPreconditionerKind::Ilu0,
+            12,
+            7,
+            ConstraintEnforcement::LagrangeMultiplier,
+            144,
+            admission.clone(),
+            0,
+        )
+        .unwrap();
+        let SolveResourcePolicy::SaddlePointGmres {
+            block_dimension,
+            restart,
+            maximum_iterations,
+            workspace_bytes_upper_bound,
+            admission: planned_admission,
+        } = policy
+        else {
+            panic!("multiplier solve must have a saddle GMRES policy");
+        };
+        assert_eq!(block_dimension, Count(19));
+        assert_eq!(restart, Count(19));
+        assert_eq!(maximum_iterations, Count(256));
+        assert_eq!(planned_admission, admission);
+        assert!(workspace_bytes_upper_bound.0 >= 19 * 20 * 8);
+    }
 
     #[test]
     fn multiplier_gmres_basis_is_charged_above_scoped_pcg() {
