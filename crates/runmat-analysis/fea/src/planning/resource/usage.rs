@@ -8,7 +8,10 @@ use runmat_execution::{
 };
 use serde::{Deserialize, Serialize};
 
-use super::contract::{ByteCount, FeaResourcePlan, FeaResourcePlanIdentity, ResourcePlanningError};
+use super::{
+    admission::allocation_matches_plan,
+    contract::{ByteCount, FeaResourcePlan, FeaResourcePlanIdentity, ResourcePlanningError},
+};
 
 const RESOURCE_USAGE_PREFIX: &[u8] = b"runmat-fea-resource-usage/v1\0";
 const RESOURCE_USAGE_LIMITS: CanonicalLimits =
@@ -230,10 +233,7 @@ impl ResourceUsageEvidence {
                         "resource usage attempt refers to an absent resource plan".into(),
                     )
                 })?;
-            if !super::reconciliation::allocation_fits_budget(
-                &attempt.resources.allocation,
-                &plan.request,
-            ) {
+            if !allocation_matches_plan(&attempt.resources.allocation, &plan.request) {
                 return Err(ResourcePlanningError::Invalid(
                     "resource usage attempt allocation differs from its plan".into(),
                 ));

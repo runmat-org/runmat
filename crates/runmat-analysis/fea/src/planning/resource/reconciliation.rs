@@ -7,23 +7,6 @@ use super::{
     usage::{AnalysisResourceUsage, ResourceOverrun},
 };
 
-pub(crate) fn allocation_fits_budget(
-    allocation: &ResourceRequest,
-    budget: &ResourceRequest,
-) -> bool {
-    allocation.cpu_millicores <= budget.cpu_millicores
-        && allocation.memory_bytes <= budget.memory_bytes
-        && allocation.scratch_bytes <= budget.scratch_bytes
-        && allocation.max_wall_millis <= budget.max_wall_millis
-        && allocation.max_artifact_bytes <= budget.max_artifact_bytes
-        && allocation.max_egress_bytes <= budget.max_egress_bytes
-        && allocation.max_relay_bytes <= budget.max_relay_bytes
-        && budget
-            .required_capabilities
-            .is_subset(&allocation.required_capabilities)
-        && allocation.accelerators == budget.accelerators
-}
-
 pub(crate) fn reconcile_resource_request(
     request: &ResourceRequest,
     actual: &AnalysisResourceUsage,

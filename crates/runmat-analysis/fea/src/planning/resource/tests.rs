@@ -1405,20 +1405,12 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
         )
         .unwrap(),
     };
-    let mut partition_allocation = allocation.clone();
-    partition_allocation.cpu_millicores = (partition_allocation.cpu_millicores / 2).max(1);
-    partition_allocation.memory_bytes = (partition_allocation.memory_bytes / 2).max(1);
-    partition_allocation.scratch_bytes /= 2;
-    partition_allocation.max_wall_millis = (partition_allocation.max_wall_millis / 2).max(1);
-    partition_allocation.max_artifact_bytes /= 2;
-    partition_allocation.max_egress_bytes /= 2;
-    partition_allocation.max_relay_bytes /= 2;
-    let partition_attempt = ResourceUsageAttempt {
-        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"partition-attempt"]),
-        worker_id: runmat_execution::identity::WorkerId::derive(&[b"partition-worker"]),
+    let retry_attempt = ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"retry-attempt"]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"retry-worker"]),
         plan: plan.identity,
         resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
-            partition_allocation,
+            allocation.clone(),
             1,
             0,
             0,
@@ -1430,7 +1422,7 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
         &plan,
         Digest::sha256("workload"),
         Digest::sha256("result"),
-        vec![partition_attempt, attempt],
+        vec![retry_attempt, attempt],
         2,
     )
     .unwrap();
@@ -1472,6 +1464,47 @@ fn resource_usage_evidence_binds_plan_workload_result_attempt_and_worker() {
             vec![substituted_attempt],
             1,
         ),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+}
+
+#[test]
+fn resource_usage_rejects_under_reserved_attempts_even_when_they_fit_the_plan_budget() {
+    let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let attempt_id = runmat_execution::identity::AttemptId::derive(&[b"under-reserved-attempt"]);
+    let worker_id = runmat_execution::identity::WorkerId::derive(&[b"under-reserved-worker"]);
+    let record_usage = |allocation| {
+        record_resource_usage(
+            &plan,
+            Digest::sha256("under-reserved-workload"),
+            Digest::sha256("under-reserved-result"),
+            vec![ResourceUsageAttempt {
+                attempt_id,
+                worker_id,
+                plan: plan.identity,
+                resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+                    allocation, 1, 0, 0, 0,
+                )
+                .unwrap(),
+            }],
+            1,
+        )
+    };
+
+    assert!(record_usage(plan.request.clone()).is_ok());
+    let mut under_reserved = plan.request.clone();
+    under_reserved.memory_bytes -= 1;
+    assert!(matches!(
+        record_usage(under_reserved),
+        Err(ResourcePlanningError::Invalid(message))
+            if message == "resource usage attempt allocation differs from its plan"
+    ));
+
+    let mut shorter_deadline = plan.request.clone();
+    shorter_deadline.max_wall_millis -= 1;
+    assert!(matches!(
+        record_usage(shorter_deadline),
         Err(ResourcePlanningError::Invalid(message))
             if message == "resource usage attempt allocation differs from its plan"
     ));
