@@ -1,0 +1,282 @@
+//! Connected two-material patch with a conformal plane at x = 1/2.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use runmat_analysis_core::{
+    AnalysisConstraint, CoordinateFrame, Displacement, EvidenceConfidence, MaterialAssignment,
+    MaterialElasticityModel, PrescribedStructuralDofs, PrescribedValue, RegionTarget,
+    StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
+};
+use runmat_meshing_core::{
+    CanonicalMeshingContract, ElementOrder, MeshRegion, PersistentEntityKind, StableDigest,
+};
+
+use super::{entity, structured_cantilever};
+use crate::{
+    contracts::{
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    },
+    fixtures::{fixture_model, FixtureId},
+    ComputeBackend, LinearStaticSolveOptions,
+};
+
+fn constrained_modulus(youngs_modulus_pa: f64, poisson_ratio: f64) -> f64 {
+    youngs_modulus_pa * (1.0 - poisson_ratio)
+        / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
+}
+
+fn transverse_stress(youngs_modulus_pa: f64, poisson_ratio: f64, axial_strain: f64) -> f64 {
+    youngs_modulus_pa * poisson_ratio * axial_strain
+        / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
+}
+
+#[test]
+fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
+    const LEFT_STRAIN: f64 = 0.1;
+    const AXIAL_STRESS_PA: f64 = 12.0;
+    let right_strain = AXIAL_STRESS_PA / constrained_modulus(200.0, 0.3);
+    let left_transverse = transverse_stress(100.0, 0.25, LEFT_STRAIN);
+    let right_transverse = transverse_stress(200.0, 0.3, right_strain);
+    assert!((left_transverse - right_transverse).abs() > 1.0);
+    let exact_displacement = |x: f64| {
+        if x <= 0.5 {
+            LEFT_STRAIN * x
+        } else {
+            LEFT_STRAIN * 0.5 + right_strain * (x - 0.5)
+        }
+    };
+
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut mesh = structured_cantilever(2, order);
+        let left_region = entity(PersistentEntityKind::Region, "left_layer");
+        let right_region = entity(PersistentEntityKind::Region, "right_layer");
+        let mut groups: BTreeMap<_, Vec<u64>> = BTreeMap::new();
+        for element in &mut mesh.topology.volume_elements {
+            let x = element.node_ids[..4]
+                .iter()
+                .map(|id| mesh.topology.nodes[*id as usize - 1].coordinates_m[0])
+                .collect::<Vec<_>>();
+            element.region_id = if x.iter().all(|value| *value <= 0.5) {
+                left_region.clone()
+            } else if x.iter().all(|value| *value >= 0.5) {
+                right_region.clone()
+            } else {
+                panic!("an element crosses the analytical material interface");
+            };
+            groups
+                .entry(element.region_id.clone())
+                .or_default()
+                .push(element.element_id);
+        }
+        assert_eq!(groups.len(), 2);
+        assert!(groups.values().all(|elements| elements.len() == 24));
+        mesh.topology.regions = groups
+            .into_iter()
+            .map(|(region_id, element_ids)| MeshRegion {
+                region_id,
+                element_ids,
+            })
+            .collect();
+        mesh.canonical_digest = StableDigest::ZERO;
+        mesh.seal_canonical_digest().unwrap();
+        mesh.validate_canonical().unwrap();
+
+        let regions = mesh
+            .topology
+            .volume_elements
+            .iter()
+            .map(|element| (element.element_id, &element.region_id))
+            .collect::<BTreeMap<_, _>>();
+        let interface_neighbors = mesh
+            .topology
+            .neighbors
+            .iter()
+            .filter(|neighbor| {
+                neighbor
+                    .adjacent_element_id
+                    .is_some_and(|adjacent| regions[&neighbor.element_id] != regions[&adjacent])
+            })
+            .count();
+        assert!(interface_neighbors > 0);
+
+        let boundary_nodes = mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .flat_map(|face| face.node_ids.iter().copied())
+            .collect::<BTreeSet<_>>();
+        let free_interface_nodes = mesh
+            .topology
+            .nodes
+            .iter()
+            .filter(|node| {
+                !boundary_nodes.contains(&node.node_id)
+                    && (node.coordinates_m[0] - 0.5).abs() < 1.0e-12
+            })
+            .count();
+        assert!(
+            free_interface_nodes > 0,
+            "{order:?} has no free interface DOF"
+        );
+
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        let mut left_material = model.materials[0].clone();
+        left_material.material_id = "left_material".into();
+        let MaterialElasticityModel::IsotropicLinear(left_elasticity) =
+            left_material.elasticity.as_mut().unwrap()
+        else {
+            panic!("the interface reference requires isotropic materials");
+        };
+        left_elasticity.youngs_modulus_pa = 100.0;
+        left_elasticity.poisson_ratio = 0.25;
+        let mut right_material = left_material.clone();
+        right_material.material_id = "right_material".into();
+        let MaterialElasticityModel::IsotropicLinear(right_elasticity) =
+            right_material.elasticity.as_mut().unwrap()
+        else {
+            unreachable!();
+        };
+        right_elasticity.youngs_modulus_pa = 200.0;
+        right_elasticity.poisson_ratio = 0.3;
+        model.materials = vec![left_material, right_material];
+        model.material_assignments = vec![
+            MaterialAssignment::to_solid_region(
+                "left_layer",
+                "left_material",
+                EvidenceConfidence::Verified,
+            ),
+            MaterialAssignment::to_solid_region(
+                "right_layer",
+                "right_material",
+                EvidenceConfidence::Verified,
+            ),
+        ];
+        model.signals.clear();
+        model.excitations.clear();
+        model.excitation_cases.clear();
+        model.constraints = boundary_nodes
+            .into_iter()
+            .map(|node_id| {
+                let x = mesh.topology.nodes[node_id as usize - 1].coordinates_m[0];
+                AnalysisConstraint::Structural(StructuralConstraint {
+                    constraint_id: format!("exact_interface_boundary_{node_id}"),
+                    frame: CoordinateFrame::Global,
+                    kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
+                        target: RegionTarget::point(format!("node:{node_id}")),
+                        translations: [
+                            (StructuralTranslationDof::Ux, exact_displacement(x)),
+                            (StructuralTranslationDof::Uy, 0.0),
+                            (StructuralTranslationDof::Uz, 0.0),
+                        ]
+                        .into_iter()
+                        .map(|(dof, value)| TranslationDofValue {
+                            dof,
+                            value: PrescribedValue::Constant(Displacement::new(value)),
+                        })
+                        .collect(),
+                        rotations: Vec::new(),
+                    }),
+                })
+            })
+            .collect();
+
+        let mut missing_assignment = model.clone();
+        missing_assignment
+            .material_assignments
+            .retain(|assignment| assignment.assigned_material_id != "right_material");
+        assert!(
+            crate::run_linear_static_with_options(
+                &missing_assignment,
+                ComputeBackend::Cpu,
+                LinearStaticSolveOptions {
+                    formulation_requirement:
+                        runmat_analysis_core::FormulationRequirement::Experimental,
+                    solver_mesh: Some(mesh.clone()),
+                    require_solver_mesh_for_solid: true,
+                    ..LinearStaticSolveOptions::default()
+                },
+            )
+            .is_err(),
+            "{order:?} must reject an unassigned material region"
+        );
+
+        let result = crate::run_linear_static_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            LinearStaticSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                solver_mesh: Some(mesh.clone()),
+                require_solver_mesh_for_solid: true,
+                ..LinearStaticSolveOptions::default()
+            },
+        )
+        .expect("the conformal two-material patch must solve");
+        let displacement = result
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        for (node, actual) in mesh.topology.nodes.iter().zip(displacement.chunks_exact(3)) {
+            let expected = [exact_displacement(node.coordinates_m[0]), 0.0, 0.0];
+            for (&actual, expected) in actual.iter().zip(expected) {
+                assert!(
+                    (actual - expected).abs() < 1.0e-8,
+                    "{order:?} node {}",
+                    node.node_id
+                );
+            }
+        }
+        let stress = result
+            .field(FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        assert_eq!(stress.len(), mesh.topology.volume_elements.len() * 4 * 6);
+        for (index, element) in mesh.topology.volume_elements.iter().enumerate() {
+            let transverse = if element.region_id == left_region {
+                left_transverse
+            } else {
+                right_transverse
+            };
+            for point in 0..4 {
+                let actual = &stress[(index * 4 + point) * 6..][..6];
+                for (&actual, expected) in
+                    actual
+                        .iter()
+                        .zip([AXIAL_STRESS_PA, transverse, transverse, 0.0, 0.0, 0.0])
+                {
+                    assert!(
+                        (actual - expected).abs() < 1.0e-6,
+                        "{order:?} element {index}"
+                    );
+                }
+            }
+        }
+        let energy = result
+            .field(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)
+            .unwrap()
+            .as_host_f64()
+            .unwrap()[0];
+        let expected_energy = 0.25 * AXIAL_STRESS_PA * (LEFT_STRAIN + right_strain);
+        assert!(
+            (energy - expected_energy).abs() < 1.0e-7,
+            "{order:?} energy {energy}"
+        );
+        let reactions = result
+            .field(FEA_FIELD_STRUCTURAL_REACTION_FORCE)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        for axis in 0..3 {
+            let resultant = reactions
+                .chunks_exact(3)
+                .map(|node| node[axis])
+                .sum::<f64>();
+            assert!(
+                resultant.abs() < 1.0e-6,
+                "{order:?} axis {axis} reaction {resultant}"
+            );
+        }
+    }
+}

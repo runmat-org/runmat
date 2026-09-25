@@ -31,6 +31,9 @@ use crate::{
 
 const TETRAHEDRON_FACES: [[usize; 3]; 4] = [[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]];
 
+#[path = "qualification_tests/interface.rs"]
+mod interface;
+
 #[test]
 fn solved_tet10_recovery_estimator_decreases_under_uniform_refinement() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
