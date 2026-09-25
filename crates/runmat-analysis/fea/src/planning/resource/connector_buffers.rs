@@ -53,17 +53,34 @@ pub(super) fn estimate_connector_buffers(
         let ConnectorKind::SurfaceNormalFoundation { target, .. } = &connector.kind else {
             continue;
         };
-        let solid_faces = projection.map_or(0_usize, |projection| {
-            projection
-                .boundary_faces
-                .iter()
-                .filter(|face| {
-                    face.provenance
-                        .iter()
-                        .any(|entity| target.matches_persistent_entity(entity))
-                })
-                .count()
-        });
+        let (solid_faces, solid_samples) = projection.map_or(
+            Ok::<_, ResourcePlanningError>((0_u64, 0_u64)),
+            |projection| {
+                projection
+                    .boundary_faces
+                    .iter()
+                    .filter(|face| {
+                        face.provenance
+                            .iter()
+                            .any(|entity| target.matches_persistent_entity(entity))
+                    })
+                    .try_fold((0_u64, 0_u64), |(faces, samples), face| {
+                        let mut face_samples = 0_u64;
+                        projection
+                            .visit_boundary_quadrature(face, |_| face_samples += 1)
+                            .map_err(|error| {
+                                ResourcePlanningError::Invalid(format!(
+                                "surface foundation `{}` has invalid boundary quadrature: {error}",
+                                connector.connector_id
+                            ))
+                            })?;
+                        Ok((
+                            sum(faces, 1, "foundation solid face count")?,
+                            sum(samples, face_samples, "foundation solid samples")?,
+                        ))
+                    })
+            },
+        )?;
         let shell_faces = model.structural.as_ref().map_or(0_usize, |structural| {
             structural
                 .elements
@@ -74,8 +91,6 @@ pub(super) fn estimate_connector_buffers(
                 })
                 .count()
         });
-        let solid_faces = u64::try_from(solid_faces)
-            .map_err(|_| ResourcePlanningError::Overflow("foundation solid face count"))?;
         let shell_faces = u64::try_from(shell_faces)
             .map_err(|_| ResourcePlanningError::Overflow("foundation shell face count"))?;
         if solid_faces == 0 && shell_faces == 0 {
@@ -84,7 +99,6 @@ pub(super) fn estimate_connector_buffers(
                 connector.connector_id
             )));
         }
-        let solid_samples = multiply(solid_faces, 7, "foundation solid samples")?;
         let shell_samples = multiply(shell_faces, 3, "foundation shell samples")?;
         let canonical = sum(
             multiply(

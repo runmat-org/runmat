@@ -19,6 +19,8 @@ use crate::{
 
 use super::*;
 
+mod curved_connector;
+
 fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
