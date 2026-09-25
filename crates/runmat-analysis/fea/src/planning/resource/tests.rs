@@ -323,7 +323,7 @@ fn structural_symbolic_plan_is_preassembly_and_material_independent() {
     assert_eq!(facts.columns, Count(12));
     assert_eq!(
         facts.operator_nonzeros,
-        vec![Count(144), Count(12), Count(12)]
+        vec![Count(144), Count(48), Count(144)]
     );
     assert_eq!(operators.stiffness_upper_bound().rows(), 12);
     assert_eq!(
@@ -484,7 +484,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
             .unwrap()
             .sparse
             .operator_nonzeros,
-        vec![Count(144), Count(12), Count(12)]
+        vec![Count(144), Count(48), Count(144)]
     );
     assert_eq!(
         plan.input.structural_operator().unwrap().topology,
@@ -717,7 +717,7 @@ fn mixed_preflight_binds_complete_topology_and_connector_sparsity() {
 }
 
 #[test]
-fn solid_connector_dashpot_reserves_off_diagonal_damping_pattern() {
+fn solid_consistent_mass_and_rayleigh_damping_reserve_element_couplings() {
     let (mut model, mesh, projection, constraints) = structural_fixture();
     let baseline =
         StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
@@ -735,19 +735,28 @@ fn solid_connector_dashpot_reserves_off_diagonal_damping_pattern() {
         });
     let with_connector =
         StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
+    assert_eq!(baseline.mass_upper_bound().column_indices().len(), 48);
+    assert_eq!(
+        baseline
+            .mass_upper_bound()
+            .row_range(0)
+            .map(|entry| baseline.mass_upper_bound().column(entry))
+            .collect::<Vec<_>>(),
+        vec![0, 3, 6, 9],
+    );
+    assert_eq!(
+        baseline.damping_upper_bound().column_indices(),
+        baseline.stiffness_upper_bound().column_indices(),
+    );
     assert_eq!(
         with_connector.stiffness_upper_bound().column_indices(),
         baseline.stiffness_upper_bound().column_indices(),
-    );
-    assert!(
-        with_connector.damping_upper_bound().column_indices().len()
-            > baseline.damping_upper_bound().column_indices().len()
     );
     assert_eq!(
         with_connector.damping_upper_bound().column_indices(),
         with_connector.stiffness_upper_bound().column_indices(),
     );
-    assert_ne!(with_connector.identity(), baseline.identity());
+    assert_eq!(with_connector.identity(), baseline.identity());
 }
 
 #[test]

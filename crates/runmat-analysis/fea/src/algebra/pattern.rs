@@ -194,6 +194,34 @@ impl SparsePattern {
         &self.column_indices
     }
 
+    /// Find the first assembled entry not covered by this planned upper-bound pattern.
+    /// Both row sets are canonical, so a merge walk uses no additional allocation.
+    pub fn first_uncovered_entry(
+        &self,
+        assembled: &Self,
+    ) -> Result<Option<(usize, usize)>, SparsePatternError> {
+        if self.rows != assembled.rows || self.columns != assembled.columns {
+            return Err(SparsePatternError::ShapeMismatch);
+        }
+        for row in 0..self.rows() {
+            let planned = &self.column_indices[self.row_range(row)];
+            let actual = &assembled.column_indices[assembled.row_range(row)];
+            let mut planned_index = 0;
+            for &column in actual {
+                while planned
+                    .get(planned_index)
+                    .is_some_and(|&entry| entry < column)
+                {
+                    planned_index += 1;
+                }
+                if planned.get(planned_index) != Some(&column) {
+                    return Ok(Some((row, column as usize)));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     /// Stable identity for symbolic sparsity reuse across devices and workers.
     pub fn identity(&self) -> Result<Digest, CanonicalCodecError> {
         runmat_canonical_codec::encode_contract(
@@ -303,6 +331,21 @@ mod tests {
         let other_shape = SparsePattern::try_new(1, 1, vec![0, 1], vec![0]).unwrap();
         assert_eq!(
             left.union(&other_shape),
+            Err(SparsePatternError::ShapeMismatch)
+        );
+    }
+
+    #[test]
+    fn planned_pattern_rejects_the_first_uncovered_assembled_entry() {
+        let planned =
+            SparsePattern::try_new(3, 3, vec![0, 2, 4, 6], vec![0, 2, 0, 1, 1, 2]).unwrap();
+        let covered = SparsePattern::try_new(3, 3, vec![0, 1, 2, 3], vec![2, 0, 2]).unwrap();
+        let uncovered = SparsePattern::try_new(3, 3, vec![0, 1, 3, 4], vec![2, 1, 2, 2]).unwrap();
+        assert_eq!(planned.first_uncovered_entry(&covered), Ok(None));
+        assert_eq!(planned.first_uncovered_entry(&uncovered), Ok(Some((1, 2))));
+        let wrong_shape = SparsePattern::try_new(1, 1, vec![0, 1], vec![0]).unwrap();
+        assert_eq!(
+            planned.first_uncovered_entry(&wrong_shape),
             Err(SparsePatternError::ShapeMismatch)
         );
     }

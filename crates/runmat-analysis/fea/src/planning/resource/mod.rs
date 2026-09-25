@@ -98,6 +98,7 @@ pub use response_spectrum::{
 pub use scoped_execution::{
     execute_scoped_chunks, execute_scoped_slices_mut, ScopedLocalExecutionError,
 };
+pub(crate) use structural_facts::verify_assembled_structural_storage;
 pub use symbolic::StructuralSymbolicOperators;
 pub use transient_block::{
     build_structural_transient_block_resource_plan,

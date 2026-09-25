@@ -6,7 +6,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    algebra::SparsePattern,
+    algebra::{CanonicalRealOperators, SparsePattern},
     assembly::{
         dofs::StructuralDofKind, dofs::StructuralDofLayout,
         explicit_connectors::compile_model_connector_plan, mixed_dof_layout,
@@ -28,8 +28,8 @@ const REFERENCE_POINT_DOF_COUNT: usize = 6;
 ///
 /// The stiffness pattern contains every coupling that element assembly may emit, including
 /// coefficients that happen to evaluate to zero for a particular material or geometry. Solid-only
-/// mass follows its admitted diagonal storage contract. Connector-bearing solid damping reserves
-/// the stiffness graph because axial dashpots can couple distinct nodes. Mixed systems conservatively
+/// mass follows the same-axis consistent-mass element graph. Solid damping reserves the stiffness
+/// graph for Rayleigh mass/stiffness terms and axial dashpots. Mixed systems conservatively
 /// reserve the complete element-and-connector stiffness bound for all three operators because
 /// explicit consistent mass and Rayleigh damping can populate those couplings. This plan is derived
 /// before numerical assembly and therefore can be used for allocation admission without doing the
@@ -84,6 +84,9 @@ impl StructuralSymbolicOperators {
         let mut stiffness_rows = (0..total_dofs)
             .map(|_| BTreeSet::<usize>::new())
             .collect::<Vec<_>>();
+        let mut mass_rows = (0..total_dofs)
+            .map(|row| BTreeSet::from([row]))
+            .collect::<Vec<_>>();
         for element in &projection.elements {
             for &row_node in &element.node_indices {
                 let row_offset = checked_dof_offset(row_node, projection.nodes.len())?;
@@ -94,10 +97,12 @@ impl StructuralSymbolicOperators {
                             stiffness_rows[row_offset + row_axis]
                                 .insert(column_offset + column_axis);
                         }
+                        mass_rows[row_offset + row_axis].insert(column_offset + row_axis);
                     }
                 }
             }
         }
+        let mass = pattern_from_rows(mass_rows, total_dofs)?;
         if !model.connectors.is_empty() {
             let topology = CanonicalStructuralNodeSpace::derive_solid(mesh)
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -113,36 +118,7 @@ impl StructuralSymbolicOperators {
             add_connector_plan_pattern(&mut stiffness_rows, &plan, constraints.topology, &layout)?;
         }
         let stiffness_upper_bound = pattern_from_rows(stiffness_rows, total_dofs)?;
-        let diagonal = diagonal_pattern(total_dofs)?;
-        let damping = if model.connectors.is_empty() {
-            diagonal.clone()
-        } else {
-            stiffness_upper_bound.clone()
-        };
-        let pattern_identities = (
-            stiffness_upper_bound
-                .identity()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-            diagonal
-                .identity()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-            damping
-                .identity()
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-        );
-        let encoded = encode_contract(
-            SYMBOLIC_PREFIX,
-            "structural-symbolic-operators",
-            &pattern_identities,
-            SYMBOLIC_LIMITS,
-        )
-        .map_err(ResourcePlanningError::from)?;
-        Ok(Self {
-            stiffness_upper_bound,
-            mass: diagonal.clone(),
-            damping,
-            identity: Digest::sha256(encoded),
-        })
+        Self::from_patterns(stiffness_upper_bound.clone(), mass, stiffness_upper_bound)
     }
 
     pub fn derive_explicit(
@@ -338,6 +314,39 @@ impl StructuralSymbolicOperators {
     pub fn patterns(&self) -> [&SparsePattern; 3] {
         [&self.stiffness_upper_bound, &self.mass, &self.damping]
     }
+
+    /// Reconcile the assembled graphs against the assembly-free storage claim before solve.
+    /// This checks exact K/M/C entries, not only total nonzero counts.
+    pub(crate) fn verify_assembled(
+        &self,
+        operators: &CanonicalRealOperators,
+    ) -> Result<(), ResourcePlanningError> {
+        let actual = [
+            operators.stiffness().pattern(),
+            operators.mass().pattern(),
+            operators.damping().pattern(),
+        ];
+        for ((role, planned), assembled) in ["stiffness", "mass", "damping"]
+            .into_iter()
+            .zip(self.patterns())
+            .zip(actual)
+        {
+            match planned.first_uncovered_entry(assembled) {
+                Ok(None) => {}
+                Ok(Some((row, column))) => {
+                    return Err(ResourcePlanningError::Invalid(format!(
+                        "assembled {role} entry ({row}, {column}) exceeds symbolic storage bound"
+                    )));
+                }
+                Err(error) => {
+                    return Err(ResourcePlanningError::Invalid(format!(
+                        "assembled {role} shape differs from symbolic storage bound: {error}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn add_connector_plan_pattern(
@@ -424,13 +433,6 @@ fn checked_dof_offset(
         .ok_or(ResourcePlanningError::Overflow("structural DOF offset"))
 }
 
-fn diagonal_pattern(dofs: usize) -> Result<SparsePattern, ResourcePlanningError> {
-    let rows = (0..dofs)
-        .map(|row| BTreeSet::from([row]))
-        .collect::<Vec<_>>();
-    pattern_from_rows(rows, dofs)
-}
-
 fn pattern_from_rows(
     rows: Vec<BTreeSet<usize>>,
     columns: usize,
@@ -459,4 +461,57 @@ fn pattern_from_rows(
         column_indices,
     )
     .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::algebra::{MatrixProperties, OperatorRole, RealSparseMatrix};
+
+    #[test]
+    fn assembled_operator_reconciliation_rejects_each_unplanned_role() {
+        let diagonal = SparsePattern::try_new(2, 2, vec![0, 1, 2], vec![0, 1]).unwrap();
+        let planned = StructuralSymbolicOperators::from_patterns(
+            diagonal.clone(),
+            diagonal.clone(),
+            diagonal,
+        )
+        .unwrap();
+        let matrix = |role, coupled| {
+            RealSparseMatrix::from_dense(
+                &[2.0, coupled, coupled, 2.0],
+                2,
+                role,
+                MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+            )
+            .unwrap()
+        };
+        for unplanned in 0..3 {
+            let operators = CanonicalRealOperators::try_new(
+                matrix(
+                    OperatorRole::Stiffness,
+                    if unplanned == 0 { 1.0 } else { 0.0 },
+                ),
+                matrix(OperatorRole::Mass, if unplanned == 1 { 1.0 } else { 0.0 }),
+                matrix(
+                    OperatorRole::Damping,
+                    if unplanned == 2 { 1.0 } else { 0.0 },
+                ),
+            )
+            .unwrap();
+            let role = ["stiffness", "mass", "damping"][unplanned];
+            assert!(matches!(
+                planned.verify_assembled(&operators),
+                Err(ResourcePlanningError::Invalid(message))
+                    if message.contains(role) && message.contains("(0, 1)")
+            ));
+        }
+        let covered = CanonicalRealOperators::try_new(
+            matrix(OperatorRole::Stiffness, 0.0),
+            matrix(OperatorRole::Mass, 0.0),
+            matrix(OperatorRole::Damping, 0.0),
+        )
+        .unwrap();
+        planned.verify_assembled(&covered).unwrap();
+    }
 }

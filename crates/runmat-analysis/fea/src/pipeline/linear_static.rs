@@ -142,17 +142,14 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
-    let preflight_plans = preflight::prepare_direct_static_constraints(
+    let preassembly = preflight::prepare_static_preassembly(
         model,
         execution_step,
         backend,
         &options,
-        constraint_plan.is_some(),
+        constraint_plan,
     )?;
-    let prepared_connectors =
-        preflight::prepare_portable_static_connectors(model, &options, constraint_plan)?;
-    let assembly_constraint_plan =
-        constraint_plan.or(preflight_plans.as_ref().map(|plans| &plans.constraints));
+    let assembly_constraint_plan = constraint_plan.or(preassembly.constraints.as_ref());
 
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
@@ -180,9 +177,11 @@ fn run_linear_static_with_constraint_plan(
         }
         other => FeaRunError::Assembly(other.to_string()),
     })?;
-    preflight::verify_executed_connector_plan(
-        preflight_plans.as_ref(),
-        prepared_connectors.as_ref(),
+    preflight::verify_executed_preassembly(
+        model,
+        &options,
+        assembly_constraint_plan,
+        &preassembly,
         &summary,
     )?;
     let identity = super::admission::admit_structural(

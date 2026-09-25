@@ -3,7 +3,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
-    assembly::{dofs::StructuralDofKind, mixed_dof_layout},
+    assembly::{dofs::StructuralDofKind, mixed_dof_layout, AssemblySummary},
     constraints::{
         CanonicalStructuralConstraintPlan, CanonicalStructuralDofOwner,
         CanonicalStructuralTopologyIdentity, ResolvedConstraintMatrix,
@@ -186,6 +186,20 @@ pub(super) fn derive_structural_resource_facts(
         recovery_has_rotational_dofs: recovery_beam_element_count > 0
             || recovery_shell_element_count > 0,
     })
+}
+
+/// The numerical matrices must fit the exact row/column graph promised by the preassembly
+/// structural planner. Re-derive from authoritative inputs because assembly cannot assert it.
+pub(crate) fn verify_assembled_structural_storage(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+    constraints: &CanonicalStructuralConstraintPlan,
+    summary: &AssemblySummary,
+) -> Result<(), ResourcePlanningError> {
+    let facts = derive_structural_resource_facts(model, mesh, constraints)?;
+    facts
+        .symbolic
+        .verify_assembled(summary.operator.operators())
 }
 
 fn resolve_constraint_matrix(
