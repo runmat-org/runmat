@@ -26,8 +26,6 @@ const POINT_CONNECTORS_PER_WORKER_WAVE: usize = 8;
 pub(super) struct PointConnectorSink<'a> {
     pub stiffness: &'a mut RealSparseAssembler,
     pub damping: &'a mut RealSparseAssembler,
-    pub node_identities: &'a [runmat_meshing_core::StableDigest],
-    pub canonical_entries: &'a mut Vec<CanonicalConnectorEntry>,
     pub stiffness_count: &'a mut usize,
     pub damping_count: &'a mut usize,
 }
@@ -82,7 +80,6 @@ pub(super) fn flush_point_wave(
         return Err(StructuralAssemblyError::Cancelled);
     }
     for (point, entries) in wave.drain(..).zip(contributions) {
-        let canonical_entry = canonical_point_entry(&point, sink.node_identities)?;
         let (assembler, count) = match point.operator {
             PointConnectorOperator::AxialDashpot { .. } => {
                 (&mut *sink.damping, &mut *sink.damping_count)
@@ -93,13 +90,12 @@ pub(super) fn flush_point_wave(
             assembler.add(row, column, value);
         }
         assembler.add_contribution(provenance(point.connector));
-        sink.canonical_entries.push(canonical_entry);
         *count += 1;
     }
     Ok(())
 }
 
-fn canonical_point_entry(
+pub(super) fn canonical_point_entry(
     point: &PreparedPointConnector<'_>,
     node_identities: &[runmat_meshing_core::StableDigest],
 ) -> Result<CanonicalConnectorEntry, StructuralAssemblyError> {

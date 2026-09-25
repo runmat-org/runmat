@@ -16,9 +16,6 @@ use runmat_meshing_core::{
 };
 
 use crate::{
-    connectors::{
-        CanonicalConnectorEntry, CanonicalConnectorNode, CanonicalStructuralConnectorPlan,
-    },
     execution::{
         AccuracyIdentity, AnalysisResultIdentity, AnalysisWorkKind, AnalysisWorkloadIdentity,
         ConstraintPlanIdentity, DiscretizationIdentity, ExecutionPlanIdentity,
@@ -303,6 +300,15 @@ fn constraint_reaction_resultant_uses_canonical_group_ownership() {
 #[test]
 fn connector_observation_binds_exact_identity_and_partition_source() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "mount".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:1"),
+                stiffness: runmat_analysis_core::Stiffness::new(1_000.0),
+            },
+        });
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     for face in &mut mesh.topology.boundary_faces {
         face.provenance.push(PersistentEntityId {
@@ -319,22 +325,10 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
         Some(&mesh),
     )
     .unwrap();
-    let source_digest = Digest::sha256(b"connector-source");
-    let connector_plan = CanonicalStructuralConnectorPlan::new(
-        constraint_plan.topology,
-        mesh.topology.nodes.len(),
-        Digest::sha256(b"authored-connectors"),
-        vec![CanonicalConnectorEntry::IsotropicGroundSpring {
-            connector_id: "mount".into(),
-            source_digest,
-            target: CanonicalConnectorNode {
-                node_index: 0,
-                node_identity: mesh.topology.nodes[0].stable_identity,
-            },
-            stiffness_newtons_per_meter: 1_000.0,
-        }],
-    )
-    .unwrap();
+    let connector_plan =
+        crate::assembly::explicit_connectors::compile_model_connector_plan(&model, Some(&mesh), 0)
+            .unwrap();
+    let source_digest = connector_plan.entries[0].source_digest();
     let definition = RecoveredFieldDefinition::new(
         crate::contracts::FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
         ObservationQuantity::ReactionForce,
@@ -458,6 +452,32 @@ fn connector_observation_binds_exact_identity_and_partition_source() {
         Some(&mesh),
         &constraint_plan,
         &connector_plan,
+        std::slice::from_ref(&field.definition().clone()),
+        ObservationLimits::default(),
+    )
+    .is_err());
+
+    model.sequence.steps[0].observations[0]
+        .spec_mut()
+        .unwrap()
+        .target = ObservationTarget::Connector {
+        connector_id: "mount".into(),
+    };
+    let mut substituted = connector_plan.clone();
+    if let crate::connectors::CanonicalConnectorEntry::IsotropicGroundSpring {
+        source_digest, ..
+    } = &mut substituted.entries[0]
+    {
+        *source_digest = Digest::sha256("substituted-connector-source");
+    } else {
+        panic!("fixture must compile a ground spring");
+    }
+    assert!(resolve_structural_observation_plan_with_connectors(
+        &model.sequence.steps[0],
+        &model,
+        Some(&mesh),
+        &constraint_plan,
+        &substituted,
         std::slice::from_ref(&field.definition().clone()),
         ObservationLimits::default(),
     )

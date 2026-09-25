@@ -30,6 +30,9 @@ use super::contract::{
 use super::history::resolve_history_sample_bounds;
 use super::topology::StructuralObservationTopology;
 
+mod connectors;
+use connectors::{compile_connector_observation_plan, resolve_connector_target};
+
 pub fn resolve_observation_plan(
     step: &ProcedureStep,
     projection: &AnalysisProjection,
@@ -50,8 +53,7 @@ pub fn resolve_structural_observation_plan(
 ) -> Result<ResolvedObservationPlan, ObservationError> {
     let topology = StructuralObservationTopology::derive(model, mesh)?;
     let connector_plan =
-        CanonicalStructuralConnectorPlan::empty(constraint_plan.topology, topology.nodes.len())
-            .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+        compile_connector_observation_plan(model, mesh, constraint_plan, topology.nodes.len())?;
     resolve_structural_observation_plan_with_connectors(
         step,
         model,
@@ -83,6 +85,9 @@ pub fn resolve_structural_observation_plan_with_connectors(
     }
     connector_plan
         .validate()
+        .map_err(|error| ObservationError::Invalid(error.to_string()))?;
+    connector_plan
+        .validate_against_authored(&model.connectors)
         .map_err(|error| ObservationError::Invalid(error.to_string()))?;
     if connector_plan.topology != topology.identity {
         return Err(ObservationError::Identity(
@@ -692,53 +697,6 @@ fn resolve_target(
             "unsupported observation request",
         )),
     }
-}
-
-fn resolve_connector_target(
-    spec: &ObservationSpec,
-    connector_plan: Option<&CanonicalStructuralConnectorPlan>,
-) -> Result<ResolvedObservationTarget, ObservationError> {
-    if spec.source_location != FieldLocation::Connector
-        || spec.output_location != FieldLocation::Connector
-        || !matches!(
-            spec.quantity,
-            ObservationQuantity::ReactionForce | ObservationQuantity::StrainEnergy
-        )
-        || spec.reduction.as_ref().is_some_and(|reduction| {
-            !matches!(
-                (spec.quantity, reduction.spatial),
-                (_, SpatialReduction::None)
-                    | (
-                        ObservationQuantity::ReactionForce,
-                        SpatialReduction::Resultant
-                    )
-            )
-        })
-    {
-        return Err(ObservationError::Invalid(
-            "connector fields support connector force and stored energy without spatial aggregation"
-                .into(),
-        ));
-    }
-    let ObservationTarget::Connector { connector_id } = &spec.target else {
-        return Err(target_error(
-            spec,
-            "connector fields require one authored connector target",
-        ));
-    };
-    let plan = connector_plan.ok_or(ObservationError::Unsupported(
-        "connector observations require the canonical executed connector plan",
-    ))?;
-    let (index, entry) = plan
-        .entries
-        .iter()
-        .enumerate()
-        .find(|(_, entry)| entry.connector_id() == connector_id)
-        .ok_or_else(|| target_error(spec, "connector target is absent from the canonical plan"))?;
-    Ok(ResolvedObservationTarget::Connectors {
-        indices: vec![index],
-        identities: vec![StableDigest::from_bytes(*entry.source_digest().bytes())],
-    })
 }
 
 fn resolve_extrema_target(

@@ -12,7 +12,7 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::planning::resource::{
     build_structural_resource_plan, FeaResourcePlan, LocalExecutionPlan,
 };
-use runmat_analysis_fea::post::fields::structural_observable_field_definitions;
+use runmat_analysis_fea::post::fields::structural_static_observable_field_definitions;
 use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationLimits,
 };
@@ -158,7 +158,7 @@ pub fn prepare_structural_linear_program(
     let constraint_plan_digest = constraint_plan
         .content_digest()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let field_definitions = structural_observable_field_definitions()
+    let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observation_plan = resolve_structural_observation_plan(
         preparation.workload.procedure_step()?,

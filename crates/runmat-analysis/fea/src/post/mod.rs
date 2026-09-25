@@ -12,7 +12,8 @@ pub use complex_fields::{
     ComplexStructuralFieldRecoveryError, ComplexStructuralFieldState,
 };
 pub use connector_fields::{
-    recover_complex_connector_force_field, recover_connector_observable_fields,
+    connector_observable_field_definitions, recover_complex_connector_force_field,
+    recover_connector_observable_fields,
 };
 pub use constraint_fields::{
     recover_complex_constraint_group_observable_fields, recover_constraint_group_observable_fields,

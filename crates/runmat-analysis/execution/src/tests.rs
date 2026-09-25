@@ -139,6 +139,71 @@ fn structural_constraint_reaction_observation() -> runmat_analysis_core::Observa
 }
 
 #[test]
+fn portable_static_preparation_admits_connector_target_observation() {
+    use runmat_analysis_fea::execution::StructuralLinearWorkload;
+    use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
+    use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
+    use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
+    use runmat_analysis_fea::ComputeBackend;
+
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "tip_support_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:2"),
+                stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
+            },
+        });
+    let mut spec = structural_displacement_observation()
+        .spec()
+        .expect("authored observation")
+        .clone();
+    spec.observation_id = runmat_analysis_core::ObservationId("tip_support_force".into());
+    spec.quantity = runmat_analysis_core::ObservationQuantity::ReactionForce;
+    spec.target = runmat_analysis_core::ObservationTarget::Connector {
+        connector_id: "tip_support_spring".into(),
+    };
+    spec.source_location = runmat_analysis_core::FieldLocation::Connector;
+    spec.output_location = runmat_analysis_core::FieldLocation::Connector;
+    spec.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+    model.sequence.steps[0].observations =
+        vec![runmat_analysis_core::ObservationRequest::Probe(spec)];
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: SpdPreconditionerKind::Jacobi,
+        algebra_backend: LinearAlgebraBackendKind::CpuReference,
+        observation_execution:
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    let prepared = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+        authored_study_digest: digest("connector-observation-study"),
+        frozen_project_digest: None,
+        program_revision: revision(),
+        artifact_access: access(),
+        workload,
+        mesh: None,
+        initial_guess: None,
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    })
+    .expect("connector-target observation must be admitted in the portable resource plan");
+    let demand = prepared.resource_plan.input.structural_operator().unwrap();
+    assert_eq!(demand.observations.produced_sample_count.0, 1);
+    assert!(demand.observations.stored_bytes.0 > 0);
+}
+
+#[test]
 fn object_closure_and_host_request_round_trip_without_inlining_payloads() {
     let payload = vec![7_u8; 65];
     let objects = prepare_analysis_objects(

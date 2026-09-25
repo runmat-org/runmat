@@ -316,3 +316,12 @@ pub fn structural_observable_field_definitions(
         )
         .collect()
 }
+
+/// The static numerical result also publishes connector force and stored energy when connectors
+/// are present. Use their recovery-owned definitions during preassembly observation admission.
+pub fn structural_static_observable_field_definitions(
+) -> Result<Vec<RecoveredFieldDefinition>, RecoveredFieldError> {
+    let mut fields = structural_observable_field_definitions()?;
+    fields.extend(crate::post::connector_observable_field_definitions()?);
+    Ok(fields)
+}

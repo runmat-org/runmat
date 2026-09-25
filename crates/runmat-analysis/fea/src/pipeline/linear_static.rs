@@ -143,14 +143,15 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
-    let preflight_constraints = preflight::prepare_direct_static_constraints(
+    let preflight_plans = preflight::prepare_direct_static_constraints(
         model,
         execution_step,
         backend,
         &options,
         constraint_plan.is_some(),
     )?;
-    let assembly_constraint_plan = constraint_plan.or(preflight_constraints.as_ref());
+    let assembly_constraint_plan =
+        constraint_plan.or(preflight_plans.as_ref().map(|plans| &plans.constraints));
 
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
@@ -178,6 +179,7 @@ fn run_linear_static_with_constraint_plan(
         }
         other => FeaRunError::Assembly(other.to_string()),
     })?;
+    preflight::verify_executed_connector_plan(preflight_plans.as_ref(), &summary)?;
     let identity = super::admission::admit_structural(
         &summary,
         execution_step,
@@ -186,7 +188,7 @@ fn run_linear_static_with_constraint_plan(
     super::validate_rotational_dof_targets(model, &summary)?;
     if options.require_solver_mesh_for_solid
         && options.solver_mesh.is_none()
-        && !model_has_explicit_structural_elements(model)
+        && !preflight::model_has_explicit_structural_elements(model)
     {
         return Err(FeaRunError::InvalidModel(
             "linear static solid continuum studies require a canonical solver mesh".to_string(),
@@ -546,13 +548,6 @@ fn run_linear_static_with_constraint_plan(
         summary,
         solution: solve_result.solution,
     })
-}
-
-fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
-    model
-        .structural
-        .as_ref()
-        .is_some_and(|structural| !structural.elements.is_empty())
 }
 
 fn structural_linear_known_answer_diagnostic(

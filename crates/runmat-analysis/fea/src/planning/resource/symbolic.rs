@@ -1,17 +1,19 @@
 use std::collections::BTreeSet;
 
-use runmat_analysis_core::{AnalysisModel, StructuralElementKind, StructuralModel};
+use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     algebra::SparsePattern,
-    assembly::{dofs::StructuralDofKind, dofs::StructuralDofLayout, mixed_dof_layout},
-    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity},
-    physics::structural::topology::{
-        node_space::CanonicalStructuralNodeSpace, target::resolve_mixed_structural_target,
+    assembly::{
+        dofs::StructuralDofKind, dofs::StructuralDofLayout,
+        explicit_connectors::compile_model_connector_plan, mixed_dof_layout,
     },
+    connectors::{CanonicalConnectorEntry, CanonicalStructuralConnectorPlan},
+    constraints::{CanonicalStructuralConstraintPlan, CanonicalStructuralTopologyIdentity},
+    physics::structural::topology::node_space::CanonicalStructuralNodeSpace,
     topology::AnalysisProjection,
 };
 
@@ -105,14 +107,10 @@ impl StructuralSymbolicOperators {
                     "solid connector layout and symbolic DOF count differ".into(),
                 ));
             }
-            add_mesh_connector_pattern(
-                &mut stiffness_rows,
-                model,
-                mesh,
-                &StructuralModel::default(),
-                &topology,
-                &layout,
-            )?;
+            let plan =
+                compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut stiffness_rows, &plan, constraints.topology, &layout)?;
         }
         let stiffness_upper_bound = pattern_from_rows(stiffness_rows, total_dofs)?;
         let diagonal = diagonal_pattern(total_dofs)?;
@@ -194,37 +192,11 @@ impl StructuralSymbolicOperators {
             }
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
-        for connector in &model.connectors {
-            let mut connector_nodes = Vec::new();
-            connector.kind.visit_targets(|target| {
-                connector_nodes.extend(
-                    crate::physics::structural::topology::explicit_target_node_indices(
-                        structural,
-                        &target.region_id,
-                    ),
-                );
-            });
-            connector_nodes.sort_unstable();
-            connector_nodes.dedup();
-            if connector_nodes.is_empty() {
-                return Err(ResourcePlanningError::Invalid(format!(
-                    "connector `{}` resolves to no explicit structural nodes",
-                    connector.connector_id
-                )));
-            }
-            let mut connector_dofs = Vec::new();
-            for node in connector_nodes {
-                connector_dofs.extend(
-                    [
-                        StructuralDofKind::Ux,
-                        StructuralDofKind::Uy,
-                        StructuralDofKind::Uz,
-                    ]
-                    .into_iter()
-                    .filter_map(|dof| layout.index(node, dof)),
-                );
-            }
-            add_dense_element_pattern(&mut rows, &connector_dofs);
+        if !model.connectors.is_empty() {
+            let plan =
+                compile_model_connector_plan(model, None, constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
         }
         for (row, columns) in rows.iter_mut().enumerate() {
             columns.insert(row);
@@ -302,7 +274,12 @@ impl StructuralSymbolicOperators {
             }
             add_dense_element_pattern(&mut rows, &element_dofs);
         }
-        add_mesh_connector_pattern(&mut rows, model, mesh, structural, &topology, &layout)?;
+        if !model.connectors.is_empty() {
+            let plan =
+                compile_model_connector_plan(model, Some(mesh), constraints.reference_points.len())
+                    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            add_connector_plan_pattern(&mut rows, &plan, constraints.topology, &layout)?;
+        }
         for (row, columns) in rows.iter_mut().enumerate() {
             columns.insert(row);
         }
@@ -363,32 +340,43 @@ impl StructuralSymbolicOperators {
     }
 }
 
-fn add_mesh_connector_pattern(
+fn add_connector_plan_pattern(
     rows: &mut [BTreeSet<usize>],
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-    structural: &StructuralModel,
-    topology: &CanonicalStructuralNodeSpace,
+    plan: &CanonicalStructuralConnectorPlan,
+    topology: CanonicalStructuralTopologyIdentity,
     layout: &StructuralDofLayout,
 ) -> Result<(), ResourcePlanningError> {
-    for connector in &model.connectors {
+    if plan.topology != topology || plan.node_count != layout.node_count() {
+        return Err(ResourcePlanningError::Invalid(
+            "connector plan and symbolic topology differ".into(),
+        ));
+    }
+    for connector in &plan.entries {
         let mut connector_nodes = Vec::new();
-        let mut resolution_error = None;
-        connector.kind.visit_targets(|target| {
-            match resolve_mixed_structural_target(target, mesh, structural, topology) {
-                Ok(ownership) => connector_nodes.extend_from_slice(ownership.canonical_nodes()),
-                Err(error) => resolution_error = Some(error),
+        match connector {
+            CanonicalConnectorEntry::AxialSpring {
+                primary, secondary, ..
             }
-        });
-        if let Some(error) = resolution_error {
-            return Err(ResourcePlanningError::Invalid(error.to_string()));
+            | CanonicalConnectorEntry::AxialDashpot {
+                primary, secondary, ..
+            } => connector_nodes.extend([primary.node_index, secondary.node_index]),
+            CanonicalConnectorEntry::IsotropicGroundSpring { target, .. } => {
+                connector_nodes.push(target.node_index);
+            }
+            CanonicalConnectorEntry::SurfaceNormalFoundation { quadrature, .. } => {
+                connector_nodes.extend(
+                    quadrature
+                        .iter()
+                        .flat_map(|point| point.nodes.iter().map(|node| node.node_index)),
+                );
+            }
         }
         connector_nodes.sort_unstable();
         connector_nodes.dedup();
         if connector_nodes.is_empty() {
             return Err(ResourcePlanningError::Invalid(format!(
                 "connector `{}` resolves to no structural nodes",
-                connector.connector_id
+                connector.connector_id()
             )));
         }
         let mut connector_dofs = Vec::new();
@@ -400,7 +388,15 @@ fn add_mesh_connector_pattern(
                     StructuralDofKind::Uz,
                 ]
                 .into_iter()
-                .filter_map(|dof| layout.index(node, dof)),
+                .map(|dof| {
+                    layout.index(node, dof).ok_or_else(|| {
+                        ResourcePlanningError::Invalid(format!(
+                            "connector `{}` lacks a translational DOF",
+                            connector.connector_id()
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             );
         }
         add_dense_element_pattern(rows, &connector_dofs);

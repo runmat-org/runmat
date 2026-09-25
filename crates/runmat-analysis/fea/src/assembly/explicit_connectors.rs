@@ -18,7 +18,10 @@ use crate::{
     planning::resource::LocalExecutionPlan,
 };
 
+mod model_targets;
 mod scoped;
+pub(crate) use model_targets::compile_model_connector_plan;
+pub(super) use model_targets::resolve_projected_surface;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ExplicitConnectorSummary {
@@ -59,6 +62,20 @@ struct PreparedPointConnector<'a> {
     connector: &'a AnalysisConnector,
     source_digest: runmat_execution::Digest,
     operator: PointConnectorOperator,
+}
+
+enum PreparedConnector<'a> {
+    Point(PreparedPointConnector<'a>),
+    Surface {
+        connector: &'a AnalysisConnector,
+        samples: Vec<SurfaceFoundationSample>,
+        modulus: f64,
+    },
+}
+
+struct CompiledConnectors<'a> {
+    plan: CanonicalStructuralConnectorPlan,
+    work: Vec<PreparedConnector<'a>>,
 }
 
 enum PointConnectorOperator {
@@ -121,23 +138,17 @@ pub(super) fn assemble_explicit_connectors(
     )
 }
 
-pub(super) fn assemble_connectors_with_resolver(
-    connectors: &[AnalysisConnector],
+fn compile_connectors_with_resolver<'a>(
+    connectors: &'a [AnalysisConnector],
     context: ConnectorAssemblyContext<'_>,
-    local_execution: LocalExecutionPlan,
-    stiffness: &mut RealSparseAssembler,
-    damping: &mut RealSparseAssembler,
     mut resolve: impl FnMut(
         &AnalysisConnector,
         &RegionTarget,
         ConnectorTargetRole,
     ) -> Result<ResolvedConnectorTarget, StructuralAssemblyError>,
-) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
-    let mut stiffness_count = 0;
-    let mut damping_count = 0;
+) -> Result<CompiledConnectors<'a>, StructuralAssemblyError> {
     let mut entries = Vec::with_capacity(connectors.len());
-    let mut point_wave = Vec::new();
-    let point_wave_capacity = scoped::point_wave_capacity(local_execution)?;
+    let mut work = Vec::with_capacity(connectors.len());
     for connector in connectors {
         let source_digest = crate::connectors::contract::source_digest(connector)
             .map_err(|_| invalid(connector, "connector source identity could not be encoded"))?;
@@ -150,7 +161,7 @@ pub(super) fn assemble_connectors_with_resolver(
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
                 let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
-                point_wave.push(PreparedPointConnector {
+                let point = PreparedPointConnector {
                     connector,
                     source_digest,
                     operator: PointConnectorOperator::AxialSpring {
@@ -158,7 +169,12 @@ pub(super) fn assemble_connectors_with_resolver(
                         axis,
                         coefficient: value.newtons_per_meter,
                     },
-                });
+                };
+                entries.push(scoped::canonical_point_entry(
+                    &point,
+                    context.node_identities,
+                )?);
+                work.push(PreparedConnector::Point(point));
             }
             ConnectorKind::AxialDashpot {
                 primary,
@@ -168,7 +184,7 @@ pub(super) fn assemble_connectors_with_resolver(
                 let endpoints =
                     resolve_axial_endpoints(connector, primary, secondary, &mut resolve)?;
                 let axis = axial_axis(context.coordinates_m, endpoints, connector)?;
-                point_wave.push(PreparedPointConnector {
+                let point = PreparedPointConnector {
                     connector,
                     source_digest,
                     operator: PointConnectorOperator::AxialDashpot {
@@ -176,7 +192,12 @@ pub(super) fn assemble_connectors_with_resolver(
                         axis,
                         coefficient: value.newton_seconds_per_meter,
                     },
-                });
+                };
+                entries.push(scoped::canonical_point_entry(
+                    &point,
+                    context.node_identities,
+                )?);
+                work.push(PreparedConnector::Point(point));
             }
             ConnectorKind::IsotropicGroundSpring {
                 target,
@@ -184,29 +205,21 @@ pub(super) fn assemble_connectors_with_resolver(
             } => {
                 let resolved = resolve(connector, target, ConnectorTargetRole::Point)?;
                 let node = exactly_one_node(connector, target, &resolved.node_indices)?;
-                point_wave.push(PreparedPointConnector {
+                let point = PreparedPointConnector {
                     connector,
                     source_digest,
                     operator: PointConnectorOperator::GroundSpring {
                         node,
                         coefficient: value.newtons_per_meter,
                     },
-                });
+                };
+                entries.push(scoped::canonical_point_entry(
+                    &point,
+                    context.node_identities,
+                )?);
+                work.push(PreparedConnector::Point(point));
             }
             ConnectorKind::SurfaceNormalFoundation { target, modulus } => {
-                scoped::flush_point_wave(
-                    &mut point_wave,
-                    context.layout,
-                    local_execution,
-                    scoped::PointConnectorSink {
-                        stiffness,
-                        damping,
-                        node_identities: context.node_identities,
-                        canonical_entries: &mut entries,
-                        stiffness_count: &mut stiffness_count,
-                        damping_count: &mut damping_count,
-                    },
-                )?;
                 let resolved = resolve(connector, target, ConnectorTargetRole::Surface)?;
                 if resolved.surface_samples.is_empty() {
                     return Err(invalid(
@@ -215,24 +228,6 @@ pub(super) fn assemble_connectors_with_resolver(
                     ));
                 }
                 scoped::validate_surface_samples(connector, &resolved.surface_samples)?;
-                if local_execution.is_serial() {
-                    add_surface_normal_foundation(
-                        stiffness,
-                        context.layout,
-                        &resolved.surface_samples,
-                        modulus.newtons_per_cubic_meter,
-                    );
-                } else {
-                    scoped::add_surface_normal_foundation_scoped(
-                        connector,
-                        stiffness,
-                        context.layout,
-                        &resolved.surface_samples,
-                        modulus.newtons_per_cubic_meter,
-                        local_execution,
-                    )?;
-                }
-                stiffness.add_contribution(provenance(connector));
                 entries.push(CanonicalConnectorEntry::SurfaceNormalFoundation {
                     connector_id: connector.connector_id.clone(),
                     source_digest,
@@ -256,38 +251,14 @@ pub(super) fn assemble_connectors_with_resolver(
                         })
                         .collect::<Result<Vec<_>, StructuralAssemblyError>>()?,
                 });
-                stiffness_count += 1;
+                work.push(PreparedConnector::Surface {
+                    connector,
+                    samples: resolved.surface_samples,
+                    modulus: modulus.newtons_per_cubic_meter,
+                });
             }
         }
-        if point_wave.len() == point_wave_capacity {
-            scoped::flush_point_wave(
-                &mut point_wave,
-                context.layout,
-                local_execution,
-                scoped::PointConnectorSink {
-                    stiffness,
-                    damping,
-                    node_identities: context.node_identities,
-                    canonical_entries: &mut entries,
-                    stiffness_count: &mut stiffness_count,
-                    damping_count: &mut damping_count,
-                },
-            )?;
-        }
     }
-    scoped::flush_point_wave(
-        &mut point_wave,
-        context.layout,
-        local_execution,
-        scoped::PointConnectorSink {
-            stiffness,
-            damping,
-            node_identities: context.node_identities,
-            canonical_entries: &mut entries,
-            stiffness_count: &mut stiffness_count,
-            damping_count: &mut damping_count,
-        },
-    )?;
     let plan = CanonicalStructuralConnectorPlan::new(
         context.topology_identity,
         context.coordinates_m.len(),
@@ -303,10 +274,93 @@ pub(super) fn assemble_connectors_with_resolver(
         connector_id: "connector-plan".into(),
         reason: "canonical connector realization is invalid",
     })?;
+    Ok(CompiledConnectors { plan, work })
+}
+
+pub(super) fn assemble_connectors_with_resolver(
+    connectors: &[AnalysisConnector],
+    context: ConnectorAssemblyContext<'_>,
+    local_execution: LocalExecutionPlan,
+    stiffness: &mut RealSparseAssembler,
+    damping: &mut RealSparseAssembler,
+    resolve: impl FnMut(
+        &AnalysisConnector,
+        &RegionTarget,
+        ConnectorTargetRole,
+    ) -> Result<ResolvedConnectorTarget, StructuralAssemblyError>,
+) -> Result<ExplicitConnectorSummary, StructuralAssemblyError> {
+    let layout = context.layout;
+    let compiled = compile_connectors_with_resolver(connectors, context, resolve)?;
+    let mut stiffness_count = 0;
+    let mut damping_count = 0;
+    let mut point_wave = Vec::new();
+    let point_wave_capacity = scoped::point_wave_capacity(local_execution)?;
+    for prepared in compiled.work {
+        match prepared {
+            PreparedConnector::Point(point) => {
+                point_wave.push(point);
+                if point_wave.len() == point_wave_capacity {
+                    scoped::flush_point_wave(
+                        &mut point_wave,
+                        layout,
+                        local_execution,
+                        scoped::PointConnectorSink {
+                            stiffness,
+                            damping,
+                            stiffness_count: &mut stiffness_count,
+                            damping_count: &mut damping_count,
+                        },
+                    )?;
+                }
+            }
+            PreparedConnector::Surface {
+                connector,
+                samples,
+                modulus,
+            } => {
+                scoped::flush_point_wave(
+                    &mut point_wave,
+                    layout,
+                    local_execution,
+                    scoped::PointConnectorSink {
+                        stiffness,
+                        damping,
+                        stiffness_count: &mut stiffness_count,
+                        damping_count: &mut damping_count,
+                    },
+                )?;
+                if local_execution.is_serial() {
+                    add_surface_normal_foundation(stiffness, layout, &samples, modulus);
+                } else {
+                    scoped::add_surface_normal_foundation_scoped(
+                        connector,
+                        stiffness,
+                        layout,
+                        &samples,
+                        modulus,
+                        local_execution,
+                    )?;
+                }
+                stiffness.add_contribution(provenance(connector));
+                stiffness_count += 1;
+            }
+        }
+    }
+    scoped::flush_point_wave(
+        &mut point_wave,
+        layout,
+        local_execution,
+        scoped::PointConnectorSink {
+            stiffness,
+            damping,
+            stiffness_count: &mut stiffness_count,
+            damping_count: &mut damping_count,
+        },
+    )?;
     Ok(ExplicitConnectorSummary {
         stiffness_count,
         damping_count,
-        plan,
+        plan: compiled.plan,
     })
 }
 
@@ -447,52 +501,6 @@ pub(super) fn resolve_explicit_surface(
                 area_weight_m2: triangle.area_m2 / 3.0,
             });
         }
-    }
-    nodes.sort_unstable();
-    nodes.dedup();
-    Ok(ResolvedConnectorTarget {
-        node_indices: nodes,
-        surface_samples: samples,
-    })
-}
-
-pub(super) fn resolve_projected_surface(
-    connector: &AnalysisConnector,
-    target: &RegionTarget,
-    projection: &crate::topology::AnalysisProjection,
-) -> Result<ResolvedConnectorTarget, StructuralAssemblyError> {
-    let faces = projection
-        .boundary_faces
-        .iter()
-        .filter(|face| {
-            face.provenance
-                .iter()
-                .any(|entity| target.matches_persistent_entity(entity))
-        })
-        .collect::<Vec<_>>();
-    if faces.is_empty() {
-        return Err(StructuralAssemblyError::UnmappedExplicitConnector {
-            connector_id: connector.connector_id.clone(),
-            target: "surface",
-            region_id: target.region_id.clone(),
-        });
-    }
-    let mut nodes = Vec::new();
-    let mut samples = Vec::new();
-    for face in faces {
-        nodes.extend_from_slice(&face.node_indices);
-        projection
-            .visit_boundary_quadrature(face, |point| {
-                let normal = unit_vector(point.area_vector_weight_m2)
-                    .expect("validated boundary quadrature owns a nonzero normal");
-                samples.push(SurfaceFoundationSample {
-                    node_indices: face.node_indices.clone(),
-                    shape_values: point.shape_values().to_vec(),
-                    unit_normal: normal,
-                    area_weight_m2: point.area_weight_m2,
-                });
-            })
-            .map_err(|_| invalid(connector, "surface foundation face quadrature is invalid"))?;
     }
     nodes.sort_unstable();
     nodes.dedup();

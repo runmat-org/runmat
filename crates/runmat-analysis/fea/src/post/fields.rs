@@ -27,8 +27,8 @@ mod scalars;
 mod state;
 
 pub use catalog::{
-    structural_observable_field_definitions, take_structural_observable_fields,
-    StructuralLinearFieldQuantity,
+    structural_observable_field_definitions, structural_static_observable_field_definitions,
+    take_structural_observable_fields, StructuralLinearFieldQuantity,
 };
 use edge::edge_strain_tensor;
 use formulation::{recover_beam_result_fields, recover_shell_result_fields};

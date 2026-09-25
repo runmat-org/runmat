@@ -471,7 +471,7 @@ fn constraint_boundary_implementations(
         implementations
     }
 }
-fn resolve_target(
+pub(super) fn resolve_target(
     target_id: &str,
     target: &runmat_analysis_core::RegionTarget,
     mesh: &SolverMeshArtifact,

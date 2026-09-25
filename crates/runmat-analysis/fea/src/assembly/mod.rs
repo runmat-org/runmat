@@ -4,7 +4,7 @@ mod direct_constraints;
 pub mod dofs;
 pub mod elements;
 mod entry_points;
-mod explicit_connectors;
+pub(crate) mod explicit_connectors;
 mod explicit_elements;
 mod explicit_loads;
 mod explicit_system;

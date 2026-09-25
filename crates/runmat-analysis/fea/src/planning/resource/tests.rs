@@ -211,7 +211,10 @@ fn mixed_structural_fixture() -> (
         connector_id: "solid_to_beam_spring".into(),
         kind: runmat_analysis_core::ConnectorKind::AxialSpring {
             primary: runmat_analysis_core::RegionTarget::point("node:102"),
-            secondary: runmat_analysis_core::RegionTarget::point("node:2"),
+            secondary: runmat_analysis_core::RegionTarget::point(format!(
+                "node:{}",
+                mesh.topology.nodes[2].node_id
+            )),
             stiffness: runmat_analysis_core::Stiffness::new(2_000.0),
         },
     }];

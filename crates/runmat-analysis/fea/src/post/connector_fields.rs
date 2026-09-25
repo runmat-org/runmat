@@ -16,6 +16,28 @@ use crate::{
 
 use super::ComplexStructuralFieldRecoveryError;
 
+pub fn connector_observable_field_definitions(
+) -> Result<[RecoveredFieldDefinition; 2], RecoveredFieldError> {
+    Ok([
+        RecoveredFieldDefinition::new(
+            FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
+            ObservationQuantity::ReactionForce,
+            FieldLocation::Connector,
+            RecoveredFieldEntityDomain::Connectors,
+            ObservationValueShape::Vector3,
+            RecoveredFieldNumericRepresentation::Real,
+        )?,
+        RecoveredFieldDefinition::new(
+            FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY,
+            ObservationQuantity::StrainEnergy,
+            FieldLocation::Connector,
+            RecoveredFieldEntityDomain::Connectors,
+            ObservationValueShape::Scalar,
+            RecoveredFieldNumericRepresentation::Real,
+        )?,
+    ])
+}
+
 /// Recovers the peak-amplitude connector-force phasor from one harmonic displacement state.
 ///
 /// The canonical real connector law remains authoritative. Evaluating it for the real and
@@ -114,44 +136,24 @@ pub fn recover_connector_observable_fields(
         .iter()
         .map(|response| response.stored_energy_joules())
         .collect();
-    [
-        (
-            FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
-            ObservationQuantity::ReactionForce,
-            ObservationValueShape::Vector3,
+    connector_observable_field_definitions()?
+        .into_iter()
+        .zip([
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_CONNECTOR_FORCE,
                 vec![connector_count, 3],
                 forces,
             ),
-        ),
-        (
-            FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY,
-            ObservationQuantity::StrainEnergy,
-            ObservationValueShape::Scalar,
             AnalysisField::host_f64(
                 FEA_FIELD_STRUCTURAL_CONNECTOR_STORED_ENERGY,
                 vec![connector_count],
                 energies,
             ),
-        ),
-    ]
-    .into_iter()
-    .map(|(field_id, quantity, shape, storage)| {
-        RecoveredField::new(
-            RecoveredFieldDefinition::new(
-                field_id,
-                quantity,
-                FieldLocation::Connector,
-                RecoveredFieldEntityDomain::Connectors,
-                shape,
-                RecoveredFieldNumericRepresentation::Real,
-            )?,
-            RecoveredFieldSample::Final,
-            storage,
-        )
-    })
-    .collect()
+        ])
+        .map(|(definition, storage)| {
+            RecoveredField::new(definition, RecoveredFieldSample::Final, storage)
+        })
+        .collect()
 }
 
 #[cfg(test)]

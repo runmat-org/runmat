@@ -420,6 +420,15 @@ fn direct_solid_connector_static_preflights_memory() {
             .structural_connector_result
             .as_ref()
             .expect("connector response")
+            .plan,
+        crate::assembly::explicit_connectors::compile_model_connector_plan(&model, Some(&mesh), 0)
+            .unwrap(),
+    );
+    assert_eq!(
+        result
+            .structural_connector_result
+            .as_ref()
+            .expect("connector response")
             .responses
             .len(),
         1,
@@ -1281,6 +1290,27 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
                 cost: runmat_analysis_core::ObservationCostPolicy::Automatic,
             },
         )];
+    let mut rejected_model = supported_model.clone();
+    rejected_model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let error = crate::run_linear_static_with_options(
+        &rejected_model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("connector observation must be costed before assembly");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                maximum: 1,
+                ..
+            }
+        )
+    ));
     let supported = crate::run_linear_static_with_options(
         &supported_model,
         ComputeBackend::Cpu,
@@ -1298,6 +1328,15 @@ fn grounded_explicit_spring_changes_the_completed_physical_solution() {
         .structural_connector_result
         .as_ref()
         .expect("the executed connector plan must publish physical response");
+    assert_eq!(
+        connector_result.plan,
+        crate::assembly::explicit_connectors::compile_model_connector_plan(
+            &supported_model,
+            None,
+            0,
+        )
+        .unwrap(),
+    );
     let expected_force = connector_result.responses[0].resultant_force_newtons();
     let observation = supported
         .observations
