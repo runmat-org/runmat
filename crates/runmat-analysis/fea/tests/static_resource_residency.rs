@@ -1,7 +1,7 @@
 //! Isolated Rust-heap and whole-process RSS evidence for admitted CPU physical static solves.
 //! Scheduler memory-byte-millis records reservations, not these measured peaks.
 
-#[path = "support/peak_allocator.rs"]
+#[path = "../support/peak_allocator.rs"]
 mod peak_allocator;
 
 use std::sync::Mutex;

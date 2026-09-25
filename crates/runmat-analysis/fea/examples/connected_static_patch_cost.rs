@@ -3,16 +3,20 @@
 //! Run with `cargo run --release -p runmat-analysis-fea --example connected_static_patch_cost -- 3 3 4 tet10`.
 //! Refinement and resource planning are outside the timed solve. The printed factorization
 //! reservation is the conservative coercivity-admission envelope, not observed factor storage.
-//! Peak RSS includes process startup and all retained data, so it is not an isolated FEA
-//! allocation or a resource-admission pass.
+//! The counted Rust heap peak begins after refinement and planning, but does not include native
+//! allocations. Peak RSS includes process startup and all retained data; neither measure alone
+//! proves the production worker's complete resource accounting.
 
 use std::{
     collections::{BTreeSet, HashMap},
     env,
     error::Error,
-    mem::MaybeUninit,
     time::Instant,
 };
+
+#[path = "../support/peak_allocator.rs"]
+mod peak_allocator;
+use peak_allocator::{begin_measurement, end_measurement, process_peak_rss_bytes};
 
 use runmat_analysis_core::{
     AnalysisConstraint, CoordinateFrame, Displacement, FormulationRequirement,
@@ -201,26 +205,6 @@ fn patch_model(mesh: &SolverMeshArtifact) -> runmat_analysis_core::AnalysisModel
     model
 }
 
-#[cfg(unix)]
-fn process_peak_rss_bytes() -> Option<u64> {
-    let mut usage = MaybeUninit::<libc::rusage>::uninit();
-    // getrusage writes the complete structure before it is read below.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    let raw = u64::try_from(unsafe { usage.assume_init() }.ru_maxrss).ok()?;
-    if cfg!(target_os = "macos") {
-        Some(raw)
-    } else {
-        raw.checked_mul(1024)
-    }
-}
-
-#[cfg(not(unix))]
-fn process_peak_rss_bytes() -> Option<u64> {
-    None
-}
-
 fn solve_patch(
     model: &runmat_analysis_core::AnalysisModel,
     mesh: &SolverMeshArtifact,
@@ -301,6 +285,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
     let model = patch_model(&mesh);
     let plan = plan_patch(&model, &mesh, local_execution)?;
+    let baseline_live_heap_bytes = begin_measurement();
     let mut timings = Vec::with_capacity(repetitions);
     let mut maximum_displacement_error_m = 0.0_f64;
     for _ in 0..repetitions {
@@ -329,6 +314,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+    let peak_live_heap_bytes = end_measurement();
+    let incremental_heap_peak_bytes = peak_live_heap_bytes.saturating_sub(baseline_live_heap_bytes);
+    let numerical_request_bytes = plan
+        .request
+        .memory_bytes
+        .checked_sub(plan.breakdown.worker_overhead_bytes.0)
+        .ok_or("worker overhead exceeds admitted memory")?;
+    if incremental_heap_peak_bytes > numerical_request_bytes {
+        return Err(format!(
+            "counted Rust heap growth {incremental_heap_peak_bytes} exceeds admitted numerical memory {numerical_request_bytes}"
+        )
+        .into());
+    }
     timings.sort_by(f64::total_cmp);
     println!("os={},arch={},order={order:?},levels={levels},nodes={},elements={},threads={threads},repetitions={repetitions},min_s={:.6},median_s={:.6},max_displacement_error_m={maximum_displacement_error_m:.3e}",
         env::consts::OS, env::consts::ARCH, mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), timings[0], timings[repetitions / 2]);
@@ -344,6 +342,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         plan.breakdown.factorization_bytes.0,
         plan.breakdown.constraint_bytes.0,
         plan.breakdown.worker_overhead_bytes.0,
+    );
+    println!(
+        "rust_heap_baseline_live_bytes={baseline_live_heap_bytes},rust_heap_peak_live_bytes={peak_live_heap_bytes},rust_heap_incremental_peak_bytes={incremental_heap_peak_bytes},resource_plan_numerical_memory_bytes={numerical_request_bytes}"
     );
     if let Some(bytes) = process_peak_rss_bytes() {
         println!("process_peak_rss_bytes={bytes}");

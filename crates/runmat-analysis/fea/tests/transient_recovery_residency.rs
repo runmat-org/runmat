@@ -21,7 +21,7 @@ use runmat_analysis_fea::{
 
 #[path = "transient_recovery_residency/mesh.rs"]
 mod mesh;
-#[path = "support/peak_allocator.rs"]
+#[path = "../support/peak_allocator.rs"]
 mod peak_allocator;
 use peak_allocator::{begin_measurement, end_measurement, process_peak_rss_bytes};
 

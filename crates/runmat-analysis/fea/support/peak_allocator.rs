@@ -1,4 +1,4 @@
-//! Test-binary-local Rust heap peak measurement; native allocations are not included.
+//! Diagnostic-binary-local Rust heap peak measurement; native allocations are not included.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
