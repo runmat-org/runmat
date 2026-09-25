@@ -2,7 +2,7 @@ use runmat_analysis_core::{AnalysisField, AnalysisModel, ProcedureStep};
 
 use crate::assembly::AssemblySummary;
 use crate::{
-    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    assembly::{assemble_structural_system_borrowed, StructuralFormulationRequirement},
     contracts::{
         fea_transient_damping_dissipation_field_id, fea_transient_energy_balance_residual_field_id,
         fea_transient_external_work_field_id, fea_transient_kinetic_energy_field_id,
@@ -164,10 +164,10 @@ fn assemble_transient_block_basis(
         ExcitationSamplePoint::time(start_time_s),
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let initial_assembly = assemble_structural_system(
+    let initial_assembly = assemble_structural_system_borrowed(
         &active_model,
         &excitations,
-        options.solver_mesh.clone(),
+        options.solver_mesh.as_ref(),
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
@@ -302,10 +302,10 @@ pub fn run_transient_block(
             },
         )
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        let assembly = assemble_structural_system(
+        let assembly = assemble_structural_system_borrowed(
             &basis.active_model,
             &excitations,
-            Some(input.solver_mesh.clone()),
+            Some(input.solver_mesh),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
@@ -441,10 +441,10 @@ pub fn run_transient_with_options(
         Some(1),
         Some(5),
     );
-    let summary = assemble_structural_system(
+    let summary = assemble_structural_system_borrowed(
         &active_model,
         &excitations,
-        options.solver_mesh.clone(),
+        options.solver_mesh.as_ref(),
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
     )
     .map_err(|err| FeaRunError::Assembly(err.to_string()))?;
@@ -491,10 +491,10 @@ pub fn run_transient_with_options(
             },
         )
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        let assembly = assemble_structural_system(
+        let assembly = assemble_structural_system_borrowed(
             &active_model,
             &excitations,
-            options.solver_mesh.clone(),
+            options.solver_mesh.as_ref(),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;

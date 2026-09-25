@@ -2,7 +2,9 @@ use runmat_analysis_core::SignalSampleApproach;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    assembly::{assemble_structural_system, AssemblySummary, StructuralFormulationRequirement},
+    assembly::{
+        assemble_structural_system_borrowed, AssemblySummary, StructuralFormulationRequirement,
+    },
     contracts::{ComputeBackend, ExecutionBackend, FeaRunError, FeaTransientRunResult},
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     execution::{
@@ -112,10 +114,10 @@ pub fn recover_completed_transient_run(
             },
         )
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        let summary = assemble_structural_system(
+        let summary = assemble_structural_system_borrowed(
             &basis.active_model,
             &excitations,
-            Some(input.solver_mesh.clone()),
+            Some(input.solver_mesh),
             StructuralFormulationRequirement::ExperimentalSyntheticOperator,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;

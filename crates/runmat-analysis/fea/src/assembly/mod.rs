@@ -3,6 +3,7 @@ mod constraint_projection;
 mod direct_constraints;
 pub mod dofs;
 pub mod elements;
+mod entry_points;
 mod explicit_connectors;
 mod explicit_elements;
 mod explicit_loads;
@@ -19,6 +20,10 @@ mod structural_loads;
 
 use std::{collections::BTreeMap, fmt};
 
+pub(crate) use entry_points::{
+    assemble_linear_system, assemble_structural_system, assemble_structural_system_borrowed,
+    assemble_structural_system_with_constraint_plan, assemble_structural_system_with_execution,
+};
 pub(crate) use mixed_structural::mixed_dof_layout;
 
 #[cfg(test)]
@@ -774,106 +779,16 @@ pub struct ElectroThermalAssemblySummary {
     pub coupling_fingerprint: u64,
 }
 
-/// Internal reduced operator used by non-structural experimental pipelines.
-///
-/// Structural callers must use [`assemble_structural_system`] so synthetic admission is explicit.
-pub(crate) fn assemble_linear_system(
-    model: &AnalysisModel,
-    excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
-) -> Result<AssemblySummary, LinearAssemblyError> {
-    let (thermo_mechanical_context, electro_thermal_context) =
-        crate::excitation::realize_coupling_contexts(model, excitations)
-            .map_err(LinearAssemblyError::CouplingRealization)?;
-    assemble_linear_system_impl(
-        model,
-        excitations,
-        solver_mesh,
-        thermo_mechanical_context,
-        electro_thermal_context,
-        AssemblyExecution {
-            structural_requirement: None,
-            supplied_constraint_plan: None,
-            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
-        },
-    )
-}
-
-pub(crate) fn assemble_structural_system(
-    model: &AnalysisModel,
-    excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
-    requirement: StructuralFormulationRequirement,
-) -> Result<AssemblySummary, LinearAssemblyError> {
-    let (thermo_mechanical_context, electro_thermal_context) =
-        crate::excitation::realize_coupling_contexts(model, excitations)
-            .map_err(LinearAssemblyError::CouplingRealization)?;
-    assemble_linear_system_impl(
-        model,
-        excitations,
-        solver_mesh,
-        thermo_mechanical_context,
-        electro_thermal_context,
-        AssemblyExecution {
-            structural_requirement: Some(requirement),
-            supplied_constraint_plan: None,
-            local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
-        },
-    )
-}
-
-pub(crate) fn assemble_structural_system_with_constraint_plan(
-    model: &AnalysisModel,
-    excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
-    requirement: StructuralFormulationRequirement,
-    constraint_plan: &CanonicalStructuralConstraintPlan,
-) -> Result<AssemblySummary, LinearAssemblyError> {
-    assemble_structural_system_with_execution(
-        model,
-        excitations,
-        solver_mesh,
-        requirement,
-        Some(constraint_plan),
-        crate::planning::resource::LocalExecutionPlan::serial(),
-    )
-}
-
-pub(crate) fn assemble_structural_system_with_execution(
-    model: &AnalysisModel,
-    excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
-    requirement: StructuralFormulationRequirement,
-    constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
-    local_execution: crate::planning::resource::LocalExecutionPlan,
-) -> Result<AssemblySummary, LinearAssemblyError> {
-    let (thermo_mechanical_context, electro_thermal_context) =
-        crate::excitation::realize_coupling_contexts(model, excitations)
-            .map_err(LinearAssemblyError::CouplingRealization)?;
-    assemble_linear_system_impl(
-        model,
-        excitations,
-        solver_mesh,
-        thermo_mechanical_context,
-        electro_thermal_context,
-        AssemblyExecution {
-            structural_requirement: Some(requirement),
-            supplied_constraint_plan: constraint_plan,
-            local_execution,
-        },
-    )
-}
-
-struct AssemblyExecution<'a> {
+pub(super) struct AssemblyExecution<'a> {
     structural_requirement: Option<StructuralFormulationRequirement>,
     supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
 }
 
-fn assemble_linear_system_impl(
+pub(super) fn assemble_linear_system_impl(
     model: &AnalysisModel,
     excitations: &RealizedExcitations,
-    solver_mesh: Option<SolverMeshArtifact>,
+    solver_mesh: Option<&SolverMeshArtifact>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     electro_thermal_context: Option<FeaElectroThermalContext>,
     execution: AssemblyExecution<'_>,
@@ -889,7 +804,7 @@ fn assemble_linear_system_impl(
         .map(|structural| structural.elements.len())
         .unwrap_or(0);
     if structural_requirement.is_some() && explicit_element_count > 0 {
-        if let Some(solver_mesh) = solver_mesh.as_ref() {
+        if let Some(solver_mesh) = solver_mesh {
             return mixed_structural::assemble_mixed_structural_system(
                 model,
                 excitations,
@@ -916,7 +831,6 @@ fn assemble_linear_system_impl(
 
     let base_dof_count = (excitations.len() * 3).max(3);
     let solid_topology = solver_mesh
-        .as_ref()
         .map(solver_solid_topology)
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?;
@@ -935,7 +849,7 @@ fn assemble_linear_system_impl(
     let compiled_constraint_plan = match (
         structural_requirement,
         supplied_constraint_plan,
-        solver_mesh.as_ref(),
+        solver_mesh,
     ) {
         (Some(_), None, Some(mesh)) => Some(
             CanonicalStructuralConstraintPlan::compile(model, mesh)
@@ -944,7 +858,7 @@ fn assemble_linear_system_impl(
         _ => None,
     };
     let constraint_plan = supplied_constraint_plan.or(compiled_constraint_plan.as_ref());
-    if let (Some(plan), Some(mesh)) = (constraint_plan, solver_mesh.as_ref()) {
+    if let (Some(plan), Some(mesh)) = (constraint_plan, solver_mesh) {
         plan.validate_against(model, mesh)
             .map_err(LinearAssemblyError::ConstraintPlan)?;
     }
@@ -1055,7 +969,7 @@ fn assemble_linear_system_impl(
     let mut constraint_matrix = None;
     let mut affine_constraint_reduction = None;
     if structural_requirement.is_some() {
-        if let (Some(mesh), Some(_)) = (solver_mesh.as_ref(), solid_topology.as_ref()) {
+        if let (Some(mesh), Some(_)) = (solver_mesh, solid_topology.as_ref()) {
             let constraint_plan = constraint_plan.ok_or_else(|| {
                 LinearAssemblyError::ConstraintPlan(ConstraintPlanError::Invalid(
                     "canonical solid assembly has no compiled constraint plan".into(),
@@ -1275,7 +1189,6 @@ fn assemble_linear_system_impl(
     }
 
     let solid_properties = solver_mesh
-        .as_ref()
         .filter(|_| structural_requirement.is_some())
         .map(|mesh| crate::properties::compile_solid_property_map(model, mesh))
         .transpose()
@@ -1285,7 +1198,6 @@ fn assemble_linear_system_impl(
             ))
         })?;
     let structural_solid_recovery = solver_mesh
-        .as_ref()
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
         .map(|(mesh, properties)| solid_recovery_from_solver_mesh(mesh, properties))
@@ -1293,7 +1205,6 @@ fn assemble_linear_system_impl(
         .map_err(LinearAssemblyError::SolidOperator)?
         .unwrap_or_default();
     let solid_operators = solver_mesh
-        .as_ref()
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
         .map(|(mesh, properties)| {
@@ -1337,7 +1248,7 @@ fn assemble_linear_system_impl(
     let mut structural_connector_plan = None;
     let mut structural_connector_stiffness_csr = None;
     if structural_requirement.is_some() && !model.connectors.is_empty() {
-        let mesh = solver_mesh.as_ref().ok_or({
+        let mesh = solver_mesh.ok_or({
             LinearAssemblyError::Structural(StructuralAssemblyError::MissingDiscretization)
         })?;
         let topology = crate::physics::structural::topology::node_space::CanonicalStructuralNodeSpace::derive_solid(mesh)
@@ -1606,11 +1517,9 @@ fn assemble_linear_system_impl(
             };
             let operators = CanonicalRealOperators::try_new(raw_stiffness, mass, damping)
                 .expect("assembled structural operator roles and dimensions are valid");
-            let nullspace_evidence = if let (Some(mesh), Some(plan), Some(_)) = (
-                solver_mesh.as_ref(),
-                constraint_plan,
-                solid_topology.as_ref(),
-            ) {
+            let nullspace_evidence = if let (Some(mesh), Some(plan), Some(_)) =
+                (solver_mesh, constraint_plan, solid_topology.as_ref())
+            {
                 let resolved_storage;
                 let resolved = if let Some(matrix) = constraint_matrix.as_ref() {
                     matrix

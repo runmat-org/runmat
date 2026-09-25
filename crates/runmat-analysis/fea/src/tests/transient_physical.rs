@@ -68,6 +68,38 @@ fn physical_reference_coefficients(
     )
 }
 
+#[test]
+fn borrowed_transient_assembly_preserves_owned_operator_and_mesh() {
+    let model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+    let original_digest = mesh.canonical_digest;
+    let excitations = crate::excitation::realize_step_excitations(
+        &model,
+        &model.sequence.steps[0],
+        crate::excitation::ExcitationSamplePoint::time(0.0),
+    )
+    .unwrap();
+    let requirement = crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization;
+    let owned = crate::assembly::assemble_structural_system(
+        &model,
+        &excitations,
+        Some(mesh.clone()),
+        requirement,
+    )
+    .unwrap();
+    let borrowed = crate::assembly::assemble_structural_system_borrowed(
+        &model,
+        &excitations,
+        Some(&mesh),
+        requirement,
+    )
+    .unwrap();
+    assert_eq!(mesh.canonical_digest, original_digest);
+    assert_eq!(borrowed.dof_count, owned.dof_count);
+    assert_eq!(borrowed.operator.load(), owned.operator.load());
+    assert_eq!(borrowed.operator.operators(), owned.operator.operators());
+}
+
 fn native_state_at(result: &crate::FeaTransientRunResult, snapshot: usize, dof: usize) -> [f64; 3] {
     [
         result.displacement_snapshots[snapshot]
