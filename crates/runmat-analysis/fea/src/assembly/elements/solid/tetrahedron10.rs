@@ -178,6 +178,8 @@ pub enum Tetrahedron10ElementError {
     DegenerateOrInverted,
     #[error("Tetrahedron10 Jacobian could not be certified positive throughout the element")]
     UncertifiedJacobian,
+    #[error("Tetrahedron10 curved material-stiffness quadrature did not converge")]
+    UnconvergedStiffnessQuadrature,
     #[error("Tetrahedron10 material is invalid: {0}")]
     InvalidMaterial(#[from] SolidMaterialError),
 }
