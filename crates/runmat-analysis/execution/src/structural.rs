@@ -176,8 +176,7 @@ pub fn prepare_structural_linear_program(
         &preparation.workload,
         &preparation.accelerator_requests,
         preparation.local_execution,
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    )?;
     let resource_plan_bytes = resource_plan
         .canonical_bytes()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

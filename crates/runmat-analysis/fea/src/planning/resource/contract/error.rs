@@ -4,6 +4,10 @@ use runmat_execution::resource::Capability;
 pub enum ResourcePlanningError {
     #[error("invalid FEA resource fact: {0}")]
     Invalid(String),
+    #[error(
+        "coercivity proof work on the structural stiffness upper-bound pattern is indeterminate; the prepared operator may still be admissible"
+    )]
+    IndeterminateCoercivityUpperBound,
     #[error("FEA resource arithmetic overflow: {0}")]
     Overflow(&'static str),
     #[error(

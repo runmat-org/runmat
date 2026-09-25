@@ -1,5 +1,5 @@
 use crate::{
-    algebra::CoercivitySymbolicPlan,
+    algebra::{CoercivityError, CoercivitySymbolicPlan},
     constraints::{
         AffineConstraintReduction, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
     },
@@ -101,7 +101,7 @@ pub fn build_structural_resource_plan(
         facts.symbolic.stiffness_upper_bound().clone()
     };
     let admission = CoercivitySymbolicPlan::derive(&admission_pattern)
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        .map_err(map_upper_bound_coercivity_error)?;
     let solve = solve_policy(
         workload.preconditioner,
         dofs,
@@ -232,6 +232,30 @@ pub fn build_structural_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
+}
+
+fn map_upper_bound_coercivity_error(error: CoercivityError) -> ResourcePlanningError {
+    match error {
+        CoercivityError::ResourceLimit => ResourcePlanningError::IndeterminateCoercivityUpperBound,
+        other => ResourcePlanningError::Invalid(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod upper_bound_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_symbolic_work_is_indeterminate_for_an_upper_bound_pattern() {
+        assert_eq!(
+            map_upper_bound_coercivity_error(CoercivityError::ResourceLimit),
+            ResourcePlanningError::IndeterminateCoercivityUpperBound
+        );
+        assert!(matches!(
+            map_upper_bound_coercivity_error(CoercivityError::IncompatibleOperator),
+            ResourcePlanningError::Invalid(_)
+        ));
+    }
 }
 
 fn structural_accelerator_requirements(
