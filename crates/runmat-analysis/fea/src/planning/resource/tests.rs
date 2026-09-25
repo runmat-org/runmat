@@ -20,6 +20,7 @@ use crate::{
 use super::*;
 
 mod curved_connector;
+mod exact_work;
 
 fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {
