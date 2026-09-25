@@ -101,6 +101,39 @@ impl AnalysisProjection {
         face: &ProjectedBoundaryFace,
         mut visit: impl FnMut(BoundaryQuadraturePoint),
     ) -> Result<(), AnalysisProjectionError> {
+        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        super::quadrature::visit_boundary_quadrature(face.order, &coordinates, |mut point| {
+            point.area_vector_weight_m2 = point
+                .area_vector_weight_m2
+                .map(|component| component * orientation);
+            visit(point);
+        })
+        .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+            face_id: face.face_id,
+        })
+    }
+
+    pub(crate) fn boundary_nodal_area_vectors(
+        &self,
+        face: &ProjectedBoundaryFace,
+    ) -> Result<Vec<[f64; 3]>, AnalysisProjectionError> {
+        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        super::quadrature::boundary_nodal_area_vectors(face.order, &coordinates)
+            .map(|vectors| {
+                vectors
+                    .into_iter()
+                    .map(|vector| vector.map(|component| orientation * component))
+                    .collect()
+            })
+            .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+                face_id: face.face_id,
+            })
+    }
+
+    fn boundary_coordinates_and_orientation(
+        &self,
+        face: &ProjectedBoundaryFace,
+    ) -> Result<(Vec<[f64; 3]>, f64), AnalysisProjectionError> {
         let expected_node_count = match face.order {
             BoundaryTriangleOrder::Tri3 => 3,
             BoundaryTriangleOrder::Tri6 => 6,
@@ -110,21 +143,14 @@ impl AnalysisProjection {
                 face_id: face.face_id,
             });
         }
-        let mut coordinates = [[0.0; 3]; 6];
-        for (local_node, &node_index) in face.node_indices.iter().enumerate() {
-            let coordinate = coordinates.get_mut(local_node).ok_or(
-                AnalysisProjectionError::InvalidBoundaryGeometry {
-                    face_id: face.face_id,
-                },
-            )?;
-            *coordinate = self
-                .nodes
-                .get(node_index)
-                .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
-                    face_id: face.face_id,
-                })?
-                .coordinates_m;
-        }
+        let coordinates = face
+            .node_indices
+            .iter()
+            .map(|&index| self.nodes.get(index).map(|node| node.coordinates_m))
+            .collect::<Option<Vec<_>>>()
+            .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+                face_id: face.face_id,
+            })?;
         let raw_normal = super::element::cross(
             super::element::subtract(coordinates[1], coordinates[0]),
             super::element::subtract(coordinates[2], coordinates[0]),
@@ -134,19 +160,7 @@ impl AnalysisProjection {
         } else {
             -1.0
         };
-        super::quadrature::visit_boundary_quadrature(
-            face.order,
-            &coordinates[..face.node_indices.len()],
-            |mut point| {
-                point.area_vector_weight_m2 = point
-                    .area_vector_weight_m2
-                    .map(|component| component * orientation);
-                visit(point);
-            },
-        )
-        .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
-            face_id: face.face_id,
-        })
+        Ok((coordinates, orientation))
     }
 }
 

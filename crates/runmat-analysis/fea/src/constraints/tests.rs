@@ -774,6 +774,9 @@ mod rank_plan;
 #[path = "tests/rotated_solve.rs"]
 mod rotated_solve;
 
+#[path = "tests/curved_normals.rs"]
+mod curved_normals;
+
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();

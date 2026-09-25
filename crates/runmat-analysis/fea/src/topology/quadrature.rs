@@ -1,5 +1,9 @@
 use runmat_meshing_core::{BoundaryTriangleOrder, ElementOrder, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 
+mod boundary_nodes;
+
+pub(super) use boundary_nodes::boundary_nodal_area_vectors;
+
 use super::{
     contract::{BoundaryQuadraturePoint, VolumeQuadraturePoint},
     element::{cross, dot, invert, norm, subtract},
