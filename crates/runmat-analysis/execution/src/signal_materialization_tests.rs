@@ -751,6 +751,9 @@ fn generated_force_and_moment_match_explicit_static_beam_and_analytic_balance() 
     close(projected_moment_z, 590.0);
 }
 
+#[path = "signal_materialization_tests/solid_static.rs"]
+mod solid_static;
+
 #[test]
 fn table_content_identity_includes_typed_jump_semantics() {
     let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);
