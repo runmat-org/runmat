@@ -6,7 +6,10 @@ use runmat_analysis_core::{
     StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_meshing_core::{
-    fixtures::{canonical_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh},
+    fixtures::{
+        canonical_tetrahedron_solver_mesh, connected_quadratic_tetrahedron_solver_mesh,
+        connected_tetrahedron_solver_mesh,
+    },
     ElementOrder,
 };
 
@@ -469,4 +472,84 @@ fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
         (host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] - 12.8 / 6.0).abs()
             < 1.0e-7
     );
+}
+
+#[test]
+fn connected_tet10_traction_patch_recovers_affine_solution_and_matches_parallel() {
+    let model = traction_patch_model();
+    let mesh = connected_quadratic_tetrahedron_solver_mesh();
+    let exact = mesh
+        .topology
+        .nodes
+        .iter()
+        .flat_map(|node| {
+            [
+                0.1 * node.coordinates_m[0],
+                0.2 * node.coordinates_m[1],
+                0.3 * node.coordinates_m[2],
+            ]
+        })
+        .collect::<Vec<_>>();
+    let summary = crate::assembly::assemble_structural_system(
+        &model,
+        &super::static_excitations(&model),
+        Some(mesh.clone()),
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("connected Tet10 patch should assemble");
+    let internal = crate::algebra::apply_k(&summary.operator, &exact);
+    assert_vectors_within_tolerance(
+        &internal,
+        &summary.physical_load,
+        ParityTolerance {
+            abs: 1.0e-9,
+            rel: 1.0e-10,
+        },
+    );
+    let options = LinearStaticSolveOptions {
+        solver_mesh: Some(mesh.clone()),
+        solver_mesh_artifact_path: Some("connected-tet10-traction-patch.rmmesh".into()),
+        ..experimental_linear_static_options()
+    };
+    let serial =
+        crate::run_linear_static_with_options(&model, ComputeBackend::Cpu, options.clone())
+            .expect("connected Tet10 patch should solve");
+    assert_vectors_within_tolerance(
+        host_field(&serial, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
+        &exact,
+        ParityTolerance {
+            abs: 1.0e-8,
+            rel: 1.0e-8,
+        },
+    );
+    let stress = host_field(&serial, FEA_FIELD_STRUCTURAL_STRESS);
+    assert_eq!(stress.len(), 4 * 6);
+    for values in stress.chunks_exact(6) {
+        assert_vectors_within_tolerance(
+            values,
+            &[32.0, 40.0, 48.0, 0.0, 0.0, 0.0],
+            ParityTolerance {
+                abs: 1.0e-6,
+                rel: 1.0e-8,
+            },
+        );
+    }
+    assert!(
+        (host_field(&serial, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] - 12.8 / 6.0).abs()
+            < 1.0e-7
+    );
+    let parallel = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            local_execution: crate::planning::resource::LocalExecutionPlan::fixed(
+                crate::planning::resource::LocalThreadCount::new(2).unwrap(),
+            )
+            .unwrap(),
+            ..options
+        },
+    )
+    .expect("parallel connected Tet10 patch should solve");
+    assert_eq!(serial.fields, parallel.fields);
+    assert_eq!(serial.observations, parallel.observations);
 }
