@@ -8,6 +8,7 @@ use super::{
 type DofKey = (CanonicalStructuralDofOwner, CanonicalStructuralDof);
 
 const RELATIVE_RANK_TOLERANCE: f64 = 1.0e-11;
+const RIGHT_HAND_SIDE_ROUNDOFF_ULPS: f64 = 64.0;
 
 struct BasisRow {
     pivot: DofKey,
@@ -50,7 +51,7 @@ pub(super) fn classify(
                 "constraint rank classification cannot normalize its right-hand side".into(),
             ));
         }
-        let right_hand_side_tolerance = right_hand_side.abs().max(1.0) * RELATIVE_RANK_TOLERANCE;
+        let mut right_hand_side_magnitude = right_hand_side.abs();
         let mut sources = BTreeSet::from([row.constraint_id.clone()]);
 
         for existing in &basis {
@@ -65,8 +66,11 @@ pub(super) fn classify(
                 }
                 *coefficients.entry(*key).or_insert(0.0) -= factor * coefficient;
             }
-            right_hand_side -= factor * existing.right_hand_side;
+            let eliminated_right_hand_side = factor * existing.right_hand_side;
+            right_hand_side_magnitude += eliminated_right_hand_side.abs();
+            right_hand_side -= eliminated_right_hand_side;
             if !right_hand_side.is_finite()
+                || !right_hand_side_magnitude.is_finite()
                 || coefficients
                     .values()
                     .any(|coefficient| !coefficient.is_finite())
@@ -80,6 +84,10 @@ pub(super) fn classify(
         coefficients.retain(|_, coefficient| coefficient.abs() > RELATIVE_RANK_TOLERANCE);
 
         let Some((&pivot, &pivot_coefficient)) = coefficients.first_key_value() else {
+            // Conflict detection is limited by floating-point cancellation, not the much
+            // wider tolerance used to decide numerical coefficient rank.
+            let right_hand_side_tolerance =
+                RIGHT_HAND_SIDE_ROUNDOFF_ULPS * f64::EPSILON * right_hand_side_magnitude.max(1.0);
             if right_hand_side.abs() > right_hand_side_tolerance {
                 let first_constraint_id = sources
                     .iter()
@@ -174,5 +182,23 @@ mod tests {
             rows[2].reaction_recovery,
             ReactionRecovery::RedundantEquation
         );
+    }
+
+    #[test]
+    fn large_prescribed_values_do_not_hide_resolvable_conflicts() {
+        let mut consistent = [
+            equation("first", 1.0, 0.0, 1.0e12),
+            equation("same", 1.0, 0.0, 1.0e12),
+        ];
+        assert_eq!(classify(&mut consistent).unwrap(), (1, 1));
+
+        let mut rows = [
+            equation("first", 1.0, 0.0, 1.0e12),
+            equation("second", 1.0, 0.0, 1.0e12 + 1.0),
+        ];
+        assert!(matches!(
+            classify(&mut rows),
+            Err(ConstraintPlanError::ConflictingRow { .. })
+        ));
     }
 }

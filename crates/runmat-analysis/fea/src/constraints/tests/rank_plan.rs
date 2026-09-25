@@ -39,3 +39,20 @@ fn scaled_equation_conflicts_are_reported_at_the_canonical_plan_boundary() {
         })
     );
 }
+
+#[test]
+fn large_prescribed_values_do_not_mask_plan_conflicts() {
+    let (mut model, mesh) = model_and_mesh();
+    model.constraints = vec![
+        equation_constraint("first", 1, 2, 1.0e12),
+        equation_constraint("second", 1, 2, 1.0e12 + 1.0),
+    ];
+    assert_eq!(
+        CanonicalStructuralConstraintPlan::compile(&model, &mesh),
+        Err(ConstraintPlanError::ConflictingRow {
+            first_constraint_id: "first".into(),
+            second_constraint_id: "second".into(),
+            conflicting_dof: None,
+        })
+    );
+}
