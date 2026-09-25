@@ -194,6 +194,47 @@ fn connector_observation_model() -> AnalysisModel {
     model
 }
 
+fn mixed_observation_model() -> AnalysisModel {
+    use runmat_analysis_core::{
+        FieldLocation, ObservationId, ObservationQuantity, ObservationRequest, ObservationTarget,
+        RetentionPolicy,
+    };
+
+    let mut model = connector_observation_model();
+    let ObservationRequest::History(connector_force) =
+        model.sequence.steps[0].observations[0].clone()
+    else {
+        unreachable!("connector fixture has one history")
+    };
+    let mut displacement = connector_force.clone();
+    displacement.observation_id = ObservationId("displacement_history".into());
+    displacement.quantity = ObservationQuantity::Displacement;
+    displacement.value_shape = displacement.quantity.canonical_value_shape();
+    displacement.target = ObservationTarget::WholeModel;
+    displacement.source_location = FieldLocation::Node;
+    displacement.output_location = FieldLocation::Node;
+
+    let mut stress = connector_force.clone();
+    stress.observation_id = ObservationId("stress_history".into());
+    stress.quantity = ObservationQuantity::Stress;
+    stress.value_shape = stress.quantity.canonical_value_shape();
+    stress.target = ObservationTarget::WholeModel;
+    stress.source_location = FieldLocation::Element;
+    stress.output_location = FieldLocation::Element;
+
+    let mut connector_energy = connector_force;
+    connector_energy.observation_id = ObservationId("dashpot_energy_history".into());
+    connector_energy.quantity = ObservationQuantity::StrainEnergy;
+    connector_energy.value_shape = connector_energy.quantity.canonical_value_shape();
+    connector_energy.storage.retention = RetentionPolicy::LatestSamples { count: 2 };
+    model.sequence.steps[0].observations.extend([
+        ObservationRequest::History(displacement),
+        ObservationRequest::History(stress),
+        ObservationRequest::History(connector_energy),
+    ]);
+    model
+}
+
 fn measure_physical_recovery(
     case: &'static str,
     model: AnalysisModel,
@@ -264,8 +305,23 @@ fn measure_physical_recovery(
         recovered.run.observation_histories.len(),
         workload.model.sequence.steps[0].observations.len()
     );
-    for history in &recovered.run.observation_histories {
-        assert_eq!(history.samples().len(), recovered.time_points_s.len());
+    for (history, request) in recovered
+        .run
+        .observation_histories
+        .iter()
+        .zip(&workload.model.sequence.steps[0].observations)
+    {
+        let runmat_analysis_core::ObservationRequest::History(spec) = request else {
+            unreachable!("recovery fixture only authors histories")
+        };
+        let expected = match &spec.storage.retention {
+            runmat_analysis_core::RetentionPolicy::Canonical => recovered.time_points_s.len(),
+            runmat_analysis_core::RetentionPolicy::LatestSamples { count } => {
+                recovered.time_points_s.len().min(*count)
+            }
+            _ => unreachable!("recovery fixture only uses canonical or latest retention"),
+        };
+        assert_eq!(history.samples().len(), expected);
     }
     assert!(
         peak <= plan.request.memory_bytes,
@@ -296,4 +352,8 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
     let (_, connector_observation_plan) =
         measure_physical_recovery("connector observation", connector_observation_model(), 24);
     assert!(connector_observation_plan > short_plan);
+    let (mixed_peak, mixed_plan) =
+        measure_physical_recovery("mixed observations", mixed_observation_model(), 240);
+    assert!(mixed_peak > long_peak);
+    assert!(mixed_plan > long_plan);
 }
