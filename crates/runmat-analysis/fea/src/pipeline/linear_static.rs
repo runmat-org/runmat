@@ -219,7 +219,6 @@ fn run_linear_static_with_constraint_plan(
         Some(5),
     );
     check_cancelled("fea.run_linear_static")?;
-
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::Solve,
@@ -228,7 +227,8 @@ fn run_linear_static_with_constraint_plan(
         Some(2),
         Some(5),
     );
-    let solve_result = solve::solve_static_system(&summary, &options)?;
+    let solve_result =
+        solve::solve_static_system(&summary, &options, preassembly.solver_admission.as_ref())?;
     let static_balance = solve::recover_static_balance(&summary, &solve_result.solution, &options)?;
     let structural_constraint_result =
         CanonicalStructuralConstraintResult::recover_for_model_from_solver_state(

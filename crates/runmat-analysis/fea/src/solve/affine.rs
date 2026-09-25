@@ -4,7 +4,7 @@ use crate::{
     constraints::AffineConstraintReduction,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    planning::resource::LocalExecutionPlan,
+    planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
     solve::{backend::kind::LinearAlgebraBackendKind, linear::LinearSolveResult},
 };
 
@@ -28,6 +28,7 @@ pub(super) fn solve_affine_constraint_system(
             |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
             None,
         ),
+        None,
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -39,6 +40,7 @@ pub(super) fn solve_affine_constraint_system_with_execution(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     solve_affine_constraint_system_with_apply(
         summary,
@@ -63,6 +65,7 @@ pub(super) fn solve_affine_constraint_system_with_execution(
             },
             Some(plan),
         ),
+        admission,
     )
 }
 
@@ -77,6 +80,7 @@ fn solve_affine_constraint_system_with_apply(
         impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
         Option<LocalExecutionPlan>,
     ),
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let (apply_full, dot, vector_plan) = operations;
     let expected_reduction = summary
@@ -140,13 +144,26 @@ fn solve_affine_constraint_system_with_apply(
         });
     }
 
-    if let Err(error) = PreparedRealLinearSystem::try_new(
+    let prepared = match PreparedRealLinearSystem::try_new(
         reduced_operator,
         reduced_rhs.clone(),
         vec![false; reduction.reduced_dof_count],
     ) {
-        return Ok(rejected_affine_system(summary, &error.to_string()));
+        Ok(prepared) => prepared,
+        Err(error) => return Ok(rejected_affine_system(summary, &error.to_string())),
+    };
+    if let Some(admission) = admission {
+        let accepted = prepared
+            .admissibility()
+            .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
+        if !accepted {
+            return Ok(rejected_affine_system(
+                summary,
+                "exact reduced-solver work exceeds the admitted resource envelope",
+            ));
+        }
     }
+    drop(prepared);
     let transpose_index = vector_plan
         .filter(|plan| !plan.is_serial())
         .map(|_| AffineTransposeIndex::new(reduction));

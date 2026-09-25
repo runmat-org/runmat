@@ -2,10 +2,11 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{FeaRunError, LinearStaticSolveOptions},
     diagnostics::FeaDiagnosticSeverity,
+    planning::resource::SolverAdmissionResourcePolicy,
     progress::check_cancelled,
     solve::{
         backend::build_backend,
-        linear::{solve_linear_system_with_execution, LinearSolveResult},
+        linear::{solve_linear_system_with_execution_admitted, LinearSolveResult},
         recover_structural_static_balance, StructuralStaticBalance,
     },
 };
@@ -13,6 +14,7 @@ use crate::{
 pub(super) fn solve_static_system(
     summary: &AssemblySummary,
     options: &LinearStaticSolveOptions,
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, FeaRunError> {
     let algebra_backend = build_backend(options.algebra_backend_kind);
     if options.initial_displacement.as_ref().is_some_and(|values| {
@@ -23,13 +25,14 @@ pub(super) fn solve_static_system(
             summary.dof_count
         )));
     }
-    let result = solve_linear_system_with_execution(
+    let result = solve_linear_system_with_execution_admitted(
         summary,
         options.preconditioner_kind,
         options.algebra_backend_kind,
         algebra_backend.as_ref(),
         options.initial_displacement.as_deref(),
         options.local_execution,
+        admission,
     )
     .map_err(|error| {
         if crate::is_fea_cancelled() {
@@ -119,7 +122,7 @@ mod tests {
             vec![1.0; dofs],
         )
         .unwrap();
-        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default())
+        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default(), None)
             .expect_err("invalid exact operator must not yield a recoverable static solution");
         assert!(
             matches!(error, FeaRunError::Solve(message) if message.contains("FEA_INVALID_REAL_SYSTEM"))

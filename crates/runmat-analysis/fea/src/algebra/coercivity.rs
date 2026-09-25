@@ -69,6 +69,19 @@ pub struct PreparedSolverAdmissibility {
 }
 
 impl CoercivityCertificate {
+    pub(crate) fn work_counts(&self) -> (u64, u64, u64, u64) {
+        let dimension = u64::try_from(self.dimension).expect("proved dimension fits u64");
+        let resident_bytes =
+            symbolic::symbolic_resident_bytes(dimension, self.factor_nonzero_count)
+                .expect("proved symbolic residency fits u64");
+        (
+            dimension,
+            self.factor_nonzero_count,
+            self.update_count,
+            resident_bytes,
+        )
+    }
+
     pub(super) fn prove(matrix: &RealSparseMatrix) -> Result<Self, CoercivityError> {
         let dimension = matrix.rows();
         if dimension == 0

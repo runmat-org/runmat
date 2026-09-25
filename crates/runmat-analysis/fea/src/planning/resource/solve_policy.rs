@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::algebra::CoercivityCertificate;
+
 use super::contract::{ByteCount, Count};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -29,6 +31,16 @@ pub struct SolverAdmissionResourcePolicy {
     pub factor_nonzero_upper_bound: Count,
     pub update_count_upper_bound: Count,
     pub resident_bytes_upper_bound: ByteCount,
+}
+
+impl SolverAdmissionResourcePolicy {
+    pub(crate) fn admits_certificate(&self, certificate: &CoercivityCertificate) -> bool {
+        let (dimension, factor_nonzeros, updates, resident_bytes) = certificate.work_counts();
+        dimension == self.dimension.0
+            && factor_nonzeros <= self.factor_nonzero_upper_bound.0
+            && updates <= self.update_count_upper_bound.0
+            && resident_bytes <= self.resident_bytes_upper_bound.0
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

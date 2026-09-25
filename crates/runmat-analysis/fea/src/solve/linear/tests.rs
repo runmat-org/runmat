@@ -4,7 +4,9 @@ use crate::{
         CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseAssembler,
         RealSparseMatrix,
     },
-    planning::resource::{execute_scoped_chunks, LocalThreadCount, ScopedLocalExecutionError},
+    planning::resource::{
+        execute_scoped_chunks, ByteCount, Count, LocalThreadCount, ScopedLocalExecutionError,
+    },
     solve::backend::cpu_reference::CpuReferenceBackend,
 };
 
@@ -53,6 +55,68 @@ fn cpu_reference_solve_converges_with_small_canonical_residual() {
 }
 
 #[test]
+fn exact_prepared_work_is_checked_before_pcg_iterations() {
+    let operator = system([4.0, 3.0]);
+    let prepared = operator.prepare_linear().unwrap();
+    let (dimension, factor_nonzeros, updates, resident_bytes) =
+        prepared.admissibility().unwrap().coercivity().work_counts();
+    let admission = SolverAdmissionResourcePolicy {
+        dimension: Count(dimension),
+        factor_nonzero_upper_bound: Count(factor_nonzeros),
+        update_count_upper_bound: Count(updates),
+        resident_bytes_upper_bound: ByteCount(resident_bytes),
+    };
+    let plan = LocalExecutionPlan::serial();
+    let accepted = solve_operator_system_scoped(
+        &operator,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+        Some(&admission),
+    )
+    .unwrap();
+    assert!(accepted.converged);
+
+    for rejected in [
+        SolverAdmissionResourcePolicy {
+            factor_nonzero_upper_bound: Count(factor_nonzeros - 1),
+            ..admission.clone()
+        },
+        SolverAdmissionResourcePolicy {
+            update_count_upper_bound: Count(updates - 1),
+            ..admission.clone()
+        },
+        SolverAdmissionResourcePolicy {
+            resident_bytes_upper_bound: ByteCount(resident_bytes - 1),
+            ..admission.clone()
+        },
+        SolverAdmissionResourcePolicy {
+            dimension: Count(dimension - 1),
+            ..admission.clone()
+        },
+    ] {
+        let result = solve_operator_system_scoped(
+            &operator,
+            SpdPreconditionerKind::Jacobi,
+            LinearAlgebraBackendKind::CpuReference,
+            &CpuReferenceBackend,
+            None,
+            plan,
+            Some(&rejected),
+        )
+        .unwrap();
+        assert!(!result.converged);
+        assert_eq!(result.iterations, 0);
+        assert_eq!(
+            result.diagnostics[0].code,
+            "FEA_SOLVER_WORK_EXCEEDS_ADMISSION"
+        );
+    }
+}
+
+#[test]
 fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling() {
     for scale in [1.0, 1.0e-20] {
         let stiffness = RealSparseMatrix::diagonal(
@@ -94,6 +158,7 @@ fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling(
             &CpuReferenceBackend,
             None,
             plan,
+            None,
         )
         .unwrap();
         assert!(serial.converged, "scale={scale}: {:?}", serial.diagnostics);
@@ -160,6 +225,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         &CpuReferenceBackend,
         None,
         plan,
+        None,
     )
     .unwrap();
     let repeated = solve_operator_system_scoped(
@@ -169,6 +235,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         &CpuReferenceBackend,
         None,
         plan,
+        None,
     )
     .unwrap();
     assert_eq!(parallel, repeated);
@@ -184,6 +251,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
             &CpuReferenceBackend,
             None,
             plan,
+            None,
         ))
     })
     .unwrap();
@@ -211,6 +279,7 @@ fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
             |_: &[f64], _: &[f64]| Err(ScopedSpmvError::ReductionDimensionMismatch),
             None,
         ),
+        None,
     );
     assert!(matches!(
         result,

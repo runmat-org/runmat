@@ -15,6 +15,16 @@ const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 1024;
 const BYTES_PER_SYMBOLIC_FACTOR_ENTRY: u64 = 192;
 const BYTES_PER_SYMBOLIC_ROW: u64 = 256;
 
+pub(super) fn symbolic_resident_bytes(dimension: u64, factor_nonzeros: u64) -> Option<u64> {
+    factor_nonzeros
+        .checked_mul(BYTES_PER_SYMBOLIC_FACTOR_ENTRY)
+        .and_then(|bytes| {
+            dimension
+                .checked_mul(BYTES_PER_SYMBOLIC_ROW)
+                .and_then(|rows| bytes.checked_add(rows))
+        })
+}
+
 /// Bounds the work of any successful exact-pattern proof whose graph is a subset of `pattern`.
 /// This is a resource reservation, not proof that such a factorization exists or fits its own
 /// pattern-relative work limit.
@@ -57,13 +67,7 @@ impl CoercivityWorkEnvelope {
             .checked_mul(MAX_FACTOR_UPDATE_MULTIPLIER)
             .and_then(|limit| limit.checked_add(dimension))
             .ok_or(CoercivityError::WorkOverflow)?;
-        let resident_bytes_limit = factor_nonzero_limit
-            .checked_mul(BYTES_PER_SYMBOLIC_FACTOR_ENTRY)
-            .and_then(|bytes| {
-                dimension
-                    .checked_mul(BYTES_PER_SYMBOLIC_ROW)
-                    .and_then(|rows| bytes.checked_add(rows))
-            })
+        let resident_bytes_limit = symbolic_resident_bytes(dimension, factor_nonzero_limit)
             .ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
             dimension,
@@ -186,14 +190,9 @@ impl CoercivitySymbolicPlan {
             graph[pivot].clear();
             pivot_neighbors.push(neighbors);
         }
-        let resident_bytes_upper_bound = factor_nonzero_count
-            .checked_mul(BYTES_PER_SYMBOLIC_FACTOR_ENTRY)
-            .and_then(|bytes| {
-                dimension_u64
-                    .checked_mul(BYTES_PER_SYMBOLIC_ROW)
-                    .and_then(|rows| bytes.checked_add(rows))
-            })
-            .ok_or(CoercivityError::WorkOverflow)?;
+        let resident_bytes_upper_bound =
+            symbolic_resident_bytes(dimension_u64, factor_nonzero_count)
+                .ok_or(CoercivityError::WorkOverflow)?;
         Ok(Self {
             pattern_identity: pattern
                 .identity()

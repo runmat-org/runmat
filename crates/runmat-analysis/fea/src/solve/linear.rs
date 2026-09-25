@@ -12,7 +12,7 @@ use crate::{
     assembly::AssemblySummary,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    planning::resource::LocalExecutionPlan,
+    planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
     solve::{
         accelerator::{prepare_accelerator_linear_system, solve_prepared_accelerator_system},
@@ -84,6 +84,26 @@ pub fn solve_linear_system_with_execution(
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    solve_linear_system_with_execution_admitted(
+        summary,
+        preconditioner_kind,
+        backend_kind,
+        algebra_backend,
+        initial_guess,
+        plan,
+        None,
+    )
+}
+
+pub(crate) fn solve_linear_system_with_execution_admitted(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+    initial_guess: Option<&[f64]>,
+    plan: LocalExecutionPlan,
+    admission: Option<&SolverAdmissionResourcePolicy>,
+) -> Result<LinearSolveResult, ScopedSpmvError> {
     if let Some(reduction) = summary.affine_constraint_reduction.as_ref() {
         return solve_affine_constraint_system_with_execution(
             summary,
@@ -92,9 +112,19 @@ pub fn solve_linear_system_with_execution(
             algebra_backend,
             initial_guess,
             plan,
+            admission,
         );
     }
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
+        if admission.is_some() {
+            return Ok(rejected_system_result(
+                &summary.operator,
+                backend_kind,
+                preconditioner_kind,
+                "FEA_SOLVER_ADMISSION_UNSUPPORTED",
+                "SPD work admission cannot be applied to multiplier GMRES".into(),
+            ));
+        }
         return solve_multiplier_constraint_system_with_execution(
             summary,
             matrix,
@@ -111,6 +141,7 @@ pub fn solve_linear_system_with_execution(
         algebra_backend,
         initial_guess,
         plan,
+        admission,
     )
 }
 
@@ -121,6 +152,7 @@ fn solve_operator_system_scoped(
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     solve_operator_system_with_apply(
         operator,
@@ -145,6 +177,7 @@ fn solve_operator_system_scoped(
             },
             Some(plan),
         ),
+        admission,
     )
 }
 
@@ -168,6 +201,7 @@ pub fn solve_operator_system(
             |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
             None,
         ),
+        None,
     )
     .expect("reference sparse application is infallible for a prepared system")
 }
@@ -183,6 +217,7 @@ fn solve_operator_system_with_apply(
         impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
         Option<LocalExecutionPlan>,
     ),
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let (apply, dot, vector_plan) = operations;
     let mut effective_backend_kind = backend_kind;
@@ -221,6 +256,20 @@ fn solve_operator_system_with_apply(
             ))
         }
     };
+    if let Some(admission) = admission {
+        let accepted = prepared
+            .admissibility()
+            .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
+        if !accepted {
+            return Ok(rejected_system_result(
+                operator,
+                effective_backend_kind,
+                preconditioner_kind,
+                "FEA_SOLVER_WORK_EXCEEDS_ADMISSION",
+                "exact prepared-solver work exceeds the admitted resource envelope".into(),
+            ));
+        }
+    }
     if let Err(error) = validate_prepared_solver_compatibility(
         &prepared,
         RealSolver::ConjugateGradient,

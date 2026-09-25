@@ -3,10 +3,11 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use crate::{
     assembly::{explicit_connectors::compile_model_connector_plan, AssemblySummary},
     connectors::CanonicalStructuralConnectorPlan,
-    constraints::CanonicalStructuralConstraintPlan,
+    constraints::{CanonicalStructuralConstraintPlan, ConstraintEnforcement},
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan, verify_assembled_structural_storage, StaticResourcePreflight,
+        build_static_resource_plan, verify_assembled_structural_storage, FeaResourceDemand,
+        SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
@@ -18,6 +19,7 @@ use crate::{
 pub(super) struct StaticPreassembly {
     pub constraints: Option<CanonicalStructuralConstraintPlan>,
     connectors: Option<CanonicalStructuralConnectorPlan>,
+    pub solver_admission: Option<SolverAdmissionResourcePolicy>,
 }
 
 /// Direct CPU physical solves derive constraints, observations, and recovery demand before
@@ -45,6 +47,7 @@ pub(super) fn prepare_static_preassembly(
         return Ok(StaticPreassembly {
             constraints: None,
             connectors,
+            solver_admission: None,
         });
     }
     if backend != ComputeBackend::Cpu
@@ -53,6 +56,7 @@ pub(super) fn prepare_static_preassembly(
         return Ok(StaticPreassembly {
             constraints: None,
             connectors: None,
+            solver_admission: None,
         });
     }
     let constraints =
@@ -78,7 +82,7 @@ pub(super) fn prepare_static_preassembly(
         ObservationLimits::default(),
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-    build_static_resource_plan(StaticResourcePreflight {
+    let resource_plan = build_static_resource_plan(StaticResourcePreflight {
         model,
         step,
         backend,
@@ -90,9 +94,23 @@ pub(super) fn prepare_static_preassembly(
         accelerator_requests: &[],
         local_execution: options.local_execution,
     })?;
+    // The multiplier branch uses a saddle-point GMRES solve rather than an SPD coercivity
+    // certificate. Its independent workspace reconciliation is still a separate gate.
+    let solver_admission = match &resource_plan.input.demand {
+        FeaResourceDemand::StructuralLinearPipeline(demand) => match &demand.solve {
+            SolveResourcePolicy::Iterative { admission, .. }
+                if constraints.enforcement != ConstraintEnforcement::LagrangeMultiplier =>
+            {
+                Some(admission.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    };
     Ok(StaticPreassembly {
         constraints: Some(constraints),
         connectors: Some(connectors),
+        solver_admission,
     })
 }
 
