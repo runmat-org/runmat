@@ -10,9 +10,8 @@ use crate::topology::quadrature::{
 use super::{
     material::elasticity_matrix,
     tetrahedron10::{
-        jacobian_determinant, physical_shape_gradients, strain_displacement_matrix, validate_nodes,
-        Tetrahedron10ElementError, Tetrahedron10ElementGeometry, Tetrahedron10Matrix30,
-        TETRAHEDRON10_ELEMENT_DOF_COUNT,
+        jacobian_determinant, physical_shape_gradients, validate_nodes, Tetrahedron10ElementError,
+        Tetrahedron10ElementGeometry, Tetrahedron10Matrix30, TETRAHEDRON10_ELEMENT_DOF_COUNT,
     },
     SolidMaterial,
 };
@@ -125,25 +124,38 @@ fn add_point(
     reference_weight: f64,
 ) -> Result<(), Tetrahedron10ElementError> {
     let gradients = physical_shape_gradients(geometry.nodes_m, barycentric)?;
-    let b = strain_displacement_matrix(gradients);
     let scale = reference_weight * jacobian_determinant(geometry.nodes_m, barycentric)?;
-    let mut elasticity_b = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; 6];
-    for row in 0..6 {
-        for column in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-            elasticity_b[row][column] = (0..6)
-                .map(|inner| elasticity[row][inner] * b[inner][column])
-                .sum();
-        }
-    }
-    for row in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-        for column in row..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-            let contribution = scale
-                * (0..6)
-                    .map(|inner| b[inner][row] * elasticity_b[inner][column])
-                    .sum::<f64>();
-            stiffness[row][column] += contribution;
-            if row != column {
-                stiffness[column][row] += contribution;
+    let lambda = elasticity[0][1];
+    let mu = elasticity[3][3];
+    for (left_node, left_gradient) in gradients.iter().enumerate() {
+        for (right_node, right_gradient) in gradients.iter().enumerate().skip(left_node) {
+            let gradient_dot = left_gradient
+                .iter()
+                .zip(right_gradient)
+                .map(|(left, right)| left * right)
+                .sum::<f64>();
+            for left_axis in 0..3 {
+                for right_axis in 0..3 {
+                    let row = 3 * left_node + left_axis;
+                    let column = 3 * right_node + right_axis;
+                    if row > column {
+                        continue;
+                    }
+                    // The isotropic BᵀDB block is λ∂ₐNᵢ∂ᵦNⱼ +
+                    // μ(δₐᵦ∇Nᵢ·∇Nⱼ + ∂ᵦNᵢ∂ₐNⱼ).
+                    let contribution = scale
+                        * (lambda * left_gradient[left_axis] * right_gradient[right_axis]
+                            + mu * left_gradient[right_axis] * right_gradient[left_axis]
+                            + if left_axis == right_axis {
+                                mu * gradient_dot
+                            } else {
+                                0.0
+                            });
+                    stiffness[row][column] += contribution;
+                    if row != column {
+                        stiffness[column][row] += contribution;
+                    }
+                }
             }
         }
     }
@@ -155,6 +167,52 @@ mod tests {
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
     use super::*;
+    use crate::assembly::elements::solid::tetrahedron10::strain_displacement_matrix;
+
+    #[test]
+    fn isotropic_gradient_form_matches_full_b_transpose_d_b_at_every_entry() {
+        let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+        let base_nodes_m = std::array::from_fn(|index| mesh.topology.nodes[index].coordinates_m);
+        let material = SolidMaterial {
+            youngs_modulus_pa: 100.0,
+            poisson_ratio: 0.25,
+            density_kg_per_m3: 1.0,
+        };
+        let elasticity = elasticity_matrix(material).unwrap();
+        for warp in [0.0, 0.1, 0.2] {
+            let mut nodes_m = base_nodes_m;
+            nodes_m[4][0] += warp;
+            let geometry = Tetrahedron10ElementGeometry { nodes_m };
+            for barycentric in [[0.25; 4], [0.1, 0.2, 0.3, 0.4]] {
+                let mut actual =
+                    [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
+                add_point(&mut actual, geometry, &elasticity, barycentric, 1.0).unwrap();
+                let gradients = physical_shape_gradients(nodes_m, barycentric).unwrap();
+                let b = strain_displacement_matrix(gradients);
+                let determinant = jacobian_determinant(nodes_m, barycentric).unwrap();
+                for (row, actual_row) in actual.iter().enumerate() {
+                    for (column, actual_value) in actual_row.iter().enumerate() {
+                        let reference = determinant
+                            * (0..6)
+                                .flat_map(|stress| {
+                                    (0..6).map(move |strain| {
+                                        b[stress][row]
+                                            * elasticity[stress][strain]
+                                            * b[strain][column]
+                                    })
+                                })
+                                .sum::<f64>();
+                        assert!(
+                            (actual_value - reference).abs()
+                                <= 1.0e-11 * reference.abs().max(1.0),
+                            "warp {warp}, point {barycentric:?}, entry ({row}, {column}): {} vs {reference}",
+                            actual_value
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn strongly_curved_element_fails_closed_when_quadrature_does_not_converge() {
