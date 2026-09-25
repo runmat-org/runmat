@@ -2,6 +2,7 @@ mod jacobian_certificate;
 pub mod material;
 pub mod quality;
 pub mod tetrahedron10;
+mod tetrahedron10_geometry;
 mod tetrahedron10_mass;
 mod tetrahedron10_stiffness;
 pub mod tetrahedron4;

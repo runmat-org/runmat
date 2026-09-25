@@ -6,8 +6,13 @@ use crate::topology::quadrature::{
     TETRAHEDRON_ELEVEN_POINT_RULE as VOLUME_QUADRATURE, TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE,
 };
 
+#[cfg(test)]
+use super::tetrahedron10_geometry::reference_shape_gradients;
+pub(super) use super::tetrahedron10_geometry::{
+    jacobian_determinant, physical_shape_gradients, physical_shape_gradients_and_measure,
+    validate_nodes,
+};
 use super::{
-    jacobian_certificate::{certify_positive_jacobian, CertificateFailure},
     material::{elasticity_matrix, SolidMaterialError},
     SolidMaterial,
 };
@@ -21,12 +26,6 @@ pub type Tetrahedron10Matrix30 =
     [[f64; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
 pub type SymmetricStressTensor = [[f64; 3]; 3];
 
-const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
-    [-1.0, -1.0, -1.0],
-    [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
-    [0.0, 0.0, 1.0],
-];
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -73,7 +72,8 @@ impl Tetrahedron10ElementGeometry {
         }; 4];
         for (index, point) in recovered.iter_mut().enumerate() {
             let barycentric = QUADRATURE[index];
-            let gradients = physical_shape_gradients(self.nodes_m, barycentric)?;
+            let (gradients, determinant) =
+                physical_shape_gradients_and_measure(self.nodes_m, barycentric)?;
             let b = strain_displacement_matrix(gradients);
             let strain: [f64; 6] = std::array::from_fn(|component| {
                 b[component]
@@ -82,8 +82,7 @@ impl Tetrahedron10ElementGeometry {
                     .map(|(shape, value)| shape * value)
                     .sum()
             });
-            let integration_weight_m3 =
-                QUADRATURE_WEIGHT * jacobian_determinant(self.nodes_m, barycentric)?;
+            let integration_weight_m3 = QUADRATURE_WEIGHT * determinant;
             if strain.iter().all(|value| value.is_finite())
                 && integration_weight_m3.is_finite()
                 && integration_weight_m3 > 0.0
@@ -193,8 +192,9 @@ pub fn geometric_stiffness_matrix(
     validate_nodes(geometry.nodes_m)?;
     let mut matrix = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
     for (quadrature_index, barycentric) in QUADRATURE.into_iter().enumerate() {
-        let gradients = physical_shape_gradients(geometry.nodes_m, barycentric)?;
-        let scale = QUADRATURE_WEIGHT * jacobian_determinant(geometry.nodes_m, barycentric)?;
+        let (gradients, determinant) =
+            physical_shape_gradients_and_measure(geometry.nodes_m, barycentric)?;
+        let scale = QUADRATURE_WEIGHT * determinant;
         for left_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
             for right_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
                 let scalar = scale
@@ -280,38 +280,6 @@ pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT
     values
 }
 
-pub(super) fn physical_shape_gradients(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-    barycentric: [f64; 4],
-) -> Result<[[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT], Tetrahedron10ElementError> {
-    let reference = reference_shape_gradients(barycentric);
-    let inverse = inverse_jacobian(nodes_m, reference)?;
-    Ok(reference.map(|gradient| {
-        std::array::from_fn(|axis| {
-            inverse[axis][0] * gradient[0]
-                + inverse[axis][1] * gradient[1]
-                + inverse[axis][2] * gradient[2]
-        })
-    }))
-}
-
-fn reference_shape_gradients(
-    barycentric: [f64; 4],
-) -> [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
-    let mut gradients = [[0.0; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT];
-    for node in 0..4 {
-        let factor = 4.0 * barycentric[node] - 1.0;
-        gradients[node] = BARYCENTRIC_DERIVATIVES[node].map(|derivative| factor * derivative);
-    }
-    for (local_edge, [left, right]) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.into_iter().enumerate() {
-        gradients[4 + local_edge] = std::array::from_fn(|axis| {
-            4.0 * (barycentric[right] * BARYCENTRIC_DERIVATIVES[left][axis]
-                + barycentric[left] * BARYCENTRIC_DERIVATIVES[right][axis])
-        });
-    }
-    gradients
-}
-
 pub(super) fn strain_displacement_matrix(
     gradients: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> [[f64; TETRAHEDRON10_ELEMENT_DOF_COUNT]; 6] {
@@ -329,91 +297,6 @@ pub(super) fn strain_displacement_matrix(
         b[5][column + 1] = dn_dx;
     }
     b
-}
-
-pub(super) fn jacobian_determinant(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-    barycentric: [f64; 4],
-) -> Result<f64, Tetrahedron10ElementError> {
-    let reference = reference_shape_gradients(barycentric);
-    let jacobian = jacobian(nodes_m, reference);
-    let determinant = dot(jacobian[0], cross(jacobian[1], jacobian[2]));
-    if determinant.is_finite() && determinant > 0.0 {
-        Ok(determinant)
-    } else {
-        Err(Tetrahedron10ElementError::DegenerateOrInverted)
-    }
-}
-
-fn inverse_jacobian(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-    reference: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-) -> Result<[[f64; 3]; 3], Tetrahedron10ElementError> {
-    let matrix = jacobian(nodes_m, reference);
-    let determinant = dot(matrix[0], cross(matrix[1], matrix[2]));
-    if !determinant.is_finite() || determinant <= 0.0 {
-        return Err(Tetrahedron10ElementError::DegenerateOrInverted);
-    }
-    let inverse_determinant = 1.0 / determinant;
-    Ok([
-        [
-            (matrix[1][1] * matrix[2][2] - matrix[1][2] * matrix[2][1]) * inverse_determinant,
-            (matrix[0][2] * matrix[2][1] - matrix[0][1] * matrix[2][2]) * inverse_determinant,
-            (matrix[0][1] * matrix[1][2] - matrix[0][2] * matrix[1][1]) * inverse_determinant,
-        ],
-        [
-            (matrix[1][2] * matrix[2][0] - matrix[1][0] * matrix[2][2]) * inverse_determinant,
-            (matrix[0][0] * matrix[2][2] - matrix[0][2] * matrix[2][0]) * inverse_determinant,
-            (matrix[0][2] * matrix[1][0] - matrix[0][0] * matrix[1][2]) * inverse_determinant,
-        ],
-        [
-            (matrix[1][0] * matrix[2][1] - matrix[1][1] * matrix[2][0]) * inverse_determinant,
-            (matrix[0][1] * matrix[2][0] - matrix[0][0] * matrix[2][1]) * inverse_determinant,
-            (matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]) * inverse_determinant,
-        ],
-    ])
-}
-
-fn jacobian(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-    reference: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-) -> [[f64; 3]; 3] {
-    std::array::from_fn(|reference_axis| {
-        std::array::from_fn(|physical_axis| {
-            (0..TETRAHEDRON10_ELEMENT_NODE_COUNT)
-                .map(|node| nodes_m[node][physical_axis] * reference[node][reference_axis])
-                .sum()
-        })
-    })
-}
-
-pub(super) fn validate_nodes(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-) -> Result<(), Tetrahedron10ElementError> {
-    if !nodes_m.iter().flatten().all(|value| value.is_finite()) {
-        return Err(Tetrahedron10ElementError::NonFiniteCoordinate);
-    }
-    let vertex_jacobians = std::array::from_fn(|vertex| {
-        let mut barycentric = [0.0; 4];
-        barycentric[vertex] = 1.0;
-        jacobian(nodes_m, reference_shape_gradients(barycentric))
-    });
-    certify_positive_jacobian(vertex_jacobians).map_err(|failure| match failure {
-        CertificateFailure::InvertedOrDegenerate => Tetrahedron10ElementError::DegenerateOrInverted,
-        CertificateFailure::Inconclusive => Tetrahedron10ElementError::UncertifiedJacobian,
-    })
-}
-
-fn dot(left: [f64; 3], right: [f64; 3]) -> f64 {
-    left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
-}
-
-fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
-    [
-        left[1] * right[2] - left[2] * right[1],
-        left[2] * right[0] - left[0] * right[2],
-        left[0] * right[1] - left[1] * right[0],
-    ]
 }
 
 #[cfg(test)]

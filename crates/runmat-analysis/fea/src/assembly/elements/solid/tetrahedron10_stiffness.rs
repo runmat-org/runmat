@@ -10,7 +10,7 @@ use crate::topology::quadrature::{
 use super::{
     material::elasticity_matrix,
     tetrahedron10::{
-        jacobian_determinant, physical_shape_gradients, validate_nodes, Tetrahedron10ElementError,
+        physical_shape_gradients_and_measure, validate_nodes, Tetrahedron10ElementError,
         Tetrahedron10ElementGeometry, Tetrahedron10Matrix30, TETRAHEDRON10_ELEMENT_DOF_COUNT,
     },
     SolidMaterial,
@@ -123,8 +123,9 @@ fn add_point(
     barycentric: [f64; 4],
     reference_weight: f64,
 ) -> Result<(), Tetrahedron10ElementError> {
-    let gradients = physical_shape_gradients(geometry.nodes_m, barycentric)?;
-    let scale = reference_weight * jacobian_determinant(geometry.nodes_m, barycentric)?;
+    let (gradients, determinant) =
+        physical_shape_gradients_and_measure(geometry.nodes_m, barycentric)?;
+    let scale = reference_weight * determinant;
     let lambda = elasticity[0][1];
     let mu = elasticity[3][3];
     for (left_node, left_gradient) in gradients.iter().enumerate() {
@@ -167,7 +168,9 @@ mod tests {
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
     use super::*;
-    use crate::assembly::elements::solid::tetrahedron10::strain_displacement_matrix;
+    use crate::assembly::elements::solid::tetrahedron10::{
+        jacobian_determinant, physical_shape_gradients, strain_displacement_matrix,
+    };
 
     #[test]
     fn isotropic_gradient_form_matches_full_b_transpose_d_b_at_every_entry() {
