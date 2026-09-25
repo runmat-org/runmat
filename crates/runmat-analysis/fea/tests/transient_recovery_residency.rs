@@ -154,8 +154,51 @@ fn physical_fixture_mesh(model: &AnalysisModel) -> SolverMeshArtifact {
     mesh
 }
 
-fn measure_physical_recovery(interval_count: usize) -> (u64, u64) {
-    let model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+fn connector_observation_model() -> AnalysisModel {
+    use runmat_analysis_core::*;
+
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    model.connectors = vec![AnalysisConnector {
+        connector_id: "root_to_tip_dashpot".into(),
+        kind: ConnectorKind::AxialDashpot {
+            primary: RegionTarget::point("node:2"),
+            secondary: RegionTarget::point("node:4"),
+            damping: Damping::new(75.0),
+        },
+    }];
+    model.sequence.steps[0].observations = vec![ObservationRequest::History(ObservationSpec {
+        observation_id: ObservationId("dashpot_force_history".into()),
+        quantity: ObservationQuantity::ReactionForce,
+        value_shape: ObservationQuantity::ReactionForce.canonical_value_shape(),
+        target: ObservationTarget::Connector {
+            connector_id: "root_to_tip_dashpot".into(),
+        },
+        source_location: FieldLocation::Connector,
+        output_location: FieldLocation::Connector,
+        recovery: RecoveryPolicy::Native,
+        component: ObservationComponent::All,
+        frame: CoordinateFrame::Global,
+        sign_convention: SignConvention::Native,
+        complex_representation: ComplexRepresentation::Real,
+        sampling: SamplingPolicy::EveryAcceptedIncrement,
+        reduction: None,
+        storage: ObservationStoragePolicy {
+            precision: SignalPrecision::Real64,
+            compression: CompressionPolicy::Lossless,
+            retention: RetentionPolicy::Canonical,
+            partial_access: PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: ObservationPurpose::Publication,
+        cost: ObservationCostPolicy::Automatic,
+    })];
+    model
+}
+
+fn measure_physical_recovery(
+    case: &'static str,
+    model: AnalysisModel,
+    interval_count: usize,
+) -> (u64, u64) {
     let mesh = physical_fixture_mesh(&model);
     let workload = StructuralTransientWorkload {
         schema_version: 1,
@@ -217,13 +260,20 @@ fn measure_physical_recovery(interval_count: usize) -> (u64, u64) {
     TRACKING.store(false, Ordering::Relaxed);
     let peak = PEAK_BYTES.load(Ordering::Relaxed);
     assert!(recovered.time_points_s.len() > interval_count);
+    assert_eq!(
+        recovered.run.observation_histories.len(),
+        workload.model.sequence.steps[0].observations.len()
+    );
+    for history in &recovered.run.observation_histories {
+        assert_eq!(history.samples().len(), recovered.time_points_s.len());
+    }
     assert!(
         peak <= plan.request.memory_bytes,
         "measured live heap peak {peak} exceeds recovery request {} (baseline {baseline})",
         plan.request.memory_bytes
     );
     eprintln!(
-        "transient recovery ({interval_count} intervals): baseline_live_heap={baseline} peak_live_heap={peak} process_peak_rss={:?} planned_memory={}",
+        "transient recovery ({case}, {interval_count} intervals): baseline_live_heap={baseline} peak_live_heap={peak} process_peak_rss={:?} planned_memory={}",
         process_peak_rss_bytes(), plan.request.memory_bytes
     );
     (peak, plan.request.memory_bytes)
@@ -231,8 +281,19 @@ fn measure_physical_recovery(interval_count: usize) -> (u64, u64) {
 
 #[test]
 fn completed_physical_recovery_heap_peak_fits_planned_memory() {
-    let (short_peak, short_plan) = measure_physical_recovery(24);
-    let (long_peak, long_plan) = measure_physical_recovery(240);
+    let (short_peak, short_plan) = measure_physical_recovery(
+        "direct",
+        fixture_model(FixtureId::StructuralTransientTet4Reference),
+        24,
+    );
+    let (long_peak, long_plan) = measure_physical_recovery(
+        "direct",
+        fixture_model(FixtureId::StructuralTransientTet4Reference),
+        240,
+    );
     assert!(long_peak > short_peak);
     assert!(long_plan > short_plan);
+    let (_, connector_observation_plan) =
+        measure_physical_recovery("connector observation", connector_observation_model(), 24);
+    assert!(connector_observation_plan > short_plan);
 }

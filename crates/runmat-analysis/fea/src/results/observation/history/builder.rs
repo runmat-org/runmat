@@ -78,7 +78,10 @@ impl BoundedObservationHistory {
             stream,
             retained_prefix_digest: initial_prefix,
             observed_prefix_digest: initial_prefix,
-            samples: VecDeque::with_capacity(maximum_retained_samples),
+            // This is an upper bound, not an allocation forecast. Dynamic sampling can permit
+            // many more samples than a completed solve actually contains; reserving the bound
+            // eagerly can exhaust memory before the first observed sample is recovered.
+            samples: VecDeque::new(),
         })
     }
 
