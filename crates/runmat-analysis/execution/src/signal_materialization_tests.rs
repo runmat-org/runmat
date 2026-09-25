@@ -522,6 +522,111 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
 }
 
 #[test]
+fn generated_constant_moment_matches_explicit_static_beam_solve() {
+    use runmat_analysis_core::FormulationRequirement;
+    use runmat_analysis_fea::{
+        fixtures::{fixture_model, FixtureId},
+        run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    };
+
+    let baseline_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let mut authored = baseline_model.signals[0].clone();
+    let PhysicalSignal::Moment(moment) = &mut authored else {
+        panic!("beam fixture must carry a moment signal")
+    };
+    let PhysicalSignal::Force(generator_template) =
+        signal(SignalShape::Vector3, SignalPrecision::Real64)
+    else {
+        unreachable!()
+    };
+    let SignalRepresentation::Generator(generator) = generator_template.representation else {
+        unreachable!()
+    };
+    moment.representation = SignalRepresentation::Generator(generator);
+
+    let admitted = admitted();
+    let chunks = plan_signal_generator_chunks(
+        &authored,
+        &admitted,
+        None,
+        RESULT_ENVELOPE_BYTES + 5 * 3 * 16,
+        |_| panic!("no artifact argument expected"),
+    )
+    .unwrap()
+    .chunks;
+    // Dense generator output is column-major: five samples of each vector component.
+    let values = [vec![0.0; 10], vec![125.0; 5]].concat();
+    let outputs = vec![output(&chunks[0], dense_f64(vec![5, 3], &values))];
+    let realization =
+        canonicalize_signal_generator_outputs(&authored, &admitted, None, &[], &chunks, &outputs)
+            .unwrap();
+    let generated = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
+    assert_eq!(
+        canonical_tabulated_signal_content_digest(&generated).unwrap(),
+        realization.content_digest,
+    );
+
+    let mut explicit = generated.clone();
+    let PhysicalSignal::Moment(moment) = &mut explicit else {
+        unreachable!()
+    };
+    moment.provenance = SignalProvenance::Authored;
+    let mut explicit_model = baseline_model.clone();
+    explicit_model.signals[0] = explicit;
+    let mut generated_model = baseline_model.clone();
+    generated_model.signals[0] = generated;
+
+    let options = LinearStaticSolveOptions {
+        formulation_requirement: FormulationRequirement::Experimental,
+        ..LinearStaticSolveOptions::default()
+    };
+    let baseline =
+        run_linear_static_with_options(&baseline_model, ComputeBackend::Cpu, options.clone())
+            .expect("constant authored moment must solve");
+    let explicit =
+        run_linear_static_with_options(&explicit_model, ComputeBackend::Cpu, options.clone())
+            .expect("explicit constant table must solve");
+    let generated = run_linear_static_with_options(&generated_model, ComputeBackend::Cpu, options)
+        .expect("verified generated constant table must solve");
+
+    for field_id in [
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
+        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    ] {
+        let expected = baseline.field(field_id).expect("baseline field");
+        assert_eq!(
+            explicit.field(field_id),
+            Some(expected),
+            "explicit {field_id}"
+        );
+        assert_eq!(
+            generated.field(field_id),
+            Some(expected),
+            "generated {field_id}"
+        );
+    }
+    assert_eq!(
+        explicit.spatial_projection_evidence,
+        baseline.spatial_projection_evidence
+    );
+    assert_eq!(
+        generated.spatial_projection_evidence,
+        baseline.spatial_projection_evidence
+    );
+    assert_eq!(
+        explicit.structural_static_balance,
+        baseline.structural_static_balance
+    );
+    assert_eq!(
+        generated.structural_static_balance,
+        baseline.structural_static_balance
+    );
+}
+
+#[test]
 fn table_content_identity_includes_typed_jump_semantics() {
     let authored = signal(SignalShape::Scalar, SignalPrecision::Real64);
     let admitted = admitted();

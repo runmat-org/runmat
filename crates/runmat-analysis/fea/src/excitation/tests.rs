@@ -190,7 +190,7 @@ fn static_realization_does_not_implicitly_take_the_first_time_sample() {
 
     assert_eq!(
         error.to_string(),
-        "excitation sample point does not match the signal domain"
+        "static excitation requires constant tabulated values"
     );
 }
 
@@ -263,6 +263,41 @@ fn explicit_time_and_parameter_samples_use_the_matching_domain() {
         parameter.iter().next().unwrap().kind,
         RealizedExcitationKind::Force(value) if value.real == [10.0, 20.0, 30.0]
     ));
+}
+
+#[test]
+fn static_excitation_accepts_only_coordinate_independent_tables() {
+    for domain in [
+        runmat_analysis_core::TabulatedSignalDomain::TimeSeconds,
+        runmat_analysis_core::TabulatedSignalDomain::StudyParameter {
+            parameter_id: "load_scale".into(),
+        },
+    ] {
+        let mut model = tabulated_force_model(domain, vec![0.0, 1.0]);
+        assert_eq!(
+            realize_static(&model).unwrap_err().to_string(),
+            "static excitation requires constant tabulated values"
+        );
+        let runmat_analysis_core::PhysicalSignal::Force(signal) = &mut model.signals[0] else {
+            unreachable!()
+        };
+        let runmat_analysis_core::SignalRepresentation::Tabulated(table) =
+            &mut signal.representation
+        else {
+            unreachable!()
+        };
+        table.knots[0].value = table.knots[1].value.clone();
+        let realized = realize_static(&model).unwrap();
+        assert!(matches!(
+            realized.iter().next().unwrap().kind,
+            RealizedExcitationKind::Force(value) if value.real == [20.0, 40.0, 60.0]
+        ));
+    }
+    let jump = jump_force_model(runmat_analysis_core::SignalPointContinuity::Right);
+    assert_eq!(
+        realize_static(&jump).unwrap_err().to_string(),
+        "static excitation cannot select a jump in a tabulated signal"
+    );
 }
 
 #[test]

@@ -238,6 +238,9 @@ pub(crate) fn sample_signal<Q>(
     match &signal.representation {
         SignalRepresentation::Constant(value) => Ok(real_value(value, &component)),
         SignalRepresentation::Tabulated(table) => {
+            if matches!(sample, ExcitationSamplePoint::Static) {
+                return sample_static_table(&table.knots, &component);
+            }
             let (abscissa, approach) = sample_abscissa(sample, &table.domain)?;
             sample_table(
                 &table.knots,
@@ -262,6 +265,40 @@ pub(crate) fn sample_signal<Q>(
             ),
         ),
     }
+}
+
+/// A static step has no abscissa. A table is unambiguous only when its complete sampled content
+/// is constant; choosing an arbitrary knot would silently change a generated history.
+fn sample_static_table<Q>(
+    knots: &[SignalKnot<Q>],
+    component: &impl Fn(&Q) -> f64,
+) -> Result<SampledValue, RealizationError> {
+    if knots.is_empty()
+        || knots.iter().any(|knot| !knot.abscissa.is_finite())
+        || knots
+            .windows(2)
+            .any(|pair| pair[0].abscissa >= pair[1].abscissa)
+    {
+        return Err(RealizationError::new(
+            "tabulated knots must have finite, strictly increasing abscissae",
+        ));
+    }
+    let mut sampled = None;
+    for knot in knots {
+        let SignalKnotValue::Continuous(value) = &knot.value else {
+            return Err(RealizationError::new(
+                "static excitation cannot select a jump in a tabulated signal",
+            ));
+        };
+        let value = ordinate_value(value, component)?;
+        if sampled.as_ref().is_some_and(|previous| previous != &value) {
+            return Err(RealizationError::new(
+                "static excitation requires constant tabulated values",
+            ));
+        }
+        sampled = Some(value);
+    }
+    Ok(sampled.expect("nonempty validated table has a sample"))
 }
 
 pub(crate) fn sample_prescribed_temperature(
