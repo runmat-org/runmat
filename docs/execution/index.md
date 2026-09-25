@@ -81,6 +81,7 @@ The execution path resets and drains per-thread runtime buffers around every req
 | [Errors & Diagnostics](/docs/runtime/execution/errors) | How syntax, semantic, compile, runtime, warning, `MException`, catch/rethrow, and WASM error payloads are represented. |
 | [Remote Execution](/docs/runtime/execution/remote) | How to configure clusters, enroll customer nodes, submit content-blind jobs and tests, use browser workers, drain nodes, and configure organization recovery. |
 | [Native Library Interfaces](/docs/runtime/execution/native-libraries) | How to prepare, declare, package, compile, distribute, and call native shared-library interfaces. |
+| [C, C++, and MEX Extensions](/docs/runtime/execution/mex) | How to build, call, package, isolate, and distribute C, modern C++, Fortran, and GPU MEX modules. |
 | [Java Interoperability](/docs/runtime/execution/java) | How to configure the JVM, call Java code, manage classpaths, use callbacks, and dispatch Desktop UI calls on the EDT. |
 | [Python Interoperability](/docs/runtime/execution/python) | How to configure CPython, use `py.*` and Python workspaces, package wheels, and choose in-process or isolated execution. |
 

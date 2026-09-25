@@ -10,6 +10,8 @@ Buffer transfer is ownership-explicit. ABI 1.1 extensions use `borrow_buffer_lea
 
 ## C MEX modules
 
+For an end-to-end guide with C and modern C++ examples, build options, packaging, isolation policy, troubleshooting, and verification commands, see [C, C++, and MEX Extensions](/docs/runtime/execution/mex). This section describes the adapter and memory contracts beneath that workflow.
+
 Native RunMat sessions can build and call C MEX source through the MATLAB-facing `mex` function or the shell command:
 
 ```matlab

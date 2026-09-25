@@ -54,7 +54,7 @@ A package can declare a prepared native shared-library interface with `[native-i
 
 ## MEX Artifacts
 
-A package can declare a RunMat-built MEX module with `[mex-artifacts.<name>]`. Each declaration names the exact module and its canonical `.runmat.json` manifest relative to the package root. The package graph freezes both digests, and native sessions install that verified identity directly rather than relying on an ambient search path. Native compilation embeds the same module and manifest in the standalone program; distributed execution materializes them into worker-owned read-only storage before interop admission. See [Native Extension ABI](../development/extensions.md) for source compatibility, build commands, GPU behavior, isolation, and lifecycle rules.
+A package can declare a RunMat-built MEX module with `[mex-artifacts.<name>]`. Each declaration names the exact module and its canonical `.runmat.json` manifest relative to the package root. The package graph freezes both digests, and native sessions install that verified identity directly rather than relying on an ambient search path. Native compilation embeds the same module and manifest in the standalone program; distributed execution materializes them into worker-owned read-only storage before interop admission. See [C, C++, and MEX Extensions](../execution/mex.md) for source compatibility, build commands, GPU behavior, isolation, and lifecycle rules.
 
 ## Related Documentation
 
