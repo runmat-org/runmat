@@ -9,10 +9,10 @@ fn curved_boundary_face_rejects_a_folded_signed_jacobian() {
     let face = &mesh.topology.boundary_faces[0];
     let projected_face = &projection.boundary_faces[0];
     let mut nodes = projection.nodes.clone();
-    // Move the 0-1 midside node past its endpoint in the original face plane.
-    // Local area remains nonzero, but its sign flips near that corner.
+    // This mild shift leaves every seven-point Dunavant sample positive, but
+    // reverses signed area close to the u=1 corner (q(1,0) = -0.04).
     let midside_index = projected_face.node_indices[3];
-    nodes[midside_index].coordinates_m = [1.2, 0.0, 0.0];
+    nodes[midside_index].coordinates_m = [0.76, 0.0, 0.0];
 
     let error = project_boundary_face(
         face,

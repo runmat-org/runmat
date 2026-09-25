@@ -315,15 +315,19 @@ pub(super) fn visit_boundary_quadrature(
     if coordinates.len() != node_count {
         return None;
     }
-    // A curved face may have a nonzero Jacobian magnitude while its mapping
-    // folds over. Its signed area must retain the corner-face orientation at
-    // every integration point; otherwise pressure and traction contributions
-    // can cancel or reverse locally without any geometry error being raised.
+    // A Tri6 map has linear tangents, so its signed area projected onto the
+    // corner normal is quadratic over the reference triangle. Checking only
+    // quadrature points misses folds near a corner or edge.
     let corner_normal = cross(
         subtract(coordinates[1], coordinates[0]),
         subtract(coordinates[2], coordinates[0]),
     );
     if !norm(corner_normal).is_finite() || norm(corner_normal) <= 0.0 {
+        return None;
+    }
+    if order == BoundaryTriangleOrder::Tri6
+        && signed_boundary_area_minimum(coordinates, corner_normal)? <= 0.0
+    {
         return None;
     }
     for (barycentric, normalized_weight) in DUNAVANT_SEVEN {
@@ -346,6 +350,77 @@ pub(super) fn visit_boundary_quadrature(
         });
     }
     Some(())
+}
+
+fn signed_boundary_area_minimum(coordinates: &[[f64; 3]], corner_normal: [f64; 3]) -> Option<f64> {
+    let signed_area = |u: f64, v: f64| {
+        let (_, derivatives) = boundary_shape(BoundaryTriangleOrder::Tri6, [1.0 - u - v, u, v]);
+        let tangent_u = weighted_derivative(coordinates, &derivatives, 0);
+        let tangent_v = weighted_derivative(coordinates, &derivatives, 1);
+        dot(cross(tangent_u, tangent_v), corner_normal)
+    };
+    let [q00, q10, q01, qh0, q0h, qhh] = [
+        signed_area(0.0, 0.0),
+        signed_area(1.0, 0.0),
+        signed_area(0.0, 1.0),
+        signed_area(0.5, 0.0),
+        signed_area(0.0, 0.5),
+        signed_area(0.5, 0.5),
+    ];
+    if [q00, q10, q01, qh0, q0h, qhh]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
+    // q(u,v) = a*u² + b*v² + c*u*v + d*u + e*v + f.
+    let a = 2.0 * (q10 + q00 - 2.0 * qh0);
+    let b = 2.0 * (q01 + q00 - 2.0 * q0h);
+    let d = q10 - q00 - a;
+    let e = q01 - q00 - b;
+    let c = 4.0 * (qhh - 0.25 * (a + b) - 0.5 * (d + e) - q00);
+    if [a, b, c, d, e].iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let edge_minima = [
+        quadratic_edge_minimum(q00, q10, qh0),
+        quadratic_edge_minimum(q00, q01, q0h),
+        quadratic_edge_minimum(q10, q01, qhh),
+    ];
+    if edge_minima.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    let mut minimum = edge_minima.into_iter().fold(f64::INFINITY, f64::min);
+    // A strict interior minimum exists only for a positive-definite Hessian.
+    let determinant = 4.0 * a * b - c * c;
+    if !determinant.is_finite() {
+        return None;
+    }
+    if a > 0.0 && determinant > 0.0 {
+        let u = (c * e - 2.0 * b * d) / determinant;
+        let v = (c * d - 2.0 * a * e) / determinant;
+        if !u.is_finite() || !v.is_finite() {
+            return None;
+        }
+        if u >= 0.0 && v >= 0.0 && u + v <= 1.0 {
+            let interior = a * u * u + b * v * v + c * u * v + d * u + e * v + q00;
+            if !interior.is_finite() {
+                return None;
+            }
+            minimum = minimum.min(interior);
+        }
+    }
+    minimum.is_finite().then_some(minimum)
+}
+
+fn quadratic_edge_minimum(start: f64, end: f64, midpoint: f64) -> f64 {
+    let curvature = 2.0 * (start + end - 2.0 * midpoint);
+    if curvature <= 0.0 {
+        return start.min(end);
+    }
+    let slope = end - start - curvature;
+    let position = (-slope / (2.0 * curvature)).clamp(0.0, 1.0);
+    (curvature * position + slope) * position + start
 }
 
 fn boundary_shape(
@@ -505,3 +580,6 @@ mod gauss_rule_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod boundary_quality_tests;
