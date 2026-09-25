@@ -22,6 +22,9 @@ use crate::{
     ComputeBackend, LinearStaticSolveOptions,
 };
 
+#[path = "interface/manufactured.rs"]
+mod manufactured;
+
 fn constrained_modulus(youngs_modulus_pa: f64, poisson_ratio: f64) -> f64 {
     youngs_modulus_pa * (1.0 - poisson_ratio)
         / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
@@ -32,8 +35,9 @@ fn transverse_stress(youngs_modulus_pa: f64, poisson_ratio: f64, axial_strain: f
         / ((1.0 + poisson_ratio) * (1.0 - 2.0 * poisson_ratio))
 }
 
-fn interface_mesh(order: ElementOrder) -> SolverMeshArtifact {
-    let mut mesh = structured_cantilever(2, order);
+fn interface_mesh(divisions: usize, order: ElementOrder) -> SolverMeshArtifact {
+    assert!(divisions > 0 && divisions.is_multiple_of(2));
+    let mut mesh = structured_cantilever(divisions, order);
     let left_region = entity(PersistentEntityKind::Region, "left_layer");
     let right_region = entity(PersistentEntityKind::Region, "right_layer");
     let mut groups: BTreeMap<_, Vec<u64>> = BTreeMap::new();
@@ -55,7 +59,9 @@ fn interface_mesh(order: ElementOrder) -> SolverMeshArtifact {
             .push(element.element_id);
     }
     assert_eq!(groups.len(), 2);
-    assert!(groups.values().all(|elements| elements.len() == 24));
+    assert!(groups
+        .values()
+        .all(|elements| elements.len() == 3 * divisions.pow(3)));
     mesh.topology.regions = groups
         .into_iter()
         .map(|(region_id, element_ids)| MeshRegion {
@@ -128,7 +134,7 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
     };
 
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
-        let mesh = interface_mesh(order);
+        let mesh = interface_mesh(2, order);
         let left_region = entity(PersistentEntityKind::Region, "left_layer");
 
         let regions = mesh
@@ -300,7 +306,7 @@ fn connected_tet4_and_tet10_material_interface_preserves_traction_and_energy() {
 fn connected_tet4_and_tet10_material_interface_transmits_physical_tip_traction() {
     const TRACTION_PA: f64 = 12.0;
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
-        let mesh = interface_mesh(order);
+        let mesh = interface_mesh(2, order);
         let mut model = interface_model(0.0, 0.0);
         model.constraints = vec![AnalysisConstraint::Structural(StructuralConstraint {
             constraint_id: "fixed_root".into(),
