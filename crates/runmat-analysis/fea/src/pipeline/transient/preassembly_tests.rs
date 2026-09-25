@@ -210,6 +210,49 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
 }
 
 #[test]
+fn transient_block_rejects_its_own_memory_ceiling_before_initial_assembly() {
+    let (mut workload, mesh) = direct_scope_case();
+    let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
+    let scope_plan = crate::planning::resource::build_structural_transient_scope_resource_plan(
+        &workload, &mesh, None, &prepared, None, None,
+    )
+    .unwrap();
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
+    let block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
+        &workload, &mesh, None, &request, None, None, None,
+    )
+    .unwrap();
+    assert!(block_plan.request.memory_bytes > scope_plan.request.memory_bytes);
+    let ceiling = scope_plan.request.memory_bytes
+        + (block_plan.request.memory_bytes - scope_plan.request.memory_bytes) / 2;
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = ceiling;
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
+    let error = run_transient_block(StructuralTransientRunBlockInput {
+        workload: &workload,
+        solver_mesh: &mesh,
+        request: &request,
+        predecessor: None,
+        modal_state: None,
+        observation_cursors: Vec::new(),
+    })
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                ..
+            }
+        )
+    ));
+}
+
+#[test]
 fn transient_block_resource_plan_bounds_a_physical_segment() {
     let (workload, mesh) = direct_scope_case();
     let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();

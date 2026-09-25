@@ -254,6 +254,18 @@ pub fn run_transient_block(
         .workload
         .validate()
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    // Direct callers must pass the block's canonical resource and accuracy-ceiling checks
+    // before constructing the initial operator or retaining solver-owned time history.
+    // Portable workers additionally verify their allocated inventory against this plan.
+    let _block_plan = crate::planning::resource::build_structural_transient_block_resource_plan(
+        input.workload,
+        input.solver_mesh,
+        input.modal_state,
+        input.request,
+        input.predecessor,
+        None,
+        None,
+    )?;
     let (basis, options) =
         prepare_transient_scope_basis(input.workload, input.solver_mesh, input.modal_state)?;
     if input.request.scope.schedule != basis.schedule {
