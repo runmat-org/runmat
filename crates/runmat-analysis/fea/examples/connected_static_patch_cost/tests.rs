@@ -1,4 +1,7 @@
 use super::*;
+
+#[path = "tests/curved.rs"]
+mod curved;
 use runmat_analysis_fea::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::StructuralLinearWorkload,
