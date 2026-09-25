@@ -58,6 +58,14 @@ fn runmat_from_repository(temp: &TempDir, args: &[&str]) -> Output {
         .current_dir(repository)
         .args(args)
         .env("RUNMAT_CONFIG", config)
+        .env(
+            "RUNMAT_PACKAGE_CACHE_DIR",
+            temp.path().join("package-cache"),
+        )
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp.path().join("execution-state"),
+        )
         .output()
         .expect("run repository FEA example")
 }
@@ -267,6 +275,16 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     let payload: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(payload["root_id"], "structural_static_experimental");
     assert_eq!(payload["procedure"], "structural_linear_sequence");
+    let manifest_path = payload["result_manifest_artifact_path"]
+        .as_str()
+        .expect("STEP study manifest path");
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest_path).unwrap()).unwrap();
+    assert_eq!(manifest["public_run"]["run_status"], "completed");
+    assert_eq!(manifest["public_run"]["numerically_acceptable"], true);
+    assert_eq!(
+        manifest["public_run"]["steps"][0]["quality_reasons"],
+        serde_json::json!([])
+    );
     let step_run_id = payload["step_run_ids"]
         .as_array()
         .and_then(|steps| steps.first())

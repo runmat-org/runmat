@@ -289,6 +289,7 @@ fn structural_buckling_completion_publishes_ordinary_runtime_results() {
             },
             &constraints,
             topology_digest,
+            None,
         )
         .unwrap();
     let constraint_result =
@@ -481,6 +482,7 @@ fn structural_prestressed_modal_completion_publishes_exact_state_and_modes() {
             },
             &constraints,
             topology_digest,
+            None,
         )
         .unwrap();
     let constraint_result =

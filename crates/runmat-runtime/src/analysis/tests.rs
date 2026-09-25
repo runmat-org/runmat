@@ -4836,6 +4836,33 @@ fn one_analysis_material_requires_and_uses_an_explicit_solid_assignment() {
 }
 
 #[test]
+fn solid_material_quality_uses_resolved_occurrence_provenance() {
+    let mut model = sample_solid_model();
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let source_solid = mesh.topology.volume_elements[0].provenance[0].clone();
+    model.material_assignments[0].target =
+        runmat_analysis_core::PropertyRegionTarget::solid("authored_body");
+    model.material_assignments[0]
+        .target
+        .bind_resolved_entities(vec![source_solid.clone()])
+        .expect("resolve authored solid");
+    assert_eq!(
+        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        None
+    );
+
+    let mut other_occurrence = source_solid;
+    other_occurrence
+        .assembly_path
+        .push("other-instance".to_string());
+    model.material_assignments[0]
+        .target
+        .bind_resolved_entities(vec![other_occurrence])
+        .expect("resolve another occurrence");
+    assert!(linear_static_result::material_coverage_gap_detail(&model, &mesh).is_some());
+}
+
+#[test]
 fn multiple_analysis_materials_require_mesh_region_coverage() {
     let mut model = sample_model_with_material_assignment_mismatch();
     model.material_assignments.clear();

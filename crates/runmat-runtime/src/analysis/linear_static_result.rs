@@ -311,7 +311,7 @@ fn boundary_region_mapping_reasons(
             continue;
         };
         if target.expected_topology == runmat_analysis_core::ExpectedTopology::BoundaryFace
-            && !mesh_has_boundary_selection(mesh, &target.region_id)
+            && !mesh_has_boundary_target(mesh, target)
         {
             reasons.push(QualityReason {
                 code: QualityReasonCode::SolidMeshUnmappedLoadRegion,
@@ -325,7 +325,7 @@ fn boundary_region_mapping_reasons(
     }
     for constraint in &model.constraints {
         if let Some(target) = constraint.target() {
-            if !mesh_has_boundary_selection(mesh, &target.region_id) {
+            if !mesh_has_boundary_target(mesh, target) {
                 reasons.push(QualityReason {
                     code: QualityReasonCode::SolidMeshUnmappedConstraintRegion,
                     detail: format!(
@@ -337,7 +337,7 @@ fn boundary_region_mapping_reasons(
         }
     }
     for boundary in &model.boundaries {
-        if !mesh_has_boundary_selection(mesh, &boundary.target.region_id) {
+        if !mesh_has_boundary_target(mesh, &boundary.target) {
             reasons.push(QualityReason {
                 code: QualityReasonCode::SolidMeshUnmappedBoundaryRegion,
                 detail: format!(
@@ -350,11 +350,14 @@ fn boundary_region_mapping_reasons(
     reasons
 }
 
-fn mesh_has_boundary_selection(mesh: &SolverMeshArtifact, selection_id: &str) -> bool {
+fn mesh_has_boundary_target(
+    mesh: &SolverMeshArtifact,
+    target: &runmat_analysis_core::RegionTarget,
+) -> bool {
     mesh.topology.boundary_faces.iter().any(|face| {
         face.provenance
             .iter()
-            .any(|entity| entity.matches_analysis_selection(selection_id))
+            .any(|entity| target.matches_persistent_entity(entity))
     })
 }
 
@@ -397,9 +400,21 @@ pub(super) fn material_coverage_gap_detail(
             .iter()
             .filter(|scope| match scope {
                 runmat_analysis_core::PropertyRegionScope::All => true,
-                runmat_analysis_core::PropertyRegionScope::Region(selection) => region
-                    .region_id
-                    .matches_analysis_selection(selection.region_id()),
+                runmat_analysis_core::PropertyRegionScope::Region(selection) => {
+                    selection.matches_persistent_entity(&region.region_id)
+                        || !region.element_ids.is_empty()
+                            && region.element_ids.iter().all(|element_id| {
+                                mesh.topology
+                                    .volume_elements
+                                    .binary_search_by_key(element_id, |element| element.element_id)
+                                    .ok()
+                                    .is_some_and(|index| {
+                                        mesh.topology.volume_elements[index].provenance.iter().any(
+                                            |entity| selection.matches_persistent_entity(entity),
+                                        )
+                                    })
+                            })
+                }
             })
             .count();
         match count {
@@ -495,4 +510,31 @@ fn descriptor_entity_count(field: &AnalysisField, descriptor: &AnalysisFieldDesc
         }
     }
     field.element_count()
+}
+
+#[cfg(test)]
+mod lineage_tests {
+    use super::*;
+    use runmat_analysis_core::RegionTarget;
+    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
+
+    #[test]
+    fn boundary_quality_uses_resolved_occurrence_provenance() {
+        let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let source_face = mesh.topology.boundary_faces[0].provenance[0].clone();
+        let mut target = RegionTarget::boundary("authored_support");
+        target
+            .bind_resolved_entities(vec![source_face.clone()])
+            .expect("resolve authored face");
+        assert!(mesh_has_boundary_target(&mesh, &target));
+
+        let mut other_occurrence = source_face;
+        other_occurrence
+            .assembly_path
+            .push("other-instance".to_string());
+        target
+            .bind_resolved_entities(vec![other_occurrence])
+            .expect("resolve another occurrence");
+        assert!(!mesh_has_boundary_target(&mesh, &target));
+    }
 }
