@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use runmat_geometry_core::{
-    GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryScalarExpression,
+    GeometryAuthoringValue, GeometryDefinition, GeometryDefinitionRef, GeometryDefinitionSource,
+    GeometryScalarExpression,
 };
 use serde::{Deserialize, Serialize};
 
@@ -24,6 +25,8 @@ pub struct AuthoredStudyInputBinding {
 #[serde(deny_unknown_fields)]
 pub struct RealizedGeometryInstance {
     pub definition: GeometryDefinitionRef,
+    /// Captured source definition, independent of a later ambient geometry lookup.
+    pub source: GeometryDefinitionSource,
     pub bindings: BTreeMap<String, GeometryAuthoringValue>,
 }
 
@@ -129,6 +132,7 @@ fn realize_geometry(
     }
     Ok(RealizedGeometryInstance {
         definition: instance.definition.clone(),
+        source: definition.source.clone(),
         bindings,
     })
 }

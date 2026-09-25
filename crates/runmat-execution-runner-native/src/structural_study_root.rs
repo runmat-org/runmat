@@ -230,6 +230,7 @@ impl StructuralStudyResultExpectation {
         };
         if expected_source_digest != self.authored_study_digest
             || self.study.geometry.definition != geometry_definition
+            || self.study.geometry.source != self.geometry_request.definition.source
             || self.study.geometry.bindings != self.geometry_request.bindings
         {
             return Err(protocol(

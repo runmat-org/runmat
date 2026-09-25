@@ -124,6 +124,19 @@ fn typed_study_root_round_trips_exact_analysis_definition() {
     let mut substituted_geometry = expectation.clone();
     substituted_geometry.geometry_request.definition.geometry_id = "other-part".into();
     assert!(substituted_geometry.validate().is_err());
+    let mut substituted_source = expectation.clone();
+    let runmat_geometry_core::GeometryDefinitionSource::Constructed(graph) =
+        &mut substituted_source.geometry_request.definition.source
+    else {
+        panic!("typed study fixture must use constructed geometry");
+    };
+    let runmat_geometry_core::GeometryFeatureOperation::Box { width_m, .. } =
+        &mut graph.features[0].operation
+    else {
+        panic!("typed study fixture must use a box feature");
+    };
+    *width_m = 2.0.into();
+    assert!(substituted_source.validate().is_err());
     let directory = tempfile::tempdir().unwrap();
     let mut store = crate::FilesystemObjectStore::open(directory.path(), 64 << 20).unwrap();
     prepared.write_to(&mut store).unwrap();

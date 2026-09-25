@@ -511,6 +511,25 @@ mod tests {
     }
 
     #[test]
+    fn realization_captures_the_geometry_source_definition() {
+        let geometry = geometry();
+        let realized = study()
+            .realize(
+                &model(),
+                &geometry,
+                &[crate::AuthoredStudyInputBinding {
+                    input_id: "service_load".into(),
+                    value: AuthoredInputValue::Quantity {
+                        dimension: QuantityDimension::Force,
+                        value_si: 1000.0,
+                    },
+                }],
+            )
+            .unwrap();
+        assert_eq!(realized.geometry.source, geometry.source);
+    }
+
+    #[test]
     fn direct_authored_studies_reject_invalid_output_storage_policy() {
         let mut study = study();
         study.outputs.push(AuthoredOutput {

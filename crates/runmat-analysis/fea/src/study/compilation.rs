@@ -8,7 +8,7 @@ use runmat_analysis_core::{
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
-use runmat_geometry_core::{GeometryDocument, ResolvedGeometryRegions};
+use runmat_geometry_core::{GeometryDefinitionSource, GeometryDocument, ResolvedGeometryRegions};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact, StableDigest};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -122,6 +122,7 @@ pub fn compile_analysis_study(
         .map_err(|error| AnalysisStudyCompilationError::InvalidGeometry(error.to_string()))?;
     mesh.validate_canonical()
         .map_err(|error| AnalysisStudyCompilationError::InvalidMesh(error.to_string()))?;
+    validate_realized_geometry_source(study, geometry)?;
     validate_geometry_mesh_identity(geometry, mesh)?;
     if study.module_path.trim().is_empty() || study.study_id.trim().is_empty() {
         return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
@@ -181,6 +182,21 @@ fn validate_geometry_mesh_identity(
     Ok(())
 }
 
+fn validate_realized_geometry_source(
+    study: &RealizedStudy,
+    geometry: &GeometryDocument,
+) -> Result<(), AnalysisStudyCompilationError> {
+    if let GeometryDefinitionSource::Imported(imported) = &study.geometry.source {
+        if imported.content_digest != geometry.source.content_digest
+            || imported.format != geometry.source.format
+            || imported.units != geometry.source.source_units
+        {
+            return Err(AnalysisStudyCompilationError::ImportedGeometrySourceMismatch);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum AnalysisStudyCompilationError {
     #[error("realized study identity is empty")]
@@ -191,6 +207,8 @@ pub enum AnalysisStudyCompilationError {
     InvalidMesh(String),
     #[error("geometry document and solver mesh identities differ")]
     GeometryMeshMismatch,
+    #[error("imported geometry source identity differs from the realized study")]
+    ImportedGeometrySourceMismatch,
     #[error("geometry revision exceeds the analysis model contract")]
     GeometryRevisionOverflow,
     #[error("compiled study identity differs from its model or mesh")]
@@ -208,3 +226,6 @@ pub enum AnalysisStudyCompilationError {
     #[error(transparent)]
     Properties(#[from] PropertyCompilationError),
 }
+
+#[cfg(test)]
+mod tests;
