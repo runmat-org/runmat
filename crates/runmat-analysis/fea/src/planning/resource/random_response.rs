@@ -117,7 +117,7 @@ impl StructuralRandomResponseResourceProjection {
                             24,
                             "random-response operator contribution bytes",
                         )?,
-                        facts.connector_quadrature_bytes,
+                        facts.connector_assembly_buffer_bytes,
                     )?,
                 ),
                 scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),

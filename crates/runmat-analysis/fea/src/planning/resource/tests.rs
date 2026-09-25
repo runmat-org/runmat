@@ -249,7 +249,13 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
     .unwrap();
     let canonical = 7 * 1_024;
     let transient = 7 * 512 + 1_024;
-    assert_eq!(one, canonical + 4_096 + transient);
+    let metadata = 4_096 + 4 * "foundation_a".len() as u64;
+    assert_eq!(one.assembly_peak_bytes, canonical + metadata + transient);
+    assert_eq!(
+        one.recovery_retained_bytes,
+        2 * (canonical + metadata) + 1_024
+    );
+    assert_eq!(one.recovery_value_count, 16);
 
     let mut second = foundation;
     second.connector_id = "foundation_b".into();
@@ -260,8 +266,16 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
         projection.nodes.len() as u64,
     )
     .unwrap();
-    assert_eq!(two, 2 * (canonical + 4_096) + transient);
-    assert!(two > one);
+    assert_eq!(
+        two.assembly_peak_bytes,
+        2 * (canonical + metadata) + transient
+    );
+    assert_eq!(
+        two.recovery_retained_bytes,
+        4 * (canonical + metadata) + 2_048
+    );
+    assert_eq!(two.recovery_value_count, 32);
+    assert!(two.assembly_peak_bytes > one.assembly_peak_bytes);
 
     let mut unmapped = model;
     unmapped.connectors[0].kind = runmat_analysis_core::ConnectorKind::SurfaceNormalFoundation {
@@ -276,6 +290,22 @@ fn foundation_preflight_charges_selected_quadrature_and_retained_plan_copies() {
         ),
         Err(ResourcePlanningError::Invalid(message)) if message.contains("foundation_a")
     ));
+
+    let mut point_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    point_model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "tip_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:2"),
+                stiffness: runmat_analysis_core::Stiffness::new(1.0),
+            },
+        });
+    let point = connector_buffers::estimate_connector_buffers(&point_model, None, 2).unwrap();
+    let point_metadata = 4_096 + 4 * "tip_spring".len() as u64;
+    assert_eq!(point.assembly_peak_bytes, point_metadata);
+    assert_eq!(point.recovery_retained_bytes, 2 * point_metadata + 1_024);
+    assert_eq!(point.recovery_value_count, 16);
 }
 
 #[test]
@@ -487,7 +517,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         projection.nodes.len() as u64,
     )
     .unwrap();
-    assert!(foundation_bytes > 0);
+    assert!(foundation_bytes.assembly_peak_bytes > 0);
     assert_eq!(
         foundation_plan
             .input
@@ -502,7 +532,24 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
             .assembly
             .contribution_bytes_upper_bound
             .0
-            + foundation_bytes,
+            + foundation_bytes.assembly_peak_bytes,
+    );
+    let baseline_operator = plan.input.structural_operator().unwrap();
+    let foundation_operator = foundation_plan.input.structural_operator().unwrap();
+    let connector_payload_bytes =
+        foundation_bytes.recovery_value_count * 8 + foundation_bytes.recovery_retained_bytes;
+    assert_eq!(
+        foundation_operator.phase_resources.resident_value_count.0,
+        baseline_operator.phase_resources.resident_value_count.0
+            + foundation_bytes.recovery_value_count,
+    );
+    assert_eq!(
+        foundation_operator.phase_resources.retained_bytes.0,
+        baseline_operator.phase_resources.retained_bytes.0 + connector_payload_bytes,
+    );
+    assert_eq!(
+        foundation_operator.publication.result_artifact_bytes.0,
+        baseline_operator.publication.result_artifact_bytes.0 + connector_payload_bytes,
     );
     assert_ne!(foundation_plan.identity, plan.identity);
     assert_eq!(

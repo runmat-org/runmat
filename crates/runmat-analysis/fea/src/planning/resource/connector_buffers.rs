@@ -14,16 +14,42 @@ const TRI3_CANONICAL_BYTES: u64 = 640;
 const TRI3_RESOLVED_BYTES: u64 = 384;
 const SURFACE_FACE_WORKSPACE_BYTES: u64 = 1_024;
 const EXPLICIT_NODE_MAP_BYTES: u64 = 256;
+// Per connector: bounded canonical entry, contribution provenance, response enum, Vec slots,
+// and allocation overhead. Identifier bytes are charged separately for the simultaneous
+// authored, assembly-plan, recovered-plan, and response/provenance copies.
 const CONNECTOR_METADATA_BYTES: u64 = 4_096;
+// Two published arrays (three force components and one energy) and their field wrappers.
+const CONNECTOR_RESULT_FIELD_BYTES: u64 = 1_024;
+const CONNECTOR_ID_COPIES: u64 = 4;
+// Covers the largest connector response's numeric values plus both published field arrays.
+const CONNECTOR_RESULT_VALUES: u64 = 16;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ConnectorBufferEstimate {
+    pub assembly_peak_bytes: u64,
+    pub recovery_retained_bytes: u64,
+    pub recovery_value_count: u64,
+}
 
 pub(super) fn estimate_connector_buffers(
     model: &AnalysisModel,
     projection: Option<&AnalysisProjection>,
     topology_node_count: u64,
-) -> Result<u64, ResourcePlanningError> {
+) -> Result<ConnectorBufferEstimate, ResourcePlanningError> {
     let mut retained = 0_u64;
     let mut transient_peak = 0_u64;
     for connector in &model.connectors {
+        let id_bytes = multiply(
+            u64::try_from(connector.connector_id.len())
+                .map_err(|_| ResourcePlanningError::Overflow("connector identifier bytes"))?,
+            CONNECTOR_ID_COPIES,
+            "connector identifier copies",
+        )?;
+        retained = sum(
+            retained,
+            sum(CONNECTOR_METADATA_BYTES, id_bytes, "connector metadata")?,
+            "all connector metadata",
+        )?;
         let ConnectorKind::SurfaceNormalFoundation { target, .. } = &connector.kind else {
             continue;
         };
@@ -115,18 +141,30 @@ pub(super) fn estimate_connector_buffers(
             )?,
             "foundation transient buffers",
         )?;
-        retained = sum(
-            retained,
-            sum(
-                canonical,
-                CONNECTOR_METADATA_BYTES,
-                "foundation retained buffers",
-            )?,
-            "all foundation retained buffers",
-        )?;
+        retained = sum(retained, canonical, "all foundation retained buffers")?;
         transient_peak = transient_peak.max(transient);
     }
-    sum(retained, transient_peak, "foundation assembly buffer peak")
+    let connector_count = u64::try_from(model.connectors.len())
+        .map_err(|_| ResourcePlanningError::Overflow("connector count"))?;
+    Ok(ConnectorBufferEstimate {
+        assembly_peak_bytes: sum(retained, transient_peak, "connector assembly buffer peak")?,
+        // Assembly retains one plan while recovery owns its clone. The response vector and the
+        // force/energy field arrays are additional retained objects, not assembly scratch.
+        recovery_retained_bytes: sum(
+            multiply(retained, 2, "two retained connector plans")?,
+            multiply(
+                connector_count,
+                CONNECTOR_RESULT_FIELD_BYTES,
+                "connector response and fields",
+            )?,
+            "connector recovery retained bytes",
+        )?,
+        recovery_value_count: multiply(
+            connector_count,
+            CONNECTOR_RESULT_VALUES,
+            "connector response value count",
+        )?,
+    })
 }
 
 pub(super) fn include_connector_buffers(

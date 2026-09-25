@@ -291,7 +291,7 @@ pub(crate) fn build_structural_transient_scope_resource_plan(
     let contribution_nonzeros = operator_nonzeros;
     let contribution_bytes = super::connector_buffers::include_connector_buffers(
         multiply(operator_nonzeros, 24, "assembly contributions")?,
-        facts.connector_quadrature_bytes,
+        facts.connector_assembly_buffer_bytes,
     )?;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,

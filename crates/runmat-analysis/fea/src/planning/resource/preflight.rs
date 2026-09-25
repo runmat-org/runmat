@@ -125,7 +125,7 @@ pub(crate) fn build_static_resource_plan(
             .ok_or(ResourcePlanningError::Overflow(
                 "assembly contribution bytes",
             ))?,
-        facts.connector_quadrature_bytes,
+        facts.connector_assembly_buffer_bytes,
     )?;
     let observations = ObservationResourceFacts::from_plan(observations, observation_execution)?;
     let recovery_topology = StructuralRecoveredFieldTopology::derive(model, mesh)
@@ -213,9 +213,19 @@ pub(crate) fn build_static_resource_plan(
             ResourcePlanningError::Overflow("structural result value count"),
         )?;
     }
+    recovery_values = recovery_values
+        .checked_add(facts.connector_recovery_value_count)
+        .ok_or(ResourcePlanningError::Overflow(
+            "connector recovery value count",
+        ))?;
     let recovery_bytes = checked_bytes(recovery_values, 8, "structural recovery bytes")?;
-    let recovery_resident = checked_add(
+    let recovery_payload_bytes = checked_add(
         recovery_bytes,
+        facts.connector_recovery_retained_bytes,
+        "structural and connector recovery payload bytes",
+    )?;
+    let recovery_resident = checked_add(
+        recovery_payload_bytes,
         STRUCTURAL_ARTIFACT_OVERHEAD_BYTES,
         "structural recovery resident bytes",
     )?;
@@ -257,16 +267,16 @@ pub(crate) fn build_static_resource_plan(
                 resident_value_count: Count(recovery_values),
                 resident_bytes_upper_bound: ByteCount(recovery_resident),
                 scratch_bytes: ByteCount(recovery_resident),
-                retained_bytes: ByteCount(recovery_bytes),
+                retained_bytes: ByteCount(recovery_payload_bytes),
             },
             field_recovery,
             observations: observations.clone(),
             publication: CheckpointArtifactPolicy {
-                result_artifact_bytes: ByteCount(recovery_bytes),
+                result_artifact_bytes: ByteCount(recovery_payload_bytes),
                 checkpoint_bytes: ByteCount(checkpoint_bytes),
                 artifact_overhead_bytes: ByteCount(STRUCTURAL_ARTIFACT_OVERHEAD_BYTES),
                 relay_bytes: ByteCount(0),
-                result_egress_bytes: ByteCount(recovery_bytes),
+                result_egress_bytes: ByteCount(recovery_payload_bytes),
                 checkpoint_egress_bytes: ByteCount(checkpoint_bytes),
             },
             // The current structural kernel is monolithic. A recommendation would be dishonest

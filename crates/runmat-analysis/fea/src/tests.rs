@@ -316,6 +316,64 @@ fn direct_physical_static_rejects_accuracy_memory_ceiling_before_assembly() {
     ));
 }
 
+#[test]
+fn direct_connector_static_without_connector_observation_preflights_memory() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model
+        .connectors
+        .push(runmat_analysis_core::AnalysisConnector {
+            connector_id: "tip_support_spring".into(),
+            kind: runmat_analysis_core::ConnectorKind::IsotropicGroundSpring {
+                target: runmat_analysis_core::RegionTarget::point("node:2"),
+                stiffness: runmat_analysis_core::Stiffness::new(1.0e6),
+            },
+        });
+    model.sequence.steps[0].observations.clear();
+    let admitted_limit = model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes;
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    let error = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect_err("connector-bearing direct solve must preflight before assembly");
+    assert!(matches!(
+        error,
+        crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                maximum: 1,
+                ..
+            }
+        )
+    ));
+    model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = admitted_limit;
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        experimental_linear_static_options(),
+    )
+    .expect("the admitted connector-bearing direct solve must complete");
+    assert_eq!(
+        result
+            .structural_connector_result
+            .as_ref()
+            .expect("connector response")
+            .responses
+            .len(),
+        1,
+    );
+}
+
 fn assert_close(actual: f64, expected: f64, tolerance: f64) {
     assert!(
         (actual - expected).abs() <= tolerance,

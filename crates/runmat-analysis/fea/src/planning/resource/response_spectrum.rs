@@ -216,7 +216,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
                 contribution_bytes_upper_bound: ByteCount(
                     super::connector_buffers::include_connector_buffers(
                         multiply(contribution_nonzeros, 24, "operator contribution bytes")?,
-                        facts.connector_quadrature_bytes,
+                        facts.connector_assembly_buffer_bytes,
                     )?,
                 ),
                 scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
