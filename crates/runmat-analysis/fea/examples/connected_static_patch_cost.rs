@@ -1,8 +1,10 @@
 //! End-to-end physical Tet4/Tet10 static patch timing on a conforming connected mesh.
 //!
 //! Run with `cargo run --release -p runmat-analysis-fea --example connected_static_patch_cost -- 3 3 4 tet10`.
-//! Refinement is outside the timed solve. Peak RSS includes process startup and all retained data,
-//! so it is not an isolated FEA allocation or a resource-admission pass.
+//! Refinement and resource planning are outside the timed solve. The printed factorization
+//! reservation is the conservative coercivity-admission envelope, not observed factor storage.
+//! Peak RSS includes process startup and all retained data, so it is not an isolated FEA
+//! allocation or a resource-admission pass.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -18,8 +20,14 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_analysis_fea::{
+    constraints::CanonicalStructuralConstraintPlan,
+    execution::StructuralLinearWorkload,
     fixtures::{fixture_model, FixtureId},
-    planning::resource::{LocalExecutionPlan, LocalThreadCount},
+    planning::resource::{build_structural_resource_plan, LocalExecutionPlan, LocalThreadCount},
+    post::fields::structural_static_observable_field_definitions,
+    results::observation::{
+        resolve_structural_observation_plan, ObservationExecutionPolicy, ObservationLimits,
+    },
     run_linear_static_with_options, ComputeBackend, FeaRunError, FeaRunResult,
     LinearStaticSolveOptions, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
 };
@@ -231,6 +239,44 @@ fn solve_patch(
     )
 }
 
+fn plan_patch(
+    model: &runmat_analysis_core::AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    local_execution: LocalExecutionPlan,
+) -> Result<runmat_analysis_fea::planning::resource::FeaResourcePlan, Box<dyn Error>> {
+    let constraints = CanonicalStructuralConstraintPlan::compile_for_model(model, Some(mesh))?;
+    let fields = structural_static_observable_field_definitions()?;
+    let observations = resolve_structural_observation_plan(
+        &model.sequence.steps[0],
+        model,
+        Some(mesh),
+        &constraints,
+        &fields,
+        ObservationLimits::default(),
+    )?;
+    let workload = StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model: model.clone(),
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        preconditioner: runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend:
+            runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: ObservationExecutionPolicy::serial(),
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    Ok(build_structural_resource_plan(
+        Some(mesh),
+        &constraints,
+        &observations,
+        &workload,
+        &[],
+        local_execution,
+    )?)
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let levels: usize = args.next().ok_or("expected refinement levels")?.parse()?;
@@ -254,6 +300,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         tet4_mesh
     };
     let model = patch_model(&mesh);
+    let plan = plan_patch(&model, &mesh, local_execution)?;
     let mut timings = Vec::with_capacity(repetitions);
     let mut maximum_displacement_error_m = 0.0_f64;
     for _ in 0..repetitions {
@@ -285,6 +332,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     timings.sort_by(f64::total_cmp);
     println!("os={},arch={},order={order:?},levels={levels},nodes={},elements={},threads={threads},repetitions={repetitions},min_s={:.6},median_s={:.6},max_displacement_error_m={maximum_displacement_error_m:.3e}",
         env::consts::OS, env::consts::ARCH, mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), timings[0], timings[repetitions / 2]);
+    println!(
+        "resource_plan_memory_bytes={},resource_plan_scratch_bytes={},resource_plan_wall_millis={}",
+        plan.request.memory_bytes, plan.request.scratch_bytes, plan.request.max_wall_millis
+    );
+    println!(
+        "resource_plan_breakdown_topology_bytes={},csr_value_bytes={},assembly_contribution_bytes={},factorization_bytes={},constraint_bytes={},worker_overhead_bytes={}",
+        plan.breakdown.topology_bytes.0,
+        plan.breakdown.csr_value_bytes.0,
+        plan.breakdown.assembly_contribution_bytes.0,
+        plan.breakdown.factorization_bytes.0,
+        plan.breakdown.constraint_bytes.0,
+        plan.breakdown.worker_overhead_bytes.0,
+    );
     if let Some(bytes) = process_peak_rss_bytes() {
         println!("process_peak_rss_bytes={bytes}");
     }
