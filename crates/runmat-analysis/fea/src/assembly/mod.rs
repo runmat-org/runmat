@@ -1190,7 +1190,7 @@ pub(super) fn assemble_linear_system_impl(
 
     let solid_properties = solver_mesh
         .filter(|_| structural_requirement.is_some())
-        .map(|mesh| crate::properties::compile_solid_property_map(model, mesh))
+        .map(|mesh| crate::properties::compile_structural_property_map(model, Some(mesh)))
         .transpose()
         .map_err(|error| {
             LinearAssemblyError::SolidOperator(SolverSolidAssemblyError::InvalidMaterialCoverage(

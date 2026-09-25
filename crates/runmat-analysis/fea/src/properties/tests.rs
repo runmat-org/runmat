@@ -130,6 +130,42 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
 }
 
 #[test]
+fn structural_solid_capabilities_fail_before_assembly_without_restricting_generic_properties() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let model = matching_model(&mesh);
+    let generic = compile_property_map(&model, Some(&mesh)).expect("generic solid properties");
+    let structural =
+        compile_structural_property_map(&model, Some(&mesh)).expect("structural solid properties");
+    assert_eq!(generic.identity, structural.identity);
+
+    let mut thermal_only = model.clone();
+    thermal_only.materials[0].elasticity = None;
+    compile_property_map(&thermal_only, Some(&mesh))
+        .expect("generic material ownership must not require elasticity");
+    assert!(matches!(
+        compile_structural_property_map(&thermal_only, Some(&mesh)),
+        Err(PropertyCompilationError::MissingCapability {
+            role: "structural solid",
+            capability: runmat_analysis_core::MaterialCapability::IsotropicLinearElasticity,
+            ..
+        })
+    ));
+
+    let mut massless = model;
+    massless.materials[0].mass_density_kg_per_m3 = None;
+    compile_property_map(&massless, Some(&mesh))
+        .expect("generic material ownership must not require density");
+    assert!(matches!(
+        compile_structural_property_map(&massless, Some(&mesh)),
+        Err(PropertyCompilationError::MissingCapability {
+            role: "structural solid",
+            capability: runmat_analysis_core::MaterialCapability::MassDensity,
+            ..
+        })
+    ));
+}
+
+#[test]
 fn compiled_map_uses_bound_entity_sets_instead_of_logical_region_names() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let selected = runmat_geometry_core::PersistentEntityId {

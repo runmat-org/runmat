@@ -75,8 +75,9 @@ pub(super) fn prepare_static_preassembly(
     let constraints = prepared_constraints
         .or(compiled_constraints.as_ref())
         .expect("CPU physical preassembly has compiled or prepared constraints");
-    let _properties = crate::properties::compile_property_map(model, options.solver_mesh.as_ref())
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let _properties =
+        crate::properties::compile_structural_property_map(model, options.solver_mesh.as_ref())
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let connectors = compile_model_connector_plan(
         model,
         options.solver_mesh.as_ref(),
@@ -174,6 +175,64 @@ pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> b
 mod tests {
     use super::*;
     use crate::fixtures::{fixture_model, FixtureId};
+
+    #[test]
+    fn physical_static_rejects_missing_solid_capabilities_before_resource_planning() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let options = LinearStaticSolveOptions {
+            solver_mesh: Some(crate::tests::single_tetrahedron_solver_mesh_for_model(
+                &model,
+            )),
+            ..LinearStaticSolveOptions::default()
+        };
+        prepare_static_preassembly(
+            &model,
+            &model.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &options,
+            None,
+            None,
+        )
+        .expect("mechanical solid is valid before assembly");
+
+        let mut thermal_only = model.clone();
+        thermal_only.materials[0].elasticity = None;
+        let error = prepare_static_preassembly(
+            &thermal_only,
+            &thermal_only.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &options,
+            None,
+            None,
+        )
+        .err()
+        .expect("thermal-only solid must fail before assembly");
+        assert!(matches!(
+            error,
+            FeaRunError::Assembly(message)
+                if message.contains("structural solid")
+                    && message.contains("IsotropicLinearElasticity")
+        ));
+
+        let mut massless = model;
+        massless.materials[0].mass_density_kg_per_m3 = None;
+        let error = prepare_static_preassembly(
+            &massless,
+            &massless.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &options,
+            None,
+            None,
+        )
+        .err()
+        .expect("massless solid must fail before assembly");
+        assert!(matches!(
+            error,
+            FeaRunError::Assembly(message)
+                if message.contains("structural solid")
+                    && message.contains("MassDensity")
+        ));
+    }
 
     #[test]
     fn prepared_static_rejects_a_substituted_worker_plan_before_assembly() {

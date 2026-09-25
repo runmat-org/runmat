@@ -8,7 +8,7 @@ use runmat_analysis_core::{
     AnalysisField, AnalysisModel, AnalysisProcedure, FormulationMaturity, FormulationRequirement,
     SolutionSpace,
 };
-use runmat_analysis_fea::properties::compile_property_map;
+use runmat_analysis_fea::properties::compile_structural_property_map;
 use runmat_analysis_fea::{
     ComputeBackend, ExecutionBackend, FeaRunResult, SolverPreconditioner,
     FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_NODAL_VON_MISES,
@@ -280,7 +280,7 @@ pub(super) fn property_compilation_quality_reason(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
 ) -> Option<QualityReason> {
-    compile_property_map(model, Some(mesh))
+    compile_structural_property_map(model, Some(mesh))
         .err()
         .map(|error| QualityReason {
             code: QualityReasonCode::StructuralPropertyCompilationFailed,

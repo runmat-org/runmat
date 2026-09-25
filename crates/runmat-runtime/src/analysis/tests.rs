@@ -4932,7 +4932,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
         &fs::read(&mesh_path).expect("read solver mesh"),
     )
     .expect("decode solver mesh");
-    let mut unowned = model;
+    let mut unowned = model.clone();
     unowned.material_assignments.clear();
     let published = linear_static_result::admit_linear_static_result(
         linear_static_result::LinearStaticResultInput {
@@ -4943,7 +4943,7 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
             options: &options,
             assigned_run_id: Some("rejected-property-coverage"),
         },
-        solved.data.run,
+        solved.data.run.clone(),
     )
     .expect("completion must publish an attributable rejection");
     assert_eq!(published.run_status, RunStatus::Rejected);
@@ -4951,6 +4951,27 @@ fn static_completion_rejects_result_with_unowned_solid_elements() {
     assert!(published.quality_reasons.iter().any(|reason| {
         reason.code == QualityReasonCode::StructuralPropertyCompilationFailed
             && reason.detail.contains("found 0")
+    }));
+
+    let mut thermal_only = model;
+    thermal_only.materials[0].elasticity = None;
+    let published = linear_static_result::admit_linear_static_result(
+        linear_static_result::LinearStaticResultInput {
+            model: &thermal_only,
+            solver_mesh: Some(&mesh),
+            requested_backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            options: &options,
+            assigned_run_id: Some("rejected-structural-capability"),
+        },
+        solved.data.run,
+    )
+    .expect("completion must reject a solid without structural capabilities");
+    assert_eq!(published.run_status, RunStatus::Rejected);
+    assert!(!published.numerically_acceptable);
+    assert!(published.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::StructuralPropertyCompilationFailed
+            && reason.detail.contains("IsotropicLinearElasticity")
     }));
     let _ = fs::remove_dir_all(mesh_root);
 }

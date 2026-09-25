@@ -90,6 +90,28 @@ pub fn compile_solid_property_map(
     compile_property_map(model, Some(mesh))
 }
 
+/// Compile the shared property map and prove that every solid owner is usable by structural
+/// operators before any element contribution is assembled. The generic map remains usable by
+/// thermal and other formulations with different constitutive requirements.
+pub fn compile_structural_property_map(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<CompiledPropertyMap, PropertyCompilationError> {
+    let compiled = compile_property_map(model, mesh)?;
+    for entry in compiled.solid_materials() {
+        require_capabilities(
+            "structural solid",
+            &entry.element_id.to_string(),
+            &entry.material,
+            &[
+                MaterialCapability::IsotropicLinearElasticity,
+                MaterialCapability::MassDensity,
+            ],
+        )?;
+    }
+    Ok(compiled)
+}
+
 /// Compile every material-bearing formulation whose topology is present.
 pub fn compile_property_map(
     model: &AnalysisModel,
