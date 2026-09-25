@@ -256,10 +256,6 @@ impl CoercivitySymbolicPlan {
         &self.pivot_neighbors
     }
 
-    pub(crate) const fn dimension(&self) -> u64 {
-        self.dimension
-    }
-
     pub(crate) const fn factor_nonzero_count(&self) -> u64 {
         self.factor_nonzero_count
     }
@@ -338,10 +334,36 @@ mod tests {
         let exact = pattern(&[&[0, 1], &[0, 1, 2], &[1, 2, 3], &[2, 3]]);
         let envelope = CoercivityWorkEnvelope::derive(&upper).unwrap();
         let proof = CoercivitySymbolicPlan::derive(&exact).unwrap();
-        assert_eq!(envelope.dimension(), proof.dimension());
+        assert_eq!(envelope.dimension(), proof.dimension);
         assert!(envelope.factor_nonzero_limit() >= proof.factor_nonzero_count());
         assert!(envelope.update_limit() >= proof.update_count());
         assert!(envelope.resident_bytes_limit() >= proof.resident_bytes_upper_bound());
+    }
+
+    #[test]
+    fn successful_upper_graph_symbolic_work_is_not_a_subgraph_work_bound() {
+        let upper = pattern(&[
+            &[0, 1, 2, 3, 4],
+            &[0, 1, 2, 3, 4],
+            &[0, 1, 2],
+            &[0, 1, 3],
+            &[0, 1, 4],
+        ]);
+        let exact = pattern(&[
+            &[0, 1, 3, 4],
+            &[0, 1, 2, 3, 4],
+            &[1, 2],
+            &[0, 1, 3],
+            &[0, 1, 4],
+        ]);
+        let upper_proof = CoercivitySymbolicPlan::derive(&upper).unwrap();
+        let exact_proof = CoercivitySymbolicPlan::derive(&exact).unwrap();
+        assert_eq!(upper_proof.update_count(), 10);
+        assert_eq!(exact_proof.update_count(), 11);
+        let envelope = CoercivityWorkEnvelope::derive(&upper).unwrap();
+        assert!(envelope.update_limit() >= exact_proof.update_count());
+        assert!(envelope.factor_nonzero_limit() >= exact_proof.factor_nonzero_count());
+        assert!(envelope.resident_bytes_limit() >= exact_proof.resident_bytes_upper_bound());
     }
 
     #[test]
@@ -387,7 +409,7 @@ mod tests {
         let second = CoercivitySymbolicPlan::derive(&source).unwrap();
 
         assert_eq!(first, second);
-        assert_eq!(first.dimension(), dimension as u64);
+        assert_eq!(first.dimension, dimension as u64);
         assert!(first.factor_nonzero_count() > dimension as u64);
         assert!(first.resident_bytes_upper_bound() < 64 * 1024 * 1024);
     }

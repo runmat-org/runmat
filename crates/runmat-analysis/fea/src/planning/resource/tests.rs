@@ -509,7 +509,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         StructuralSymbolicOperators::derive(&projection, &constraints, &workload.model, &mesh)
             .unwrap();
     let expected_admission =
-        crate::algebra::CoercivitySymbolicPlan::derive(operators.stiffness_upper_bound()).unwrap();
+        crate::algebra::CoercivityWorkEnvelope::derive(operators.stiffness_upper_bound()).unwrap();
     let SolveResourcePolicy::Iterative { admission, .. } =
         &plan.input.structural_operator().unwrap().solve
     else {
@@ -518,15 +518,15 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert_eq!(admission.dimension, Count(expected_admission.dimension()));
     assert_eq!(
         admission.factor_nonzero_upper_bound,
-        Count(expected_admission.factor_nonzero_count())
+        Count(expected_admission.factor_nonzero_limit())
     );
     assert_eq!(
         admission.update_count_upper_bound,
-        Count(expected_admission.update_count())
+        Count(expected_admission.update_limit())
     );
     assert_eq!(
         admission.resident_bytes_upper_bound,
-        ByteCount(expected_admission.resident_bytes_upper_bound())
+        ByteCount(expected_admission.resident_bytes_limit())
     );
     plan.validate_identity().unwrap();
 

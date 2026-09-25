@@ -1,5 +1,5 @@
 use crate::{
-    algebra::{CoercivityError, CoercivitySymbolicPlan, CoercivityWorkEnvelope},
+    algebra::CoercivityWorkEnvelope,
     constraints::{
         AffineConstraintReduction, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
     },
@@ -100,28 +100,17 @@ pub fn build_structural_resource_plan(
     } else {
         facts.symbolic.stiffness_upper_bound().clone()
     };
-    let admission = match CoercivitySymbolicPlan::derive(&admission_pattern) {
-        Ok(proof) => SolverAdmissionResourcePolicy {
-            dimension: Count(proof.dimension()),
-            factor_nonzero_upper_bound: Count(proof.factor_nonzero_count()),
-            update_count_upper_bound: Count(proof.update_count()),
-            resident_bytes_upper_bound: ByteCount(proof.resident_bytes_upper_bound()),
-        },
-        Err(CoercivityError::ResourceLimit { .. }) => {
-            // The topology pattern can contain couplings that vanish during numerical assembly.
-            // Its failed proof is not an exact-operator rejection. Reserve the maximum work of
-            // any successful exact-pattern proof under this graph instead; the solve must still
-            // perform and report its own exact coercivity check after assembly.
-            let bound = CoercivityWorkEnvelope::derive(&admission_pattern)
-                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-            SolverAdmissionResourcePolicy {
-                dimension: Count(bound.dimension()),
-                factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
-                update_count_upper_bound: Count(bound.update_limit()),
-                resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
-            }
-        }
-        Err(error) => return Err(ResourcePlanningError::Invalid(error.to_string())),
+    // The topology-derived pattern is a superset of the prepared operator's graph, but the
+    // fill-reducing ordering is recalculated for the exact graph. Even a successful symbolic
+    // proof on the superset is therefore not an upper bound on exact fill or update work.
+    // Reserve the graph-count envelope; exact coercivity is proved after numerical assembly.
+    let bound = CoercivityWorkEnvelope::derive(&admission_pattern)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let admission = SolverAdmissionResourcePolicy {
+        dimension: Count(bound.dimension()),
+        factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
+        update_count_upper_bound: Count(bound.update_limit()),
+        resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
     };
     let solve = solve_policy(
         workload.preconditioner,
