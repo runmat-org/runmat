@@ -2,7 +2,9 @@ use thiserror::Error;
 
 use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 
-use crate::topology::quadrature::TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE;
+use crate::topology::quadrature::{
+    TETRAHEDRON_ELEVEN_POINT_RULE as VOLUME_QUADRATURE, TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE,
+};
 
 use super::{
     jacobian_certificate::{certify_positive_jacobian, CertificateFailure},
@@ -26,25 +28,6 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 0.0, 1.0],
 ];
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
-const MASS_A: f64 = 0.785_714_285_714_285_7;
-const MASS_B: f64 = 0.071_428_571_428_571_42;
-const MASS_C: f64 = 0.399_403_576_166_799_2;
-const MASS_D: f64 = 0.100_596_423_833_200_8;
-const MASS_VERTEX_WEIGHT: f64 = 0.007_622_222_222_222_222;
-const MASS_EDGE_WEIGHT: f64 = 0.024_888_888_888_888_89;
-const MASS_QUADRATURE: [([f64; 4], f64); 11] = [
-    ([0.25; 4], -0.013_155_555_555_555_556),
-    ([MASS_A, MASS_B, MASS_B, MASS_B], MASS_VERTEX_WEIGHT),
-    ([MASS_B, MASS_A, MASS_B, MASS_B], MASS_VERTEX_WEIGHT),
-    ([MASS_B, MASS_B, MASS_A, MASS_B], MASS_VERTEX_WEIGHT),
-    ([MASS_B, MASS_B, MASS_B, MASS_A], MASS_VERTEX_WEIGHT),
-    ([MASS_C, MASS_C, MASS_D, MASS_D], MASS_EDGE_WEIGHT),
-    ([MASS_C, MASS_D, MASS_C, MASS_D], MASS_EDGE_WEIGHT),
-    ([MASS_C, MASS_D, MASS_D, MASS_C], MASS_EDGE_WEIGHT),
-    ([MASS_D, MASS_C, MASS_C, MASS_D], MASS_EDGE_WEIGHT),
-    ([MASS_D, MASS_C, MASS_D, MASS_C], MASS_EDGE_WEIGHT),
-    ([MASS_D, MASS_D, MASS_C, MASS_C], 0.024_888_888_888_89),
-];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Tetrahedron10ElementGeometry {
@@ -56,7 +39,7 @@ impl Tetrahedron10ElementGeometry {
     pub fn volume_m3(self) -> Result<f64, Tetrahedron10ElementError> {
         validate_nodes(self.nodes_m)?;
         let volume =
-            MASS_QUADRATURE
+            VOLUME_QUADRATURE
                 .into_iter()
                 .try_fold(0.0, |volume, (barycentric, weight)| {
                     Ok::<_, Tetrahedron10ElementError>(
@@ -239,31 +222,6 @@ pub fn global_stiffness_matrix(
     }
 }
 
-pub fn consistent_mass_matrix(
-    material: SolidMaterial,
-    geometry: Tetrahedron10ElementGeometry,
-) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
-    validate_nodes(geometry.nodes_m)?;
-    material.validate()?;
-    let mut mass = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
-    for (barycentric, weight) in MASS_QUADRATURE {
-        let shape = shape_values(barycentric);
-        let scale = material.density_kg_per_m3
-            * weight
-            * jacobian_determinant(geometry.nodes_m, barycentric)?;
-        for left_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
-            for right_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
-                let value = scale * shape[left_node] * shape[right_node];
-                for axis in 0..TETRAHEDRON10_NODE_DOF_COUNT {
-                    mass[left_node * TETRAHEDRON10_NODE_DOF_COUNT + axis]
-                        [right_node * TETRAHEDRON10_NODE_DOF_COUNT + axis] += value;
-                }
-            }
-        }
-    }
-    Ok(mass)
-}
-
 /// Integrates the initial-stress stiffness using the same isoparametric geometry and quadrature
 /// as the material stiffness. Stress is tension-positive and is supplied at each quadrature point.
 pub fn geometric_stiffness_matrix(
@@ -349,7 +307,7 @@ fn quadratic_form(left: [f64; 3], matrix: [[f64; 3]; 3], right: [f64; 3]) -> f64
         .sum()
 }
 
-fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
+pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
     let mut values = [0.0; TETRAHEDRON10_ELEMENT_NODE_COUNT];
     for node in 0..4 {
         values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
@@ -411,7 +369,7 @@ fn strain_displacement_matrix(
     b
 }
 
-fn jacobian_determinant(
+pub(super) fn jacobian_determinant(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
     barycentric: [f64; 4],
 ) -> Result<f64, Tetrahedron10ElementError> {
@@ -467,7 +425,7 @@ fn jacobian(
     })
 }
 
-fn validate_nodes(
+pub(super) fn validate_nodes(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> Result<(), Tetrahedron10ElementError> {
     if !nodes_m.iter().flatten().all(|value| value.is_finite()) {
@@ -498,6 +456,7 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
+    use super::super::tetrahedron10_mass::consistent_mass_matrix;
     use super::*;
     use crate::assembly::elements::solid::Tetrahedron4ElementGeometry;
 
@@ -650,12 +609,12 @@ mod tests {
         let mut folded = straight_unit_tetrahedron();
         // The 01 midside node moves from x=0.5 to x=0.8. Along that edge,
         // det(J)=1+1.2(1-2*x), so it is negative at corner 1 even though every
-        // current stiffness and mass quadrature point still has a positive determinant.
+        // current stiffness and volume quadrature point still has a positive determinant.
         folded.nodes_m[4][0] += 0.3;
         for barycentric in QUADRATURE {
             assert!(jacobian_determinant(folded.nodes_m, barycentric).is_ok());
         }
-        for (barycentric, _) in MASS_QUADRATURE {
+        for (barycentric, _) in VOLUME_QUADRATURE {
             assert!(jacobian_determinant(folded.nodes_m, barycentric).is_ok());
         }
         assert_eq!(
@@ -674,6 +633,23 @@ mod tests {
             folded.volume_m3(),
             Err(Tetrahedron10ElementError::DegenerateOrInverted)
         );
+    }
+
+    #[test]
+    fn curved_tetrahedron10_mass_matches_exact_barycentric_moments() {
+        let mut geometry = straight_unit_tetrahedron();
+        let warp = 0.1;
+        geometry.nodes_m[4][0] += warp;
+        let mass = consistent_mass_matrix(steel(), geometry).unwrap();
+        let density = steel().density_kg_per_m3;
+        // For this warp det(J)=1+4δ(L0-L1). Exact simplex moments give
+        // ∫N0² dV = 1/420 + δ/315 and ∫N4² dV = 4/315.
+        assert!((mass[0][0] - density * (1.0 / 420.0 + warp / 315.0)).abs() < 1.0e-10);
+        assert!((mass[12][12] - density * 4.0 / 315.0).abs() < 1.0e-10);
+        let rigid_translation_mass = (0..10)
+            .flat_map(|left| (0..10).map(move |right| mass[left * 3][right * 3]))
+            .sum::<f64>();
+        assert!((rigid_translation_mass - density * geometry.volume_m3().unwrap()).abs() < 1.0e-9);
     }
 
     #[test]

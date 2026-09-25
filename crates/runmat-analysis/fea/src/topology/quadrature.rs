@@ -32,6 +32,118 @@ pub(crate) const TETRAHEDRON_FOUR_POINT_RULE: [[f64; 4]; 4] = [
     ],
 ];
 
+// Degree-four tetrahedral rule: exact for the cubic Tet10 Jacobian volume integral.
+const TETRAHEDRON_ELEVEN_A: f64 = 0.785_714_285_714_285_7;
+const TETRAHEDRON_ELEVEN_B: f64 = 0.071_428_571_428_571_42;
+const TETRAHEDRON_ELEVEN_C: f64 = 0.399_403_576_166_799_2;
+const TETRAHEDRON_ELEVEN_D: f64 = 0.100_596_423_833_200_8;
+const TETRAHEDRON_ELEVEN_VERTEX_WEIGHT: f64 = 0.007_622_222_222_222_222;
+const TETRAHEDRON_ELEVEN_EDGE_WEIGHT: f64 = 0.024_888_888_888_888_89;
+pub(crate) const TETRAHEDRON_ELEVEN_POINT_RULE: [([f64; 4], f64); 11] = [
+    ([0.25; 4], -0.013_155_555_555_555_556),
+    (
+        [
+            TETRAHEDRON_ELEVEN_A,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+        ],
+        TETRAHEDRON_ELEVEN_VERTEX_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_A,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+        ],
+        TETRAHEDRON_ELEVEN_VERTEX_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_A,
+            TETRAHEDRON_ELEVEN_B,
+        ],
+        TETRAHEDRON_ELEVEN_VERTEX_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_B,
+            TETRAHEDRON_ELEVEN_A,
+        ],
+        TETRAHEDRON_ELEVEN_VERTEX_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_D,
+        ],
+        TETRAHEDRON_ELEVEN_EDGE_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+        ],
+        TETRAHEDRON_ELEVEN_EDGE_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+        ],
+        TETRAHEDRON_ELEVEN_EDGE_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+        ],
+        TETRAHEDRON_ELEVEN_EDGE_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+        ],
+        TETRAHEDRON_ELEVEN_EDGE_WEIGHT,
+    ),
+    (
+        [
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_D,
+            TETRAHEDRON_ELEVEN_C,
+            TETRAHEDRON_ELEVEN_C,
+        ],
+        0.024_888_888_888_89,
+    ),
+];
+
+// Five-point Gauss-Legendre on [0,1] is exact through degree nine. A 5³
+// Duffy product integrates curved Tet10 N_i N_j det(J) exactly (degree ≤7 on
+// the tetrahedron and degree ≤9 per transformed cube coordinate).
+pub(crate) const GAUSS_LEGENDRE_FIVE_UNIT: [(f64, f64); 5] = [
+    (0.046_910_077_030_668, 0.118_463_442_528_094_5),
+    (0.230_765_344_947_158_5, 0.239_314_335_249_683_25),
+    (0.5, 0.284_444_444_444_444_44),
+    (0.769_234_655_052_841_5, 0.239_314_335_249_683_25),
+    (0.953_089_922_969_332, 0.118_463_442_528_094_5),
+];
+
 const TETRAHEDRON_DERIVATIVES: [[f64; 3]; 4] = [
     [-1.0, -1.0, -1.0],
     [1.0, 0.0, 0.0],
