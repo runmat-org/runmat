@@ -6,15 +6,7 @@ fn surface_case(
     order: ElementOrder,
     kind: FixtureExcitationKind,
 ) -> (FeaRunResult, SolverMeshArtifact) {
-    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
-    replace_fixture_excitations(
-        &mut model,
-        vec![FixtureExcitation {
-            id: "face_load".into(),
-            region_id: "tip".into(),
-            kind,
-        }],
-    );
+    let model = surface_model("face_load", kind);
     let mesh = single_tetrahedron_solver_mesh_with_order_for_model(&model, order);
     let result = crate::run_linear_static_with_options(
         &model,
@@ -26,6 +18,19 @@ fn surface_case(
     )
     .expect("a supported single-tetrahedron surface-load solve must complete");
     (result, mesh)
+}
+
+fn surface_model(id: &str, kind: FixtureExcitationKind) -> runmat_analysis_core::AnalysisModel {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    replace_fixture_excitations(
+        &mut model,
+        vec![FixtureExcitation {
+            id: id.into(),
+            region_id: "tip".into(),
+            kind,
+        }],
+    );
+    model
 }
 
 fn close(actual: f64, expected: f64) {
@@ -197,5 +202,108 @@ fn solved_tet4_and_tet10_surface_loads_preserve_global_balance_and_work_scaling(
             assert!(base.structural_static_balance.as_ref().unwrap().accepted);
             assert!(doubled.structural_static_balance.as_ref().unwrap().accepted);
         }
+    }
+}
+
+#[test]
+fn tet4_and_tet10_surface_loads_obey_reciprocity_and_energy_polarization() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let pressure = FixtureExcitationKind::Pressure(12.0);
+        let traction = FixtureExcitationKind::Traction([5.0, -7.0, 11.0]);
+        let (pressure_result, mesh) = surface_case(order, pressure);
+        let (traction_result, _) = surface_case(order, traction);
+        let pressure_model = surface_model("pressure", pressure);
+        let traction_model = surface_model("traction", traction);
+        let pressure_load = crate::assembly::assemble_structural_system(
+            &pressure_model,
+            &super::static_excitations(&pressure_model),
+            Some(mesh.clone()),
+            crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap()
+        .physical_load;
+        let traction_load = crate::assembly::assemble_structural_system(
+            &traction_model,
+            &super::static_excitations(&traction_model),
+            Some(mesh.clone()),
+            crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap()
+        .physical_load;
+        let pressure_u = pressure_result
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        let traction_u = traction_result
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        let pressure_on_traction = pressure_load
+            .iter()
+            .zip(traction_u)
+            .map(|(force, displacement)| force * displacement)
+            .sum::<f64>();
+        let traction_on_pressure = traction_load
+            .iter()
+            .zip(pressure_u)
+            .map(|(force, displacement)| force * displacement)
+            .sum::<f64>();
+        assert!(pressure_on_traction.abs() > 0.0);
+        let work_scale = pressure_on_traction.abs().max(traction_on_pressure.abs());
+        close_scaled(pressure_on_traction, traction_on_pressure, work_scale);
+
+        let mut combined_model = fixture_model(FixtureId::CantileverLinearStatic);
+        replace_fixture_excitations(
+            &mut combined_model,
+            vec![
+                FixtureExcitation {
+                    id: "pressure".into(),
+                    region_id: "tip".into(),
+                    kind: pressure,
+                },
+                FixtureExcitation {
+                    id: "traction".into(),
+                    region_id: "tip".into(),
+                    kind: traction,
+                },
+            ],
+        );
+        let combined = crate::run_linear_static_with_options(
+            &combined_model,
+            ComputeBackend::Cpu,
+            LinearStaticSolveOptions {
+                solver_mesh: Some(mesh),
+                ..experimental_linear_static_options()
+            },
+        )
+        .unwrap();
+        let combined_u = combined
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        let displacement_scale = combined_u.iter().copied().map(f64::abs).fold(0.0, f64::max);
+        for ((combined, pressure), traction) in combined_u.iter().zip(pressure_u).zip(traction_u) {
+            close_scaled(*combined, pressure + traction, displacement_scale);
+        }
+        let energy = |result: &FeaRunResult| {
+            result
+                .field(FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)
+                .unwrap()
+                .as_host_f64()
+                .unwrap()[0]
+        };
+        let polarized_energy =
+            energy(&combined) - energy(&pressure_result) - energy(&traction_result);
+        close_scaled(polarized_energy, pressure_on_traction, work_scale);
+        assert!(
+            combined
+                .structural_static_balance
+                .as_ref()
+                .unwrap()
+                .accepted
+        );
     }
 }
