@@ -147,13 +147,31 @@ impl PreparedAnalysisObjects {
 pub fn prepared_input_resource_facts(
     inputs: &[PreparedAnalysisObjects],
 ) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
+    prepared_input_resource_facts_from_refs(inputs.iter())
+}
+
+/// Reprojects numerical inputs without cloning their potentially large prepared payloads.
+pub fn prepared_input_resource_facts_without_resource_plan(
+    inputs: &[PreparedAnalysisObjects],
+) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
+    prepared_input_resource_facts_from_refs(
+        inputs
+            .iter()
+            .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan),
+    )
+}
+
+fn prepared_input_resource_facts_from_refs<'a>(
+    inputs: impl Iterator<Item = &'a PreparedAnalysisObjects>,
+) -> AnalysisBridgeResult<PreparedInputResourceFacts> {
+    let inputs = inputs.collect::<Vec<_>>();
     let encoded_payload_bytes = inputs.iter().try_fold(0_u64, |total, input| {
         total
             .checked_add(input.manifest.encoded_length)
             .ok_or_else(|| AnalysisBridgeError::Invalid("input payload bytes overflow".into()))
     })?;
     let mut unique = std::collections::BTreeMap::new();
-    for input in inputs {
+    for input in &inputs {
         for object in &input.objects {
             unique
                 .entry(object.descriptor.digest)

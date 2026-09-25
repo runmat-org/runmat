@@ -279,6 +279,8 @@ impl StructuralTransientSequenceCoordinator {
                 modal_state: self.preparation.modal_state.clone(),
                 artifact_access: self.preparation.artifact_access.clone(),
                 program_revision: self.preparation.program_revision.clone(),
+                chunk_bytes: self.preparation.chunk_bytes,
+                inventory_limits: self.preparation.inventory_limits,
             })?;
         self.phase = SequencePhase::AwaitingBlock(prepared.request.identity);
         Ok(prepared)

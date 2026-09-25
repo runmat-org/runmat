@@ -1120,7 +1120,13 @@ async fn remote_conformance(
         .unwrap();
         assert_eq!(transient_result.result.result.samples().len(), 5);
         assert_eq!(transient_result.result.numerical_receipt.blocks.len(), 2);
-        assert_eq!(transient_result.resource_attempts.len(), 2);
+        assert_eq!(transient_result.resource_attempts.len(), 4);
+        assert!(transient_result.resource_attempts[1..3].iter().all(|attempt| {
+            matches!(
+                attempt.plan.input.phase,
+                runmat_analysis_fea::planning::resource::FeaResourcePhase::StructuralTransientBlock(_)
+            )
+        }));
         assert!(transient_result
             .resource_attempts
             .iter()

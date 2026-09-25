@@ -47,7 +47,7 @@ pub(super) fn execute_scope_preparation(
             &workload,
             &mesh,
             modal_state.as_ref(),
-            prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
+            prepared_input_resource_facts_without_resource_plan(invocation.inputs)?,
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;

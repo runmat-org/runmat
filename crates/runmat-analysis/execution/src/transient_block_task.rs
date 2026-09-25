@@ -6,17 +6,21 @@ use runmat_analysis_fea::execution::{
     StructuralTransientCoordinateSpace, StructuralTransientSegment, StructuralTransientSolverPlan,
     StructuralTransientWorkload,
 };
+use runmat_analysis_fea::planning::resource::{
+    build_structural_transient_block_resource_plan, FeaResourcePlan,
+};
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::ProgramExecutionResponse;
+use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionResponse};
 use runmat_meshing_core::CanonicalMeshingContract;
 
 use crate::{
     decode_prepared_structural_transient_checkpoint, decode_prepared_structural_transient_segment,
     decode_prepared_structural_transient_workload, import_analysis_objects,
-    import_analysis_output_set, prepare_analysis_program, AnalysisBridgeError,
+    import_analysis_output_set, prepare_analysis_objects, prepare_analysis_program,
+    prepared_input_resource_facts, projected_output_set_resource_facts, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
     AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
@@ -30,6 +34,8 @@ pub struct StructuralTransientBlockPreparation {
     pub modal_state: Option<PreparedAnalysisObjects>,
     pub artifact_access: runmat_execution_artifact::ArtifactAccess,
     pub program_revision: ProgramRevision,
+    pub chunk_bytes: usize,
+    pub inventory_limits: ObjectInventoryLimits,
 }
 
 pub struct PreparedStructuralTransientBlockTask {
@@ -40,6 +46,7 @@ pub struct PreparedStructuralTransientBlockTask {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+    pub resource_plan: FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,32 +117,50 @@ pub fn prepare_structural_transient_block_task(
             "structural transient modal state differs from its workload and checkpoint scope",
         ));
     }
-    let mut typed_inputs = vec![
-        (preparation.workload, ValueRefKind::DriverObject),
-        (preparation.mesh, ValueRefKind::DriverObject),
-        (preparation.request, ValueRefKind::DriverObject),
-    ];
+    let mut inputs = vec![preparation.workload, preparation.mesh, preparation.request];
+    let mut reference_kinds = vec![ValueRefKind::DriverObject; inputs.len()];
     if let Some(predecessor) = preparation.predecessor {
-        typed_inputs.push((predecessor, ValueRefKind::ResultObject));
+        inputs.push(predecessor);
+        reference_kinds.push(ValueRefKind::ResultObject);
     }
     if let Some(modal_state) = preparation.modal_state {
-        typed_inputs.push((modal_state, ValueRefKind::ResultObject));
+        inputs.push(modal_state);
+        reference_kinds.push(ValueRefKind::ResultObject);
     }
-    let workload_inputs = typed_inputs
+    let resource_plan = build_structural_transient_block_resource_plan(
+        &workload,
+        &solver_mesh,
+        modal_state.as_ref(),
+        &request,
+        predecessor.as_ref(),
+        Some(prepared_input_resource_facts(&inputs)?),
+        Some(projected_output_set_resource_facts()),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let resource_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan
+            .canonical_bytes()
+            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    inputs.push(resource_objects);
+    reference_kinds.push(ValueRefKind::DriverObject);
+    let workload_inputs = inputs
         .iter()
+        .zip(reference_kinds)
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
             logical_identity: input.manifest.logical_identity,
             payload_digest: input.manifest.payload_digest,
             manifest_digest: input.root.digest,
             manifest_encoded_length: input.root.encoded_length,
-            reference_kind: *reference_kind,
+            reference_kind,
         })
         .collect();
-    let inputs = typed_inputs
-        .into_iter()
-        .map(|(input, _)| input)
-        .collect::<Vec<_>>();
     let analysis_workload = AnalysisWorkloadRequest::new(
         request.scope.study,
         request.scope.step,
@@ -157,6 +182,7 @@ pub fn prepare_structural_transient_block_task(
         host,
         program,
         inputs,
+        resource_plan,
     })
 }
 

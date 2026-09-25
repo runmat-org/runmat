@@ -35,3 +35,15 @@ pub struct StructuralModalResourceDemand {
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StructuralModalResponseSpectrumDirectionResourceDemand {
+    pub operator: StructuralOperatorResourceDemand,
+    pub spectrum_point_count: Count,
+    pub mode_count_upper_bound: Count,
+    pub correlation_pair_count_upper_bound: Count,
+    pub response_vector_count_upper_bound: Count,
+    pub inputs: PreparedInputResourceFacts,
+    pub output: PreparedOutputResourceFacts,
+}

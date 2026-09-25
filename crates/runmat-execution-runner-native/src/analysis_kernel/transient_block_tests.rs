@@ -461,6 +461,8 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         modal_state: None,
         artifact_access: access(),
         program_revision: revision(),
+        chunk_bytes: 256,
+        inventory_limits: limits,
     })
     .unwrap();
     let directory = tempfile::tempdir().unwrap();
@@ -501,6 +503,8 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         modal_state: None,
         artifact_access: access(),
         program_revision: revision(),
+        chunk_bytes: 256,
+        inventory_limits: limits,
     })
     .unwrap();
     let second_response = execute_durable_block(&mut store, &second);
@@ -645,6 +649,8 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
         modal_state: None,
         artifact_access: access(),
         program_revision: revision(),
+        chunk_bytes: 256,
+        inventory_limits: limits,
     })
     .unwrap();
     let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(

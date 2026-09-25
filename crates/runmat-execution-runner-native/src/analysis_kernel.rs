@@ -18,9 +18,10 @@ use runmat_analysis_execution::{
     decode_prepared_structural_random_response_workload,
     decode_prepared_structural_transient_result_assembly_request,
     decode_prepared_structural_transient_segment, prepared_input_resource_facts,
-    projected_output_resource_facts, projected_output_set_resource_facts,
-    validate_observation_resource_usage, AnalysisBridgeError, AnalysisBridgeResult, AnalysisKernel,
-    AnalysisKernelInvocation, AnalysisKernelOutput, AnalysisKernelOutputPartition,
+    prepared_input_resource_facts_without_resource_plan, projected_output_resource_facts,
+    projected_output_set_resource_facts, validate_observation_resource_usage, AnalysisBridgeError,
+    AnalysisBridgeResult, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
+    AnalysisKernelOutputPartition,
 };
 use runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan;
 use runmat_analysis_fea::execution::{
@@ -45,7 +46,8 @@ use runmat_analysis_fea::planning::resource::{
     build_structural_buckling_resource_plan, build_structural_frequency_entry_resource_plan,
     build_structural_frequency_recovery_resource_plan,
     build_structural_frequency_result_assembly_resource_plan, build_structural_modal_resource_plan,
-    build_structural_resource_plan, observation_artifact_payload_bytes_upper_bound,
+    build_structural_resource_plan, build_structural_transient_block_resource_plan,
+    observation_artifact_payload_bytes_upper_bound,
     observation_history_checkpoint_payload_bytes_upper_bound,
     observation_partition_payload_bytes_upper_bound,
     observation_reduction_payload_bytes_upper_bound,
@@ -339,8 +341,9 @@ fn execute_structural_transient_block(
     )?;
     let modal_input =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::SemanticState)?;
+    let resource_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     if invocation.inputs.len()
-        != 3 + usize::from(predecessor_input.is_some()) + usize::from(modal_input.is_some())
+        != 4 + usize::from(predecessor_input.is_some()) + usize::from(modal_input.is_some())
         || invocation.host.workload.outputs
             != vec![AnalysisNumericalObjectKind::StructuralTransientSegment]
     {
@@ -358,6 +361,8 @@ fn execute_structural_transient_block(
     let modal_state = modal_input
         .map(decode_prepared_semantic_state)
         .transpose()?;
+    let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_input.payload())
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if workload_input.manifest.logical_identity != request.scope.source_workload.digest()
         || mesh_input.manifest.logical_identity
             != runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes())
@@ -408,6 +413,27 @@ fn execute_structural_transient_block(
         ));
     }
     request.validate_against_predecessor(predecessor.as_ref())?;
+    let expected_plan = build_structural_transient_block_resource_plan(
+        &workload,
+        &mesh,
+        modal_state.as_ref(),
+        &request,
+        predecessor.as_ref(),
+        Some(prepared_input_resource_facts_without_resource_plan(
+            invocation.inputs,
+        )?),
+        Some(projected_output_set_resource_facts()),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if resource_input.manifest.logical_identity != resource_plan.identity.digest()
+        || resource_plan != expected_plan
+        || resource_plan.input.phase != FeaResourcePhase::StructuralTransientBlock(request.identity)
+        || !resource_plan.request.accelerators.is_empty()
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "transient block resource plan does not converge from authoritative inputs",
+        ));
+    }
     let segment = runmat_analysis_fea::pipeline::transient::run_transient_block(
         runmat_analysis_fea::pipeline::transient::StructuralTransientRunBlockInput {
             workload: &workload,

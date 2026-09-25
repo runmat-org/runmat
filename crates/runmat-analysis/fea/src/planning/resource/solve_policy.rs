@@ -62,6 +62,11 @@ pub enum SolveResourcePolicy {
         mode_count: Count,
         workspace_bytes_upper_bound: ByteCount,
     },
+    TransientBlock {
+        physical_dimension: Count,
+        coordinate_dimension: Count,
+        workspace_bytes_upper_bound: ByteCount,
+    },
     SymmetricSubspaceIteration {
         full_dimension: Count,
         reduced_dimension: Count,
@@ -95,6 +100,7 @@ impl SolveResourcePolicy {
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::ModalDenseHarmonic { .. }
+            | Self::TransientBlock { .. }
             | Self::SymmetricSubspaceIteration { .. } => None,
         }
     }
@@ -105,6 +111,7 @@ impl SolveResourcePolicy {
             Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::ModalDenseHarmonic { .. }
+            | Self::TransientBlock { .. }
             | Self::SymmetricSubspaceIteration { .. } => return 8,
         };
         match scalar {
@@ -123,6 +130,10 @@ impl SolveResourcePolicy {
                 ..
             }
             | Self::ModalDenseHarmonic {
+                workspace_bytes_upper_bound,
+                ..
+            }
+            | Self::TransientBlock {
                 workspace_bytes_upper_bound,
                 ..
             }

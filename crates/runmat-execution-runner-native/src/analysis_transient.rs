@@ -172,16 +172,19 @@ pub(crate) async fn execute_structural_transient_with_pool(
         let logical_dependencies = coordinator.next_block_dependency_identities();
         let live_dependencies =
             matching_live_dependencies(&logical_dependencies, live_block_tasks.iter().copied());
-        let (response, identity, task_id, _) = execute_task(
+        let (response, identity, task_id, block_attempt) = execute_task(
             pool,
             &prepared.host,
             &prepared.program,
             logical_dependencies,
             live_dependencies,
-            None,
+            Some(&prepared.resource_plan),
             &policy,
         )
         .await?;
+        resource_attempts.push(block_attempt.ok_or_else(|| {
+            NativeExecutionError::Protocol("transient block task lost its planned attempt".into())
+        })?);
         coordinator
             .complete_block(pool, response, &prepared)
             .map_err(protocol)?;

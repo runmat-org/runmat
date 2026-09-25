@@ -210,6 +210,78 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
 }
 
 #[test]
+fn transient_block_resource_plan_bounds_a_physical_segment() {
+    let (workload, mesh) = direct_scope_case();
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let request = crate::execution::StructuralTransientBlockRequest::new(scope, None, 2).unwrap();
+    let plan = crate::planning::resource::build_structural_transient_block_resource_plan(
+        &workload, &mesh, None, &request, None, None, None,
+    )
+    .unwrap();
+    let crate::planning::resource::FeaResourceDemand::StructuralTransientBlock(demand) =
+        &plan.input.demand
+    else {
+        panic!("expected transient block demand");
+    };
+    assert_eq!(plan.request.cpu_millicores, 1_000);
+    assert_eq!(demand.time_point_count.0, 2);
+    assert!(matches!(
+        demand.operator.solve,
+        crate::planning::resource::SolveResourcePolicy::TransientBlock { .. }
+    ));
+    let segment = run_transient_block(StructuralTransientRunBlockInput {
+        workload: &workload,
+        solver_mesh: &mesh,
+        request: &request,
+        predecessor: None,
+        modal_state: None,
+        observation_cursors: Vec::new(),
+    })
+    .unwrap();
+    let mut actual_bytes =
+        u64::try_from(segment.manifest().canonical_bytes().unwrap().len()).unwrap();
+    if let Some(initial) = segment.initial_sample() {
+        actual_bytes += u64::try_from(initial.canonical_bytes().unwrap().len()).unwrap();
+    }
+    for sample in segment.samples() {
+        actual_bytes += u64::try_from(sample.canonical_bytes().unwrap().len()).unwrap();
+    }
+    assert!(actual_bytes <= demand.segment_output.encoded_payload_bytes_upper_bound.0);
+    assert_eq!(
+        plan.request.max_artifact_bytes,
+        demand.segment_output.encoded_payload_bytes_upper_bound.0
+            + crate::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES
+    );
+
+    let mut understated_output = plan.input.clone();
+    let crate::planning::resource::FeaResourceDemand::StructuralTransientBlock(understated) =
+        &mut understated_output.demand
+    else {
+        unreachable!();
+    };
+    understated
+        .segment_output
+        .encoded_payload_bytes_upper_bound
+        .0 -= 1;
+    assert!(crate::planning::resource::build_resource_plan(understated_output).is_err());
+
+    let mut wrong_inputs = demand.inputs.clone();
+    wrong_inputs.encoded_payload_bytes.0 += 1;
+    assert!(
+        crate::planning::resource::build_structural_transient_block_resource_plan(
+            &workload,
+            &mesh,
+            None,
+            &request,
+            None,
+            Some(wrong_inputs),
+            None,
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn scope_task_plan_uses_the_prepared_input_closure_and_output_set() {
     let (workload, mesh) = direct_scope_case();
     let prepared = prepare_transient_preassembly(&workload.model, (&workload).into()).unwrap();
