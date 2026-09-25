@@ -11,6 +11,78 @@ const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 512;
 const BYTES_PER_SYMBOLIC_FACTOR_ENTRY: u64 = 192;
 const BYTES_PER_SYMBOLIC_ROW: u64 = 256;
 
+/// Bounds the work of any successful exact-pattern proof whose graph is a subset of `pattern`.
+/// This is a resource reservation, not proof that such a factorization exists or fits its own
+/// pattern-relative work limit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CoercivityWorkEnvelope {
+    dimension: u64,
+    factor_nonzero_limit: u64,
+    update_limit: u64,
+    resident_bytes_limit: u64,
+}
+
+impl CoercivityWorkEnvelope {
+    pub(crate) fn derive(pattern: &SparsePattern) -> Result<Self, CoercivityError> {
+        let dimension = pattern.rows();
+        if dimension == 0 || pattern.columns() != dimension {
+            return Err(CoercivityError::IncompatibleOperator);
+        }
+        let dimension = u64::try_from(dimension).map_err(|_| CoercivityError::WorkOverflow)?;
+        let mut edges = BTreeSet::new();
+        for row in 0..pattern.rows() {
+            for entry in pattern.row_range(row) {
+                let column = pattern.column(entry);
+                if row != column {
+                    edges.insert((row.min(column), row.max(column)));
+                }
+            }
+        }
+        Self::from_graph_counts(dimension, edges.len())
+    }
+
+    fn from_graph_counts(dimension: u64, edge_count: usize) -> Result<Self, CoercivityError> {
+        let input_lower_nonzeros = dimension
+            .checked_add(u64::try_from(edge_count).map_err(|_| CoercivityError::WorkOverflow)?)
+            .ok_or(CoercivityError::WorkOverflow)?;
+        let factor_nonzero_limit = input_lower_nonzeros
+            .checked_mul(MAX_FACTOR_FILL_MULTIPLIER)
+            .and_then(|limit| limit.checked_add(dimension))
+            .ok_or(CoercivityError::WorkOverflow)?;
+        let update_limit = input_lower_nonzeros
+            .checked_mul(MAX_FACTOR_UPDATE_MULTIPLIER)
+            .and_then(|limit| limit.checked_add(dimension))
+            .ok_or(CoercivityError::WorkOverflow)?;
+        let resident_bytes_limit = factor_nonzero_limit
+            .checked_mul(BYTES_PER_SYMBOLIC_FACTOR_ENTRY)
+            .and_then(|bytes| {
+                dimension
+                    .checked_mul(BYTES_PER_SYMBOLIC_ROW)
+                    .and_then(|rows| bytes.checked_add(rows))
+            })
+            .ok_or(CoercivityError::WorkOverflow)?;
+        Ok(Self {
+            dimension,
+            factor_nonzero_limit,
+            update_limit,
+            resident_bytes_limit,
+        })
+    }
+
+    pub(crate) fn dimension(self) -> u64 {
+        self.dimension
+    }
+    pub(crate) fn factor_nonzero_limit(self) -> u64 {
+        self.factor_nonzero_limit
+    }
+    pub(crate) fn update_limit(self) -> u64 {
+        self.update_limit
+    }
+    pub(crate) fn resident_bytes_limit(self) -> u64 {
+        self.resident_bytes_limit
+    }
+}
+
 /// Deterministic fill-reducing symbolic preparation shared by resource planning and numerical
 /// coercivity validation. Indices in `pivot_neighbors` use elimination-order coordinates.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -54,18 +126,17 @@ impl CoercivitySymbolicPlan {
             }
         }
 
-        let input_lower_nonzeros =
-            u64::try_from(dimension + original_graph.iter().map(BTreeSet::len).sum::<usize>() / 2)
-                .map_err(|_| CoercivityError::WorkOverflow)?;
         let dimension_u64 = u64::try_from(dimension).map_err(|_| CoercivityError::WorkOverflow)?;
-        let factor_limit = input_lower_nonzeros
-            .checked_mul(MAX_FACTOR_FILL_MULTIPLIER)
-            .and_then(|limit| limit.checked_add(dimension_u64))
-            .ok_or(CoercivityError::WorkOverflow)?;
-        let update_limit = input_lower_nonzeros
-            .checked_mul(MAX_FACTOR_UPDATE_MULTIPLIER)
-            .and_then(|limit| limit.checked_add(dimension_u64))
-            .ok_or(CoercivityError::WorkOverflow)?;
+        let edge_count = original_graph
+            .iter()
+            .try_fold(0_usize, |total, neighbors| {
+                total.checked_add(neighbors.len())
+            })
+            .ok_or(CoercivityError::WorkOverflow)?
+            / 2;
+        let envelope = CoercivityWorkEnvelope::from_graph_counts(dimension_u64, edge_count)?;
+        let factor_limit = envelope.factor_nonzero_limit();
+        let update_limit = envelope.update_limit();
 
         let mut pivot_neighbors = Vec::with_capacity(dimension);
         let mut factor_nonzero_count = dimension_u64;
@@ -249,6 +320,18 @@ mod tests {
         assert_eq!(first.factor_nonzero_count(), 9);
         assert_eq!(first.update_count(), 7);
         first.validate_for(&source).unwrap();
+    }
+
+    #[test]
+    fn upper_graph_work_envelope_bounds_a_successful_sparse_subgraph_proof() {
+        let upper = pattern(&[&[0, 1, 2, 3], &[0, 1, 2, 3], &[0, 1, 2, 3], &[0, 1, 2, 3]]);
+        let exact = pattern(&[&[0, 1], &[0, 1, 2], &[1, 2, 3], &[2, 3]]);
+        let envelope = CoercivityWorkEnvelope::derive(&upper).unwrap();
+        let proof = CoercivitySymbolicPlan::derive(&exact).unwrap();
+        assert_eq!(envelope.dimension(), proof.dimension());
+        assert!(envelope.factor_nonzero_limit() >= proof.factor_nonzero_count());
+        assert!(envelope.update_limit() >= proof.update_count());
+        assert!(envelope.resident_bytes_limit() >= proof.resident_bytes_upper_bound());
     }
 
     #[test]

@@ -6,8 +6,8 @@ mod operator;
 mod pattern;
 mod reference;
 
-pub(crate) use coercivity::CoercivitySymbolicPlan;
 pub use coercivity::{CoercivityCertificate, CoercivityError, PreparedSolverAdmissibility};
+pub(crate) use coercivity::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
 pub use compatibility::{
     validate_prepared_solver_compatibility, validate_solver_compatibility, CompatibilityError,
     RealPreconditioner, RealSolver,

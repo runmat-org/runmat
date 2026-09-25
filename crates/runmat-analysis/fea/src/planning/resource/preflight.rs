@@ -1,5 +1,5 @@
 use crate::{
-    algebra::{CoercivityError, CoercivitySymbolicPlan},
+    algebra::{CoercivityError, CoercivitySymbolicPlan, CoercivityWorkEnvelope},
     constraints::{
         AffineConstraintReduction, CanonicalStructuralConstraintPlan, ConstraintEnforcement,
     },
@@ -100,8 +100,29 @@ pub fn build_structural_resource_plan(
     } else {
         facts.symbolic.stiffness_upper_bound().clone()
     };
-    let admission = CoercivitySymbolicPlan::derive(&admission_pattern)
-        .map_err(map_upper_bound_coercivity_error)?;
+    let admission = match CoercivitySymbolicPlan::derive(&admission_pattern) {
+        Ok(proof) => SolverAdmissionResourcePolicy {
+            dimension: Count(proof.dimension()),
+            factor_nonzero_upper_bound: Count(proof.factor_nonzero_count()),
+            update_count_upper_bound: Count(proof.update_count()),
+            resident_bytes_upper_bound: ByteCount(proof.resident_bytes_upper_bound()),
+        },
+        Err(CoercivityError::ResourceLimit) => {
+            // The topology pattern can contain couplings that vanish during numerical assembly.
+            // Its failed proof is not an exact-operator rejection. Reserve the maximum work of
+            // any successful exact-pattern proof under this graph instead; the solve must still
+            // perform and report its own exact coercivity check after assembly.
+            let bound = CoercivityWorkEnvelope::derive(&admission_pattern)
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+            SolverAdmissionResourcePolicy {
+                dimension: Count(bound.dimension()),
+                factor_nonzero_upper_bound: Count(bound.factor_nonzero_limit()),
+                update_count_upper_bound: Count(bound.update_limit()),
+                resident_bytes_upper_bound: ByteCount(bound.resident_bytes_limit()),
+            }
+        }
+        Err(error) => return Err(ResourcePlanningError::Invalid(error.to_string())),
+    };
     let solve = solve_policy(
         workload.preconditioner,
         dofs,
@@ -109,7 +130,7 @@ pub fn build_structural_resource_plan(
             .map_err(|_| ResourcePlanningError::Overflow("constraint row count"))?,
         constraints.enforcement,
         stiffness_nonzeros,
-        &admission,
+        admission,
         if constraints.enforcement == ConstraintEnforcement::AffineReduction
             && !local_execution.is_serial()
         {
@@ -234,30 +255,6 @@ pub fn build_structural_resource_plan(
     })
 }
 
-fn map_upper_bound_coercivity_error(error: CoercivityError) -> ResourcePlanningError {
-    match error {
-        CoercivityError::ResourceLimit => ResourcePlanningError::IndeterminateCoercivityUpperBound,
-        other => ResourcePlanningError::Invalid(other.to_string()),
-    }
-}
-
-#[cfg(test)]
-mod upper_bound_tests {
-    use super::*;
-
-    #[test]
-    fn bounded_symbolic_work_is_indeterminate_for_an_upper_bound_pattern() {
-        assert_eq!(
-            map_upper_bound_coercivity_error(CoercivityError::ResourceLimit),
-            ResourcePlanningError::IndeterminateCoercivityUpperBound
-        );
-        assert!(matches!(
-            map_upper_bound_coercivity_error(CoercivityError::IncompatibleOperator),
-            ResourcePlanningError::Invalid(_)
-        ));
-    }
-}
-
 fn structural_accelerator_requirements(
     workload: &StructuralLinearWorkload,
     requests: &[AcceleratorRequest],
@@ -289,7 +286,7 @@ fn solve_policy(
     constraint_rows: u64,
     enforcement: ConstraintEnforcement,
     stiffness_nonzeros: u64,
-    admission: &CoercivitySymbolicPlan,
+    admission: SolverAdmissionResourcePolicy,
     transpose_index_bytes: u64,
 ) -> Result<SolveResourcePolicy, ResourcePlanningError> {
     let storage = match preconditioner {
@@ -320,12 +317,7 @@ fn solve_policy(
         )?),
         scalar: NumericalScalar::RealF64,
         preconditioner: storage,
-        admission: SolverAdmissionResourcePolicy {
-            dimension: Count(admission.dimension()),
-            factor_nonzero_upper_bound: Count(admission.factor_nonzero_count()),
-            update_count_upper_bound: Count(admission.update_count()),
-            resident_bytes_upper_bound: ByteCount(admission.resident_bytes_upper_bound()),
-        },
+        admission,
         transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
     })
 }

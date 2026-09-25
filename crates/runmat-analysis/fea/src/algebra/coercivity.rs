@@ -16,7 +16,7 @@ const SYMMETRY_RELATIVE_TOLERANCE: f64 = 1.0e-12;
 
 mod symbolic;
 
-pub(crate) use symbolic::CoercivitySymbolicPlan;
+pub(crate) use symbolic::{CoercivitySymbolicPlan, CoercivityWorkEnvelope};
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum CoercivityError {

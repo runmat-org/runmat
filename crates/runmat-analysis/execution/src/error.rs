@@ -21,22 +21,3 @@ pub enum AnalysisBridgeError {
     #[error("analysis execution codec failure: {0}")]
     Codec(#[from] runmat_canonical_codec::CanonicalCodecError),
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn indeterminate_fea_preflight_remains_typed_at_the_execution_boundary() {
-        let error: AnalysisBridgeError = runmat_analysis_fea::planning::resource::
-            ResourcePlanningError::IndeterminateCoercivityUpperBound
-            .into();
-        assert!(matches!(
-            error,
-            AnalysisBridgeError::Resource(
-                runmat_analysis_fea::planning::resource::
-                    ResourcePlanningError::IndeterminateCoercivityUpperBound
-            )
-        ));
-    }
-}

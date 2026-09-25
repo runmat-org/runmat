@@ -276,9 +276,90 @@ fn main() -> Result<(), Box<dyn Error>> {
 mod tests {
     use super::*;
     use runmat_analysis_fea::{
+        constraints::CanonicalStructuralConstraintPlan,
+        execution::StructuralLinearWorkload,
+        planning::resource::{build_structural_resource_plan, StructuralSymbolicOperators},
+        post::fields::structural_observable_field_definitions,
+        results::observation::{
+            resolve_structural_observation_plan, ObservationExecutionPolicy, ObservationLimits,
+        },
+        solve::{backend::kind::LinearAlgebraBackendKind, preconditioner::SpdPreconditionerKind},
+        topology::AnalysisProjection,
         FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
     };
+
+    #[test]
+    fn connected_preflight_reserves_indeterminate_upper_pattern_without_false_rejection() {
+        let mesh = refine(connected_tetrahedron_solver_mesh(), 4).unwrap();
+        let model = patch_model();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let constraints =
+            CanonicalStructuralConstraintPlan::compile_for_model(&model, Some(&mesh)).unwrap();
+        let symbolic =
+            StructuralSymbolicOperators::derive(&projection, &constraints, &model, &mesh).unwrap();
+        assert_eq!(symbolic.stiffness_upper_bound().rows(), 1_035);
+        assert_eq!(
+            symbolic.stiffness_upper_bound().column_indices().len(),
+            27_765
+        );
+        let field_definitions = structural_observable_field_definitions().unwrap();
+        let observations = resolve_structural_observation_plan(
+            &model.sequence.steps[0],
+            &model,
+            Some(&mesh),
+            &constraints,
+            &field_definitions,
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let ceiling = model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes;
+        let workload = StructuralLinearWorkload {
+            schema_version: 1,
+            step_id: model.sequence.steps[0].step_id.clone(),
+            model,
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            preconditioner: SpdPreconditionerKind::Jacobi,
+            algebra_backend: LinearAlgebraBackendKind::CpuReference,
+            observation_execution: ObservationExecutionPolicy::scalable(),
+            require_solver_mesh_for_solid: true,
+            initial_guess_transition: None,
+        };
+        let plan = build_structural_resource_plan(
+            Some(&mesh),
+            &constraints,
+            &observations,
+            &workload,
+            &[],
+            LocalExecutionPlan::serial(),
+        )
+        .unwrap();
+        assert!(plan.request.memory_bytes <= ceiling);
+        assert!(plan.request.memory_bytes > 64 * 1024 * 1024);
+
+        let mut capped = workload;
+        capped.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = 64 * 1024 * 1024;
+        let error = build_structural_resource_plan(
+            Some(&mesh),
+            &constraints,
+            &observations,
+            &capped,
+            &[],
+            LocalExecutionPlan::serial(),
+        )
+        .expect_err("a ceiling below the conservative work reservation must reject early");
+        assert!(matches!(
+            error,
+            runmat_analysis_fea::planning::resource::ResourcePlanningError::AccuracyCeiling { .. }
+        ));
+    }
 
     #[test]
     fn connected_patch_serial_and_four_worker_fields_match_the_affine_solution() {
