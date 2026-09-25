@@ -1,10 +1,11 @@
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, AnalysisProcedure, StructuralConstraintKind,
-    StructuralOperatorImplementation,
 };
 use runmat_execution::Digest;
 
+mod preflight;
 mod solve;
+mod static_diagnostics;
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -29,21 +30,17 @@ use crate::{
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
     pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
-    planning::resource::build_static_resource_plan,
     post::{
         fields::{
             recover_result_fields, structural_field_recovery_metrics,
-            structural_observable_field_definitions, take_structural_observable_fields,
+            take_structural_observable_fields,
         },
         recover_connector_observable_fields, recover_constraint_group_observable_fields,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     results::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
-        observation::{
-            evaluate_structural_observations, resolve_structural_observation_plan,
-            ObservationExecutionPolicy, ObservationLimits,
-        },
+        observation::{evaluate_structural_observations, ObservationLimits},
     },
     solve::StructuralStaticBalanceEvidence,
 };
@@ -146,49 +143,14 @@ fn run_linear_static_with_constraint_plan(
     );
     check_cancelled("fea.run_linear_static")?;
 
-    // Direct CPU physical solves have no portable scheduler to admit their resource envelope.
-    // Derive the same topology, constraint, observation, and recovery demand here before
-    // excitation realization or matrix assembly. The GPU path lacks an inline accelerator
-    // request, and connector observations require connector-aware preassembly resolution;
-    // neither can be admitted through this direct envelope yet. Portable solves have already
-    // validated their resource plan against authoritative inputs at the runner boundary.
-    if constraint_plan.is_none()
-        && backend == ComputeBackend::Cpu
-        && model.connectors.is_empty()
-        && (options.solver_mesh.is_some() || model_has_explicit_structural_elements(model))
-    {
-        let constraints = CanonicalStructuralConstraintPlan::compile_for_model(
-            model,
-            options.solver_mesh.as_ref(),
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let _properties =
-            crate::properties::compile_property_map(model, options.solver_mesh.as_ref())
-                .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let fields = structural_observable_field_definitions()
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let observations = resolve_structural_observation_plan(
-            execution_step,
-            model,
-            options.solver_mesh.as_ref(),
-            &constraints,
-            &fields,
-            ObservationLimits::default(),
-        )
-        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        build_static_resource_plan(
-            model,
-            execution_step,
-            backend,
-            options.preconditioner_kind,
-            ObservationExecutionPolicy::serial(),
-            options.solver_mesh.as_ref(),
-            &constraints,
-            &observations,
-            &[],
-            options.local_execution,
-        )?;
-    }
+    let preflight_constraints = preflight::prepare_direct_static_constraints(
+        model,
+        execution_step,
+        backend,
+        &options,
+        constraint_plan.is_some(),
+    )?;
+    let assembly_constraint_plan = constraint_plan.or(preflight_constraints.as_ref());
 
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
@@ -206,7 +168,7 @@ fn run_linear_static_with_constraint_plan(
         &excitations,
         options.solver_mesh.clone(),
         StructuralFormulationRequirement::ExperimentalSyntheticOperator,
-        constraint_plan,
+        assembly_constraint_plan,
         options.local_execution,
     )
     .map_err(|err| match err {
@@ -222,9 +184,8 @@ fn run_linear_static_with_constraint_plan(
         options.formulation_requirement,
     )?;
     super::validate_rotational_dof_targets(model, &summary)?;
-    let solver_mesh_present = options.solver_mesh.is_some();
     if options.require_solver_mesh_for_solid
-        && !solver_mesh_present
+        && options.solver_mesh.is_none()
         && !model_has_explicit_structural_elements(model)
     {
         return Err(FeaRunError::InvalidModel(
@@ -232,7 +193,7 @@ fn run_linear_static_with_constraint_plan(
         ));
     }
     let compiled_constraint_plan;
-    let executed_constraint_plan = match constraint_plan {
+    let executed_constraint_plan = match assembly_constraint_plan {
         Some(plan) => plan,
         None => {
             compiled_constraint_plan = CanonicalStructuralConstraintPlan::compile_for_model(
@@ -453,7 +414,7 @@ fn run_linear_static_with_constraint_plan(
             message: format!("solver_mesh_artifact_path={path}{mesh_summary}"),
         });
     }
-    if let Some(diagnostic) = structural_solid_assembly_diagnostic(&summary) {
+    if let Some(diagnostic) = static_diagnostics::solid_assembly(&summary) {
         diagnostics.push(diagnostic);
     }
     if let (Some(residual_norm), Some(equation_scale)) = (
@@ -592,64 +553,6 @@ fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {
         .structural
         .as_ref()
         .is_some_and(|structural| !structural.elements.is_empty())
-}
-
-fn structural_solid_assembly_diagnostic(summary: &AssemblySummary) -> Option<FeaDiagnostic> {
-    if summary.structural_solid_element_count == 0 {
-        return None;
-    }
-
-    let stiffness_nnz = summary.operator.operators().stiffness().values().len();
-    let rhs_nonzero_count = summary
-        .operator
-        .load()
-        .iter()
-        .filter(|value| value.abs() > 0.0)
-        .count();
-    let has_solid_stiffness = stiffness_nnz > 0 && summary.structural_solid_element_count > 0;
-    let has_solid_mass = !summary.operator.operators().mass().values().is_empty()
-        && summary.structural_solid_total_mass_kg.is_finite()
-        && summary.structural_solid_total_mass_kg > 0.0;
-    let basis = match summary
-        .structural_formulations
-        .iter()
-        .map(|value| value.operator)
-        .find(|operator| {
-            matches!(
-                operator,
-                StructuralOperatorImplementation::Tet4LinearElasticity
-                    | StructuralOperatorImplementation::Tet10LinearElasticity
-            )
-        }) {
-        Some(StructuralOperatorImplementation::Tet4LinearElasticity) => "tet4_linear_elasticity",
-        Some(StructuralOperatorImplementation::Tet10LinearElasticity) => "tet10_linear_elasticity",
-        _ => "non_solid",
-    };
-    let storage = "sparse_csr";
-
-    Some(FeaDiagnostic {
-        code: "FEA_STRUCTURAL_SOLID_ASSEMBLY".to_string(),
-        severity: if has_solid_stiffness && has_solid_mass {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "basis={} stiffness_storage={} mass_storage={} solid_node_count={} solid_element_count={} solid_total_mass_kg={} dof_count={} constrained_dof_count={} stiffness_nnz={} rhs_nonzero_count={} stiffness_present={} mass_present={}",
-            basis,
-            storage,
-            "sparse_csr",
-            summary.structural_node_count,
-            summary.structural_solid_element_count,
-            summary.structural_solid_total_mass_kg,
-            summary.dof_count,
-            summary.constrained_dof_count,
-            stiffness_nnz,
-            rhs_nonzero_count,
-            has_solid_stiffness,
-            has_solid_mass,
-        ),
-    })
 }
 
 fn structural_linear_known_answer_diagnostic(

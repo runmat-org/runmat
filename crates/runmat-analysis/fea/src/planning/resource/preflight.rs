@@ -61,35 +61,50 @@ pub fn build_structural_resource_plan(
     let step = workload
         .procedure_step()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    build_static_resource_plan(
-        &workload.model,
+    build_static_resource_plan(StaticResourcePreflight {
+        model: &workload.model,
         step,
-        workload.backend,
-        workload.preconditioner,
-        workload.observation_execution,
+        backend: workload.backend,
+        preconditioner: workload.preconditioner,
+        observation_execution: workload.observation_execution,
         mesh,
         constraints,
         observations,
         accelerator_requests,
         local_execution,
-    )
+    })
 }
 
 /// The shared numerical preflight for portable and direct static execution. The portable
 /// entry point additionally validates the workload's sequencing and replay contract.
-#[allow(clippy::too_many_arguments)]
+pub(crate) struct StaticResourcePreflight<'a> {
+    pub model: &'a AnalysisModel,
+    pub step: &'a ProcedureStep,
+    pub backend: crate::ComputeBackend,
+    pub preconditioner: SpdPreconditionerKind,
+    pub observation_execution: ObservationExecutionPolicy,
+    pub mesh: Option<&'a SolverMeshArtifact>,
+    pub constraints: &'a CanonicalStructuralConstraintPlan,
+    pub observations: &'a ResolvedObservationPlan,
+    pub accelerator_requests: &'a [AcceleratorRequest],
+    pub local_execution: LocalExecutionPlan,
+}
+
 pub(crate) fn build_static_resource_plan(
-    model: &AnalysisModel,
-    step: &ProcedureStep,
-    backend: crate::ComputeBackend,
-    preconditioner: SpdPreconditionerKind,
-    observation_execution: ObservationExecutionPolicy,
-    mesh: Option<&SolverMeshArtifact>,
-    constraints: &CanonicalStructuralConstraintPlan,
-    observations: &ResolvedObservationPlan,
-    accelerator_requests: &[AcceleratorRequest],
-    local_execution: LocalExecutionPlan,
+    input: StaticResourcePreflight<'_>,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let StaticResourcePreflight {
+        model,
+        step,
+        backend,
+        preconditioner,
+        observation_execution,
+        mesh,
+        constraints,
+        observations,
+        accelerator_requests,
+        local_execution,
+    } = input;
     let facts = derive_structural_resource_facts(model, mesh, constraints)?;
     if observations.topology_digest != facts.topology_digest {
         return Err(ResourcePlanningError::Invalid(

@@ -381,6 +381,20 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         LocalExecutionPlan::serial(),
     )
     .unwrap();
+    let direct_plan = build_static_resource_plan(StaticResourcePreflight {
+        model: &serial_workload.model,
+        step: serial_workload.procedure_step().unwrap(),
+        backend: serial_workload.backend,
+        preconditioner: serial_workload.preconditioner,
+        observation_execution: serial_workload.observation_execution,
+        mesh: Some(&mesh),
+        constraints: &constraints,
+        observations: &observations,
+        accelerator_requests: &[],
+        local_execution: LocalExecutionPlan::serial(),
+    })
+    .unwrap();
+    assert_eq!(direct_plan, serial_plan);
     let four_threads = LocalExecutionPlan::fixed(LocalThreadCount::new(4).unwrap()).unwrap();
     let parallel_plan = build_structural_resource_plan(
         Some(&mesh),
