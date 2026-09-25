@@ -182,48 +182,8 @@ pub enum Tetrahedron10ElementError {
     InvalidMaterial(#[from] SolidMaterialError),
 }
 
-pub fn global_stiffness_matrix(
-    material: SolidMaterial,
-    geometry: Tetrahedron10ElementGeometry,
-) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
-    validate_nodes(geometry.nodes_m)?;
-    let elasticity = elasticity_matrix(material)?;
-    let mut stiffness = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
-    for barycentric in QUADRATURE {
-        let gradients = physical_shape_gradients(geometry.nodes_m, barycentric)?;
-        let b = strain_displacement_matrix(gradients);
-        let determinant = jacobian_determinant(geometry.nodes_m, barycentric)?;
-        let scale = QUADRATURE_WEIGHT * determinant;
-        let mut elasticity_b = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; 6];
-        for row in 0..6 {
-            for column in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-                elasticity_b[row][column] = (0..6)
-                    .map(|inner| elasticity[row][inner] * b[inner][column])
-                    .sum();
-            }
-        }
-        for row in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-            for column in row..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-                let contribution = scale
-                    * (0..6)
-                        .map(|inner| b[inner][row] * elasticity_b[inner][column])
-                        .sum::<f64>();
-                stiffness[row][column] += contribution;
-                if row != column {
-                    stiffness[column][row] += contribution;
-                }
-            }
-        }
-    }
-    if stiffness.iter().flatten().all(|value| value.is_finite()) {
-        Ok(stiffness)
-    } else {
-        Err(Tetrahedron10ElementError::DegenerateOrInverted)
-    }
-}
-
-/// Integrates the initial-stress stiffness using the same isoparametric geometry and quadrature
-/// as the material stiffness. Stress is tension-positive and is supplied at each quadrature point.
+/// Initial-stress stiffness uses four supplied stress samples, unlike curved material stiffness.
+/// Curved prestressed Tet10 integration is unqualified; stress is tension-positive.
 pub fn geometric_stiffness_matrix(
     geometry: Tetrahedron10ElementGeometry,
     stresses: [SymmetricStressTensor; 4],
@@ -318,7 +278,7 @@ pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT
     values
 }
 
-fn physical_shape_gradients(
+pub(super) fn physical_shape_gradients(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
     barycentric: [f64; 4],
 ) -> Result<[[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT], Tetrahedron10ElementError> {
@@ -350,7 +310,7 @@ fn reference_shape_gradients(
     gradients
 }
 
-fn strain_displacement_matrix(
+pub(super) fn strain_displacement_matrix(
     gradients: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
 ) -> [[f64; TETRAHEDRON10_ELEMENT_DOF_COUNT]; 6] {
     let mut b = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; 6];
@@ -457,6 +417,7 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 #[cfg(test)]
 mod tests {
     use super::super::tetrahedron10_mass::consistent_mass_matrix;
+    use super::super::tetrahedron10_stiffness::global_stiffness_matrix;
     use super::*;
     use crate::assembly::elements::solid::Tetrahedron4ElementGeometry;
 
