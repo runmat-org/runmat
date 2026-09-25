@@ -116,15 +116,6 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
         );
     }
     if let Some(matrix) = summary.constraint_matrix.as_ref() {
-        if admission.is_some() {
-            return Ok(rejected_system_result(
-                &summary.operator,
-                backend_kind,
-                preconditioner_kind,
-                "FEA_SOLVER_ADMISSION_UNSUPPORTED",
-                "SPD work admission cannot be applied to multiplier GMRES".into(),
-            ));
-        }
         return solve_multiplier_constraint_system_with_execution(
             summary,
             matrix,
@@ -132,6 +123,7 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
             algebra_backend,
             initial_guess,
             plan,
+            admission,
         );
     }
     solve_operator_system_scoped(

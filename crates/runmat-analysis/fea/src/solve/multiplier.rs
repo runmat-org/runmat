@@ -9,13 +9,18 @@ use crate::{
     constraints::ResolvedConstraintMatrix,
     contracts::{SolverMethod, SolverPreconditioner},
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    planning::resource::LocalExecutionPlan,
+    planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy},
     solve::{
         backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
         krylov::{restarted_gmres, restarted_gmres_scoped, GmresPolicy},
         linear::LinearSolveResult,
     },
 };
+
+struct MultiplierExecution<'a> {
+    vector_plan: Option<LocalExecutionPlan>,
+    admission: Option<&'a SolverAdmissionResourcePolicy>,
+}
 
 pub(super) fn solve_multiplier_constraint_system(
     summary: &AssemblySummary,
@@ -31,7 +36,10 @@ pub(super) fn solve_multiplier_constraint_system(
         initial_guess,
         |physical| Ok(apply_k(&summary.operator, physical)),
         |left, right| Ok(algebra.dot(left, right)),
-        None,
+        MultiplierExecution {
+            vector_plan: None,
+            admission: None,
+        },
     )
     .expect("reference sparse application is infallible for an assembled system")
 }
@@ -43,6 +51,7 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     plan: LocalExecutionPlan,
+    admission: Option<&SolverAdmissionResourcePolicy>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     solve_multiplier_constraint_system_with_apply(
         summary,
@@ -63,7 +72,10 @@ pub(super) fn solve_multiplier_constraint_system_with_execution(
                 dot_scoped(left, right, plan)
             }
         },
-        Some(plan),
+        MultiplierExecution {
+            vector_plan: Some(plan),
+            admission,
+        },
     )
 }
 
@@ -74,8 +86,12 @@ fn solve_multiplier_constraint_system_with_apply(
     initial_guess: Option<&[f64]>,
     apply_stiffness: impl Fn(&[f64]) -> Result<Vec<f64>, ScopedSpmvError>,
     dot: impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
-    vector_plan: Option<LocalExecutionPlan>,
+    execution: MultiplierExecution<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let MultiplierExecution {
+        vector_plan,
+        admission,
+    } = execution;
     let dofs = summary.dof_count;
     let rows = constraints.row_count();
     if constraints.validate().is_err() || constraints.full_dof_count != dofs {
@@ -112,13 +128,26 @@ fn solve_multiplier_constraint_system_with_apply(
             Ok(reduced) => reduced,
             Err(error) => return Ok(rejected_multiplier_system(summary, &error.to_string())),
         };
-        if let Err(error) = PreparedRealLinearSystem::try_new(
+        let prepared = match PreparedRealLinearSystem::try_new(
             reduced_operator,
             reduced_rhs,
             vec![false; reduction.reduced_dof_count],
         ) {
-            return Ok(rejected_multiplier_system(summary, &error.to_string()));
+            Ok(prepared) => prepared,
+            Err(error) => return Ok(rejected_multiplier_system(summary, &error.to_string())),
+        };
+        if let Some(admission) = admission {
+            let accepted = prepared
+                .admissibility()
+                .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
+            if !accepted {
+                return Ok(rejected_multiplier_system(
+                    summary,
+                    "exact reduced-solver work exceeds the admitted resource envelope",
+                ));
+            }
         }
+        drop(prepared);
     }
     let equation_scale = representative_stiffness(summary);
     let mut right_hand_side = summary.operator.load().to_vec();

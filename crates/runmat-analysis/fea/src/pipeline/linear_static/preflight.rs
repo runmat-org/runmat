@@ -3,7 +3,7 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use crate::{
     assembly::{explicit_connectors::compile_model_connector_plan, AssemblySummary},
     connectors::CanonicalStructuralConnectorPlan,
-    constraints::{CanonicalStructuralConstraintPlan, ConstraintEnforcement},
+    constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
         build_static_resource_plan, verify_assembled_structural_storage, FeaResourceDemand,
@@ -98,15 +98,11 @@ pub(super) fn prepare_static_preassembly(
         accelerator_requests: &[],
         local_execution: options.local_execution,
     })?;
-    // The multiplier branch uses a saddle-point GMRES solve rather than an SPD coercivity
-    // certificate. Its independent workspace reconciliation is still a separate gate.
+    // All iterative branches prove a prepared SPD operator (reduced where needed) before PCG
+    // or multiplier GMRES. The latter's Krylov workspace still needs measured reconciliation.
     let solver_admission = match &resource_plan.input.demand {
         FeaResourceDemand::StructuralLinearPipeline(demand) => match &demand.solve {
-            SolveResourcePolicy::Iterative { admission, .. }
-                if constraints.enforcement != ConstraintEnforcement::LagrangeMultiplier =>
-            {
-                Some(admission.clone())
-            }
+            SolveResourcePolicy::Iterative { admission, .. } => Some(admission.clone()),
             _ => None,
         },
         _ => None,

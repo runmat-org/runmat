@@ -136,7 +136,7 @@ pub(crate) fn build_static_resource_plan(
     )?;
     let dofs = facts.sparse.rows.0;
     let stiffness_nonzeros = facts.sparse.maximum_nonzeros();
-    let admission_pattern = if constraints.rows.iter().any(|row| row.terms.len() > 1) {
+    let admission_pattern = if constraints.enforcement != ConstraintEnforcement::DirectElimination {
         facts
             .constraint_matrix
             .affine_reduction()

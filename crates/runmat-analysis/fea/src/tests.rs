@@ -5268,11 +5268,15 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
     };
     use crate::constraints::ResolvedConstraintMatrix;
     use crate::planning::resource::{
-        execute_scoped_chunks, LocalExecutionPlan, LocalThreadCount, ScopedLocalExecutionError,
+        execute_scoped_chunks, ByteCount, Count, LocalExecutionPlan, LocalThreadCount,
+        ScopedLocalExecutionError, SolverAdmissionResourcePolicy,
     };
     use crate::solve::{
         backend::{cpu_reference::CpuReferenceBackend, kind::LinearAlgebraBackendKind},
-        linear::{solve_linear_system, solve_linear_system_with_execution},
+        linear::{
+            solve_linear_system, solve_linear_system_with_execution,
+            solve_linear_system_with_execution_admitted,
+        },
         preconditioner::SpdPreconditionerKind,
     };
 
@@ -5417,6 +5421,62 @@ fn admitted_affine_and_multiplier_static_solves_match_closed_form() {
         multiplier_parallel.diagnostics
     );
     assert_eq!(multiplier_parallel, multiplier_serial);
+    let reduction = summary
+        .constraint_matrix
+        .as_ref()
+        .unwrap()
+        .affine_reduction()
+        .unwrap();
+    let (reduced_operator, reduced_rhs) = reduction
+        .reduce_sparse_system(
+            summary.operator.operators().stiffness(),
+            summary.operator.load(),
+        )
+        .unwrap();
+    let prepared = crate::algebra::PreparedRealLinearSystem::try_new(
+        reduced_operator,
+        reduced_rhs,
+        vec![false; reduction.reduced_dof_count],
+    )
+    .unwrap();
+    let (dimension, factor_nonzeros, updates, resident_bytes) =
+        prepared.admissibility().unwrap().coercivity().work_counts();
+    let admission = SolverAdmissionResourcePolicy {
+        dimension: Count(dimension),
+        factor_nonzero_upper_bound: Count(factor_nonzeros),
+        update_count_upper_bound: Count(updates),
+        resident_bytes_upper_bound: ByteCount(resident_bytes),
+    };
+    let admitted = solve_linear_system_with_execution_admitted(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+        Some(&admission),
+    )
+    .unwrap();
+    assert_eq!(admitted, multiplier_serial);
+    let rejected = solve_linear_system_with_execution_admitted(
+        &summary,
+        SpdPreconditionerKind::Jacobi,
+        LinearAlgebraBackendKind::CpuReference,
+        &CpuReferenceBackend,
+        None,
+        plan,
+        Some(&SolverAdmissionResourcePolicy {
+            factor_nonzero_upper_bound: Count(factor_nonzeros - 1),
+            ..admission
+        }),
+    )
+    .unwrap();
+    assert!(!rejected.converged);
+    assert_eq!(rejected.iterations, 0);
+    assert_eq!(
+        rejected.diagnostics[0].code,
+        "FEA_INVALID_MULTIPLIER_SOLVER_ADMISSION"
+    );
     assert!((multiplier_parallel.solution[0] - 3.0 / 8.0).abs() < 1.0e-12);
     assert!((multiplier_parallel.solution[1] - 3.0 / 8.0).abs() < 1.0e-12);
     let equilibrium = crate::algebra::spmv(
