@@ -89,6 +89,11 @@ Sweep outputs can collect attributed scalar values, retain each case's field, or
 
 Backend admission is explicit. A required accelerator request must match an allocated class and memory envelope; it never silently falls back to a host solve. GPU execution is advertised only for qualified shapes and hardware evidence.
 
+Linear-static structural execution currently admits CPU solves only. A `Gpu` static solve request
+fails before assembly, including when accelerator algebra is selected; its native sparse solver and
+accelerator-bound resource admission are not yet qualified. A preferred placement policy may still
+choose a CPU attempt, but that attempt is a CPU solve, not GPU execution.
+
 Fan-out and cooperative distribution are different:
 
 - fan-out schedules independent cases, frequencies, or generated-input chunks;

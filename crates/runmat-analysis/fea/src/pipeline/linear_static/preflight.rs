@@ -27,8 +27,8 @@ pub(super) struct StaticPreassembly {
 
 /// Direct and prepared CPU physical solves derive observations and recovery demand before
 /// assembly. Prepared execution retains its worker-verified constraint identity and independently
-/// derives the same numerical solver envelope. Direct GPU lacks a bound accelerator request and
-/// remains outside this admission envelope.
+/// derives the same numerical solver envelope. Static GPU execution is unavailable until a native
+/// sparse solver and an accelerator-bound admission can be carried through this boundary.
 pub(super) fn prepare_static_preassembly(
     model: &AnalysisModel,
     step: &ProcedureStep,
@@ -37,9 +37,14 @@ pub(super) fn prepare_static_preassembly(
     prepared_constraints: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
 ) -> Result<StaticPreassembly, FeaRunError> {
-    if backend != ComputeBackend::Cpu
-        || (options.solver_mesh.is_none() && !model_has_explicit_structural_elements(model))
-    {
+    if backend == ComputeBackend::Gpu {
+        return Err(ResourcePlanningError::Invalid(
+            "static GPU execution requires a native sparse solver and accelerator-bound admission; CPU fallback is not a GPU solve"
+                .into(),
+        )
+        .into());
+    }
+    if options.solver_mesh.is_none() && !model_has_explicit_structural_elements(model) {
         if admitted.is_some() {
             return Err(ResourcePlanningError::Invalid(
                 "admitted static plan cannot bypass CPU physical preassembly".into(),

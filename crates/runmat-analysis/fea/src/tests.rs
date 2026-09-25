@@ -2637,33 +2637,30 @@ fn deterministic_replay_for_fixture_is_stable() {
 }
 
 #[test]
-fn cpu_gpu_parity_respects_tolerance_policy() {
+fn static_gpu_request_fails_before_assembly_without_native_admission() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
-    let cpu = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Cpu)
-        .expect("cpu run should succeed");
-    let gpu = run_linear_static_with_single_tetrahedron_mesh(&model, ComputeBackend::Gpu)
-        .expect("gpu run should succeed");
-
-    let tol = ParityTolerance::strict();
-    let cpu_displacement = host_field(&cpu, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
-    let gpu_displacement = host_field(&gpu, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
-    assert_vectors_within_tolerance(cpu_displacement, gpu_displacement, tol);
-
-    let cpu_stress = host_field(&cpu, FEA_FIELD_STRUCTURAL_VON_MISES);
-    let gpu_stress = host_field(&gpu, FEA_FIELD_STRUCTURAL_VON_MISES);
-    assert_vectors_within_tolerance(cpu_stress, gpu_stress, tol);
-
-    let cpu_tensor_stress = host_field(&cpu, FEA_FIELD_STRUCTURAL_STRESS);
-    let gpu_tensor_stress = host_field(&gpu, FEA_FIELD_STRUCTURAL_STRESS);
-    assert_vectors_within_tolerance(cpu_tensor_stress, gpu_tensor_stress, tol);
-
-    let cpu_reactions = host_field(&cpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
-    let gpu_reactions = host_field(&gpu, FEA_FIELD_STRUCTURAL_REACTION_FORCE);
-    assert_vectors_within_tolerance(cpu_reactions, gpu_reactions, tol);
-
-    let cpu_residual = host_field(&cpu, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM);
-    let gpu_residual = host_field(&gpu, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM);
-    assert_vectors_within_tolerance(cpu_residual, gpu_residual, tol);
+    for algebra_backend_kind in [
+        crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator,
+    ] {
+        let mesh = single_tetrahedron_solver_mesh_for_model(&model);
+        let error = crate::run_linear_static_with_options(
+            &model,
+            ComputeBackend::Gpu,
+            LinearStaticSolveOptions {
+                solver_mesh: Some(mesh),
+                algebra_backend_kind,
+                ..experimental_linear_static_options()
+            },
+        )
+        .expect_err("GPU request must not silently execute a CPU static solve");
+        assert!(matches!(
+            error,
+            crate::contracts::FeaRunError::Resource(
+                crate::planning::resource::ResourcePlanningError::Invalid(message)
+            ) if message.contains("CPU fallback is not a GPU solve")
+        ));
+    }
 }
 
 #[test]
