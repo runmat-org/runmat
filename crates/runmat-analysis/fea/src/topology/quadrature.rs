@@ -1,5 +1,6 @@
 use runmat_meshing_core::{BoundaryTriangleOrder, ElementOrder, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 
+mod boundary_curved;
 mod boundary_nodes;
 
 pub(super) use boundary_nodes::boundary_nodal_area_vectors;
@@ -333,6 +334,14 @@ pub(super) fn visit_boundary_quadrature(
         && signed_boundary_area_minimum(coordinates, corner_normal)? <= 0.0
     {
         return None;
+    }
+    // Curved area and consistent nodal traction are non-polynomial; the
+    // seven-point planar rule does not reliably integrate their moments.
+    if order == BoundaryTriangleOrder::Tri6 && boundary_curved::is_curved(coordinates) {
+        for point in boundary_curved::converged_points(coordinates, corner_normal)? {
+            visit(point);
+        }
+        return Some(());
     }
     for (barycentric, normalized_weight) in DUNAVANT_SEVEN {
         let (shape_values, derivatives) = boundary_shape(order, barycentric);
