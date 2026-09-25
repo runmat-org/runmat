@@ -42,7 +42,6 @@ use crate::{
         field::{RecoveredFieldCatalog, StructuralRecoveredFieldTopology},
         observation::{evaluate_structural_observations, ObservationLimits},
     },
-    solve::StructuralStaticBalanceEvidence,
 };
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
@@ -150,6 +149,8 @@ fn run_linear_static_with_constraint_plan(
         &options,
         constraint_plan.is_some(),
     )?;
+    let prepared_connectors =
+        preflight::prepare_portable_static_connectors(model, &options, constraint_plan)?;
     let assembly_constraint_plan =
         constraint_plan.or(preflight_plans.as_ref().map(|plans| &plans.constraints));
 
@@ -179,7 +180,11 @@ fn run_linear_static_with_constraint_plan(
         }
         other => FeaRunError::Assembly(other.to_string()),
     })?;
-    preflight::verify_executed_connector_plan(preflight_plans.as_ref(), &summary)?;
+    preflight::verify_executed_connector_plan(
+        preflight_plans.as_ref(),
+        prepared_connectors.as_ref(),
+        &summary,
+    )?;
     let identity = super::admission::admit_structural(
         &summary,
         execution_step,
@@ -448,7 +453,7 @@ fn run_linear_static_with_constraint_plan(
             },
             message: format!("total_strain_energy={total_strain_energy}"),
         });
-        diagnostics.push(structural_linear_known_answer_diagnostic(
+        diagnostics.push(static_diagnostics::known_answer(
             total_strain_energy,
             &static_balance.evidence,
         ));
@@ -548,52 +553,6 @@ fn run_linear_static_with_constraint_plan(
         summary,
         solution: solve_result.solution,
     })
-}
-
-fn structural_linear_known_answer_diagnostic(
-    total_strain_energy: f64,
-    balance: &StructuralStaticBalanceEvidence,
-) -> FeaDiagnostic {
-    let total_external_work = balance.applied_load_work_joules + balance.constraint_work_joules;
-    let work_energy_ratio = if total_external_work.abs() > 1.0e-12 {
-        (2.0 * total_strain_energy) / total_external_work
-    } else if total_strain_energy.abs() <= 1.0e-12 {
-        1.0
-    } else {
-        0.0
-    };
-    let work_energy_residual_ratio = (work_energy_ratio - 1.0).abs();
-    let known_answer_coverage_ratio =
-        if total_strain_energy.is_finite() && total_external_work.is_finite() && balance.accepted {
-            1.0
-        } else {
-            0.0
-        };
-    let severity = if known_answer_coverage_ratio >= 1.0
-        && total_strain_energy >= 0.0
-        && work_energy_residual_ratio <= 1.0e-8
-    {
-        FeaDiagnosticSeverity::Info
-    } else {
-        FeaDiagnosticSeverity::Warning
-    };
-
-    FeaDiagnostic {
-        code: "FEA_STRUCTURAL_LINEAR_KNOWN_ANSWER".to_string(),
-        severity,
-        message: format!(
-            "identity=linear_work_energy applied_load_work_joules={} constraint_work_joules={} total_external_work_joules={} total_strain_energy={} work_energy_ratio={} work_energy_residual_ratio={} equilibrium_relative_error={} balance_accepted={} known_answer_coverage_ratio={}",
-            balance.applied_load_work_joules,
-            balance.constraint_work_joules,
-            total_external_work,
-            total_strain_energy,
-            work_energy_ratio,
-            work_energy_residual_ratio,
-            balance.equilibrium_relative_error,
-            balance.accepted,
-            known_answer_coverage_ratio
-        ),
-    }
 }
 
 fn structural_reference_kinematics_diagnostic(

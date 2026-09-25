@@ -78,17 +78,39 @@ pub(super) fn prepare_direct_static_constraints(
 }
 
 pub(super) fn verify_executed_connector_plan(
-    preflight: Option<&DirectStaticPreflight>,
+    direct: Option<&DirectStaticPreflight>,
+    portable: Option<&CanonicalStructuralConnectorPlan>,
     summary: &AssemblySummary,
 ) -> Result<(), FeaRunError> {
-    if let Some(preflight) = preflight.filter(|plans| !plans.connectors.entries.is_empty()) {
-        if summary.structural_connector_plan.as_ref() != Some(&preflight.connectors) {
+    let preassembly_plan = direct.map(|plans| &plans.connectors).or(portable);
+    if let Some(plan) = preassembly_plan.filter(|plan| !plan.entries.is_empty()) {
+        if summary.structural_connector_plan.as_ref() != Some(plan) {
             return Err(FeaRunError::Assembly(
                 "executed connector plan differs from the admitted preassembly plan".into(),
             ));
         }
     }
     Ok(())
+}
+
+/// Portable execution already admitted its resource plan. Compile the same connector identity
+/// before assembly so a changed numerical target resolution cannot pass on admission alone.
+pub(super) fn prepare_portable_static_connectors(
+    model: &AnalysisModel,
+    options: &LinearStaticSolveOptions,
+    prepared_constraints: Option<&CanonicalStructuralConstraintPlan>,
+) -> Result<Option<CanonicalStructuralConnectorPlan>, FeaRunError> {
+    prepared_constraints
+        .filter(|_| !model.connectors.is_empty())
+        .map(|plan| {
+            compile_model_connector_plan(
+                model,
+                options.solver_mesh.as_ref(),
+                plan.reference_points.len(),
+            )
+            .map_err(|error| FeaRunError::Assembly(error.to_string()))
+        })
+        .transpose()
 }
 
 pub(super) fn model_has_explicit_structural_elements(model: &AnalysisModel) -> bool {

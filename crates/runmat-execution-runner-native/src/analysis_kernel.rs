@@ -71,7 +71,8 @@ use runmat_analysis_fea::planning::resource::{
     StructuralFrequencyRecoveryResourceInput,
 };
 use runmat_analysis_fea::post::fields::{
-    structural_observable_field_definitions, take_structural_observable_fields,
+    structural_observable_field_definitions, structural_static_observable_field_definitions,
+    take_structural_observable_fields,
 };
 use runmat_analysis_fea::post::recover_constraint_group_observable_fields;
 use runmat_analysis_fea::results::accuracy::AccuracyArtifact;
@@ -742,7 +743,7 @@ fn execute_structural_linear(
             "resource-plan manifest differs from its canonical identity",
         ));
     }
-    let field_definitions = structural_observable_field_definitions()
+    let field_definitions = structural_static_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations =
         runmat_analysis_fea::results::observation::resolve_structural_observation_plan(
