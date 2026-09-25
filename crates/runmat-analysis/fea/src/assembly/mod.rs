@@ -11,6 +11,7 @@ mod explicit_system;
 pub mod identity;
 mod mixed_structural;
 mod moment_projection;
+mod reduced_material_summary;
 mod reduced_rhs;
 mod solid_matrix;
 mod solid_properties;
@@ -18,6 +19,7 @@ pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
 mod structural_loads;
+mod thermoelastic_load;
 
 use std::{collections::BTreeMap, fmt};
 
@@ -72,6 +74,7 @@ use self::{
 };
 use crate::physics::structural::topology::explicit_target_node_indices as structural_target_nodes;
 use moment_projection::project_moment;
+use reduced_material_summary::structural_material_summary;
 use reduced_rhs::apply_reduced_multiphysics_rhs;
 
 use crate::algebra::{
@@ -1063,6 +1066,17 @@ pub(super) fn assemble_linear_system_impl(
     }
 
     if let Some(context) = thermo_mechanical_context {
+        let physical_thermal_load = solver_mesh
+            .filter(|_| {
+                structural_requirement
+                    == Some(StructuralFormulationRequirement::PhysicalDiscretization)
+            })
+            .zip(solid_properties.as_ref())
+            .map(|(mesh, properties)| {
+                thermoelastic_load::assemble_uniform_temperature_load(mesh, properties, &context)
+            })
+            .transpose()
+            .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
         let thermal_strain_scale = (context.thermal_expansion_coefficient
             * context.applied_temperature_delta_k.abs())
         .clamp(0.0, 0.05);
@@ -1105,14 +1119,24 @@ pub(super) fn assemble_linear_system_impl(
             let local_scale =
                 (effective_modulus_scale * (1.0 + dof_adjustments[i])).clamp(0.75, 1.2);
             local_modulus_scales[i] = local_scale;
-            stiffness_diag[i] *= thermal_bias * local_scale;
-            if !constrained[i] {
+            if physical_thermal_load.is_none() {
+                stiffness_diag[i] *= thermal_bias * local_scale;
+            }
+            if physical_thermal_load.is_none() && !constrained[i] {
                 rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
             }
         }
         for i in 0..stiffness_upper.len() {
             let edge_scale = 0.5 * (local_modulus_scales[i] + local_modulus_scales[i + 1]);
             stiffness_upper[i] *= edge_scale;
+        }
+        if let Some(thermal_load) = physical_thermal_load {
+            for (index, value) in thermal_load.iter().copied().enumerate() {
+                if !constrained[index] {
+                    rhs[index] += value;
+                }
+                physical_load[index] += value;
+            }
         }
         let min_modulus_scale = local_modulus_scales
             .iter()
@@ -1683,40 +1707,6 @@ fn electro_thermal_fingerprint(
         hash = hash.wrapping_mul(1099511628211);
     }
     hash
-}
-
-fn structural_material_summary(model: &AnalysisModel) -> StructuralMaterialSummary {
-    let avg_youngs_modulus = mean(model.materials.iter().filter_map(|material| {
-        material
-            .require_mechanical()
-            .ok()
-            .map(|mechanical| mechanical.youngs_modulus_pa)
-    }))
-    .unwrap_or(1.0e9);
-    let avg_poisson_ratio = mean(model.materials.iter().filter_map(|material| {
-        material
-            .require_mechanical()
-            .ok()
-            .map(|mechanical| mechanical.poisson_ratio)
-    }))
-    .unwrap_or(0.3);
-    let shear_modulus_pa = avg_youngs_modulus / (2.0 * (1.0 + avg_poisson_ratio));
-    let avg_density_kg_per_m3 = mean(
-        model
-            .materials
-            .iter()
-            .filter_map(|material| material.mass_density_kg_per_m3),
-    )
-    .unwrap_or(7850.0);
-    let lame_lambda_pa = avg_youngs_modulus * avg_poisson_ratio
-        / ((1.0 + avg_poisson_ratio) * (1.0 - 2.0 * avg_poisson_ratio));
-    StructuralMaterialSummary {
-        youngs_modulus_pa: avg_youngs_modulus,
-        poisson_ratio: avg_poisson_ratio,
-        density_kg_per_m3: avg_density_kg_per_m3,
-        lame_lambda_pa,
-        shear_modulus_pa,
-    }
 }
 
 fn mean(values: impl IntoIterator<Item = f64>) -> Option<f64> {
