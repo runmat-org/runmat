@@ -22,4 +22,5 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 anyhow = { workspace = true }
+libc = "0.2"
 serde_json = { workspace = true }

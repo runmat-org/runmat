@@ -6359,6 +6359,7 @@ version = "0.6.2"
 dependencies = [
  "anyhow",
  "futures",
+ "libc",
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-canonical-codec",
