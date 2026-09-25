@@ -1954,6 +1954,7 @@ fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
         options.clone(),
         &plan,
         topology_digest,
+        None,
     )
     .unwrap();
     assert_eq!(base.linearization.topology_digest(), topology_digest);
@@ -1983,6 +1984,7 @@ fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
         options,
         &plan,
         topology_digest,
+        None,
     )
     .unwrap();
     for row in 0..base.linearization.geometric_stiffness().rows() {
@@ -2039,6 +2041,7 @@ fn physical_compressive_preload_buckling_has_exact_residual_and_inverse_load_sca
             options(),
             &plan,
             topology_digest,
+            None,
         )
         .unwrap();
         let excitations = static_excitations(model);
@@ -2153,6 +2156,7 @@ fn portable_buckling_pipeline_consumes_the_exact_published_preload_state() {
         },
         &constraint_plan,
         topology_digest,
+        None,
     )
     .unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
@@ -2274,6 +2278,7 @@ pub(crate) fn prepared_prestressed_modal_case(
         },
         &constraints,
         topology_digest,
+        None,
     )
     .unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();

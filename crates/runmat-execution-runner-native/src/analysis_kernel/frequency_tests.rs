@@ -207,6 +207,7 @@ fn prestressed_direct_fixture() -> (
             },
             &constraints,
             topology_digest,
+            None,
         )
         .unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();

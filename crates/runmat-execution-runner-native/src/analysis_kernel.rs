@@ -797,6 +797,12 @@ fn execute_structural_linear(
         initial_displacement,
         local_execution,
     };
+    let static_admission = (solve.backend == runmat_analysis_fea::ComputeBackend::Cpu).then_some(
+        runmat_analysis_fea::StaticResourceAdmission {
+            plan: &resource_plan,
+            observation_execution: solve.observation_execution,
+        },
+    );
     let publishes_linearization = solve
         .procedure_step()?
         .state_outputs
@@ -810,6 +816,7 @@ fn execute_structural_linear(
                 solve_options,
                 &constraint_plan,
                 topology_digest,
+                static_admission,
             )
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         (execution.run, Some(execution.linearization))
@@ -820,6 +827,7 @@ fn execute_structural_linear(
                 solve.backend,
                 solve_options,
                 &constraint_plan,
+                static_admission,
             )
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             None,

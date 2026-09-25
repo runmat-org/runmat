@@ -128,6 +128,7 @@ fn native_buckling_task_round_trips_the_preload_bound_result() {
             },
             &constraints,
             topology_digest,
+            None,
         )
         .unwrap();
     let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
