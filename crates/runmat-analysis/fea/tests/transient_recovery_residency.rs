@@ -113,8 +113,8 @@ fn add_face_region(mesh: &mut SolverMeshArtifact, face: usize, region: &str) {
     }
 }
 
-fn physical_fixture_mesh(model: &AnalysisModel) -> SolverMeshArtifact {
-    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+fn physical_fixture_mesh(model: &AnalysisModel, order: ElementOrder) -> SolverMeshArtifact {
+    let mut mesh = canonical_tetrahedron_solver_mesh(order);
     if let Some(assignment) = model.material_assignments.first() {
         let region = PersistentEntityId {
             kind: PersistentEntityKind::Region,
@@ -274,7 +274,7 @@ fn modal_recovery_model_and_state() -> (
         topology: TopologyTransitionPolicy::RequireIdentical,
         reference: ReferenceStatePolicy::Preserve,
     }];
-    let mesh = physical_fixture_mesh(&model);
+    let mesh = physical_fixture_mesh(&model, ElementOrder::Tet4);
     let modal = runmat_analysis_fea::run_modal_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -321,10 +321,11 @@ fn measure_physical_recovery(
     case: &'static str,
     model: AnalysisModel,
     interval_count: usize,
+    order: ElementOrder,
     solver: StructuralTransientSolverPlan,
     modal_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
 ) -> (u64, u64) {
-    let mesh = physical_fixture_mesh(&model);
+    let mesh = physical_fixture_mesh(&model, order);
     let workload = StructuralTransientWorkload {
         schema_version: 1,
         step_id: model.sequence.steps.last().unwrap().step_id.clone(),
@@ -436,6 +437,7 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         24,
+        ElementOrder::Tet4,
         StructuralTransientSolverPlan::Direct,
         None,
     );
@@ -443,6 +445,7 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         240,
+        ElementOrder::Tet4,
         StructuralTransientSolverPlan::Direct,
         None,
     );
@@ -452,6 +455,7 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         "connector observation",
         connector_observation_model(),
         24,
+        ElementOrder::Tet4,
         StructuralTransientSolverPlan::Direct,
         None,
     );
@@ -460,11 +464,29 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         "mixed observations",
         mixed_observation_model(),
         240,
+        ElementOrder::Tet4,
         StructuralTransientSolverPlan::Direct,
         None,
     );
     assert!(mixed_peak > long_peak);
     assert!(mixed_plan > long_plan);
     let (modal_model, modal_solver, modal_state) = modal_recovery_model_and_state();
-    measure_physical_recovery("modal", modal_model, 40, modal_solver, Some(&modal_state));
+    measure_physical_recovery(
+        "modal",
+        modal_model,
+        40,
+        ElementOrder::Tet4,
+        modal_solver,
+        Some(&modal_state),
+    );
+    let (tet10_peak, tet10_plan) = measure_physical_recovery(
+        "Tet10 direct",
+        fixture_model(FixtureId::StructuralTransientTet4Reference),
+        24,
+        ElementOrder::Tet10,
+        StructuralTransientSolverPlan::Direct,
+        None,
+    );
+    assert!(tet10_peak > short_peak);
+    assert!(tet10_plan > short_plan);
 }
