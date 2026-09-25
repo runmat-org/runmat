@@ -771,6 +771,9 @@ fn dependent_equations_are_evidenced_and_inconsistent_equations_fail() {
 #[path = "tests/rank_plan.rs"]
 mod rank_plan;
 
+#[path = "tests/rotated_solve.rs"]
+mod rotated_solve;
+
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();
