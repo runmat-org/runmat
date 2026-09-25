@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::properties::{
-    compile_property_map, compile_structural_property_map, realize_formulation_properties,
-    CompiledPropertyMap, PropertyCompilationError, PropertyRealizationError,
+    compile_property_map, realize_formulation_properties, CompiledPropertyMap,
+    PropertyCompilationError, PropertyRealizationError,
 };
 
 const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
@@ -49,6 +49,9 @@ impl CompiledAnalysisStudy {
             .map_err(AnalysisStudyCompilationError::Identity)?;
         if requires_structural_solid_capabilities(&self.model) {
             self.properties.validate_structural_solid_capabilities()?;
+        }
+        if requires_thermal_solid_capabilities(&self.model) {
+            self.properties.validate_thermal_solid_capabilities()?;
         }
         validate_study_inputs(&self.study_inputs)?;
         validate_authored_outputs(&self.outputs, &self.model.sequence.steps)
@@ -163,11 +166,22 @@ fn compile_study_properties(
     model: &AnalysisModel,
     mesh: &SolverMeshArtifact,
 ) -> Result<CompiledPropertyMap, PropertyCompilationError> {
+    let properties = compile_property_map(model, Some(mesh))?;
     if requires_structural_solid_capabilities(model) {
-        compile_structural_property_map(model, Some(mesh))
-    } else {
-        compile_property_map(model, Some(mesh))
+        properties.validate_structural_solid_capabilities()?;
     }
+    if requires_thermal_solid_capabilities(model) {
+        properties.validate_thermal_solid_capabilities()?;
+    }
+    Ok(properties)
+}
+
+fn requires_thermal_solid_capabilities(model: &AnalysisModel) -> bool {
+    model
+        .sequence
+        .steps
+        .iter()
+        .any(|step| step.family == PhysicsFamily::Thermal)
 }
 
 fn requires_structural_solid_capabilities(model: &AnalysisModel) -> bool {

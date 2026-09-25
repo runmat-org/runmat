@@ -7,7 +7,7 @@ mod realize;
 
 pub use compile::{
     compile_property_map, compile_solid_property_map, compile_structural_property_map,
-    PropertyCompilationError,
+    compile_thermal_property_map, PropertyCompilationError,
 };
 pub use contract::{
     CompiledBeamProperty, CompiledElementMaterial, CompiledLaminatePly, CompiledPropertyAudit,

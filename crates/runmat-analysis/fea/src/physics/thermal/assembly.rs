@@ -175,7 +175,7 @@ pub(crate) fn assemble(
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-    let properties = crate::properties::compile_solid_property_map(model, mesh)
+    let properties = crate::properties::compile_thermal_property_map(model, Some(mesh))
         .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
     let mut conductivity = RealSparseAssembler::square(
         projection.nodes.len(),

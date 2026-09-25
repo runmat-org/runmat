@@ -102,6 +102,17 @@ pub fn compile_structural_property_map(
     Ok(compiled)
 }
 
+/// Compile ownership and require the constitutive inputs used by thermal solid operators before
+/// assembly starts. This does not impose thermal requirements on other physics families.
+pub fn compile_thermal_property_map(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<CompiledPropertyMap, PropertyCompilationError> {
+    let compiled = compile_property_map(model, mesh)?;
+    compiled.validate_thermal_solid_capabilities()?;
+    Ok(compiled)
+}
+
 impl CompiledPropertyMap {
     /// Validate the constitutive view needed by structural solid operators without selecting
     /// owners again. Study identity checks use this on already-compiled property maps.
@@ -115,6 +126,19 @@ impl CompiledPropertyMap {
                     MaterialCapability::IsotropicLinearElasticity,
                     MaterialCapability::MassDensity,
                 ],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Validate an already-compiled map without reselecting material owners.
+    pub fn validate_thermal_solid_capabilities(&self) -> Result<(), PropertyCompilationError> {
+        for entry in self.solid_materials() {
+            require_capabilities(
+                "thermal solid",
+                &entry.element_id.to_string(),
+                &entry.material,
+                &[MaterialCapability::Thermal, MaterialCapability::MassDensity],
             )?;
         }
         Ok(())
