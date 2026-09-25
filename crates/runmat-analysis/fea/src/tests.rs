@@ -85,6 +85,7 @@ use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
 
+mod connected_static_patch;
 mod connector_qualification;
 mod prestressed_frequency;
 mod random_response_portable;
