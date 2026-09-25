@@ -98,18 +98,27 @@ pub fn compile_structural_property_map(
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<CompiledPropertyMap, PropertyCompilationError> {
     let compiled = compile_property_map(model, mesh)?;
-    for entry in compiled.solid_materials() {
-        require_capabilities(
-            "structural solid",
-            &entry.element_id.to_string(),
-            &entry.material,
-            &[
-                MaterialCapability::IsotropicLinearElasticity,
-                MaterialCapability::MassDensity,
-            ],
-        )?;
-    }
+    compiled.validate_structural_solid_capabilities()?;
     Ok(compiled)
+}
+
+impl CompiledPropertyMap {
+    /// Validate the constitutive view needed by structural solid operators without selecting
+    /// owners again. Study identity checks use this on already-compiled property maps.
+    pub fn validate_structural_solid_capabilities(&self) -> Result<(), PropertyCompilationError> {
+        for entry in self.solid_materials() {
+            require_capabilities(
+                "structural solid",
+                &entry.element_id.to_string(),
+                &entry.material,
+                &[
+                    MaterialCapability::IsotropicLinearElasticity,
+                    MaterialCapability::MassDensity,
+                ],
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// Compile every material-bearing formulation whose topology is present.

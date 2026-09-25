@@ -4,7 +4,7 @@ use runmat_analysis_core::{
     realize_analysis_model, validate_authored_outputs, AnalysisModel,
     AnalysisModelRealizationError, AnalysisModelRealizationInput, AuthoredMaterialRef,
     AuthoredOutput, AuthoredStudyInputBinding, FormulationRequirement, MaterialModel,
-    RealizedStudy,
+    PhysicsFamily, RealizedStudy,
 };
 use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::properties::{
-    compile_property_map, realize_formulation_properties, CompiledPropertyMap,
-    PropertyCompilationError, PropertyRealizationError,
+    compile_property_map, compile_structural_property_map, realize_formulation_properties,
+    CompiledPropertyMap, PropertyCompilationError, PropertyRealizationError,
 };
 
 const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
@@ -44,6 +44,12 @@ impl CompiledAnalysisStudy {
         if self.module_path.trim().is_empty() || self.study_id.trim().is_empty() {
             return Err(AnalysisStudyCompilationError::InvalidStudyIdentity);
         }
+        self.properties
+            .validate_integrity()
+            .map_err(AnalysisStudyCompilationError::Identity)?;
+        if requires_structural_solid_capabilities(&self.model) {
+            self.properties.validate_structural_solid_capabilities()?;
+        }
         validate_study_inputs(&self.study_inputs)?;
         validate_authored_outputs(&self.outputs, &self.model.sequence.steps)
             .map_err(|error| AnalysisStudyCompilationError::InvalidOutputs(error.to_string()))?;
@@ -64,7 +70,7 @@ impl CompiledAnalysisStudy {
         {
             return Err(AnalysisStudyCompilationError::IdentityMismatch);
         }
-        let expected = compile_property_map(&self.model, Some(mesh))?;
+        let expected = compile_study_properties(&self.model, mesh)?;
         if expected != self.properties {
             return Err(AnalysisStudyCompilationError::IdentityMismatch);
         }
@@ -138,7 +144,7 @@ pub fn compile_analysis_study(
         materials,
     })?;
     let model = realize_formulation_properties(realized, mesh)?;
-    let properties = compile_property_map(&model, Some(mesh))?;
+    let properties = compile_study_properties(&model, mesh)?;
     let compiled = CompiledAnalysisStudy {
         module_path: study.module_path.clone(),
         study_id: study.study_id.clone(),
@@ -151,6 +157,25 @@ pub fn compile_analysis_study(
     };
     compiled.validate_against(mesh)?;
     Ok(compiled)
+}
+
+fn compile_study_properties(
+    model: &AnalysisModel,
+    mesh: &SolverMeshArtifact,
+) -> Result<CompiledPropertyMap, PropertyCompilationError> {
+    if requires_structural_solid_capabilities(model) {
+        compile_structural_property_map(model, Some(mesh))
+    } else {
+        compile_property_map(model, Some(mesh))
+    }
+}
+
+fn requires_structural_solid_capabilities(model: &AnalysisModel) -> bool {
+    model
+        .sequence
+        .steps
+        .iter()
+        .any(|step| step.family == PhysicsFamily::Structural)
 }
 
 fn validate_study_inputs(

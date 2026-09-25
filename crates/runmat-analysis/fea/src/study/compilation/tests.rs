@@ -9,9 +9,75 @@ use runmat_geometry_core::{
 use runmat_meshing_core::{fixtures, ElementOrder};
 
 use super::{
-    compile_analysis_study, validate_realized_geometry_source, AnalysisStudyCompilationError,
-    AnalysisStudyCompilationInput,
+    compile_analysis_study, compile_study_properties, validate_realized_geometry_source,
+    AnalysisStudyCompilationError, AnalysisStudyCompilationInput, CompiledAnalysisStudy,
 };
+
+#[test]
+fn structural_study_compilation_requires_capable_solid_material_before_planning() {
+    let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
+    let valid = compile_study_properties(&model, &mesh).expect("valid structural properties");
+
+    let mut thermal_only = model.clone();
+    thermal_only.materials[0].elasticity = None;
+    let generic = crate::properties::compile_property_map(&thermal_only, Some(&mesh))
+        .expect("generic material ownership is still valid");
+    assert!(matches!(
+        compile_study_properties(&thermal_only, &mesh),
+        Err(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                role: "structural solid",
+                capability: runmat_analysis_core::MaterialCapability::IsotropicLinearElasticity,
+                ..
+            }
+        )
+    ));
+
+    let substituted = CompiledAnalysisStudy {
+        module_path: "tests/structural.fea".into(),
+        study_id: "structural".into(),
+        formulation_requirement: FormulationRequirement::Experimental,
+        study_inputs: Vec::new(),
+        outputs: Vec::new(),
+        model: thermal_only.clone(),
+        properties: generic,
+        solver_mesh_digest: mesh.canonical_digest,
+    };
+    assert!(matches!(
+        substituted.definition_digest(),
+        Err(AnalysisStudyCompilationError::Properties(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                capability: runmat_analysis_core::MaterialCapability::IsotropicLinearElasticity,
+                ..
+            }
+        ))
+    ));
+    assert!(matches!(
+        substituted.validate_against(&mesh),
+        Err(AnalysisStudyCompilationError::Properties(
+            crate::properties::PropertyCompilationError::MissingCapability {
+                capability: runmat_analysis_core::MaterialCapability::IsotropicLinearElasticity,
+                ..
+            }
+        ))
+    ));
+
+    thermal_only.sequence =
+        AnalysisSequence::from_steps("thermal", vec![ProcedureStep::thermal_steady("steady")]);
+    assert_eq!(
+        compile_study_properties(&thermal_only, &mesh)
+            .expect("nonstructural study retains generic property semantics")
+            .identity,
+        crate::properties::compile_property_map(&thermal_only, Some(&mesh))
+            .unwrap()
+            .identity
+    );
+    assert_eq!(
+        valid.solid_materials().len(),
+        mesh.topology.volume_elements.len()
+    );
+}
 
 fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> RealizedStudy {
     RealizedStudy {
