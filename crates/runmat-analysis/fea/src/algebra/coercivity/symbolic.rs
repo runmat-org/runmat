@@ -7,10 +7,11 @@ use crate::algebra::SparsePattern;
 use super::CoercivityError;
 
 const MAX_FACTOR_FILL_MULTIPLIER: u64 = 16;
-// The connected 4,096-Tet4 affine patch uses 29,350,140 symbolic updates against 44,238
-// input lower entries (about 663 per entry). Keep bounded headroom above that independent
-// physical reference while retaining a finite proof-work cap.
-const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 768;
+// Connected physical patches include 4,096 Tet4 and 1,024 Tet10 elements. The latter
+// crossed the former 768x update envelope by 38,559 updates at pivot 4,402, while its
+// factor fill remained below the separate 16x cap. Bound the work above both independently
+// verified affine patches without treating a failed symbolic proof as a physics result.
+const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 1024;
 const BYTES_PER_SYMBOLIC_FACTOR_ENTRY: u64 = 192;
 const BYTES_PER_SYMBOLIC_ROW: u64 = 256;
 
@@ -165,7 +166,13 @@ impl CoercivitySymbolicPlan {
                 )
                 .ok_or(CoercivityError::WorkOverflow)?;
             if factor_nonzero_count > factor_limit || update_count > update_limit {
-                return Err(CoercivityError::ResourceLimit);
+                return Err(CoercivityError::ResourceLimit {
+                    pivot,
+                    factor_nonzero_count,
+                    factor_nonzero_limit: factor_limit,
+                    update_count,
+                    update_limit,
+                });
             }
             for left in 0..neighbors.len() {
                 for right in 0..left {

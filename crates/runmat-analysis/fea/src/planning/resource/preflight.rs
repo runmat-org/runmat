@@ -107,7 +107,7 @@ pub fn build_structural_resource_plan(
             update_count_upper_bound: Count(proof.update_count()),
             resident_bytes_upper_bound: ByteCount(proof.resident_bytes_upper_bound()),
         },
-        Err(CoercivityError::ResourceLimit) => {
+        Err(CoercivityError::ResourceLimit { .. }) => {
             // The topology pattern can contain couplings that vanish during numerical assembly.
             // Its failed proof is not an exact-operator rejection. Reserve the maximum work of
             // any successful exact-pattern proof under this graph instead; the solve must still

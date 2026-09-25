@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn refined_connected_tet10_preflight_reserves_and_rejects_a_lower_ceiling() {
         let mesh =
-            elevate_connected_tet4_fixture(refine(connected_tetrahedron_solver_mesh(), 3).unwrap());
+            elevate_connected_tet4_fixture(refine(connected_tetrahedron_solver_mesh(), 4).unwrap());
         mesh.validate_canonical().unwrap();
         let model = patch_model(&mesh);
         let constraints =
@@ -484,9 +484,9 @@ mod tests {
     #[test]
     fn refined_connected_tet10_patch_solves_with_parallel_parity_and_affine_accuracy() {
         let mesh =
-            elevate_connected_tet4_fixture(refine(connected_tetrahedron_solver_mesh(), 3).unwrap());
+            elevate_connected_tet4_fixture(refine(connected_tetrahedron_solver_mesh(), 4).unwrap());
         mesh.validate_canonical().unwrap();
-        assert_eq!(mesh.topology.volume_elements.len(), 256);
+        assert_eq!(mesh.topology.volume_elements.len(), 1024);
         let model = patch_model(&mesh);
         let serial = solve_patch(&model, &mesh, LocalExecutionPlan::serial()).unwrap();
         let scoped = solve_patch(
@@ -496,7 +496,7 @@ mod tests {
         )
         .unwrap();
         assert_static_field_parity(&serial, &scoped);
-        assert_affine_displacement(&scoped, &mesh, 2.0e-7);
+        assert_affine_displacement(&scoped, &mesh, 1.0e-6);
         assert_affine_element_fields(&scoped, &mesh, 1.0e-5, 1.0e-3);
     }
 

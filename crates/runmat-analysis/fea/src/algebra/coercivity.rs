@@ -28,8 +28,14 @@ pub enum CoercivityError {
     NonPositivePivot { pivot: usize },
     #[error("coercivity proof arithmetic overflowed")]
     WorkOverflow,
-    #[error("coercivity proof exceeded its bounded sparse fill or update envelope")]
-    ResourceLimit,
+    #[error("coercivity proof exceeded its bounded sparse envelope at pivot {pivot}: factor entries {factor_nonzero_count}/{factor_nonzero_limit}, updates {update_count}/{update_limit}")]
+    ResourceLimit {
+        pivot: usize,
+        factor_nonzero_count: u64,
+        factor_nonzero_limit: u64,
+        update_count: u64,
+        update_limit: u64,
+    },
     #[error("coercivity symbolic ordering could not cover the complete operator graph")]
     SymbolicOrdering,
     #[error("coercivity evidence does not match its prepared operator or right-hand side")]
