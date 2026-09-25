@@ -1,8 +1,12 @@
 use serde_json::Value;
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 use tempfile::TempDir;
+
+use runmat_analysis_core::{AnalysisModel, ExcitationTarget, PropertyRegionScope};
+use runmat_meshing_core::{CanonicalMeshingContract, MeshingEvidence, SolverMeshArtifact};
 
 fn runmat(temp: &TempDir, args: &[&str]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_runmat"));
@@ -285,6 +289,98 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         manifest["public_run"]["steps"][0]["quality_reasons"],
         serde_json::json!([])
     );
+    let mesh_path = temp.path().join("standalone-two-box.mesh.cbor");
+    let evidence_path = temp.path().join("standalone-two-box.evidence.cbor");
+    let standalone = runmat_from_repository(
+        &temp,
+        &[
+            "mesh",
+            "docs/fea/examples/geometry/two-box-assembly.step",
+            "--source-units",
+            "meter",
+            "--target-size",
+            "1.5",
+            "--deviation",
+            "0.05",
+            "--max-elements",
+            "10000000",
+            "--seed",
+            "0",
+            "--output",
+            mesh_path.to_str().expect("UTF-8 mesh path"),
+            "--evidence",
+            evidence_path.to_str().expect("UTF-8 evidence path"),
+            "--json",
+        ],
+    );
+    assert!(
+        standalone.status.success(),
+        "standalone STEP mesh failed:\nstdout={}\nstderr={}",
+        String::from_utf8_lossy(&standalone.stdout),
+        String::from_utf8_lossy(&standalone.stderr)
+    );
+    let mesh = SolverMeshArtifact::canonical_decode(&fs::read(&mesh_path).unwrap()).unwrap();
+    let evidence = MeshingEvidence::canonical_decode(&fs::read(&evidence_path).unwrap()).unwrap();
+    evidence.validate(&mesh).expect("standalone mesh evidence");
+    let manifest_digest = manifest["solver_mesh_digest"]
+        .as_array()
+        .expect("study solver mesh digest")
+        .iter()
+        .map(|byte| u8::try_from(byte.as_u64().expect("digest byte")).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(manifest_digest, mesh.canonical_digest.bytes().to_vec());
+    assert_eq!(
+        manifest["meshing_evidence"]["artifact_digest"],
+        manifest["solver_mesh_digest"]
+    );
+    assert_eq!(evidence.artifact_digest, mesh.canonical_digest);
+    assert_eq!(mesh.topology.nodes.len(), 168);
+    assert_eq!(mesh.topology.volume_elements.len(), 292);
+    assert_eq!(mesh.topology.boundary_faces.len(), 320);
+
+    let model: AnalysisModel =
+        serde_json::from_value(manifest["compiled"]["model"].clone()).unwrap();
+    let resolved_solids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| {
+            let PropertyRegionScope::Region(selection) = assignment.target.scope() else {
+                panic!("two-box material must select one resolved solid");
+            };
+            let [solid] = selection.resolved_entities() else {
+                panic!("two-box material must resolve one solid occurrence");
+            };
+            assert!(mesh
+                .topology
+                .volume_elements
+                .iter()
+                .any(|element| element.provenance.contains(solid)));
+            solid.clone()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(resolved_solids.len(), 2);
+    let boundary_targets = model
+        .constraints
+        .iter()
+        .filter_map(|constraint| constraint.target())
+        .chain(model.excitations.iter().filter_map(|action| {
+            let ExcitationTarget::Region(target) = &action.excitation().target else {
+                return None;
+            };
+            Some(target)
+        }))
+        .collect::<Vec<_>>();
+    assert_eq!(boundary_targets.len(), 3);
+    for target in boundary_targets {
+        let [face] = target.resolved_entities() else {
+            panic!("two-box boundary target must resolve one face occurrence");
+        };
+        assert!(mesh
+            .topology
+            .boundary_faces
+            .iter()
+            .any(|boundary| boundary.provenance.contains(face)));
+    }
     let step_run_id = payload["step_run_ids"]
         .as_array()
         .and_then(|steps| steps.first())
