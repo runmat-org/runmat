@@ -1,6 +1,7 @@
 use crate::{
     assembly::AssemblySummary,
     contracts::{FeaRunError, LinearStaticSolveOptions},
+    diagnostics::FeaDiagnosticSeverity,
     progress::check_cancelled,
     solve::{
         backend::build_backend,
@@ -38,6 +39,20 @@ pub(super) fn solve_static_system(
         }
     })?;
     check_cancelled("fea.run_linear_static")?;
+    if !result.converged {
+        let reason = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.severity == FeaDiagnosticSeverity::Error)
+            .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
+            .unwrap_or_else(|| {
+                format!(
+                    "linear static solve did not converge after {} iterations (residual norm {})",
+                    result.iterations, result.residual_norm
+                )
+            });
+        return Err(FeaRunError::Solve(reason));
+    }
     Ok(result)
 }
 
