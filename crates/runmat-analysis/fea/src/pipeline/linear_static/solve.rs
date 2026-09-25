@@ -71,3 +71,58 @@ pub(super) fn recover_static_balance(
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        algebra::{
+            AssembledRealSystem, CanonicalRealOperators, MatrixProperties, OperatorRole,
+            RealSparseMatrix,
+        },
+        assembly::{assemble_structural_system, StructuralFormulationRequirement},
+        excitation::{realize_step_excitations, ExcitationSamplePoint},
+        fixtures::{fixture_model, FixtureId},
+    };
+
+    #[test]
+    fn invalid_exact_operator_stops_static_pipeline_before_field_recovery() {
+        let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        let excitations = realize_step_excitations(
+            &model,
+            &model.sequence.steps[0],
+            ExcitationSamplePoint::Static,
+        )
+        .unwrap();
+        let mut summary = assemble_structural_system(
+            &model,
+            &excitations,
+            None,
+            StructuralFormulationRequirement::PhysicalDiscretization,
+        )
+        .unwrap();
+        let dofs = summary.dof_count;
+        let operators = summary.operator.operators();
+        summary.operator = AssembledRealSystem::try_new(
+            CanonicalRealOperators::try_new(
+                RealSparseMatrix::diagonal(
+                    vec![-1.0; dofs],
+                    OperatorRole::Stiffness,
+                    MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+                )
+                .unwrap(),
+                operators.mass().clone(),
+                operators.damping().clone(),
+            )
+            .unwrap(),
+            vec![false; dofs],
+            vec![1.0; dofs],
+        )
+        .unwrap();
+        let error = solve_static_system(&summary, &LinearStaticSolveOptions::default())
+            .expect_err("invalid exact operator must not yield a recoverable static solution");
+        assert!(
+            matches!(error, FeaRunError::Solve(message) if message.contains("FEA_INVALID_REAL_SYSTEM"))
+        );
+    }
+}

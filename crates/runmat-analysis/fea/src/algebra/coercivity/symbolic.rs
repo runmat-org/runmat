@@ -7,7 +7,10 @@ use crate::algebra::SparsePattern;
 use super::CoercivityError;
 
 const MAX_FACTOR_FILL_MULTIPLIER: u64 = 16;
-const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 512;
+// The connected 4,096-Tet4 affine patch uses 29,350,140 symbolic updates against 44,238
+// input lower entries (about 663 per entry). Keep bounded headroom above that independent
+// physical reference while retaining a finite proof-work cap.
+const MAX_FACTOR_UPDATE_MULTIPLIER: u64 = 768;
 const BYTES_PER_SYMBOLIC_FACTOR_ENTRY: u64 = 192;
 const BYTES_PER_SYMBOLIC_ROW: u64 = 256;
 
