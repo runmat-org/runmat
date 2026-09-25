@@ -1,11 +1,14 @@
-//! Independently check a solved connected Tet4 patch against an affine elasticity solution.
+//! Independently check physical solid patch solves against affine elasticity solutions.
 
 use runmat_analysis_core::{
     AnalysisConstraint, CoordinateFrame, Displacement, MaterialElasticityModel,
     PrescribedStructuralDofs, PrescribedValue, RegionTarget, StructuralConstraint,
     StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
-use runmat_meshing_core::fixtures::connected_tetrahedron_solver_mesh;
+use runmat_meshing_core::{
+    fixtures::{canonical_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh},
+    ElementOrder,
+};
 
 use super::{
     assert_vectors_within_tolerance, experimental_linear_static_options, fixture_model, host_field,
@@ -145,8 +148,7 @@ fn connected_tet4_static_dirichlet_patch_recovers_affine_interior_and_boundary_t
     }
 }
 
-#[test]
-fn connected_tet4_traction_patch_recovers_affine_solution_and_nodal_resultants() {
+fn traction_patch_model() -> runmat_analysis_core::AnalysisModel {
     let mut model = patch_model();
     // Six zero-valued DOFs remove rigid translations and rotations without
     // imposing a strain incompatible with u=(0.1x,0.2y,0.3z).
@@ -218,7 +220,12 @@ fn connected_tet4_traction_patch_recovers_affine_solution_and_nodal_resultants()
             },
         ],
     );
+    model
+}
 
+#[test]
+fn connected_tet4_traction_patch_recovers_affine_solution_and_nodal_resultants() {
+    let model = traction_patch_model();
     let mesh = connected_tetrahedron_solver_mesh();
     let mut unrestrained = model.clone();
     unrestrained.constraints.clear();
@@ -312,4 +319,154 @@ fn connected_tet4_traction_patch_recovers_affine_solution_and_nodal_resultants()
             },
         );
     }
+}
+
+#[test]
+fn tet10_traction_patch_recovers_quadratic_face_loads_and_affine_stress() {
+    let model = traction_patch_model();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let mut unrestrained = model.clone();
+    unrestrained.constraints.clear();
+    let summary = crate::assembly::assemble_structural_system(
+        &unrestrained,
+        &super::static_excitations(&unrestrained),
+        Some(mesh.clone()),
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("Tet10 traction patch should assemble");
+
+    // A straight-sided quadratic triangle integrates its three corner basis
+    // functions to zero and each midside basis to area/3. Check the full
+    // assembled vector without reusing the production face quadrature.
+    let root_three = 3.0_f64.sqrt();
+    let tractions = [
+        [0.0, 0.0, -48.0],
+        [0.0, -40.0, 0.0],
+        [-32.0, 0.0, 0.0],
+        [32.0 / root_three, 40.0 / root_three, 48.0 / root_three],
+    ];
+    let areas = [0.5, 0.5, 0.5, root_three / 2.0];
+    let mut expected_load = vec![0.0; 30];
+    for ((face, traction), area) in mesh
+        .topology
+        .boundary_faces
+        .iter()
+        .zip(tractions)
+        .zip(areas)
+    {
+        for &node_id in &face.node_ids[3..] {
+            for axis in 0..3 {
+                expected_load[(node_id as usize - 1) * 3 + axis] += area * traction[axis] / 3.0;
+            }
+        }
+    }
+    assert_vectors_within_tolerance(
+        summary.operator.load(),
+        &expected_load,
+        ParityTolerance {
+            abs: 1.0e-10,
+            rel: 1.0e-10,
+        },
+    );
+    let mut resultant = [0.0; 3];
+    let mut moment = [0.0; 3];
+    for (node, force) in mesh
+        .topology
+        .nodes
+        .iter()
+        .zip(expected_load.chunks_exact(3))
+    {
+        let [x, y, z] = node.coordinates_m;
+        resultant
+            .iter_mut()
+            .zip(force)
+            .for_each(|(sum, value)| *sum += value);
+        moment[0] += y * force[2] - z * force[1];
+        moment[1] += z * force[0] - x * force[2];
+        moment[2] += x * force[1] - y * force[0];
+    }
+    assert!(resultant.into_iter().all(|value| value.abs() < 1.0e-10));
+    assert!(moment.into_iter().all(|value| value.abs() < 1.0e-10));
+
+    let solve_summary = crate::assembly::assemble_structural_system(
+        &model,
+        &super::static_excitations(&model),
+        Some(mesh.clone()),
+        crate::assembly::StructuralFormulationRequirement::PhysicalDiscretization,
+    )
+    .expect("Tet10 constrained patch should assemble");
+    let exact = mesh
+        .topology
+        .nodes
+        .iter()
+        .flat_map(|node| {
+            [
+                0.1 * node.coordinates_m[0],
+                0.2 * node.coordinates_m[1],
+                0.3 * node.coordinates_m[2],
+            ]
+        })
+        .collect::<Vec<_>>();
+    let internal = crate::algebra::apply_k(&solve_summary.operator, &exact);
+    assert_vectors_within_tolerance(
+        &internal,
+        &solve_summary.physical_load,
+        ParityTolerance {
+            abs: 1.0e-10,
+            rel: 1.0e-10,
+        },
+    );
+
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(mesh.clone()),
+            solver_mesh_artifact_path: Some("tet10-traction-patch.rmmesh".into()),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("Tet10 traction patch should solve");
+    let displacement = host_field(&result, FEA_FIELD_STRUCTURAL_DISPLACEMENT);
+    assert_eq!(displacement.len(), 30);
+    for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
+        for (&actual, expected) in actual.iter().zip([
+            0.1 * node.coordinates_m[0],
+            0.2 * node.coordinates_m[1],
+            0.3 * node.coordinates_m[2],
+        ]) {
+            assert!(
+                (actual - expected).abs() < 1.0e-8,
+                "u {actual} vs {expected}"
+            );
+        }
+    }
+    let stress = host_field(&result, FEA_FIELD_STRUCTURAL_STRESS);
+    assert_eq!(stress.len(), 6);
+    for (&actual, expected) in stress.iter().zip([32.0, 40.0, 48.0, 0.0, 0.0, 0.0]) {
+        assert!(
+            (actual - expected).abs() < 1.0e-6,
+            "stress {actual} vs {expected}"
+        );
+    }
+    let integration_stress = host_field(
+        &result,
+        crate::FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS,
+    );
+    assert_eq!(integration_stress.len(), 24);
+    for values in integration_stress.chunks_exact(6) {
+        for (&actual, expected) in values.iter().zip([32.0, 40.0, 48.0, 0.0, 0.0, 0.0]) {
+            assert!(
+                (actual - expected).abs() < 1.0e-6,
+                "integration stress {actual} vs {expected}"
+            );
+        }
+    }
+    assert!(host_field(&result, FEA_FIELD_STRUCTURAL_REACTION_FORCE)
+        .iter()
+        .all(|value| value.abs() < 1.0e-7));
+    assert!(
+        (host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0] - 12.8 / 6.0).abs()
+            < 1.0e-7
+    );
 }

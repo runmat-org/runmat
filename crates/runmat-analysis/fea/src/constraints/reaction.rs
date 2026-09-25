@@ -12,6 +12,13 @@ pub(crate) fn solve_constraint_multipliers(
     if rows.is_empty() {
         return Some(Vec::new());
     }
+    let load_scale = right_hand_side
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    if !load_scale.is_finite() {
+        return None;
+    }
     let inverse_diagonal = rows
         .iter()
         .map(|row| {
@@ -19,8 +26,17 @@ pub(crate) fn solve_constraint_multipliers(
             (diagonal > 1.0e-18 && diagonal.is_finite()).then_some(diagonal.recip())
         })
         .collect::<Option<Vec<_>>>()?;
+    if load_scale == 0.0 {
+        return Some(vec![0.0; rows.len()]);
+    }
     let mut solution = vec![0.0; rows.len()];
-    let mut residual = right_hand_side.to_vec();
+    // Normalize the right-hand side so that the convergence and breakdown
+    // checks are independent of reaction units or the overall force scale.
+    let mut residual = right_hand_side
+        .iter()
+        .map(|value| value / load_scale)
+        .collect::<Vec<_>>();
+    let scale = dot(&residual, &residual).sqrt();
     let mut preconditioned = residual
         .iter()
         .zip(&inverse_diagonal)
@@ -28,14 +44,14 @@ pub(crate) fn solve_constraint_multipliers(
         .collect::<Vec<_>>();
     let mut direction = preconditioned.clone();
     let mut rz = dot(&residual, &preconditioned);
-    let scale = dot(right_hand_side, right_hand_side).sqrt().max(1.0);
-    if dot(&residual, &residual).sqrt() / scale <= 1.0e-10 {
-        return Some(solution);
-    }
     for _ in 0..rows.len().saturating_mul(4).max(256) {
         let applied = apply_constraint_gram(rows, &direction);
         let denominator = dot(&direction, &applied);
-        if !denominator.is_finite() || denominator <= 1.0e-18 {
+        // The Gram quadratic form is positive for an independent direction.
+        // A fixed absolute cutoff rejects valid small reactions even when the
+        // row coefficients are well scaled (for example, an affine patch with
+        // support reactions near solver roundoff).
+        if !denominator.is_finite() || denominator <= 0.0 {
             return None;
         }
         let alpha = rz / denominator;
@@ -44,6 +60,10 @@ pub(crate) fn solve_constraint_multipliers(
             residual[index] -= alpha * applied[index];
         }
         if dot(&residual, &residual).sqrt() / scale <= 1.0e-10 {
+            let solution = solution
+                .into_iter()
+                .map(|value| value * load_scale)
+                .collect::<Vec<_>>();
             return solution
                 .iter()
                 .all(|value| value.is_finite())
@@ -85,4 +105,22 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
         .zip(right)
         .map(|(left, right)| left * right)
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiny_independent_reactions_do_not_trigger_a_fixed_breakdown_cutoff() {
+        let rows = vec![BTreeMap::from([(0, 1.0)]), BTreeMap::from([(1, 1.0)])];
+        for magnitude in [1.0e-10, 1.0e-20] {
+            let rhs = [4.0 * magnitude, -2.0 * magnitude];
+            let multipliers = solve_constraint_multipliers(&rows, &rhs)
+                .expect("positive small Gram denominator is not a breakdown");
+            for (actual, expected) in multipliers.iter().zip(rhs) {
+                assert!((actual - expected).abs() < magnitude * 1.0e-12);
+            }
+        }
+    }
 }

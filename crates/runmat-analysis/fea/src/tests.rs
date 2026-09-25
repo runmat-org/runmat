@@ -85,12 +85,12 @@ use runmat_meshing_core::{
     ElementOrder, PersistentEntityId, PersistentEntityKind, SolverMeshArtifact,
 };
 
-mod connected_static_patch;
 mod connector_qualification;
 mod prestressed_frequency;
 mod random_response_portable;
 mod random_response_qualification;
 mod response_spectrum_portable;
+mod solid_static_patch;
 mod transient_physical;
 
 fn experimental_linear_static_options() -> LinearStaticSolveOptions {
