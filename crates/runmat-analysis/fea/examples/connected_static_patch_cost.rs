@@ -1,6 +1,6 @@
 //! End-to-end physical Tet4 static patch timing on a conforming connected mesh.
 //!
-//! Run with `cargo run --release -p runmat-analysis-fea --example connected_static_patch_cost -- 3 3`.
+//! Run with `cargo run --release -p runmat-analysis-fea --example connected_static_patch_cost -- 3 3 4`.
 //! Refinement is outside the timed solve. Peak RSS includes process startup and all retained data,
 //! so it is not an isolated FEA allocation or a resource-admission pass.
 
@@ -13,8 +13,9 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
-    run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
-    FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+    planning::resource::{LocalExecutionPlan, LocalThreadCount},
+    run_linear_static_with_options, ComputeBackend, FeaRunError, FeaRunResult,
+    LinearStaticSolveOptions, FEA_FIELD_STRUCTURAL_DISPLACEMENT,
 };
 use runmat_meshing_core::{
     fixtures::connected_tetrahedron_solver_mesh, solver_volume_element_identity,
@@ -205,29 +206,40 @@ fn process_peak_rss_bytes() -> Option<u64> {
     None
 }
 
+fn solve_patch(
+    model: &runmat_analysis_core::AnalysisModel,
+    mesh: &SolverMeshArtifact,
+    local_execution: LocalExecutionPlan,
+) -> Result<FeaRunResult, FeaRunError> {
+    run_linear_static_with_options(
+        model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            formulation_requirement: FormulationRequirement::Experimental,
+            solver_mesh: Some(mesh.clone()),
+            solver_mesh_artifact_path: Some("connected-static-patch-cost.rmmesh".into()),
+            local_execution,
+            ..LinearStaticSolveOptions::default()
+        },
+    )
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     let levels: usize = args.next().ok_or("expected refinement levels")?.parse()?;
     let repetitions: usize = args.next().ok_or("expected repetition count")?.parse()?;
+    let threads: u16 = args.next().unwrap_or_else(|| "1".into()).parse()?;
     if args.next().is_some() || levels > 5 || repetitions == 0 {
-        return Err("expected refinement levels 0..=5 and positive repetitions".into());
+        return Err("expected refinement levels 0..=5, positive repetitions, and optional admitted thread count".into());
     }
+    let local_execution = LocalExecutionPlan::from_thread_count(LocalThreadCount::new(threads)?)?;
     let mesh = refine(connected_tetrahedron_solver_mesh(), levels)?;
     let model = patch_model();
     let mut timings = Vec::with_capacity(repetitions);
     let mut maximum_displacement_error_m = 0.0_f64;
     for _ in 0..repetitions {
         let start = Instant::now();
-        let result = run_linear_static_with_options(
-            &model,
-            ComputeBackend::Cpu,
-            LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
-                solver_mesh: Some(mesh.clone()),
-                solver_mesh_artifact_path: Some("connected-static-patch-cost.rmmesh".into()),
-                ..LinearStaticSolveOptions::default()
-            },
-        )?;
+        let result = solve_patch(&model, &mesh, local_execution)?;
         timings.push(start.elapsed().as_secs_f64());
         let displacement = result
             .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
@@ -252,7 +264,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
     timings.sort_by(f64::total_cmp);
-    println!("os={},arch={},levels={levels},nodes={},elements={},repetitions={repetitions},min_s={:.6},median_s={:.6},max_displacement_error_m={maximum_displacement_error_m:.3e}",
+    println!("os={},arch={},levels={levels},nodes={},elements={},threads={threads},repetitions={repetitions},min_s={:.6},median_s={:.6},max_displacement_error_m={maximum_displacement_error_m:.3e}",
         env::consts::OS, env::consts::ARCH, mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), timings[0], timings[repetitions / 2]);
     if let Some(bytes) = process_peak_rss_bytes() {
         println!("process_peak_rss_bytes={bytes}");
@@ -263,21 +275,57 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_analysis_fea::{
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE, FEA_FIELD_STRUCTURAL_STRAIN,
+        FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+    };
+
+    #[test]
+    fn connected_patch_serial_and_four_worker_fields_match_the_affine_solution() {
+        let mesh = refine(connected_tetrahedron_solver_mesh(), 4).unwrap();
+        let model = patch_model();
+        let serial = solve_patch(&model, &mesh, LocalExecutionPlan::serial()).unwrap();
+        let scoped = solve_patch(
+            &model,
+            &mesh,
+            LocalExecutionPlan::fixed(LocalThreadCount::new(4).unwrap()).unwrap(),
+        )
+        .unwrap();
+        for field_id in [
+            FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+            FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+            FEA_FIELD_STRUCTURAL_STRAIN,
+            FEA_FIELD_STRUCTURAL_STRESS,
+            FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
+        ] {
+            let serial_values = serial.field(field_id).unwrap().as_host_f64().unwrap();
+            let scoped_values = scoped.field(field_id).unwrap().as_host_f64().unwrap();
+            assert_eq!(serial_values.len(), scoped_values.len());
+            assert_eq!(serial_values, scoped_values, "{field_id} parity");
+        }
+        let displacement = scoped
+            .field(FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap()
+            .as_host_f64()
+            .unwrap();
+        for (actual, node) in displacement.chunks_exact(3).zip(&mesh.topology.nodes) {
+            for axis in 0..3 {
+                let expected = [0.1, 0.2, 0.3][axis] * node.coordinates_m[axis];
+                assert!(
+                    (actual[axis] - expected).abs() <= 1.0e-7,
+                    "node {} axis {axis}: {} != {expected}",
+                    node.node_id,
+                    actual[axis]
+                );
+            }
+        }
+    }
 
     #[test]
     fn connected_patch_rejects_unsupported_solve_size_instead_of_publishing_zeros() {
         let mesh = refine(connected_tetrahedron_solver_mesh(), 5).unwrap();
-        let error = run_linear_static_with_options(
-            &patch_model(),
-            ComputeBackend::Cpu,
-            LinearStaticSolveOptions {
-                formulation_requirement: FormulationRequirement::Experimental,
-                solver_mesh: Some(mesh),
-                solver_mesh_artifact_path: Some("connected-static-patch-cost.rmmesh".into()),
-                ..LinearStaticSolveOptions::default()
-            },
-        )
-        .expect_err("an unsupported solve must not publish a zero displacement field");
+        let error = solve_patch(&patch_model(), &mesh, LocalExecutionPlan::serial())
+            .expect_err("an unsupported solve must not publish a zero displacement field");
         assert!(
             error.to_string().contains("FEA_INVALID_REAL_SYSTEM"),
             "{error}"

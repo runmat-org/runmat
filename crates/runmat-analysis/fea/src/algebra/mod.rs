@@ -29,6 +29,7 @@ pub use operator::{
     PreparedModalSystem, PreparedRealLinearSystem, RealSystemError,
 };
 pub use pattern::{SparseIndexWidth, SparsePattern, SparsePatternError};
+pub(crate) use reference::dot_canonical;
 pub use reference::{
     axpy_scoped, direction_update_scoped, dot_scoped, normalized_copy_scoped, residual,
     scale_scoped, spmv, spmv_scoped, subtract_into_scoped, vector_sub_scoped, ScopedSpmvError,

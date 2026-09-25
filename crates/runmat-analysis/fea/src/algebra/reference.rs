@@ -21,9 +21,30 @@ pub enum SpmvWorkError {
     Cancelled,
 }
 
-/// Deterministic dot product under the admitted local CPU plan. Each worker reduces a
-/// contiguous interval in input order; partial sums are combined in chunk order.
-/// Partition changes can alter floating-point rounding, so callers use numerical tolerances.
+const DOT_REDUCTION_BLOCK_SIZE: usize = 256;
+
+pub(crate) fn dot_canonical(left: &[f64], right: &[f64]) -> f64 {
+    let mut total = 0.0;
+    for block in 0..left
+        .len()
+        .min(right.len())
+        .div_ceil(DOT_REDUCTION_BLOCK_SIZE)
+    {
+        let start = block * DOT_REDUCTION_BLOCK_SIZE;
+        let end = (start + DOT_REDUCTION_BLOCK_SIZE)
+            .min(left.len())
+            .min(right.len());
+        let mut partial = 0.0;
+        for index in start..end {
+            partial += left[index] * right[index];
+        }
+        total += partial;
+    }
+    total
+}
+
+/// Dot product under the admitted local CPU plan. Fixed input blocks establish one reduction
+/// order independent of worker count; workers only own disjoint ranges of those blocks.
 pub fn dot_scoped(
     left: &[f64],
     right: &[f64],
@@ -36,17 +57,24 @@ pub fn dot_scoped(
         return Ok(0.0);
     }
     let cancellation = crate::progress::cancellation_token();
-    let partials = execute_scoped_chunks(plan, left.len() as u64, |chunk| {
-        let mut sum = 0.0;
-        for index in chunk.start() as usize..chunk.end_exclusive() as usize {
-            if cancellation.is_cancelled() {
-                return Err(SpmvWorkError::Cancelled);
+    let block_count = left.len().div_ceil(DOT_REDUCTION_BLOCK_SIZE);
+    let chunks = execute_scoped_chunks(plan, block_count as u64, |chunk| {
+        let mut partials = Vec::with_capacity((chunk.end_exclusive() - chunk.start()) as usize);
+        for block in chunk.start() as usize..chunk.end_exclusive() as usize {
+            let start = block * DOT_REDUCTION_BLOCK_SIZE;
+            let end = (start + DOT_REDUCTION_BLOCK_SIZE).min(left.len());
+            let mut sum = 0.0;
+            for index in start..end {
+                if cancellation.is_cancelled() {
+                    return Err(SpmvWorkError::Cancelled);
+                }
+                sum += left[index] * right[index];
             }
-            sum += left[index] * right[index];
+            partials.push(sum);
         }
-        Ok(sum)
+        Ok(partials)
     })?;
-    Ok(partials.into_iter().sum())
+    Ok(chunks.into_iter().flatten().sum())
 }
 
 /// In-place `y += alpha*x` under the admitted plan. Disjoint output slices keep the
@@ -266,7 +294,7 @@ mod tests {
     fn scoped_dot_uses_canonical_chunks_and_rejects_invalid_inputs() {
         let left = [3.0, -4.0, 0.2, 7.0, 1.0e-12, -5.0, 9.0];
         let right = [-1.0, 2.0, 3.0, -0.5, 4.0, 6.0, 1.0];
-        let expected = left.iter().zip(right).map(|(a, b)| a * b).sum::<f64>();
+        let expected = dot_canonical(&left, &right);
         assert_eq!(
             dot_scoped(&left, &right, LocalExecutionPlan::serial()).unwrap(),
             expected
@@ -287,6 +315,26 @@ mod tests {
                 ScopedLocalExecutionError::NestedExecution
             ))
         ));
+    }
+
+    #[test]
+    fn scoped_dot_preserves_bits_across_worker_partitions_and_block_boundaries() {
+        let left = (0..1_031)
+            .map(|index| match index % 4 {
+                0 => 1.0e12,
+                1 => -1.0e12,
+                2 => 1.0e-4,
+                _ => (index as f64) * 1.0e-7,
+            })
+            .collect::<Vec<_>>();
+        let right = (0..left.len())
+            .map(|index| if index % 3 == 0 { -0.25 } else { 1.0 })
+            .collect::<Vec<_>>();
+        let expected = dot_scoped(&left, &right, LocalExecutionPlan::serial()).unwrap();
+        for workers in [2, 3, 4, 7] {
+            let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(workers).unwrap()).unwrap();
+            assert_eq!(dot_scoped(&left, &right, plan).unwrap(), expected);
+        }
     }
 
     #[test]
