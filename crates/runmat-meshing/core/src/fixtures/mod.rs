@@ -7,7 +7,7 @@ pub use connected::{
 };
 pub use solver_mesh::{
     canonical_tetrahedron_meshing_evidence, canonical_tetrahedron_solver_mesh,
-    three_region_tetrahedron_solver_mesh,
+    three_region_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh_with_order,
 };
 
 use runmat_geometry_core::{

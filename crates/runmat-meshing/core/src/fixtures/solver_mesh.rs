@@ -12,6 +12,7 @@ use crate::{
     SolverMeshNode, SolverMeshTopology, SolverNodeExactParameter, SolverVolumeElement,
     StableDigest, SurfaceQualityTargets, VolumeQualityTargets, MESHING_EVIDENCE_SCHEMA_VERSION,
     MESHING_REQUEST_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtifact {
@@ -182,7 +183,12 @@ pub fn canonical_tetrahedron_solver_mesh(order: ElementOrder) -> SolverMeshArtif
 
 /// Three separated, independently material-addressable Tet4 regions for solver tests.
 pub fn three_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
-    let mut template = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    three_region_tetrahedron_solver_mesh_with_order(ElementOrder::Tet4)
+}
+
+/// Three separated, independently material-addressable regions of the requested order.
+pub fn three_region_tetrahedron_solver_mesh_with_order(order: ElementOrder) -> SolverMeshArtifact {
+    let mut template = canonical_tetrahedron_solver_mesh(order);
     for (face_index, name) in [(0, "root"), (1, "tip")] {
         template.topology.boundary_faces[face_index]
             .provenance
@@ -208,8 +214,15 @@ pub fn three_region_tetrahedron_solver_mesh() -> SolverMeshArtifact {
         for (local_node, node) in template.topology.nodes.iter().enumerate() {
             let mut node = node.clone();
             node.node_id += offset;
-            node.stable_identity =
-                StableDigest::from_bytes([32 + (copy * 4 + local_node) as u8; 32]);
+            node.stable_identity = if local_node < 4 {
+                StableDigest::from_bytes([32 + (copy * 4 + local_node) as u8; 32])
+            } else {
+                let endpoints = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[local_node - 4];
+                solver_midside_node_identity(
+                    endpoints
+                        .map(|corner| mesh.topology.nodes[node_start + corner].stable_identity),
+                )
+            };
             node.coordinates_m[0] += copy as f64 * 2.0;
             mesh.topology.nodes.push(node);
         }
@@ -479,4 +492,23 @@ fn entity(kind: PersistentEntityKind, source: &str) -> PersistentEntityId {
 
 fn digest(byte: u8) -> StableDigest {
     StableDigest::from_bytes([byte; 32])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn three_region_tet10_fixture_preserves_canonical_order_and_material_regions() {
+        let mesh = three_region_tetrahedron_solver_mesh_with_order(ElementOrder::Tet10);
+        mesh.validate_canonical().unwrap();
+        assert_eq!(mesh.topology.nodes.len(), 30);
+        assert_eq!(mesh.topology.volume_elements.len(), 3);
+        assert_eq!(mesh.topology.regions.len(), 3);
+        assert!(mesh
+            .topology
+            .volume_elements
+            .iter()
+            .all(|element| element.node_ids.len() == 10));
+    }
 }
