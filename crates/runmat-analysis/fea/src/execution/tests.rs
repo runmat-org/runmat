@@ -573,6 +573,17 @@ fn structural_linear_workload_round_trips_without_a_mesh_path() {
         decoded.model.sequence.steps[0].observations
     );
     assert!(!String::from_utf8_lossy(&bytes).contains("artifact_path"));
+
+    let mut unavailable_gpu = workload;
+    unavailable_gpu.backend = crate::ComputeBackend::Gpu;
+    unavailable_gpu.algebra_backend =
+        crate::solve::backend::kind::LinearAlgebraBackendKind::Accelerator;
+    let rejection = unavailable_gpu
+        .validate_sequence_template()
+        .expect_err("unadmitted GPU static sequence must fail before any solve wave");
+    assert!(rejection
+        .to_string()
+        .contains("CPU fallback is not a GPU solve"));
 }
 
 fn signal_realization(values: Vec<f64>) -> CanonicalSignalRealization {

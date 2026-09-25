@@ -2629,7 +2629,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     backend_variant.backend = ComputeBackend::Gpu;
     backend_variant.algebra_backend =
         runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::Accelerator;
-    let backend_variant = prepare_structural_linear_program(StructuralLinearProgramPreparation {
+    let backend_rejection = prepare_structural_linear_program(StructuralLinearProgramPreparation {
         authored_study_digest: digest("authored-study"),
         frozen_project_digest: None,
         program_revision: revision(),
@@ -2647,30 +2647,14 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         }],
         local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
     })
-    .unwrap();
-    assert!(backend_variant
-        .host
-        .workload
-        .required_capabilities
-        .contains(&AnalysisCapabilityRequirement::Accelerator {
-            class: "test-gpu".into(),
-        }));
-    assert_ne!(
-        prepared.host.workload.execution_plan,
-        backend_variant.host.workload.execution_plan
-    );
-    assert_eq!(
-        prepared.program.request.recipe,
-        backend_variant.program.request.recipe
-    );
-    assert_eq!(
-        prepared.program.request.artifact,
-        backend_variant.program.request.artifact
-    );
-    assert_ne!(
-        prepared.program.request.arguments,
-        backend_variant.program.request.arguments
-    );
+    .err()
+    .expect("unsupported GPU static work must be rejected before scheduler preparation");
+    assert!(matches!(
+        backend_rejection,
+        AnalysisBridgeError::Resource(
+            runmat_analysis_fea::planning::resource::ResourcePlanningError::Invalid(message)
+        ) if message.contains("CPU fallback is not a GPU solve")
+    ));
 
     let mut wrong_backend = raw;
     wrong_backend.requested_backend = ComputeBackend::Gpu;
@@ -2858,6 +2842,29 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         (left.step_id.clone(), left_workload),
         (right.step_id.clone(), right_workload),
     ]);
+    let mut unavailable_workloads = workloads.clone();
+    let unavailable = unavailable_workloads.get_mut(&right.step_id).unwrap();
+    unavailable.backend = ComputeBackend::Gpu;
+    unavailable.algebra_backend =
+        runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind::Accelerator;
+    let early_rejection = StructuralSequenceCoordinator::new(StructuralSequencePreparation {
+        authored_study_digest: digest("unadmitted-gpu-branch"),
+        frozen_project_digest: Some(digest("branch-project")),
+        program_revision: revision(),
+        artifact_access: access(),
+        workloads: unavailable_workloads,
+        mesh: Some(mesh.clone()),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+        required_capabilities: BTreeSet::new(),
+        accelerator_requests: Vec::new(),
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+    })
+    .err()
+    .expect("a later GPU branch must fail before the sequence admits any solve wave");
+    assert!(early_rejection
+        .to_string()
+        .contains("CPU fallback is not a GPU solve"));
     let mut incomplete_workloads = workloads.clone();
     incomplete_workloads.remove(&right.step_id);
     assert!(

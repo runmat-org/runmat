@@ -6,9 +6,9 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     contracts::{ComputeBackend, FeaRunError, LinearStaticSolveOptions},
     planning::resource::{
-        build_static_resource_plan, verify_assembled_structural_storage, FeaResourceDemand,
-        ResourcePlanningError, SolveResourcePolicy, SolverAdmissionResourcePolicy,
-        StaticResourcePreflight,
+        build_static_resource_plan, require_executable_static_backend,
+        verify_assembled_structural_storage, FeaResourceDemand, ResourcePlanningError,
+        SolveResourcePolicy, SolverAdmissionResourcePolicy, StaticResourcePreflight,
     },
     post::fields::structural_static_observable_field_definitions,
     results::observation::{
@@ -37,13 +37,7 @@ pub(super) fn prepare_static_preassembly(
     prepared_constraints: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
 ) -> Result<StaticPreassembly, FeaRunError> {
-    if backend == ComputeBackend::Gpu {
-        return Err(ResourcePlanningError::Invalid(
-            "static GPU execution requires a native sparse solver and accelerator-bound admission; CPU fallback is not a GPU solve"
-                .into(),
-        )
-        .into());
-    }
+    require_executable_static_backend(backend)?;
     if options.solver_mesh.is_none() && !model_has_explicit_structural_elements(model) {
         if admitted.is_some() {
             return Err(ResourcePlanningError::Invalid(

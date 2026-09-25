@@ -672,24 +672,12 @@ impl StructuralSequenceCoordinator {
 fn validate_accelerator_requests(
     preparation: &StructuralSequencePreparation,
 ) -> AnalysisBridgeResult<()> {
-    let requires_accelerator = preparation
-        .workloads
-        .values()
-        .any(|workload| workload.backend == runmat_analysis_fea::ComputeBackend::Gpu);
-    match (
-        requires_accelerator,
-        preparation.accelerator_requests.as_slice(),
-    ) {
-        (false, []) => Ok(()),
-        (false, _) => Err(AnalysisBridgeError::Invalid(
+    if preparation.accelerator_requests.is_empty() {
+        Ok(())
+    } else {
+        Err(AnalysisBridgeError::Invalid(
             "CPU-only structural sequences cannot publish an accelerator allocation".into(),
-        )),
-        (true, [request]) => request
-            .validate()
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string())),
-        (true, _) => Err(AnalysisBridgeError::Invalid(
-            "GPU structural sequences require exactly one accelerator allocation".into(),
-        )),
+        ))
     }
 }
 

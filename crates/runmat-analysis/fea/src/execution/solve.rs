@@ -50,6 +50,8 @@ impl StructuralLinearWorkload {
     /// validation remains stricter and requires the exact canonical transition receipt.
     pub fn validate_sequence_template(&self) -> AnalysisExecutionResult<()> {
         let step = self.validate_common()?;
+        crate::planning::resource::require_executable_static_backend(self.backend)
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if self.initial_guess_transition.is_some() {
             return Err(AnalysisExecutionError::Invalid(
                 "structural sequence template cannot contain a prebound transition".into(),

@@ -10,7 +10,8 @@ use runmat_analysis_fea::execution::{
     StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_analysis_fea::planning::resource::{
-    build_structural_resource_plan, FeaResourcePlan, LocalExecutionPlan,
+    build_structural_resource_plan, require_executable_static_backend, FeaResourcePlan,
+    LocalExecutionPlan,
 };
 use runmat_analysis_fea::post::fields::structural_static_observable_field_definitions;
 use runmat_analysis_fea::results::observation::{
@@ -122,6 +123,7 @@ pub fn prepare_structural_linear_program(
     preparation: StructuralLinearProgramPreparation,
 ) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
     preparation.workload.validate()?;
+    require_executable_static_backend(preparation.workload.backend)?;
     if let Some(mesh) = &preparation.mesh {
         mesh.validate()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
