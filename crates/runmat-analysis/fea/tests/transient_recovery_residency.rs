@@ -1,8 +1,5 @@
 //! Isolated allocator evidence for the completed physical transient recovery preflight.
 
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
 use mesh::{physical_fixture_mesh, RecoveryMesh};
 use runmat_analysis_core::{AnalysisModel, FormulationRequirement};
 use runmat_analysis_fea::{
@@ -24,81 +21,9 @@ use runmat_analysis_fea::{
 
 #[path = "transient_recovery_residency/mesh.rs"]
 mod mesh;
-
-struct CountingAllocator;
-
-static LIVE_BYTES: AtomicU64 = AtomicU64::new(0);
-static PEAK_BYTES: AtomicU64 = AtomicU64::new(0);
-static TRACKING: AtomicBool = AtomicBool::new(false);
-
-#[global_allocator]
-static ALLOCATOR: CountingAllocator = CountingAllocator;
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc(layout) };
-        if !pointer.is_null() {
-            record_allocation(layout.size());
-        }
-        pointer
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc_zeroed(layout) };
-        if !pointer.is_null() {
-            record_allocation(layout.size());
-        }
-        pointer
-    }
-
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        LIVE_BYTES.fetch_sub(bytes(layout.size()), Ordering::Relaxed);
-        unsafe { System.dealloc(pointer, layout) };
-    }
-
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let replacement = unsafe { System.realloc(pointer, layout, new_size) };
-        if !replacement.is_null() {
-            LIVE_BYTES.fetch_sub(bytes(layout.size()), Ordering::Relaxed);
-            record_allocation(new_size);
-        }
-        replacement
-    }
-}
-
-fn bytes(size: usize) -> u64 {
-    u64::try_from(size).unwrap_or(u64::MAX)
-}
-
-fn record_allocation(size: usize) {
-    let live = LIVE_BYTES
-        .fetch_add(bytes(size), Ordering::Relaxed)
-        .saturating_add(bytes(size));
-    if TRACKING.load(Ordering::Relaxed) {
-        PEAK_BYTES.fetch_max(live, Ordering::Relaxed);
-    }
-}
-
-#[cfg(unix)]
-fn process_peak_rss_bytes() -> Option<u64> {
-    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
-    // SAFETY: `usage` is writable storage for one `rusage` value.
-    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    // SAFETY: successful `getrusage` initialized the complete value.
-    let maximum = u64::try_from(unsafe { usage.assume_init() }.ru_maxrss).ok()?;
-    Some(if cfg!(target_os = "macos") {
-        maximum
-    } else {
-        maximum.saturating_mul(1024)
-    })
-}
-
-#[cfg(not(unix))]
-fn process_peak_rss_bytes() -> Option<u64> {
-    None
-}
+#[path = "support/peak_allocator.rs"]
+mod peak_allocator;
+use peak_allocator::{begin_measurement, end_measurement, process_peak_rss_bytes};
 
 fn connector_observation_model() -> AnalysisModel {
     use runmat_analysis_core::*;
@@ -322,9 +247,7 @@ fn measure_physical_recovery(
         &receipt,
     )
     .unwrap();
-    let baseline = LIVE_BYTES.load(Ordering::Relaxed);
-    PEAK_BYTES.store(baseline, Ordering::Relaxed);
-    TRACKING.store(true, Ordering::Relaxed);
+    let baseline = begin_measurement();
     let recovered = recover_completed_transient_run(CompletedStructuralTransientRunInput {
         workload: &workload,
         solver_mesh: &mesh,
@@ -333,8 +256,7 @@ fn measure_physical_recovery(
         numerical_receipt: &receipt,
     })
     .unwrap();
-    TRACKING.store(false, Ordering::Relaxed);
-    let peak = PEAK_BYTES.load(Ordering::Relaxed);
+    let peak = end_measurement();
     assert!(recovered.time_points_s.len() > interval_count);
     let execution_step = workload
         .model
