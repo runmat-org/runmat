@@ -1,6 +1,33 @@
 use runmat_meshing_core::{fixtures, ElementOrder};
 
-use super::AnalysisProjection;
+use super::{boundary::project_boundary_face, AnalysisProjection};
+
+#[test]
+fn curved_boundary_face_rejects_a_folded_signed_jacobian() {
+    let mesh = fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let projection = AnalysisProjection::derive(&mesh).expect("straight Tet10 projection");
+    let face = &mesh.topology.boundary_faces[0];
+    let projected_face = &projection.boundary_faces[0];
+    let mut nodes = projection.nodes.clone();
+    // Move the 0-1 midside node past its endpoint in the original face plane.
+    // Local area remains nonzero, but its sign flips near that corner.
+    let midside_index = projected_face.node_indices[3];
+    nodes[midside_index].coordinates_m = [1.2, 0.0, 0.0];
+
+    let error = project_boundary_face(
+        face,
+        projected_face.node_indices.clone(),
+        projected_face.adjacent_element_indices.clone(),
+        &nodes,
+        &projection.elements,
+    )
+    .expect_err("a folded pressure face must be rejected");
+
+    assert!(matches!(
+        error,
+        super::AnalysisProjectionError::InvalidBoundaryGeometry { face_id: 10 }
+    ));
+}
 
 #[test]
 fn canonical_tetrahedron_projection_has_indexed_oriented_geometry() {

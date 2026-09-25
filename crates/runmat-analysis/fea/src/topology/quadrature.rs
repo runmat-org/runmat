@@ -2,7 +2,7 @@ use runmat_meshing_core::{BoundaryTriangleOrder, ElementOrder, TETRAHEDRON_MIDSI
 
 use super::{
     contract::{BoundaryQuadraturePoint, VolumeQuadraturePoint},
-    element::{cross, dot, invert, norm},
+    element::{cross, dot, invert, norm, subtract},
 };
 
 pub(crate) const TETRAHEDRON_FOUR_POINT_RULE: [[f64; 4]; 4] = [
@@ -315,6 +315,17 @@ pub(super) fn visit_boundary_quadrature(
     if coordinates.len() != node_count {
         return None;
     }
+    // A curved face may have a nonzero Jacobian magnitude while its mapping
+    // folds over. Its signed area must retain the corner-face orientation at
+    // every integration point; otherwise pressure and traction contributions
+    // can cancel or reverse locally without any geometry error being raised.
+    let corner_normal = cross(
+        subtract(coordinates[1], coordinates[0]),
+        subtract(coordinates[2], coordinates[0]),
+    );
+    if !norm(corner_normal).is_finite() || norm(corner_normal) <= 0.0 {
+        return None;
+    }
     for (barycentric, normalized_weight) in DUNAVANT_SEVEN {
         let (shape_values, derivatives) = boundary_shape(order, barycentric);
         let position_m = weighted_position(coordinates, &shape_values[..node_count]);
@@ -322,7 +333,7 @@ pub(super) fn visit_boundary_quadrature(
         let tangent_eta = weighted_derivative(coordinates, &derivatives[..node_count], 1);
         let jacobian_vector = cross(tangent_xi, tangent_eta);
         let jacobian = norm(jacobian_vector);
-        if !jacobian.is_finite() || jacobian <= 0.0 {
+        if !jacobian.is_finite() || jacobian <= 0.0 || dot(jacobian_vector, corner_normal) <= 0.0 {
             return None;
         }
         let reference_weight = 0.5 * normalized_weight;
