@@ -954,15 +954,29 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
             .program_response();
         let imported_scope =
             import_structural_transient_scope(&store, scope_response, &scope_task, limits).unwrap();
+        let workload_chunk = scope_task.inputs[0].objects[1].bytes.as_ptr();
+        let mesh_chunk = scope_task.inputs[1].objects[1].bytes.as_ptr();
+        let modal_chunk = scope_task.inputs[2].objects[1].bytes.as_ptr();
         let scope_identity =
             AnalysisTaskIdentity::new(scope_task.host.workload.identity, Vec::new()).unwrap();
         let preparation = complete_structural_transient_sequence_preparation(
             plan,
-            &scope_task,
-            &imported_scope,
+            scope_task,
+            imported_scope,
             scope_identity,
         )
         .unwrap();
+        assert_eq!(
+            preparation.workload.objects[1].bytes.as_ptr(),
+            workload_chunk
+        );
+        assert_eq!(preparation.mesh.objects[1].bytes.as_ptr(), mesh_chunk);
+        assert_eq!(
+            preparation.modal_state.as_ref().unwrap().objects[1]
+                .bytes
+                .as_ptr(),
+            modal_chunk
+        );
         assert_eq!(
             preparation
                 .modal_state
@@ -1196,8 +1210,8 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         AnalysisTaskIdentity::new(scope_task.host.workload.identity, vec![state_task]).unwrap();
     let preparation = complete_structural_transient_sequence_preparation(
         plan,
-        &scope_task,
-        &imported_scope,
+        scope_task,
+        imported_scope,
         scope_identity,
     )
     .unwrap();

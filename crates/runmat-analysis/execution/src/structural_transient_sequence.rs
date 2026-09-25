@@ -20,12 +20,11 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
     decode_prepared_structural_transient_workload, import_structural_transient_block,
-    import_structural_transient_result, prepare_analysis_objects, prepare_semantic_state_objects,
+    import_structural_transient_result, object::rebind_unpartitioned_analysis_identity,
     prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
-    prepare_structural_transient_workload_objects, AnalysisBridgeError, AnalysisBridgeResult,
-    ImportedStructuralTransientBlock, ImportedStructuralTransientResult,
-    ImportedStructuralTransientScope, PreparedAnalysisObjects,
+    AnalysisBridgeError, AnalysisBridgeResult, ImportedStructuralTransientBlock,
+    ImportedStructuralTransientResult, ImportedStructuralTransientScope, PreparedAnalysisObjects,
     PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
     PreparedStructuralTransientScopeTask, StructuralTransientBlockPlan,
     StructuralTransientBlockPreparation, StructuralTransientExecutionCheckpoint,
@@ -110,8 +109,8 @@ pub fn prepare_structural_transient_sequence(
 
 pub fn complete_structural_transient_sequence_preparation(
     plan: StructuralTransientSequencePlan,
-    prepared_scope: &PreparedStructuralTransientScopeTask,
-    imported_scope: &ImportedStructuralTransientScope,
+    prepared_scope: PreparedStructuralTransientScopeTask,
+    imported_scope: ImportedStructuralTransientScope,
     scope_task_identity: AnalysisTaskIdentity,
 ) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
     let expected_task_identity = AnalysisTaskIdentity::new(
@@ -150,44 +149,49 @@ pub fn complete_structural_transient_sequence_preparation(
     let terminal_schedule_ordinals = plan
         .block_plan
         .terminal_schedule_ordinals(terminal_schedule_ordinal)?;
-    let workload = prepare_structural_transient_workload_objects(
-        &plan.workload,
-        scope.source_workload,
-        plan.chunk_bytes,
-        ObjectNamespace::InputValue,
+    let mut scope_inputs = prepared_scope.inputs.into_iter();
+    let workload = scope_inputs.next().ok_or(AnalysisBridgeError::Identity(
+        "transient scope task omitted its workload input",
+    ))?;
+    let workload = rebind_unpartitioned_analysis_identity(
+        workload,
+        scope.source_workload.digest(),
         plan.inventory_limits,
     )?;
-    let mesh_bytes = plan
-        .mesh
-        .canonical_encode()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mesh = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::Mesh,
-        Digest::from_bytes(*plan.mesh.canonical_digest.bytes()),
-        &mesh_bytes,
-        plan.chunk_bytes,
-        ObjectNamespace::InputValue,
-        plan.inventory_limits,
-    )?;
-    let modal_state = plan
-        .modal_state
-        .as_ref()
-        .map(|state| {
-            prepare_semantic_state_objects(
-                state,
-                plan.chunk_bytes,
-                ObjectNamespace::ResultValue,
-                plan.inventory_limits,
-            )
-        })
-        .transpose()?;
+    let mesh = scope_inputs.next().ok_or(AnalysisBridgeError::Identity(
+        "transient scope task omitted its mesh input",
+    ))?;
+    let modal_state = if plan.modal_state.is_some() {
+        Some(scope_inputs.next().ok_or(AnalysisBridgeError::Identity(
+            "modal transient scope task omitted its basis input",
+        ))?)
+    } else {
+        None
+    };
+    let resource_input = scope_inputs.next().ok_or(AnalysisBridgeError::Identity(
+        "transient scope task omitted its resource-plan input",
+    ))?;
+    if resource_input.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan
+        || resource_input.manifest.logical_identity
+            != prepared_scope.resource_plan.identity.digest()
+        || resource_input.payload()
+            != prepared_scope
+                .resource_plan
+                .canonical_bytes()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        || scope_inputs.next().is_some()
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "transient scope task inputs differ from its admitted resource plan",
+        ));
+    }
     let mut initial_dependencies = plan.initial_dependencies;
     initial_dependencies.push(scope_task_identity);
     let preparation = StructuralTransientSequencePreparation {
         workload,
         mesh,
         modal_state,
-        scope: scope.clone(),
+        scope: imported_scope.scope,
         terminal_schedule_ordinals,
         initial_dependencies,
         artifact_access: plan.artifact_access,

@@ -146,8 +146,8 @@ pub(crate) async fn execute_structural_transient_with_pool(
     .map_err(protocol)?;
     let preparation = complete_structural_transient_sequence_preparation(
         plan,
-        &prepared_scope,
-        &imported_scope,
+        prepared_scope,
+        imported_scope,
         scope_identity,
     )
     .map_err(protocol)?;

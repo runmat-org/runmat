@@ -491,6 +491,57 @@ pub fn prepare_analysis_objects(
     prepare_chunked_analysis_objects(chunked, namespace, limits)
 }
 
+/// Rebinds an unpartitioned prepared input to an independently derived numerical identity.
+/// Chunk content is immutable and transferred without copying; only the manifest changes.
+pub(crate) fn rebind_unpartitioned_analysis_identity(
+    mut prepared: PreparedAnalysisObjects,
+    logical_identity: Digest,
+    limits: ObjectInventoryLimits,
+) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
+    if prepared.manifest.partitions.len() != 1
+        || prepared.manifest.partitions[0].logical_identity != prepared.manifest.logical_identity
+        || prepared.objects.len() != prepared.manifest.chunks.len() + 1
+        || prepared.objects.first().map(|object| &object.descriptor) != Some(&prepared.root)
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "analysis input cannot be rebound from a partitioned or invalid manifest",
+        ));
+    }
+    validate_inventory(&prepared.objects, limits)?;
+    if prepared.manifest.canonical_bytes()? != prepared.objects[0].bytes {
+        return Err(AnalysisBridgeError::Identity(
+            "analysis input manifest differs from its prepared root",
+        ));
+    }
+    if prepared
+        .manifest
+        .chunks
+        .iter()
+        .zip(prepared.objects.iter().skip(1))
+        .any(|(chunk, object)| {
+            object.descriptor.digest != chunk.digest
+                || object.descriptor.encoded_length != chunk.encoded_length
+                || object.descriptor.namespace != prepared.root.namespace
+        })
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "analysis input chunks differ from their prepared manifest",
+        ));
+    }
+    prepared.manifest.logical_identity = logical_identity;
+    prepared.manifest.partitions[0].logical_identity = logical_identity;
+    let manifest_object = logical_object(
+        prepared.root.namespace,
+        "analysis/manifests",
+        ANALYSIS_MANIFEST_MEDIA_TYPE,
+        prepared.manifest.canonical_bytes()?,
+    )?;
+    prepared.root = manifest_object.descriptor.clone();
+    prepared.objects[0] = manifest_object;
+    validate_inventory(&prepared.objects, limits)?;
+    Ok(prepared)
+}
+
 pub fn prepare_partitioned_analysis_objects(
     kind: AnalysisNumericalObjectKind,
     logical_identity: Digest,
@@ -657,6 +708,114 @@ fn validate_partition_payloads(
 #[cfg(test)]
 mod resource_tests {
     use super::*;
+
+    #[test]
+    fn rebinding_unpartitioned_identity_preserves_payload_chunks() {
+        let limits = ObjectInventoryLimits::default();
+        let payload = vec![7_u8; 129];
+        let prepared = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::StructuralTransientWorkload,
+            Digest::sha256("scope-workload"),
+            &payload,
+            32,
+            ObjectNamespace::InputValue,
+            limits,
+        )
+        .unwrap();
+        let old_root = prepared.root.digest;
+        let chunk_addresses = prepared
+            .objects
+            .iter()
+            .skip(1)
+            .map(|object| object.bytes.as_ptr())
+            .collect::<Vec<_>>();
+        let rebound = rebind_unpartitioned_analysis_identity(
+            prepared,
+            Digest::sha256("assembled-workload"),
+            limits,
+        )
+        .unwrap();
+        assert_ne!(rebound.root.digest, old_root);
+        assert_eq!(
+            rebound.manifest.logical_identity,
+            Digest::sha256("assembled-workload")
+        );
+        assert_eq!(
+            rebound.manifest.partitions[0].logical_identity,
+            rebound.manifest.logical_identity
+        );
+        assert_eq!(rebound.payload(), payload);
+        assert_eq!(
+            rebound
+                .objects
+                .iter()
+                .skip(1)
+                .map(|object| object.bytes.as_ptr())
+                .collect::<Vec<_>>(),
+            chunk_addresses
+        );
+        assert_eq!(
+            rebound,
+            prepare_analysis_objects(
+                AnalysisNumericalObjectKind::StructuralTransientWorkload,
+                Digest::sha256("assembled-workload"),
+                &payload,
+                32,
+                ObjectNamespace::InputValue,
+                limits,
+            )
+            .unwrap()
+        );
+
+        let partitioned = prepare_partitioned_analysis_objects(
+            AnalysisNumericalObjectKind::StructuralTransientWorkload,
+            Digest::sha256("partitioned-workload"),
+            &[
+                AnalysisPayloadPartition {
+                    logical_identity: Digest::sha256("left"),
+                    payload: &[1_u8; 8],
+                },
+                AnalysisPayloadPartition {
+                    logical_identity: Digest::sha256("right"),
+                    payload: &[2_u8; 8],
+                },
+            ],
+            32,
+            ObjectNamespace::InputValue,
+            limits,
+        )
+        .unwrap();
+        assert!(rebind_unpartitioned_analysis_identity(
+            partitioned,
+            Digest::sha256("rebinding-must-fail"),
+            limits,
+        )
+        .is_err());
+
+        let mut substituted = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::StructuralTransientWorkload,
+            Digest::sha256("scope-workload"),
+            &payload,
+            32,
+            ObjectNamespace::InputValue,
+            limits,
+        )
+        .unwrap();
+        let original = &substituted.objects[1];
+        substituted.objects[1] = LogicalObject::new(
+            original.descriptor.namespace,
+            original.descriptor.logical_name.clone(),
+            original.descriptor.media_type.clone(),
+            vec![9_u8; original.bytes.len()],
+        )
+        .unwrap();
+        assert!(rebind_unpartitioned_analysis_identity(
+            substituted,
+            Digest::sha256("rebinding-must-fail"),
+            limits,
+        )
+        .is_err());
+    }
 
     #[test]
     fn prepared_output_must_fit_semantic_and_transport_envelopes_independently() {
