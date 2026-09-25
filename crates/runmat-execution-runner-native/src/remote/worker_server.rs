@@ -3,8 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use runmat_execution::identity::AttemptId;
+use runmat_execution::resource::ResourceRequest;
 use runmat_execution_artifact::encryption::RunKeyMaterial;
 use runmat_execution_artifact::{ExecutableForm, ExecutionBundle, ProgramExecutionResponse};
+use runmat_execution_runner::scheduler::{fits, release, reserve, ResourceAllocation};
 use runmat_execution_runner::WorkerSpec;
 use runmat_execution_transport_native::frame::{EncryptedFrameSession, FrameKind, FrameLimits};
 use tokio::sync::Mutex;
@@ -25,6 +27,8 @@ struct WorkerState {
     materialized_project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     bundle_digest: Option<runmat_execution::Digest>,
     attempts: HashMap<AttemptId, ActiveAttempt>,
+    /// Capacity reserved by active attempts, not sampled process utilization.
+    allocated: ResourceAllocation,
     values: HashMap<runmat_execution::identity::ValueId, runmat_execution::value::ValuePayload>,
     objects: super::object_transfer::RemoteObjectStore,
     draining: bool,
@@ -33,9 +37,18 @@ struct WorkerState {
 
 struct ActiveAttempt {
     task: tokio::task::JoinHandle<()>,
+    resources: ResourceRequest,
     cancellation: Arc<super::worker_execution::AttemptCancellation>,
     cooperative: bool,
     finished: tokio::sync::watch::Receiver<bool>,
+}
+
+impl WorkerState {
+    fn finish_attempt(&mut self, attempt_id: AttemptId) -> Option<ActiveAttempt> {
+        let active = self.attempts.remove(&attempt_id)?;
+        release(&mut self.allocated, &active.resources);
+        Some(active)
+    }
 }
 
 pub(super) struct WorkerLoopContext {
@@ -86,6 +99,7 @@ pub(super) async fn run_worker_loop(
         materialized_project: None,
         bundle_digest: None,
         attempts: HashMap::new(),
+        allocated: ResourceAllocation::default(),
         values: HashMap::new(),
         objects: super::object_transfer::RemoteObjectStore::new()?,
         draining: false,
@@ -247,7 +261,8 @@ pub(super) async fn run_worker_loop(
                 .await?;
             }
             RemoteWorkerCommand::Execute { attempt } => {
-                let rejection = validate_attempt(&state, &worker, driver_fence, &attempt).await;
+                let rejection =
+                    validate_and_reserve_attempt(&state, &worker, driver_fence, &attempt).await;
                 if let Some(message) = rejection {
                     reply(
                         connection.as_ref(),
@@ -261,6 +276,7 @@ pub(super) async fn run_worker_loop(
                 let attempt = *attempt;
                 let attempt_id = attempt.scheduling.id;
                 let scheduling = attempt.scheduling.clone();
+                let reserved_resources = scheduling.task.resources.clone();
                 let correlation_id = request.correlation_id;
                 let connection = Arc::clone(&connection);
                 let sender = Arc::clone(&sender);
@@ -375,7 +391,7 @@ pub(super) async fn run_worker_loop(
                     )
                     .await;
                     let mut state = state_for_task.lock().await;
-                    state.attempts.remove(&attempt_id);
+                    let _ = state.finish_attempt(attempt_id);
                     finished_sender.send_replace(true);
                     if state.draining && state.attempts.is_empty() {
                         drain_complete_for_task.notify_waiters();
@@ -385,6 +401,7 @@ pub(super) async fn run_worker_loop(
                     attempt_id,
                     ActiveAttempt {
                         task,
+                        resources: reserved_resources,
                         cancellation,
                         cooperative,
                         finished,
@@ -400,7 +417,7 @@ pub(super) async fn run_worker_loop(
                     active.cancellation.cancel();
                     if active.cooperative {
                         completion = Some(active.finished.clone());
-                    } else if let Some(active) = state.attempts.remove(&attempt_id) {
+                    } else if let Some(active) = state.finish_attempt(attempt_id) {
                         active.task.abort();
                         aborted_task = Some(active.task);
                     }
@@ -464,25 +481,21 @@ pub(super) async fn run_worker_loop(
     }
 }
 
-async fn validate_attempt(
+async fn validate_and_reserve_attempt(
     state: &Mutex<WorkerState>,
     worker: &WorkerSpec,
     driver_fence: u64,
     attempt: &RemoteAttempt,
 ) -> Option<String> {
-    let state = state.lock().await;
+    let mut state = state.lock().await;
     if state.draining
         || attempt.scheduling.driver_fence != driver_fence
         || attempt.scheduling.worker_id != worker.id
     {
         return Some("attempt is outside live worker authority".into());
     }
-    if !runmat_execution_runner::scheduler::fits(
-        &worker.resources,
-        &Default::default(),
-        &attempt.scheduling.task.resources,
-    ) {
-        return Some("attempt resources exceed the worker's declared inventory".into());
+    if state.attempts.contains_key(&attempt.scheduling.id) {
+        return Some("attempt is already active on the worker".into());
     }
     let Some(bundle) = state.bundle.as_ref() else {
         return Some("exact execution bundle is not installed".into());
@@ -502,9 +515,36 @@ async fn validate_attempt(
     {
         return Some("attempt program is not authorized by the installed bundle".into());
     }
-    None
+    reserve_attempt_capacity(
+        &worker.resources,
+        &mut state.allocated,
+        &attempt.scheduling.task.resources,
+    )
+    .err()
+    .map(str::to_owned)
+}
+
+fn reserve_attempt_capacity(
+    inventory: &runmat_execution::resource::ResourceInventory,
+    allocated: &mut ResourceAllocation,
+    request: &ResourceRequest,
+) -> Result<(), &'static str> {
+    request
+        .validate()
+        .map_err(|_| "attempt has an invalid resource request")?;
+    if !fits(inventory, allocated, request) {
+        return Err("attempt resources exceed the worker's available inventory");
+    }
+    // `reserve` can fail after a preceding field was updated; commit only a complete reservation.
+    let mut next = allocated.clone();
+    reserve(&mut next, request).map_err(|_| "attempt resource reservation overflowed")?;
+    *allocated = next;
+    Ok(())
 }
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
 }
+
+#[cfg(test)]
+mod tests;
