@@ -1,5 +1,8 @@
 mod support;
 
+#[path = "study_realization/study_input_static_solve.rs"]
+mod study_input_static_solve;
+
 use runmat_analysis_language::*;
 use support::{source_module, TestHost};
 

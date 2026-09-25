@@ -6377,7 +6377,9 @@ name = "runmat-analysis-language"
 version = "0.6.2"
 dependencies = [
  "runmat-analysis-core",
+ "runmat-analysis-fea",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-parser",
  "runmat-types",
