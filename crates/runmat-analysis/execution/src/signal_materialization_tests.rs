@@ -521,34 +521,45 @@ fn canonical_realization_becomes_a_typed_solver_table_without_a_callable() {
     assert!(materialize_signal_for_solver(&authored, &substituted, &realization).is_err());
 }
 
-#[test]
-fn generated_constant_moment_matches_explicit_static_beam_solve() {
-    use runmat_analysis_core::FormulationRequirement;
-    use runmat_analysis_fea::{
-        fixtures::{fixture_model, FixtureId},
-        run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
-        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
-        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-    };
-
-    let baseline_model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
-    let mut authored = baseline_model.signals[0].clone();
-    let PhysicalSignal::Moment(moment) = &mut authored else {
-        panic!("beam fixture must carry a moment signal")
-    };
+fn materialize_constant_vector_signal(
+    authored: &PhysicalSignal,
+    components: [f64; 3],
+    identity_label: &str,
+) -> PhysicalSignal {
+    let mut generator_signal = authored.clone();
     let PhysicalSignal::Force(generator_template) =
         signal(SignalShape::Vector3, SignalPrecision::Real64)
     else {
         unreachable!()
     };
-    let SignalRepresentation::Generator(generator) = generator_template.representation else {
+    let SignalRepresentation::Generator(mut generator) = generator_template.representation else {
         unreachable!()
     };
-    moment.representation = SignalRepresentation::Generator(generator);
-
-    let admitted = admitted();
+    generator.invocation.arguments = vec![GeneratorArgument::Real(components.iter().sum())];
+    match &mut generator_signal {
+        PhysicalSignal::Force(signal) => {
+            signal.representation = SignalRepresentation::Generator(generator.clone())
+        }
+        PhysicalSignal::Moment(signal) => {
+            signal.representation = SignalRepresentation::Generator(generator)
+        }
+        _ => panic!("the static beam test supports only force and moment signals"),
+    }
+    let mut admitted = admitted();
+    admitted.generator_identity = GeneratorIdentity::new(
+        digest(&format!("{identity_label}.callable")),
+        digest(&format!("{identity_label}.captures")),
+        digest(&format!("{identity_label}.generator")),
+    )
+    .unwrap();
+    admitted.materialization_identity = SignalMaterializationIdentity::new(
+        digest(&format!("{identity_label}.signal")),
+        None,
+        digest("sampling"),
+    )
+    .unwrap();
     let chunks = plan_signal_generator_chunks(
-        &authored,
+        &generator_signal,
         &admitted,
         None,
         RESULT_ENVELOPE_BYTES + 5 * 3 * 16,
@@ -557,26 +568,81 @@ fn generated_constant_moment_matches_explicit_static_beam_solve() {
     .unwrap()
     .chunks;
     // Dense generator output is column-major: five samples of each vector component.
-    let values = [vec![0.0; 10], vec![125.0; 5]].concat();
+    let values = components
+        .into_iter()
+        .flat_map(|component| std::iter::repeat_n(component, 5))
+        .collect::<Vec<_>>();
     let outputs = vec![output(&chunks[0], dense_f64(vec![5, 3], &values))];
-    let realization =
-        canonicalize_signal_generator_outputs(&authored, &admitted, None, &[], &chunks, &outputs)
-            .unwrap();
-    let generated = materialize_signal_for_solver(&authored, &admitted, &realization).unwrap();
+    let realization = canonicalize_signal_generator_outputs(
+        &generator_signal,
+        &admitted,
+        None,
+        &[],
+        &chunks,
+        &outputs,
+    )
+    .unwrap();
+    let generated =
+        materialize_signal_for_solver(&generator_signal, &admitted, &realization).unwrap();
     assert_eq!(
         canonical_tabulated_signal_content_digest(&generated).unwrap(),
         realization.content_digest,
     );
+    generated
+}
 
-    let mut explicit = generated.clone();
-    let PhysicalSignal::Moment(moment) = &mut explicit else {
-        unreachable!()
+#[test]
+fn generated_force_and_moment_match_explicit_static_beam_and_analytic_balance() {
+    use runmat_analysis_core::FormulationRequirement;
+    use runmat_analysis_fea::{
+        excitation::SpatialProjectionBalance,
+        fixtures::{fixture_model, FixtureId},
+        run_linear_static_with_options, ComputeBackend, FeaRunResult, LinearStaticSolveOptions,
+        FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_REACTION_FORCE,
+        FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_ROTATION,
+        FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
     };
-    moment.provenance = SignalProvenance::Authored;
+
+    fn field<'a>(result: &'a FeaRunResult, name: &str) -> &'a [f64] {
+        result.field(name).unwrap().as_host_f64().unwrap()
+    }
+
+    let baseline_model = fixture_model(FixtureId::StructuralBeamForceAndMomentReference);
+    assert_eq!(baseline_model.signals.len(), 2);
+    let generated_signals = baseline_model
+        .signals
+        .iter()
+        .map(|authored| match authored {
+            PhysicalSignal::Force(_) => {
+                materialize_constant_vector_signal(authored, [0.0, 500.0, 0.0], "tip.force")
+            }
+            PhysicalSignal::Moment(_) => {
+                materialize_constant_vector_signal(authored, [0.0, 0.0, 90.0], "tip.moment")
+            }
+            _ => panic!("beam fixture has only force and moment"),
+        })
+        .collect::<Vec<_>>();
+    assert!(generated_signals.iter().all(|signal| match signal {
+        PhysicalSignal::Force(signal) =>
+            matches!(signal.provenance, SignalProvenance::Generated(_)),
+        PhysicalSignal::Moment(signal) => {
+            matches!(signal.provenance, SignalProvenance::Generated(_))
+        }
+        _ => false,
+    }));
+    let mut explicit_signals = generated_signals.clone();
+    for signal in &mut explicit_signals {
+        match signal {
+            PhysicalSignal::Force(signal) => signal.provenance = SignalProvenance::Authored,
+            PhysicalSignal::Moment(signal) => signal.provenance = SignalProvenance::Authored,
+            _ => unreachable!(),
+        }
+    }
+
     let mut explicit_model = baseline_model.clone();
-    explicit_model.signals[0] = explicit;
+    explicit_model.signals = explicit_signals;
     let mut generated_model = baseline_model.clone();
-    generated_model.signals[0] = generated;
+    generated_model.signals = generated_signals;
 
     let options = LinearStaticSolveOptions {
         formulation_requirement: FormulationRequirement::Experimental,
@@ -584,15 +650,17 @@ fn generated_constant_moment_matches_explicit_static_beam_solve() {
     };
     let baseline =
         run_linear_static_with_options(&baseline_model, ComputeBackend::Cpu, options.clone())
-            .expect("constant authored moment must solve");
+            .expect("constant authored force and moment must solve");
     let explicit =
         run_linear_static_with_options(&explicit_model, ComputeBackend::Cpu, options.clone())
             .expect("explicit constant table must solve");
     let generated = run_linear_static_with_options(&generated_model, ComputeBackend::Cpu, options)
-        .expect("verified generated constant table must solve");
+        .expect("verified generated constant tables must solve");
 
     for field_id in [
         FEA_FIELD_STRUCTURAL_DISPLACEMENT,
+        FEA_FIELD_STRUCTURAL_ROTATION,
+        FEA_FIELD_STRUCTURAL_REACTION_FORCE,
         FEA_FIELD_STRUCTURAL_REACTION_MOMENT,
         FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
     ] {
@@ -624,6 +692,63 @@ fn generated_constant_moment_matches_explicit_static_beam_solve() {
         generated.structural_static_balance,
         baseline.structural_static_balance
     );
+
+    // Euler-Bernoulli cantilever, L=1 m and EI_z=(200e9 Pa)(6.4e-9 m^4)=1280 N m².
+    // The independent tip response is F L³/(3EI)+M L²/(2EI),
+    // theta=F L²/(2EI)+M L/EI, and stored energy is (F u + M theta)/2.
+    let tip_y = 500.0 / (3.0 * 1280.0) + 90.0 / (2.0 * 1280.0);
+    let tip_theta_z = 500.0 / (2.0 * 1280.0) + 90.0 / 1280.0;
+    let energy = 0.5 * (500.0 * tip_y + 90.0 * tip_theta_z);
+    let close = |actual: f64, expected: f64| {
+        assert!(
+            (actual - expected).abs() <= expected.abs().max(1.0) * 1.0e-9,
+            "actual={actual} expected={expected}"
+        );
+    };
+    close(
+        field(&generated, FEA_FIELD_STRUCTURAL_DISPLACEMENT)[4],
+        tip_y,
+    );
+    close(
+        field(&generated, FEA_FIELD_STRUCTURAL_ROTATION)[5],
+        tip_theta_z,
+    );
+    close(
+        field(&generated, FEA_FIELD_STRUCTURAL_REACTION_FORCE)[1],
+        -500.0,
+    );
+    close(
+        field(&generated, FEA_FIELD_STRUCTURAL_REACTION_MOMENT)[2],
+        -590.0,
+    );
+    close(
+        field(&generated, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0],
+        energy,
+    );
+
+    assert_eq!(generated.spatial_projection_evidence.len(), 2);
+    let mut projected_force_y = 0.0;
+    let mut projected_moment_z = 0.0;
+    for evidence in &generated.spatial_projection_evidence {
+        evidence.validate().unwrap();
+        assert!(evidence.accepted);
+        let SpatialProjectionBalance::VectorResultant {
+            projected_resultant,
+            projected_moment,
+            ..
+        } = evidence.balance
+        else {
+            panic!("beam vector loading needs vector projection evidence")
+        };
+        projected_force_y += projected_resultant.real[1];
+        // Projection moments are about each evidence reference point; shift to the
+        // global origin before adding the force and direct moment contributions.
+        projected_moment_z += projected_moment.real[2]
+            + evidence.reference_point_m[0] * projected_resultant.real[1]
+            - evidence.reference_point_m[1] * projected_resultant.real[0];
+    }
+    close(projected_force_y, 500.0);
+    close(projected_moment_z, 590.0);
 }
 
 #[test]
