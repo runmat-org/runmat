@@ -6,6 +6,7 @@ pub(super) struct TransientRunFinalization<'a> {
     pub(super) active_model: &'a AnalysisModel,
     pub(super) backend: ComputeBackend,
     pub(super) options: &'a TransientSolveOptions,
+    pub(super) initial_assembly: &'a AssemblySummary,
     pub(super) identity: crate::admission::AnalysisRunIdentity,
     pub(super) initial_state: StructuralInitialStateEvidence,
 }
@@ -13,6 +14,7 @@ pub(super) struct TransientRunFinalization<'a> {
 pub(super) fn finish_transient_run(
     input: TransientRunFinalization<'_>,
     mut transient: crate::solve::transient::TransientSolveResult,
+    mut reassemble: Option<&mut dyn FnMut(f64) -> Result<AssemblySummary, FeaRunError>>,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     let TransientRunFinalization {
         model,
@@ -20,6 +22,7 @@ pub(super) fn finish_transient_run(
         active_model,
         backend,
         options,
+        initial_assembly,
         identity,
         initial_state,
     } = input;
@@ -27,9 +30,19 @@ pub(super) fn finish_transient_run(
     // Their duplicated endpoint assemblies and states are not part of the public
     // history, so release them before constructing recovered field histories.
     transient.integration_intervals.clear();
-    let reporting_summary = transient.assembly_snapshots.last().ok_or_else(|| {
-        FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
+    let terminal_time = *transient.time_points_s.last().ok_or_else(|| {
+        FeaRunError::Assembly("transient solve produced no reporting time point".into())
     })?;
+    let mut terminal_assembly = reassemble
+        .as_mut()
+        .map(|assemble| assemble(terminal_time))
+        .transpose()?;
+    let reporting_summary = terminal_assembly
+        .as_ref()
+        .or_else(|| transient.assembly_snapshots.last())
+        .ok_or_else(|| {
+            FeaRunError::Assembly("transient solve produced no reporting assembly snapshot".into())
+        })?;
     let reporting_dof_count = reporting_summary.dof_count;
     emit_phase(
         "fea.run_transient",
@@ -103,8 +116,35 @@ pub(super) fn finish_transient_run(
         "residual norm",
         transient.residual_norms.len(),
     )?;
-    let recovered =
-        recovery::recover_transient_fields(&mut transient, empty_connector_plan.as_ref())?;
+    let recovered = if let Some(assemble) = reassemble {
+        let terminal_index = transient.time_points_s.len() - 1;
+        let times = transient.time_points_s.clone();
+        let summaries = times.into_iter().enumerate().map(|(index, time)| {
+            if index == terminal_index {
+                Ok(terminal_assembly
+                    .take()
+                    .expect("terminal assembly was prepared"))
+            } else {
+                assemble(time)
+            }
+        });
+        recovery::recover_transient_fields(
+            &mut transient,
+            empty_connector_plan.as_ref(),
+            initial_assembly,
+            summaries,
+        )?
+    } else {
+        let summaries = std::mem::take(&mut transient.assembly_snapshots)
+            .into_iter()
+            .map(Ok);
+        recovery::recover_transient_fields(
+            &mut transient,
+            empty_connector_plan.as_ref(),
+            initial_assembly,
+            summaries,
+        )?
+    };
     // Recovery consumed the solver-owned state vectors as it built the typed
     // histories; no duplicate raw history survives into observation work.
     for connector_result in &recovered.connector_results {

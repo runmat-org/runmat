@@ -1,9 +1,6 @@
-use crate::{
-    assembly::AssemblySummary,
-    execution::{
-        StructuralTransientNumericalReceipt, StructuralTransientSampleStep,
-        StructuralTransientSolverResult,
-    },
+use crate::execution::{
+    StructuralTransientNumericalReceipt, StructuralTransientSampleStep,
+    StructuralTransientSolverResult,
 };
 
 use super::{
@@ -14,7 +11,6 @@ pub(crate) struct CompletedTransientSolveInput<'a> {
     pub(crate) options: &'a TransientSolveOptions,
     pub(crate) result: StructuralTransientSolverResult,
     pub(crate) receipt: &'a StructuralTransientNumericalReceipt,
-    pub(crate) assembly_snapshots: Vec<AssemblySummary>,
 }
 
 /// Reconstructs the ephemeral solve result consumed by formulation recovery from a completed,
@@ -28,17 +24,13 @@ pub(crate) fn reconstruct_completed_transient_solve(
         .validate_for_result(&input.result)
         .map_err(contract_error)?;
     let samples = input.result.samples();
-    if samples.len() != input.assembly_snapshots.len() {
-        return Err(contract_error(
-            "completed transient sample and reporting-assembly counts differ",
-        ));
-    }
     let scope = &input.result.manifest().scope;
     if samples.is_empty()
-        || input
-            .assembly_snapshots
-            .iter()
-            .any(|summary| summary.dof_count != scope.dof_count)
+        || samples.iter().any(|sample| {
+            sample.state.displacement.len() != scope.dof_count
+                || sample.state.velocity.len() != scope.dof_count
+                || sample.state.acceleration.len() != scope.dof_count
+        })
     {
         return Err(TransientSolveError::DofCountChanged);
     }
@@ -149,7 +141,7 @@ pub(crate) fn reconstruct_completed_transient_solve(
         device_apply_k_attempt_count,
         preconditioner: first_block.preconditioner,
         accelerator_evidence,
-        assembly_snapshots: input.assembly_snapshots,
+        assembly_snapshots: Vec::new(),
         reaction_snapshots,
         integration_intervals: Vec::new(),
         strain_energy_snapshots,

@@ -561,9 +561,11 @@ pub fn run_transient_with_options(
             active_model: &active_model,
             backend,
             options: &options,
+            initial_assembly: &summary,
             identity,
             initial_state: initial_state_evidence,
         },
         transient,
+        None,
     )
 }

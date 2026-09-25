@@ -103,13 +103,29 @@ pub fn recover_completed_transient_run(
         ));
     }
 
-    let mut assembly_snapshots = Vec::with_capacity(input.result.samples().len());
-    for sample in input.result.samples() {
+    let transient = reconstruct_completed_transient_solve(CompletedTransientSolveInput {
+        options: &options,
+        result: input.result,
+        receipt: input.numerical_receipt,
+    })
+    .map_err(|error| match error {
+        TransientSolveError::Assembly(never) => match never {},
+        other => FeaRunError::Solve(other.to_string()),
+    })?;
+    let identity = super::super::admission::admit_structural(
+        &basis.initial_assembly,
+        &basis.execution_step,
+        input.workload.formulation_requirement,
+    )?;
+    // Reporting assemblies are derived one accepted sample at a time, then consumed by field
+    // recovery. The completed numerical result never retains a second history of full operators.
+    let mut reassemble = |time_s| {
+        super::check_cancelled("fea.run_transient")?;
         let excitations = realize_step_excitations(
             &basis.active_model,
             &basis.execution_step,
             ExcitationSamplePoint::TimeSeconds {
-                value: sample.time_s,
+                value: time_s,
                 approach: SignalSampleApproach::At,
             },
         )
@@ -127,29 +143,14 @@ pub fn recover_completed_transient_run(
             super::motion::physical_summary_for_recovery(
                 summary,
                 &basis.motions,
-                sample.time_s,
+                time_s,
                 SignalSampleApproach::At,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?
         };
         validate_reporting_summary(&basis.initial_assembly, &summary)?;
-        assembly_snapshots.push(summary);
-    }
-    let transient = reconstruct_completed_transient_solve(CompletedTransientSolveInput {
-        options: &options,
-        result: input.result,
-        receipt: input.numerical_receipt,
-        assembly_snapshots,
-    })
-    .map_err(|error| match error {
-        TransientSolveError::Assembly(never) => match never {},
-        other => FeaRunError::Solve(other.to_string()),
-    })?;
-    let identity = super::super::admission::admit_structural(
-        &basis.initial_assembly,
-        &basis.execution_step,
-        input.workload.formulation_requirement,
-    )?;
+        Ok(summary)
+    };
     let recovered = super::finish_transient_run(
         super::TransientRunFinalization {
             model: &input.workload.model,
@@ -157,10 +158,12 @@ pub fn recover_completed_transient_run(
             active_model: &basis.active_model,
             backend: input.workload.backend,
             options: &options,
+            initial_assembly: &basis.initial_assembly,
             identity,
             initial_state: initial_state.evidence,
         },
         transient,
+        Some(&mut reassemble),
     )?;
     if recovered.run.execution_backend != ExecutionBackend::from_solver_backend(expected_backend) {
         return Err(FeaRunError::Solve(

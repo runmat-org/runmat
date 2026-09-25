@@ -214,7 +214,10 @@ fn recovery_consumes_reporting_assemblies_in_accepted_order() {
     )
     .unwrap();
     assert_eq!(solved.assembly_snapshots.len(), 3);
-    let recovered = recover_transient_fields(&mut solved, None).unwrap();
+    let assemblies = std::mem::take(&mut solved.assembly_snapshots)
+        .into_iter()
+        .map(Ok);
+    let recovered = recover_transient_fields(&mut solved, None, &summary, assemblies).unwrap();
     assert!(solved.assembly_snapshots.is_empty());
     assert!(solved.displacement_snapshots.is_empty());
     assert!(solved.velocity_snapshots.is_empty());

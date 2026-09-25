@@ -46,10 +46,15 @@ pub(super) struct TransientFieldRecovery {
     pub electro_thermal_summaries: Vec<Option<crate::assembly::ElectroThermalAssemblySummary>>,
 }
 
-pub(super) fn recover_transient_fields(
+pub(super) fn recover_transient_fields<I>(
     transient: &mut TransientSolveResult,
     empty_connector_plan: Option<&crate::connectors::CanonicalStructuralConnectorPlan>,
-) -> Result<TransientFieldRecovery, FeaRunError> {
+    reference: &AssemblySummary,
+    summaries: I,
+) -> Result<TransientFieldRecovery, FeaRunError>
+where
+    I: ExactSizeIterator<Item = Result<AssemblySummary, FeaRunError>>,
+{
     let snapshot_count = transient.time_points_s.len();
     require_snapshot_count(
         snapshot_count,
@@ -66,11 +71,7 @@ pub(super) fn recover_transient_fields(
         "acceleration",
         transient.acceleration_snapshots.len(),
     )?;
-    require_snapshot_count(
-        snapshot_count,
-        "assembly",
-        transient.assembly_snapshots.len(),
-    )?;
+    require_snapshot_count(snapshot_count, "assembly", summaries.len())?;
     require_snapshot_count(
         snapshot_count,
         "dynamic reaction",
@@ -83,18 +84,6 @@ pub(super) fn recover_transient_fields(
         ));
     }
     validate_schedule_points(&transient.schedule, &transient.time_points_s)?;
-    let reference = &transient.assembly_snapshots[0];
-    for index in 0..snapshot_count {
-        validate_snapshot_shape(
-            reference,
-            &transient.assembly_snapshots[index],
-            index,
-            &transient.displacement_snapshots[index],
-            &transient.velocity_snapshots[index],
-            &transient.acceleration_snapshots[index],
-            &transient.reaction_snapshots[index],
-        )?;
-    }
     // Move each recovered field into its history as soon as the snapshot is ready.
     // Only the final state is cloned for the ordinary result-field view; there is
     // no second retained history-sized deformation-field collection.
@@ -123,15 +112,23 @@ pub(super) fn recover_transient_fields(
     let velocities = std::mem::take(&mut transient.velocity_snapshots);
     let accelerations = std::mem::take(&mut transient.acceleration_snapshots);
     let reactions = std::mem::take(&mut transient.reaction_snapshots);
-    for (index, ((((mut summary, displacement), velocity), acceleration), reaction)) in
-        std::mem::take(&mut transient.assembly_snapshots)
-            .into_iter()
-            .zip(displacements)
-            .zip(velocities)
-            .zip(accelerations)
-            .zip(reactions)
-            .enumerate()
+    for (index, ((((summary, displacement), velocity), acceleration), reaction)) in summaries
+        .zip(displacements)
+        .zip(velocities)
+        .zip(accelerations)
+        .zip(reactions)
+        .enumerate()
     {
+        let mut summary = summary?;
+        validate_snapshot_shape(
+            reference,
+            &summary,
+            index,
+            &displacement,
+            &velocity,
+            &acceleration,
+            &reaction,
+        )?;
         let mut fields = if index + 1 == snapshot_count {
             recover_deformation_result_fields(&summary, &displacement)
         } else {

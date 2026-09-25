@@ -419,6 +419,16 @@ fn execute_transient_workload(
     let numerical_receipt =
         crate::execution::StructuralTransientNumericalReceipt::new(&result, &request, &segments)
             .unwrap();
+    let options = workload.solve_options(mesh.clone());
+    let reconstructed = crate::solve::transient::reconstruct_completed_transient_solve(
+        crate::solve::transient::CompletedTransientSolveInput {
+            options: &options,
+            result: result.clone(),
+            receipt: &numerical_receipt,
+        },
+    )
+    .unwrap();
+    assert!(reconstructed.assembly_snapshots.is_empty());
     crate::pipeline::transient::recover_completed_transient_run(
         crate::pipeline::transient::CompletedStructuralTransientRunInput {
             workload,
