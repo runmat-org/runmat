@@ -24,11 +24,13 @@ use crate::{
     prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
     prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
     prepare_structural_transient_workload_objects, AnalysisBridgeError, AnalysisBridgeResult,
-    ImportedStructuralTransientBlock, ImportedStructuralTransientResult, PreparedAnalysisObjects,
+    ImportedStructuralTransientBlock, ImportedStructuralTransientResult,
+    ImportedStructuralTransientScope, PreparedAnalysisObjects,
     PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
-    StructuralTransientBlockPlan, StructuralTransientBlockPreparation,
-    StructuralTransientExecutionCheckpoint, StructuralTransientRecoveryClosure,
-    StructuralTransientResultPreparation, STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
+    PreparedStructuralTransientScopeTask, StructuralTransientBlockPlan,
+    StructuralTransientBlockPreparation, StructuralTransientExecutionCheckpoint,
+    StructuralTransientRecoveryClosure, StructuralTransientResultPreparation,
+    STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,65 +61,139 @@ pub struct StructuralTransientSequencePreparationInput<'a> {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructuralTransientSequencePlan {
+    pub workload: StructuralTransientWorkload,
+    pub mesh: SolverMeshArtifact,
+    pub modal_state: Option<CanonicalSemanticState>,
+    pub block_plan: StructuralTransientBlockPlan,
+    pub initial_dependencies: Vec<AnalysisTaskIdentity>,
+    pub artifact_access: ArtifactAccess,
+    pub program_revision: ProgramRevision,
+    pub chunk_bytes: usize,
+    pub inventory_limits: ObjectInventoryLimits,
+}
+
 pub fn prepare_structural_transient_sequence(
     input: StructuralTransientSequencePreparationInput<'_>,
-) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
+) -> AnalysisBridgeResult<StructuralTransientSequencePlan> {
     input.workload.validate()?;
     input
         .mesh
         .validate_canonical()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
-        input.workload,
-        input.mesh,
-        input.modal_state,
-    )?;
-    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1)
-        .map_err(|_| invalid("transient schedule exceeds u64 ordinals"))?;
-    let terminal_schedule_ordinals = input
-        .block_plan
-        .terminal_schedule_ordinals(terminal_schedule_ordinal)?;
-    let workload = prepare_structural_transient_workload_objects(
-        input.workload,
-        scope.source_workload,
-        input.chunk_bytes,
-        ObjectNamespace::InputValue,
-        input.inventory_limits,
-    )?;
-    let mesh_bytes = input
-        .mesh
-        .canonical_encode()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let mesh = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::Mesh,
-        Digest::from_bytes(*input.mesh.canonical_digest.bytes()),
-        &mesh_bytes,
-        input.chunk_bytes,
-        ObjectNamespace::InputValue,
-        input.inventory_limits,
-    )?;
-    let modal_state = input
-        .modal_state
-        .map(|state| {
-            prepare_semantic_state_objects(
-                state,
-                input.chunk_bytes,
-                ObjectNamespace::ResultValue,
-                input.inventory_limits,
-            )
-        })
-        .transpose()?;
-    let preparation = StructuralTransientSequencePreparation {
-        workload,
-        mesh,
-        modal_state,
-        scope,
-        terminal_schedule_ordinals,
+    input.artifact_access.validate()?;
+    if input.chunk_bytes == 0 {
+        return Err(invalid("transient sequence requires a nonzero chunk size"));
+    }
+    let mut unique_dependencies = input.initial_dependencies.clone();
+    unique_dependencies.sort_unstable();
+    let original_count = unique_dependencies.len();
+    unique_dependencies.dedup();
+    if unique_dependencies.len() != original_count {
+        return Err(invalid(
+            "transient sequence has duplicate initial dependencies",
+        ));
+    }
+    Ok(StructuralTransientSequencePlan {
+        workload: input.workload.clone(),
+        mesh: input.mesh.clone(),
+        modal_state: input.modal_state.cloned(),
+        block_plan: input.block_plan,
         initial_dependencies: input.initial_dependencies,
         artifact_access: input.artifact_access,
         program_revision: input.program_revision,
         chunk_bytes: input.chunk_bytes,
         inventory_limits: input.inventory_limits,
+    })
+}
+
+pub fn complete_structural_transient_sequence_preparation(
+    plan: StructuralTransientSequencePlan,
+    prepared_scope: &PreparedStructuralTransientScopeTask,
+    imported_scope: &ImportedStructuralTransientScope,
+    scope_task_identity: AnalysisTaskIdentity,
+) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
+    let expected_task_identity = AnalysisTaskIdentity::new(
+        prepared_scope.host.workload.identity,
+        plan.initial_dependencies.clone(),
+    )?;
+    let scope = &imported_scope.scope;
+    let workload_digest = Digest::sha256(plan.workload.canonical_bytes()?);
+    let modal_identity = plan
+        .modal_state
+        .as_ref()
+        .map(|state| state.identity.digest());
+    let prepared_modal_identity = prepared_scope
+        .inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::SemanticState)
+        .map(|input| input.manifest.logical_identity);
+    if scope_task_identity != expected_task_identity
+        || prepared_scope.host.artifact_access != plan.artifact_access
+        || prepared_scope
+            .inputs
+            .first()
+            .is_none_or(|input| input.manifest.payload_digest != workload_digest)
+        || prepared_scope.inputs.get(1).is_none_or(|input| {
+            input.manifest.logical_identity
+                != Digest::from_bytes(*plan.mesh.canonical_digest.bytes())
+        })
+        || prepared_modal_identity != modal_identity
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "transient scope task differs from the planned sequence inputs or dependencies",
+        ));
+    }
+    let terminal_schedule_ordinal = u64::try_from(scope.schedule.points.len() - 1)
+        .map_err(|_| invalid("transient schedule exceeds u64 ordinals"))?;
+    let terminal_schedule_ordinals = plan
+        .block_plan
+        .terminal_schedule_ordinals(terminal_schedule_ordinal)?;
+    let workload = prepare_structural_transient_workload_objects(
+        &plan.workload,
+        scope.source_workload,
+        plan.chunk_bytes,
+        ObjectNamespace::InputValue,
+        plan.inventory_limits,
+    )?;
+    let mesh_bytes = plan
+        .mesh
+        .canonical_encode()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let mesh = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::Mesh,
+        Digest::from_bytes(*plan.mesh.canonical_digest.bytes()),
+        &mesh_bytes,
+        plan.chunk_bytes,
+        ObjectNamespace::InputValue,
+        plan.inventory_limits,
+    )?;
+    let modal_state = plan
+        .modal_state
+        .as_ref()
+        .map(|state| {
+            prepare_semantic_state_objects(
+                state,
+                plan.chunk_bytes,
+                ObjectNamespace::ResultValue,
+                plan.inventory_limits,
+            )
+        })
+        .transpose()?;
+    let mut initial_dependencies = plan.initial_dependencies;
+    initial_dependencies.push(scope_task_identity);
+    let preparation = StructuralTransientSequencePreparation {
+        workload,
+        mesh,
+        modal_state,
+        scope: scope.clone(),
+        terminal_schedule_ordinals,
+        initial_dependencies,
+        artifact_access: plan.artifact_access,
+        program_revision: plan.program_revision,
+        chunk_bytes: plan.chunk_bytes,
+        inventory_limits: plan.inventory_limits,
     };
     validate_preparation(&preparation)?;
     Ok(preparation)

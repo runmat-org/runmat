@@ -1120,16 +1120,14 @@ async fn remote_conformance(
         .unwrap();
         assert_eq!(transient_result.result.result.samples().len(), 5);
         assert_eq!(transient_result.result.numerical_receipt.blocks.len(), 2);
+        assert_eq!(transient_result.resource_attempts.len(), 2);
+        assert!(transient_result
+            .resource_attempts
+            .iter()
+            .all(|attempt| attempt.plan.validate_identity().is_ok()));
         assert_eq!(transient_publisher.closures.len(), 2);
         let final_closure = transient_publisher.closures.last().unwrap();
-        let restored = runmat_analysis_execution::StructuralTransientSequenceCoordinator::restore_from_closure(
-            transient::preparation(revision.clone(), "remote-analysis"),
-            &final_closure.root,
-            &final_closure.objects,
-        )
-        .unwrap();
-        assert_eq!(restored.completed_blocks().len(), 2);
-        assert!(!restored.has_remaining_blocks());
+        assert_eq!(final_closure.checkpoint.completed_block_count(), 2);
 
         let replacement_preparation = transient::preparation_with_encryption(
             revision.clone(),
@@ -1176,15 +1174,12 @@ async fn remote_conformance(
             "interruption occurred before recovery publication: {interruption}"
         );
         let accepted_before_replacement = interrupted_publisher.closures.pop().unwrap();
-        let restored_before_replacement =
-            runmat_analysis_execution::StructuralTransientSequenceCoordinator::restore_from_closure(
-                replacement_preparation.clone(),
-                &accepted_before_replacement.root,
-                &accepted_before_replacement.objects,
-            )
-            .unwrap();
-        assert_eq!(restored_before_replacement.completed_blocks().len(), 1);
-        assert!(restored_before_replacement.has_remaining_blocks());
+        assert_eq!(
+            accepted_before_replacement
+                .checkpoint
+                .completed_block_count(),
+            1
+        );
         let first_block_worker = replacement_pool
             .snapshot()
             .attempts

@@ -117,6 +117,10 @@ impl TryFrom<StructuralTransientExecutionCheckpointWire>
 }
 
 impl StructuralTransientExecutionCheckpoint {
+    pub fn completed_block_count(&self) -> usize {
+        self.completed_block_responses.len()
+    }
+
     pub(crate) fn new(
         preparation: &StructuralTransientSequencePreparation,
         completed_block_responses: Vec<ProgramExecutionResponse>,

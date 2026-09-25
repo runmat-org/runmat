@@ -4,18 +4,18 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind,
 };
 use runmat_analysis_execution::{
-    prepare_analysis_objects, prepare_structural_transient_workload_objects,
-    StructuralTransientRecoveryClosure, StructuralTransientSequencePreparation,
+    prepare_structural_transient_sequence, StructuralTransientRecoveryClosure,
+    StructuralTransientSequencePlan, StructuralTransientSequencePreparationInput,
 };
-use runmat_analysis_fea::execution::{AnalysisNumericalObjectKind, StructuralTransientWorkload};
+use runmat_analysis_fea::execution::{StructuralTransientBlockPlan, StructuralTransientWorkload};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::solve::transient::StructuralTimeStepPolicy;
 use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
+use runmat_execution_artifact::ArtifactAccess;
 use runmat_execution_runner_native::{NativeExecutionResult, StructuralTransientRecoveryPublisher};
-use runmat_meshing_core::{CanonicalMeshingContract, ElementOrder};
+use runmat_meshing_core::ElementOrder;
 
 pub(super) struct RecordingPublisher {
     pub(super) closures: Vec<StructuralTransientRecoveryClosure>,
@@ -54,7 +54,7 @@ impl StructuralTransientRecoveryPublisher for FailAfterFirstPublisher {
 pub(super) fn preparation(
     revision: ProgramRevision,
     authorization_scope: &str,
-) -> StructuralTransientSequencePreparation {
+) -> StructuralTransientSequencePlan {
     preparation_with_encryption(revision, authorization_scope, "remote-transient-encryption")
 }
 
@@ -62,7 +62,7 @@ pub(super) fn preparation_with_encryption(
     revision: ProgramRevision,
     authorization_scope: &str,
     encryption_context: &str,
-) -> StructuralTransientSequencePreparation {
+) -> StructuralTransientSequencePlan {
     let (model, mesh) = structural_transient_fixture();
     let workload = StructuralTransientWorkload {
         schema_version: 1,
@@ -74,34 +74,12 @@ pub(super) fn preparation_with_encryption(
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count: 4 },
         residual_target: 1.0e-10,
     };
-    let scope = runmat_analysis_fea::pipeline::transient::prepare_transient_checkpoint_scope(
-        &workload, &mesh, None,
-    )
-    .unwrap();
     let limits = ObjectInventoryLimits::default();
-    let workload_objects = prepare_structural_transient_workload_objects(
-        &workload,
-        scope.source_workload,
-        256,
-        ObjectNamespace::InputValue,
-        limits,
-    )
-    .unwrap();
-    let mesh_objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::Mesh,
-        Digest::from_bytes(*mesh.canonical_digest.bytes()),
-        &mesh.canonical_encode().unwrap(),
-        256,
-        ObjectNamespace::InputValue,
-        limits,
-    )
-    .unwrap();
-    StructuralTransientSequencePreparation {
-        workload: workload_objects,
-        mesh: mesh_objects,
+    prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
+        workload: &workload,
+        mesh: &mesh,
         modal_state: None,
-        scope,
-        terminal_schedule_ordinals: vec![2, 4],
+        block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
         initial_dependencies: Vec::new(),
         artifact_access: ArtifactAccess {
             authorization_scope: authorization_scope.into(),
@@ -110,7 +88,8 @@ pub(super) fn preparation_with_encryption(
         program_revision: revision,
         chunk_bytes: 256,
         inventory_limits: limits,
-    }
+    })
+    .unwrap()
 }
 
 pub(super) fn structural_transient_fixture() -> (

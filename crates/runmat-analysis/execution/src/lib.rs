@@ -315,7 +315,8 @@ pub use structural_transient_recovery::{
     STRUCTURAL_TRANSIENT_EXECUTION_CHECKPOINT_VALUE_SCHEMA,
 };
 pub use structural_transient_sequence::{
-    prepare_structural_transient_sequence, StructuralTransientSequenceCoordinator,
+    complete_structural_transient_sequence_preparation, prepare_structural_transient_sequence,
+    StructuralTransientSequenceCoordinator, StructuralTransientSequencePlan,
     StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 pub use task::{

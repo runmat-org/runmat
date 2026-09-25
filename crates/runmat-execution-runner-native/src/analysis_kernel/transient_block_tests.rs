@@ -5,24 +5,25 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind, TopologyTransitionPolicy, TransitionId,
 };
 use runmat_analysis_execution::{
-    bind_upstream_state_transition, execute_serial_analysis, import_structural_transient_block,
-    import_structural_transient_result, import_structural_transient_scope,
-    prepare_analysis_objects, prepare_structural_transient_block_request_objects,
-    prepare_structural_transient_block_task, prepare_structural_transient_checkpoint_objects,
-    prepare_structural_transient_result_task, prepare_structural_transient_scope_task,
-    prepare_structural_transient_sequence, prepare_structural_transient_workload_objects,
-    AnalysisHostResponse, AnalysisKernel, AnalysisKernelInvocation,
-    PreparedStructuralTransientBlockTask, PreparedStructuralTransientResultTask,
-    StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
-    StructuralTransientBlockPreparation, StructuralTransientResultPreparation,
-    StructuralTransientScopeTaskPreparation, StructuralTransientSequenceCoordinator,
-    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
+    bind_upstream_state_transition, complete_structural_transient_sequence_preparation,
+    execute_serial_analysis, import_structural_transient_block, import_structural_transient_result,
+    import_structural_transient_scope, prepare_analysis_objects,
+    prepare_structural_transient_block_request_objects, prepare_structural_transient_block_task,
+    prepare_structural_transient_checkpoint_objects, prepare_structural_transient_result_task,
+    prepare_structural_transient_scope_task, prepare_structural_transient_sequence,
+    prepare_structural_transient_workload_objects, AnalysisHostResponse, AnalysisKernel,
+    AnalysisKernelInvocation, PreparedStructuralTransientBlockTask,
+    PreparedStructuralTransientResultTask, StructuralModalTransientStudyCoordinator,
+    StructuralModalTransientStudyPreparation, StructuralTransientBlockPreparation,
+    StructuralTransientResultPreparation, StructuralTransientScopeTaskPreparation,
+    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
+    StructuralTransientSequencePreparationInput,
 };
 use runmat_analysis_fea::{
     execution::{
-        AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
-        CanonicalSemanticStateInput, CanonicalSemanticStatePayload, SequenceIdentity,
-        SolverResultIdentity, StepIdentity, StructuralModalTransientTemplate,
+        AnalysisNumericalObjectKind, AnalysisTaskIdentity, AnalysisWorkKind,
+        CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+        SequenceIdentity, SolverResultIdentity, StepIdentity, StructuralModalTransientTemplate,
         StructuralModalWorkload, StructuralModalWorkloadInput, StructuralStepWorkload,
         StructuralStudyWorkloads, StructuralTransientBlockPlan, StructuralTransientBlockRequest,
         StructuralTransientSolverPlan, StructuralTransientWorkload,
@@ -879,12 +880,10 @@ fn transient_sequence_preserves_typed_scope_resource_rejection() {
         residual_target: 1.0e-10,
     };
     let error =
-        match prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
-            workload: &workload,
-            mesh: &mesh,
+        match prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            workload,
+            mesh,
             modal_state: None,
-            block_plan: StructuralTransientBlockPlan::new(2).unwrap(),
-            initial_dependencies: Vec::new(),
             artifact_access: access(),
             program_revision: revision(),
             chunk_bytes: 256,
@@ -911,7 +910,7 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
     for (workload, mesh, modal_state) in [modal_transient_fixture(), modal_support_motion_fixture()]
     {
         let limits = ObjectInventoryLimits::default();
-        let preparation =
+        let plan =
             prepare_structural_transient_sequence(StructuralTransientSequencePreparationInput {
                 workload: &workload,
                 mesh: &mesh,
@@ -924,6 +923,46 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
                 inventory_limits: limits,
             })
             .unwrap();
+        let scope_task =
+            prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+                workload: workload.clone(),
+                mesh: mesh.clone(),
+                modal_state: Some(modal_state.clone()),
+                artifact_access: access(),
+                program_revision: revision(),
+                chunk_bytes: 256,
+                inventory_limits: limits,
+            })
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
+            directory.path().join("objects"),
+            limits.max_object_bytes,
+        )
+        .unwrap();
+        scope_task.program.write_to(&mut store).unwrap();
+        let completed = execute_serial_analysis(
+            &scope_task.program.request,
+            &mut store,
+            &NativeAnalysisKernel,
+            256,
+            limits,
+        )
+        .unwrap();
+        let scope_response = AnalysisHostResponse::completed(&scope_task.host, &completed)
+            .unwrap()
+            .program_response();
+        let imported_scope =
+            import_structural_transient_scope(&store, scope_response, &scope_task, limits).unwrap();
+        let scope_identity =
+            AnalysisTaskIdentity::new(scope_task.host.workload.identity, Vec::new()).unwrap();
+        let preparation = complete_structural_transient_sequence_preparation(
+            plan,
+            &scope_task,
+            &imported_scope,
+            scope_identity,
+        )
+        .unwrap();
         assert_eq!(
             preparation
                 .modal_state
@@ -934,12 +973,6 @@ fn modal_transient_sequence_transports_one_basis_and_restarts_exact_reduced_stat
             modal_state.identity.digest()
         );
 
-        let directory = tempfile::tempdir().unwrap();
-        let mut store = runmat_execution_artifact::cache::FilesystemObjectStore::open(
-            directory.path().join("objects"),
-            limits.max_object_bytes,
-        )
-        .unwrap();
         let mut coordinator =
             StructuralTransientSequenceCoordinator::new(preparation.clone()).unwrap();
         let first = coordinator.prepare_next_block().unwrap();
@@ -1125,25 +1158,55 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
         .unwrap()
     );
 
-    let preparation = coordinator.prepare_transient().unwrap();
-    assert_eq!(preparation.initial_dependencies, vec![state_task]);
+    let plan = coordinator.prepare_transient().unwrap();
+    assert_eq!(plan.initial_dependencies, vec![state_task]);
     let published = coordinator.semantic_state().unwrap();
-    let workload = runmat_analysis_execution::decode_prepared_structural_transient_workload(
-        &preparation.workload,
-    )
-    .unwrap();
     assert!(matches!(
-        workload.solver,
-        StructuralTransientSolverPlan::ModalReduced { basis_transition }
+        plan.workload.solver,
+        StructuralTransientSolverPlan::ModalReduced { ref basis_transition }
             if basis_transition.source_state == published.state.identity
     ));
 
+    let scope_task =
+        prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            workload: plan.workload.clone(),
+            mesh: plan.mesh.clone(),
+            modal_state: plan.modal_state.clone(),
+            artifact_access: plan.artifact_access.clone(),
+            program_revision: plan.program_revision.clone(),
+            chunk_bytes: plan.chunk_bytes,
+            inventory_limits: plan.inventory_limits,
+        })
+        .unwrap();
+    scope_task.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &scope_task.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    let scope_response = AnalysisHostResponse::completed(&scope_task.host, &completed)
+        .unwrap()
+        .program_response();
+    let imported_scope =
+        import_structural_transient_scope(&store, scope_response, &scope_task, limits).unwrap();
+    let scope_identity =
+        AnalysisTaskIdentity::new(scope_task.host.workload.identity, vec![state_task]).unwrap();
+    let preparation = complete_structural_transient_sequence_preparation(
+        plan,
+        &scope_task,
+        &imported_scope,
+        scope_identity,
+    )
+    .unwrap();
     let mut transient = StructuralTransientSequenceCoordinator::new(preparation).unwrap();
     let first = transient.prepare_next_block().unwrap();
     let response = execute_durable_block(&mut store, &first);
     let expected_first_task = runmat_analysis_fea::execution::AnalysisTaskIdentity::new(
         first.host.workload.identity,
-        vec![state_task],
+        vec![state_task, scope_identity],
     )
     .unwrap();
     transient.complete_block(&store, response, &first).unwrap();

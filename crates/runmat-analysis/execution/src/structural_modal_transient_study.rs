@@ -18,7 +18,7 @@ use crate::{
     bind_upstream_state_transition, prepare_structural_transient_sequence, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedSemanticState,
     ImportedStructuralModalResult, PreparedSemanticStatePublication, PreparedStructuralModalTask,
-    StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
+    StructuralTransientSequencePlan, StructuralTransientSequencePreparationInput,
 };
 
 /// Placement-neutral inputs for an authored modal-extraction -> modal-transient study.
@@ -133,9 +133,7 @@ impl StructuralModalTransientStudyCoordinator {
         self.producer.complete_state(source, response, prepared)
     }
 
-    pub fn prepare_transient(
-        &self,
-    ) -> AnalysisBridgeResult<StructuralTransientSequencePreparation> {
+    pub fn prepare_transient(&self) -> AnalysisBridgeResult<StructuralTransientSequencePlan> {
         let state = self
             .producer
             .semantic_state()

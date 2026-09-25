@@ -105,8 +105,7 @@ pub fn prepare_structural_transient_scope_task(
             preparation.modal_state.as_ref(),
             prepared_input_resource_facts(&numerical_inputs)?,
             projected_output_set_resource_facts(),
-        )
-        .map_err(|error| invalid(error.to_string()))?;
+        )?;
     let (study, step, execution_plan) =
         transient_scope_task_identity(&preparation.workload, &preparation.mesh, &resource_plan)?;
     let resource_objects = prepare_analysis_objects(

@@ -3,8 +3,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use runmat_analysis_execution::{
-    ImportedStructuralTransientResult, PreparedAnalysisProgram, StructuralTransientRecoveryClosure,
-    StructuralTransientSequenceCoordinator, StructuralTransientSequencePreparation,
+    complete_structural_transient_sequence_preparation, import_structural_transient_scope,
+    prepare_structural_transient_scope_task, ImportedStructuralTransientResult,
+    PlannedResourceUsageAttempt, PreparedAnalysisProgram, StructuralTransientRecoveryClosure,
+    StructuralTransientScopeTaskPreparation, StructuralTransientSequenceCoordinator,
+    StructuralTransientSequencePlan,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
@@ -54,11 +57,12 @@ impl StructuralTransientRecoveryPublisher for RetainedStructuralTransientRecover
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralTransientSequence {
     pub result: ImportedStructuralTransientResult,
+    pub resource_attempts: Vec<PlannedResourceUsageAttempt>,
 }
 
 pub async fn execute_structural_transient_locally(
     mut config: NativeExecutionConfig,
-    preparation: StructuralTransientSequencePreparation,
+    preparation: StructuralTransientSequencePlan,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
     policy.validate()?;
@@ -78,7 +82,7 @@ pub async fn execute_structural_transient_locally(
 
 pub async fn execute_structural_transient_remotely(
     pool: Arc<RemotePoolDriver>,
-    preparation: StructuralTransientSequencePreparation,
+    preparation: StructuralTransientSequencePlan,
     policy: StructuralSequenceExecutionPolicy,
     recovery: Option<&StructuralTransientRecoveryClosure>,
     publisher: &mut (impl StructuralTransientRecoveryPublisher + ?Sized),
@@ -98,13 +102,55 @@ pub async fn execute_structural_transient_remotely(
 
 pub(crate) async fn execute_structural_transient_with_pool(
     pool: &mut impl AnalysisTaskPool,
-    preparation: StructuralTransientSequencePreparation,
+    plan: StructuralTransientSequencePlan,
     policy: StructuralSequenceExecutionPolicy,
     recovery: Option<&StructuralTransientRecoveryClosure>,
     publisher: &mut (impl StructuralTransientRecoveryPublisher + ?Sized),
     initial_live_tasks: Vec<(AnalysisTaskIdentity, TaskId)>,
 ) -> NativeExecutionResult<CompletedStructuralTransientSequence> {
     policy.validate()?;
+    let prepared_scope =
+        prepare_structural_transient_scope_task(StructuralTransientScopeTaskPreparation {
+            workload: plan.workload.clone(),
+            mesh: plan.mesh.clone(),
+            modal_state: plan.modal_state.clone(),
+            artifact_access: plan.artifact_access.clone(),
+            program_revision: plan.program_revision.clone(),
+            chunk_bytes: plan.chunk_bytes,
+            inventory_limits: plan.inventory_limits,
+        })
+        .map_err(protocol)?;
+    let scope_dependencies = matching_live_dependencies(
+        &plan.initial_dependencies,
+        initial_live_tasks.iter().copied(),
+    );
+    let (scope_response, scope_identity, scope_task_id, scope_attempt) = execute_task(
+        pool,
+        &prepared_scope.host,
+        &prepared_scope.program,
+        plan.initial_dependencies.clone(),
+        scope_dependencies,
+        Some(&prepared_scope.resource_plan),
+        &policy,
+    )
+    .await?;
+    let mut resource_attempts = vec![scope_attempt.ok_or_else(|| {
+        NativeExecutionError::Protocol("transient scope task lost its planned attempt".into())
+    })?];
+    let imported_scope = import_structural_transient_scope(
+        pool,
+        scope_response,
+        &prepared_scope,
+        plan.inventory_limits,
+    )
+    .map_err(protocol)?;
+    let preparation = complete_structural_transient_sequence_preparation(
+        plan,
+        &prepared_scope,
+        &imported_scope,
+        scope_identity,
+    )
+    .map_err(protocol)?;
     let mut coordinator = match recovery {
         Some(recovery) => {
             for object in &recovery.objects {
@@ -120,14 +166,13 @@ pub(crate) async fn execute_structural_transient_with_pool(
         None => StructuralTransientSequenceCoordinator::new(preparation).map_err(protocol)?,
     };
     let mut live_block_tasks = initial_live_tasks;
+    live_block_tasks.push((scope_identity, scope_task_id));
     while coordinator.has_remaining_blocks() {
         let prepared = coordinator.prepare_next_block().map_err(protocol)?;
         let logical_dependencies = coordinator.next_block_dependency_identities();
-        let live_dependencies = matching_live_dependencies(
-            &logical_dependencies,
-            live_block_tasks.last().copied().into_iter(),
-        );
-        let (response, identity, task_id) = execute_task(
+        let live_dependencies =
+            matching_live_dependencies(&logical_dependencies, live_block_tasks.iter().copied());
+        let (response, identity, task_id, _) = execute_task(
             pool,
             &prepared.host,
             &prepared.program,
@@ -154,7 +199,7 @@ pub(crate) async fn execute_structural_transient_with_pool(
     let logical_dependencies = coordinator.assembly_dependency_identities();
     let live_dependencies =
         matching_live_dependencies(&logical_dependencies, live_block_tasks.iter().copied());
-    let (response, _, _) = execute_task(
+    let (response, _, _, assembly_attempt) = execute_task(
         pool,
         &prepared.host,
         &prepared.program,
@@ -164,11 +209,17 @@ pub(crate) async fn execute_structural_transient_with_pool(
         &policy,
     )
     .await?;
+    resource_attempts.push(assembly_attempt.ok_or_else(|| {
+        NativeExecutionError::Protocol("transient assembly task lost its planned attempt".into())
+    })?);
     coordinator
         .complete_assembly(pool, response, &prepared)
         .map_err(protocol)?;
     let result = coordinator.finish().map_err(protocol)?;
-    Ok(CompletedStructuralTransientSequence { result })
+    Ok(CompletedStructuralTransientSequence {
+        result,
+        resource_attempts,
+    })
 }
 
 async fn execute_task(
@@ -183,6 +234,7 @@ async fn execute_task(
     runmat_execution_artifact::ProgramExecutionResponse,
     AnalysisTaskIdentity,
     TaskId,
+    Option<PlannedResourceUsageAttempt>,
 )> {
     pool.register_program(program)?;
     let resources = resource_plan
@@ -224,10 +276,10 @@ async fn execute_task(
         response,
         attempt,
     };
-    if let Some(plan) = resource_plan {
-        planned_resource_attempt(plan, &executed)?;
-    }
-    Ok((executed.response, identity, task_id))
+    let planned_attempt = resource_plan
+        .map(|plan| planned_resource_attempt(plan, &executed))
+        .transpose()?;
+    Ok((executed.response, identity, task_id, planned_attempt))
 }
 
 fn matching_live_dependencies(
