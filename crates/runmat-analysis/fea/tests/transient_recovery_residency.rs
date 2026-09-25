@@ -235,23 +235,107 @@ fn mixed_observation_model() -> AnalysisModel {
     model
 }
 
+fn modal_recovery_model_and_state() -> (
+    AnalysisModel,
+    StructuralTransientSolverPlan,
+    runmat_analysis_fea::execution::CanonicalSemanticState,
+) {
+    use runmat_analysis_core::{
+        ProcedureStep, ProcedureStepId, ReferenceStatePolicy, SequenceDependency,
+        SequenceDependencyReason, StateId, StateTransition, StateTransitionMethod, StateUse,
+        TopologyTransitionPolicy, TransitionId,
+    };
+    use runmat_analysis_fea::{
+        execution::{
+            CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
+            CanonicalStateTransition, SequenceIdentity, SolverResultIdentity, StepIdentity,
+        },
+        ModalSolveOptions, ModalTruncationPolicy,
+    };
+    use runmat_execution::Digest;
+
+    let mut model = fixture_model(FixtureId::StructuralTransientTet4Reference);
+    let modal_step = ProcedureStep::structural_modal("modes");
+    let mut transient_step =
+        ProcedureStep::structural_modal_transient("response", "modes", "modal_basis");
+    transient_step.independent_domain = model.sequence.steps[0].independent_domain.clone();
+    model.sequence.steps = vec![modal_step, transient_step];
+    model.sequence.dependencies = vec![SequenceDependency {
+        predecessor: ProcedureStepId("modes".into()),
+        successor: ProcedureStepId("response".into()),
+        reason: SequenceDependencyReason::StateTransfer,
+    }];
+    model.sequence.transitions = vec![StateTransition {
+        transition_id: TransitionId("modal-basis-to-response".into()),
+        producer_step: ProcedureStepId("modes".into()),
+        consumer_step: ProcedureStepId("response".into()),
+        state_id: StateId("modal_basis".into()),
+        method: StateTransitionMethod::Reuse,
+        topology: TopologyTransitionPolicy::RequireIdentical,
+        reference: ReferenceStatePolicy::Preserve,
+    }];
+    let mesh = physical_fixture_mesh(&model);
+    let modal = runmat_analysis_fea::run_modal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ModalSolveOptions {
+            truncation: ModalTruncationPolicy::requested(1),
+            solver_mesh: Some(mesh.clone()),
+            formulation_requirement: FormulationRequirement::Experimental,
+            ..ModalSolveOptions::default()
+        },
+    )
+    .unwrap();
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let producer = StepIdentity::from_solver_contract(sequence, &model.sequence.steps[0]).unwrap();
+    let source_result =
+        SolverResultIdentity::from_step_result(producer, modal.basis.identity().digest()).unwrap();
+    let state = CanonicalSemanticState::new(CanonicalSemanticStateInput {
+        producer,
+        declaration: model.sequence.steps[0].state_outputs[0].clone(),
+        topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
+        source_result,
+        payload: CanonicalSemanticStatePayload::ModalBasis {
+            basis: Box::new(modal.basis),
+        },
+    })
+    .unwrap();
+    let transition = CanonicalStateTransition::bind_upstream(
+        &model,
+        &ProcedureStepId("response".into()),
+        &state,
+        StateUse::ModalBasis,
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+    )
+    .unwrap();
+    (
+        model,
+        StructuralTransientSolverPlan::ModalReduced {
+            basis_transition: Box::new(transition),
+        },
+        state,
+    )
+}
+
 fn measure_physical_recovery(
     case: &'static str,
     model: AnalysisModel,
     interval_count: usize,
+    solver: StructuralTransientSolverPlan,
+    modal_state: Option<&runmat_analysis_fea::execution::CanonicalSemanticState>,
 ) -> (u64, u64) {
     let mesh = physical_fixture_mesh(&model);
     let workload = StructuralTransientWorkload {
         schema_version: 1,
-        step_id: model.sequence.steps[0].step_id.clone(),
+        step_id: model.sequence.steps.last().unwrap().step_id.clone(),
         model,
         backend: ComputeBackend::Cpu,
         formulation_requirement: FormulationRequirement::Experimental,
-        solver: StructuralTransientSolverPlan::Direct,
+        solver,
         time_step_policy: StructuralTimeStepPolicy::Fixed { interval_count },
         residual_target: 1.0e-10,
     };
-    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, None).unwrap();
+    let scope = prepare_transient_checkpoint_scope(&workload, &mesh, modal_state).unwrap();
     let terminal = u64::try_from(scope.schedule.points.len() - 1).unwrap();
     let terminals = StructuralTransientBlockPlan::new(49)
         .unwrap()
@@ -268,7 +352,7 @@ fn measure_physical_recovery(
             solver_mesh: &mesh,
             request: &request,
             predecessor: predecessor.as_ref(),
-            modal_state: None,
+            modal_state,
             observation_cursors: Vec::new(),
         })
         .unwrap();
@@ -284,7 +368,11 @@ fn measure_physical_recovery(
     drop(scope);
 
     let plan = build_structural_transient_recovery_resource_plan(
-        &workload, &mesh, None, &result, &receipt,
+        &workload,
+        &mesh,
+        modal_state,
+        &result,
+        &receipt,
     )
     .unwrap();
     let baseline = LIVE_BYTES.load(Ordering::Relaxed);
@@ -293,7 +381,7 @@ fn measure_physical_recovery(
     let recovered = recover_completed_transient_run(CompletedStructuralTransientRunInput {
         workload: &workload,
         solver_mesh: &mesh,
-        modal_state: None,
+        modal_state,
         result,
         numerical_receipt: &receipt,
     })
@@ -301,15 +389,22 @@ fn measure_physical_recovery(
     TRACKING.store(false, Ordering::Relaxed);
     let peak = PEAK_BYTES.load(Ordering::Relaxed);
     assert!(recovered.time_points_s.len() > interval_count);
+    let execution_step = workload
+        .model
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.step_id == workload.step_id)
+        .unwrap();
     assert_eq!(
         recovered.run.observation_histories.len(),
-        workload.model.sequence.steps[0].observations.len()
+        execution_step.observations.len()
     );
     for (history, request) in recovered
         .run
         .observation_histories
         .iter()
-        .zip(&workload.model.sequence.steps[0].observations)
+        .zip(&execution_step.observations)
     {
         let runmat_analysis_core::ObservationRequest::History(spec) = request else {
             unreachable!("recovery fixture only authors histories")
@@ -341,19 +436,35 @@ fn completed_physical_recovery_heap_peak_fits_planned_memory() {
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         24,
+        StructuralTransientSolverPlan::Direct,
+        None,
     );
     let (long_peak, long_plan) = measure_physical_recovery(
         "direct",
         fixture_model(FixtureId::StructuralTransientTet4Reference),
         240,
+        StructuralTransientSolverPlan::Direct,
+        None,
     );
     assert!(long_peak > short_peak);
     assert!(long_plan > short_plan);
-    let (_, connector_observation_plan) =
-        measure_physical_recovery("connector observation", connector_observation_model(), 24);
+    let (_, connector_observation_plan) = measure_physical_recovery(
+        "connector observation",
+        connector_observation_model(),
+        24,
+        StructuralTransientSolverPlan::Direct,
+        None,
+    );
     assert!(connector_observation_plan > short_plan);
-    let (mixed_peak, mixed_plan) =
-        measure_physical_recovery("mixed observations", mixed_observation_model(), 240);
+    let (mixed_peak, mixed_plan) = measure_physical_recovery(
+        "mixed observations",
+        mixed_observation_model(),
+        240,
+        StructuralTransientSolverPlan::Direct,
+        None,
+    );
     assert!(mixed_peak > long_peak);
     assert!(mixed_plan > long_plan);
+    let (modal_model, modal_solver, modal_state) = modal_recovery_model_and_state();
+    measure_physical_recovery("modal", modal_model, 40, modal_solver, Some(&modal_state));
 }
