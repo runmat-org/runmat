@@ -91,6 +91,7 @@ mod random_response_portable;
 mod random_response_qualification;
 mod response_spectrum_portable;
 mod solid_static_patch;
+mod structural_static_surface;
 mod transient_physical;
 
 fn experimental_linear_static_options() -> LinearStaticSolveOptions {
