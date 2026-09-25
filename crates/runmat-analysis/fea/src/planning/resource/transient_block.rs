@@ -3,23 +3,22 @@
 use crate::ComputeBackend;
 use crate::{
     execution::{
-        AnalysisWorkKind, AnalysisWorkloadIdentity, CanonicalSemanticState,
-        StructuralTransientBlockRequest, StructuralTransientCheckpoint,
+        CanonicalSemanticState, StructuralTransientBlockRequest, StructuralTransientCheckpoint,
         StructuralTransientCoordinateSpace, StructuralTransientSolverPlan,
         StructuralTransientWorkload,
     },
     pipeline::transient::prepare_transient_preassembly,
 };
-use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use super::{
     build_resource_plan, build_structural_transient_scope_resource_plan, post_process,
-    AccuracyResourceDemand, ByteCount, CheckpointArtifactPolicy, Count, FeaResourceDemand,
-    FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput, PartitioningPolicy,
-    PhaseResourcePolicy, PreparedInputResourceFacts, PreparedOutputResourceFacts,
-    PreparedOutputSetResourceFacts, ResourcePlanningError, SolveResourcePolicy,
-    StructuralTransientBlockResourceDemand, RESOURCE_ESTIMATION_MODEL_REVISION,
+    transient_scope::transient_source_workload_identity, AccuracyResourceDemand, ByteCount,
+    CheckpointArtifactPolicy, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
+    FeaResourcePlanningInput, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
+    PreparedOutputResourceFacts, PreparedOutputSetResourceFacts, ResourcePlanningError,
+    SolveResourcePolicy, StructuralTransientBlockResourceDemand,
+    RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const FULL_ORDER_WORK_VECTORS: u64 = 128;
@@ -77,24 +76,11 @@ pub fn build_structural_transient_block_resource_plan(
     let workload_bytes = workload
         .canonical_bytes()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    let mesh_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
-    let mut dependencies = vec![mesh_digest];
-    if let StructuralTransientSolverPlan::ModalReduced { basis_transition } = &workload.solver {
-        dependencies.extend([
-            basis_transition.source_state.digest(),
-            basis_transition.identity.digest(),
-        ]);
-    }
-    let source_workload = AnalysisWorkloadIdentity::new(
-        request.scope.study,
-        request.scope.step,
-        request.scope.execution_plan,
-        AnalysisWorkKind::SolveStructuralTransientBlock,
-        Digest::sha256(&workload_bytes),
-        dependencies,
-    )
-    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-    if request.scope.source_workload != source_workload
+    let (study, step, source_workload) =
+        transient_source_workload_identity(workload, mesh, request.scope.execution_plan)?;
+    if request.scope.study != study
+        || request.scope.step != step
+        || request.scope.source_workload != source_workload
         || request.scope.schedule != prepared.schedule
         || count(request.scope.dof_count, "transient physical DOFs")?
             != scope_demand.operator.sparse.rows.0

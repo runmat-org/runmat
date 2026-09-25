@@ -5,7 +5,8 @@ mod post_process;
 mod sparse_validation;
 
 use demand_validation::{
-    validate_buckling_demand, validate_modal_demand, validate_transient_block_demand,
+    validate_buckling_demand, validate_modal_demand, validate_random_response_interval_demand,
+    validate_transient_block_demand,
 };
 use implicit_input::implicit_resource_plan_input_facts;
 use phase_policy::requires_no_solve_policy;
@@ -70,6 +71,23 @@ pub fn build_resource_plan(
             build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
         }
         (
+            FeaResourcePhase::StructuralTransientFieldRecovery(result),
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand),
+        ) if *result == demand.result => {
+            if demand.sample_count.0 == 0
+                || demand.physical_dof_count != demand.operator.sparse.rows
+                || demand.decoded_sample_bytes_upper_bound.0 == 0
+                || demand.retained_field_bytes_upper_bound.0 == 0
+                || demand.operator.phase_resources.retained_bytes
+                    < demand.retained_field_bytes_upper_bound
+            {
+                return Err(ResourcePlanningError::Invalid(
+                    "transient recovery dimensions or retained-field bound are inconsistent".into(),
+                ));
+            }
+            build_operator_resource_plan(input.clone(), &demand.operator, Some(&demand.inputs))
+        }
+        (
             FeaResourcePhase::StructuralFrequencyEntry(_),
             FeaResourceDemand::StructuralFrequencyEntry(demand),
         )
@@ -124,46 +142,6 @@ pub fn build_resource_plan(
             "resource phase and typed demand variant differ".into(),
         )),
     }
-}
-
-fn validate_random_response_interval_demand(
-    demand: &super::contract::StructuralRandomResponseIntervalResourceDemand,
-) -> Result<(), ResourcePlanningError> {
-    let minimum_spectral_values = mul(
-        mul(
-            demand.channel_count.0,
-            demand.channel_count.0,
-            "random-response channel matrix",
-        )?,
-        2,
-        "random-response minimum spectral samples",
-    )?;
-    let expected_response_values = add(
-        demand.physical_dof_count.0,
-        demand.linear_field_value_count.0,
-        "random-response response values",
-    )?;
-    let minimum_evaluations = mul(
-        demand.interval_count.0,
-        3,
-        "random-response minimum interval evaluations",
-    )?;
-    if demand.interval_count.0 == 0
-        || demand.channel_count.0 == 0
-        || demand.spectral_matrix_complex_value_count.0 < minimum_spectral_values
-        || demand.selected_mode_count.0 == 0
-        || demand.physical_dof_count.0 == 0
-        || demand.linear_field_value_count.0 == 0
-        || demand.response_value_count.0 != expected_response_values
-        || demand.maximum_frequency_evaluation_count.0 < minimum_evaluations
-        || demand.operator.sparse.rows.0 != demand.physical_dof_count.0
-        || demand.output.encoded_payload_bytes_upper_bound.0 == 0
-    {
-        return Err(ResourcePlanningError::Invalid(
-            "random-response interval resource dimensions are inconsistent".into(),
-        ));
-    }
-    Ok(())
 }
 
 fn prepared_output_is_valid(output: &PreparedOutputResourceFacts) -> bool {

@@ -50,6 +50,18 @@ pub fn recover_completed_transient_run(
         .validate_for_result(&input.result)
         .map_err(|error| FeaRunError::Solve(error.to_string()))?;
 
+    // The decoded numerical history and retained public field histories coexist during
+    // recovery. Scope admission alone does not cover them; check this exact result's host
+    // recovery envelope before assembling the first operator.
+    let _recovery_plan =
+        crate::planning::resource::build_structural_transient_recovery_resource_plan(
+            input.workload,
+            input.solver_mesh,
+            input.modal_state,
+            &input.result,
+            input.numerical_receipt,
+        )?;
+
     let (basis, options) =
         super::prepare_transient_scope_basis(input.workload, input.solver_mesh, input.modal_state)?;
     let expected_scope = StructuralTransientCheckpointScope::from_prepared_workload(

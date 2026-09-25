@@ -8,7 +8,9 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{
-        CanonicalSemanticState, StructuralTransientSolverPlan, StructuralTransientWorkload,
+        AnalysisWorkKind, AnalysisWorkloadIdentity, CanonicalSemanticState, ExecutionPlanIdentity,
+        SequenceIdentity, StepIdentity, StructuralTransientSolverPlan, StructuralTransientWorkload,
+        StudyIdentity,
     },
     pipeline::transient::PreparedTransientPreassembly,
 };
@@ -34,6 +36,45 @@ const SCOPE_BYTES_PER_SCHEDULE_POINT_UPPER_BOUND: u64 = 128;
 // Every scope field outside `schedule` is a fixed-size identity, scalar, or the bounded modal
 // projection evidence. Reserve its canonical map/field encoding independently of sample count.
 const SCOPE_FIXED_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
+
+pub(super) fn transient_source_workload_identity(
+    workload: &StructuralTransientWorkload,
+    mesh: &SolverMeshArtifact,
+    execution_plan: ExecutionPlanIdentity,
+) -> Result<(StudyIdentity, StepIdentity, AnalysisWorkloadIdentity), ResourcePlanningError> {
+    let study = StudyIdentity::from_authored_contract(&workload.model, None)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let sequence = SequenceIdentity::from_solver_contract(&workload.model.sequence)
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let step = StepIdentity::from_solver_contract(
+        sequence,
+        workload
+            .procedure_step()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+    )
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let workload_bytes = workload
+        .canonical_bytes()
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    let mesh_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
+    let mut dependencies = vec![mesh_digest];
+    if let StructuralTransientSolverPlan::ModalReduced { basis_transition } = &workload.solver {
+        dependencies.extend([
+            basis_transition.source_state.digest(),
+            basis_transition.identity.digest(),
+        ]);
+    }
+    let source = AnalysisWorkloadIdentity::new(
+        study,
+        step,
+        execution_plan,
+        AnalysisWorkKind::SolveStructuralTransientBlock,
+        Digest::sha256(&workload_bytes),
+        dependencies,
+    )
+    .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+    Ok((study, step, source))
+}
 
 pub(crate) fn structural_transient_scope_payload_bytes_upper_bound(
     schedule: &crate::execution::StructuralTransientSchedule,

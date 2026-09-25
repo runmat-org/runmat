@@ -1,8 +1,49 @@
 //! Family-specific operator-demand validation kept outside the resource estimator.
 
 use super::{
-    prepared_output_is_valid, PartitioningPolicy, ResourcePlanningError, SolveResourcePolicy,
+    add, mul, prepared_output_is_valid, PartitioningPolicy, ResourcePlanningError,
+    SolveResourcePolicy,
 };
+
+pub(super) fn validate_random_response_interval_demand(
+    demand: &super::super::contract::StructuralRandomResponseIntervalResourceDemand,
+) -> Result<(), ResourcePlanningError> {
+    let minimum_spectral_values = mul(
+        mul(
+            demand.channel_count.0,
+            demand.channel_count.0,
+            "random-response channel matrix",
+        )?,
+        2,
+        "random-response minimum spectral samples",
+    )?;
+    let expected_response_values = add(
+        demand.physical_dof_count.0,
+        demand.linear_field_value_count.0,
+        "random-response response values",
+    )?;
+    let minimum_evaluations = mul(
+        demand.interval_count.0,
+        3,
+        "random-response minimum interval evaluations",
+    )?;
+    if demand.interval_count.0 == 0
+        || demand.channel_count.0 == 0
+        || demand.spectral_matrix_complex_value_count.0 < minimum_spectral_values
+        || demand.selected_mode_count.0 == 0
+        || demand.physical_dof_count.0 == 0
+        || demand.linear_field_value_count.0 == 0
+        || demand.response_value_count.0 != expected_response_values
+        || demand.maximum_frequency_evaluation_count.0 < minimum_evaluations
+        || demand.operator.sparse.rows.0 != demand.physical_dof_count.0
+        || demand.output.encoded_payload_bytes_upper_bound.0 == 0
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "random-response interval resource dimensions are inconsistent".into(),
+        ));
+    }
+    Ok(())
+}
 
 pub(super) fn validate_buckling_demand(
     demand: &super::super::contract::StructuralBucklingResourceDemand,

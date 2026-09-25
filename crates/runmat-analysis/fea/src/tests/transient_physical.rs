@@ -419,6 +419,44 @@ fn execute_transient_workload(
     let numerical_receipt =
         crate::execution::StructuralTransientNumericalReceipt::new(&result, &request, &segments)
             .unwrap();
+    let recovery_plan =
+        crate::planning::resource::build_structural_transient_recovery_resource_plan(
+            workload,
+            mesh,
+            modal_state,
+            &result,
+            &numerical_receipt,
+        )
+        .unwrap();
+    assert!(matches!(
+        recovery_plan.input.phase,
+        crate::planning::resource::FeaResourcePhase::StructuralTransientFieldRecovery(identity)
+            if identity == result.manifest().identity
+    ));
+    let mut insufficient = recovery_plan.input.clone();
+    insufficient.accuracy_ceiling.maximum_resident_bytes = recovery_plan.request.memory_bytes - 1;
+    assert!(matches!(
+        crate::planning::resource::build_resource_plan(insufficient),
+        Err(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                ..
+            }
+        )
+    ));
+    let mut changed_workload = workload.clone();
+    changed_workload.residual_target *= 0.5;
+    assert!(matches!(
+        crate::planning::resource::build_structural_transient_recovery_resource_plan(
+            &changed_workload,
+            mesh,
+            modal_state,
+            &result,
+            &numerical_receipt,
+        ),
+        Err(crate::planning::resource::ResourcePlanningError::Invalid(message))
+            if message.contains("scope differs")
+    ));
     let options = workload.solve_options(mesh.clone());
     let reconstructed = crate::solve::transient::reconstruct_completed_transient_solve(
         crate::solve::transient::CompletedTransientSolveInput {

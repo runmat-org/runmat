@@ -7,6 +7,7 @@ pub(super) fn requires_no_solve_policy(phase: &FeaResourcePhase) -> bool {
         phase,
         FeaResourcePhase::StructuralFrequencyFieldRecovery(_)
             | FeaResourcePhase::StructuralTransientScopePreparation(_)
+            | FeaResourcePhase::StructuralTransientFieldRecovery(_)
             | FeaResourcePhase::StructuralModalResponseSpectrumDirection(_)
             | FeaResourcePhase::StructuralRandomResponseInterval(_)
     )

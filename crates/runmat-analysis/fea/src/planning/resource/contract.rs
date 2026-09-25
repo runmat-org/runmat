@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::execution::{
     AnalysisNumericalObjectKind, FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
     ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
-    ObservationPartitionReductionRequestIdentity, StructuralBucklingWorkloadIdentity,
-    StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
+    ObservationPartitionReductionRequestIdentity, SolverResultIdentity,
+    StructuralBucklingWorkloadIdentity, StructuralFrequencyEntryRequestIdentity,
+    StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalResponseSpectrumAssemblyRequestIdentity,
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
     StructuralRandomResponseAssemblyRequestIdentity,
@@ -20,9 +21,11 @@ use crate::execution::{
     StructuralTransientResultAssemblyRequestIdentity,
 };
 mod assembly_demand;
+mod error;
 mod modal_demand;
 mod random_response_demand;
 mod transient_block_demand;
+mod transient_recovery_demand;
 mod transient_scope_demand;
 pub use assembly_demand::{
     StructuralFrequencyResultAssemblyResourceDemand,
@@ -30,11 +33,13 @@ pub use assembly_demand::{
     StructuralRandomResponseAssemblyResourceDemand,
     StructuralTransientResultAssemblyResourceDemand,
 };
+pub use error::ResourcePlanningError;
 pub use modal_demand::{
     StructuralModalResourceDemand, StructuralModalResponseSpectrumDirectionResourceDemand,
 };
 pub use random_response_demand::StructuralRandomResponseIntervalResourceDemand;
 pub use transient_block_demand::StructuralTransientBlockResourceDemand;
+pub use transient_recovery_demand::StructuralTransientFieldRecoveryResourceDemand;
 pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
 
 pub use super::solve_policy::{
@@ -44,7 +49,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 11;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 12;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -228,6 +233,7 @@ pub enum FeaResourcePhase {
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
     StructuralTransientScopePreparation(Digest),
     StructuralTransientBlock(StructuralTransientBlockRequestIdentity),
+    StructuralTransientFieldRecovery(SolverResultIdentity),
     StructuralTransientResultAssembly(StructuralTransientResultAssemblyRequestIdentity),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionRequestIdentity,
@@ -416,6 +422,7 @@ pub enum FeaResourceDemand {
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
     StructuralTransientScopePreparation(StructuralTransientScopeResourceDemand),
     StructuralTransientBlock(StructuralTransientBlockResourceDemand),
+    StructuralTransientFieldRecovery(StructuralTransientFieldRecoveryResourceDemand),
     StructuralTransientResultAssembly(StructuralTransientResultAssemblyResourceDemand),
     StructuralModalResponseSpectrumDirection(
         StructuralModalResponseSpectrumDirectionResourceDemand,
@@ -528,7 +535,10 @@ impl FeaResourceDemand {
     }
 
     pub const fn governs_prepared_outputs(&self) -> bool {
-        !matches!(self, Self::StructuralLinearPipeline(_))
+        !matches!(
+            self,
+            Self::StructuralLinearPipeline(_) | Self::StructuralTransientFieldRecovery(_)
+        )
     }
 }
 
@@ -565,6 +575,9 @@ impl FeaResourcePlanningInput {
                 demand.operator.topology_digest
             }
             FeaResourceDemand::StructuralTransientBlock(demand) => demand.operator.topology_digest,
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand) => {
+                demand.operator.topology_digest
+            }
             FeaResourceDemand::StructuralTransientResultAssembly(demand) => demand.scope_digest,
             FeaResourceDemand::StructuralModalResponseSpectrumDirection(demand) => {
                 demand.operator.topology_digest
@@ -590,6 +603,9 @@ impl FeaResourcePlanningInput {
                 Some(&demand.operator.observations)
             }
             FeaResourceDemand::StructuralTransientBlock(demand) => {
+                Some(&demand.operator.observations)
+            }
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand) => {
                 Some(&demand.operator.observations)
             }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
@@ -622,6 +638,9 @@ impl FeaResourcePlanningInput {
                 &demand.operator.partitioning
             }
             FeaResourceDemand::StructuralTransientBlock(demand) => &demand.operator.partitioning,
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand) => {
+                &demand.operator.partitioning
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 &demand.operator.partitioning
@@ -661,6 +680,7 @@ impl FeaResourcePlanningInput {
                 Some(&demand.operator)
             }
             FeaResourceDemand::StructuralTransientBlock(demand) => Some(&demand.operator),
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralObservationPartition(_)
@@ -687,6 +707,9 @@ impl FeaResourcePlanningInput {
                 Some(&mut demand.operator)
             }
             FeaResourceDemand::StructuralTransientBlock(demand) => Some(&mut demand.operator),
+            FeaResourceDemand::StructuralTransientFieldRecovery(demand) => {
+                Some(&mut demand.operator)
+            }
             FeaResourceDemand::StructuralFrequencyEntry(demand)
             | FeaResourceDemand::StructuralFrequencyFieldRecovery(demand) => {
                 Some(&mut demand.operator)
@@ -882,42 +905,4 @@ pub enum ResourceAdmission {
     Reject {
         reason: ResourcePlanningError,
     },
-}
-
-#[derive(Clone, Debug, thiserror::Error, Eq, PartialEq)]
-pub enum ResourcePlanningError {
-    #[error("invalid FEA resource fact: {0}")]
-    Invalid(String),
-    #[error("FEA resource arithmetic overflow: {0}")]
-    Overflow(&'static str),
-    #[error(
-        "accuracy resource ceiling exceeded for {resource}: requires {required}, maximum {maximum}"
-    )]
-    AccuracyCeiling {
-        resource: &'static str,
-        required: u64,
-        maximum: u64,
-    },
-    #[error("worker inventory is insufficient: {0}")]
-    Inventory(&'static str),
-    #[error("worker lacks required capability `{0:?}`")]
-    Capability(Capability),
-    #[error(
-        "worker lacks accelerator `{class}` count {count} with {memory_bytes_each} bytes each"
-    )]
-    Accelerator {
-        class: String,
-        count: u16,
-        memory_bytes_each: u64,
-    },
-    #[error("FEA resource plan identity does not converge")]
-    Identity,
-    #[error("FEA resource plan encoding failed: {0}")]
-    Encoding(String),
-}
-
-impl From<runmat_canonical_codec::CanonicalCodecError> for ResourcePlanningError {
-    fn from(value: runmat_canonical_codec::CanonicalCodecError) -> Self {
-        Self::Encoding(value.to_string())
-    }
 }
