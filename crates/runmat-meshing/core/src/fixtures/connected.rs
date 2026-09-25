@@ -96,7 +96,19 @@ pub fn connected_tetrahedron_solver_mesh() -> SolverMeshArtifact {
 /// Straight-sided Tet10 elevation of the conforming four-element fixture.
 /// Every shared volume edge receives exactly one midside node.
 pub fn connected_quadratic_tetrahedron_solver_mesh() -> SolverMeshArtifact {
-    let mut artifact = connected_tetrahedron_solver_mesh();
+    elevate_connected_tet4_fixture(connected_tetrahedron_solver_mesh())
+}
+
+/// Elevate a refined canonical connected-Tet4 fixture, retaining its exterior
+/// four source faces and their unit-tetrahedron parameter charts.
+pub fn elevate_connected_tet4_fixture(mut artifact: SolverMeshArtifact) -> SolverMeshArtifact {
+    assert_eq!(artifact.resolved_request.element_order, ElementOrder::Tet4);
+    assert_eq!(artifact.topology.boundary_faces.len(), 4);
+    assert!(artifact
+        .topology
+        .volume_elements
+        .iter()
+        .all(|element| element.order == ElementOrder::Tet4));
     let mut source_faces_by_edge: BTreeMap<[u64; 2], Vec<(usize, PersistentEntityId)>> =
         BTreeMap::new();
     for (face_index, face) in artifact.topology.boundary_faces.iter().enumerate() {
@@ -192,6 +204,11 @@ pub fn connected_quadratic_tetrahedron_solver_mesh() -> SolverMeshArtifact {
         edge.order = BoundaryEdgeOrder::Line3;
     }
     artifact.resolved_request.element_order = ElementOrder::Tet10;
+    artifact.resolved_request.resources.maximum_nodes = artifact
+        .resolved_request
+        .resources
+        .maximum_nodes
+        .max(artifact.topology.nodes.len() as u64);
     for topology in &mut artifact.topology.field_topologies {
         if topology.location == FieldTopologyLocation::Node {
             topology.ordered_entity_ids = (1..=artifact.topology.nodes.len() as u64).collect();

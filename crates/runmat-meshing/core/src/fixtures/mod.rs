@@ -3,6 +3,7 @@ mod solver_mesh;
 
 pub use connected::{
     connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh,
+    elevate_connected_tet4_fixture,
 };
 pub use solver_mesh::{
     canonical_tetrahedron_meshing_evidence, canonical_tetrahedron_solver_mesh,
