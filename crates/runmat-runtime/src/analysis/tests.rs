@@ -4830,7 +4830,7 @@ fn one_analysis_material_requires_and_uses_an_explicit_solid_assignment() {
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
     assert_eq!(
-        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
         None
     );
 }
@@ -4847,7 +4847,7 @@ fn solid_material_quality_uses_resolved_occurrence_provenance() {
         .bind_resolved_entities(vec![source_solid.clone()])
         .expect("resolve authored solid");
     assert_eq!(
-        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
         None
     );
 
@@ -4859,29 +4859,100 @@ fn solid_material_quality_uses_resolved_occurrence_provenance() {
         .target
         .bind_resolved_entities(vec![other_occurrence])
         .expect("resolve another occurrence");
-    assert!(linear_static_result::material_coverage_gap_detail(&model, &mesh).is_some());
+    let reason = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("different occurrence must fail compiled property coverage");
+    assert_eq!(
+        reason.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(reason
+        .detail
+        .contains("requires exactly one compatible material assignment"));
 }
 
 #[test]
-fn multiple_analysis_materials_require_mesh_region_coverage() {
-    let mut model = sample_model_with_material_assignment_mismatch();
+fn compiled_solid_property_quality_rejects_gaps_and_overlaps() {
+    let mut model = sample_solid_model();
     model.material_assignments.clear();
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
 
-    let gap = linear_static_result::material_coverage_gap_detail(&model, &mesh)
-        .expect("region coverage must be required");
-    assert!(gap.contains("no explicit solid material assignment"));
+    let gap = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("compiled property coverage is required");
+    assert_eq!(
+        gap.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(gap.detail.contains("found 0"));
 
     model.material_assignments = vec![MaterialAssignment {
         target: runmat_analysis_core::PropertyRegionTarget::solid("region"),
         expected_material_id: "mat_steel".to_string(),
-        assigned_material_id: "mat_polymer".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
         confidence: EvidenceConfidence::Verified,
     }];
     assert_eq!(
-        linear_static_result::material_coverage_gap_detail(&model, &mesh),
+        linear_static_result::property_compilation_quality_reason(&model, &mesh),
         None
     );
+    model.material_assignments.push(MaterialAssignment {
+        target: runmat_analysis_core::PropertyRegionTarget::all_solids(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_steel".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    });
+    let overlap = linear_static_result::property_compilation_quality_reason(&model, &mesh)
+        .expect("overlapping compiled property owners must fail");
+    assert_eq!(
+        overlap.code,
+        QualityReasonCode::StructuralPropertyCompilationFailed
+    );
+    assert!(overlap.detail.contains("found 2"));
+}
+
+#[test]
+fn static_completion_rejects_result_with_unowned_solid_elements() {
+    let _guard = analysis_test_guard();
+    let (mesh_root, mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("completion-property-coverage");
+    let model = sample_solid_model();
+    let options = AnalysisRunOptions {
+        solver_mesh_artifact_path: Some(mesh_path.display().to_string()),
+        ..AnalysisRunOptions::default()
+    };
+    let solved = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        options.clone(),
+        OperationContext::new(Some("trace-completion-property-coverage".to_string()), None),
+    )
+    .expect("valid solid solve");
+    assert_eq!(solved.data.run_status, RunStatus::Completed);
+    let mesh = runmat_meshing_core::SolverMeshArtifact::canonical_decode(
+        &fs::read(&mesh_path).expect("read solver mesh"),
+    )
+    .expect("decode solver mesh");
+    let mut unowned = model;
+    unowned.material_assignments.clear();
+    let published = linear_static_result::admit_linear_static_result(
+        linear_static_result::LinearStaticResultInput {
+            model: &unowned,
+            solver_mesh: Some(&mesh),
+            requested_backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+            options: &options,
+            assigned_run_id: Some("rejected-property-coverage"),
+        },
+        solved.data.run,
+    )
+    .expect("completion must publish an attributable rejection");
+    assert_eq!(published.run_status, RunStatus::Rejected);
+    assert!(!published.numerically_acceptable);
+    assert!(published.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::StructuralPropertyCompilationFailed
+            && reason.detail.contains("found 0")
+    }));
+    let _ = fs::remove_dir_all(mesh_root);
 }
 
 #[test]

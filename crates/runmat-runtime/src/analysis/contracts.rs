@@ -73,7 +73,7 @@ pub enum QualityReasonCode {
     SolidMeshUnmappedLoadRegion,
     SolidMeshUnmappedConstraintRegion,
     SolidMeshUnmappedBoundaryRegion,
-    SolidMeshMaterialCoverageIncomplete,
+    StructuralPropertyCompilationFailed,
     SolidMeshRenderTopologyIncomplete,
     SolidMeshValidationEvidenceMissing,
     SolidMeshValidationEvidenceFailed,
