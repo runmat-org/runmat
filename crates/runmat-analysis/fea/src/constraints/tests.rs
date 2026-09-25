@@ -777,6 +777,9 @@ mod rotated_solve;
 #[path = "tests/curved_normals.rs"]
 mod curved_normals;
 
+#[path = "tests/normal_solve.rs"]
+mod normal_solve;
+
 #[test]
 fn canonical_solid_solve_enforces_affine_equation_and_recovers_reactions() {
     let (mut model, mesh) = model_and_mesh();
