@@ -450,6 +450,15 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(bound.transition.source_state, source.identity);
+        assert_eq!(
+            bound.solid_recovery.len(),
+            mesh.topology.volume_elements.len()
+        );
+        assert!(bound.solid_recovery.iter().all(|element| {
+            element.solved_thermal_quadrature.is_some()
+                && element.thermal_eigenstrain.is_none()
+                && element.prescribed_temperature_k.is_none()
+        }));
         assert_eq!(bound.reference_temperature_k, 293.15);
         assert_eq!(
             bound.physical_nodal_load_n.len(),

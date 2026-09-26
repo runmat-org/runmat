@@ -437,7 +437,15 @@ mod tests {
             });
         let load = assemble_prescribed_temperature_load(&mesh, &properties, &prescribed).unwrap();
         let recovery =
-            crate::assembly::solid_recovery::build(&mesh, &properties, Some(&prescribed)).unwrap();
+            crate::assembly::solid_recovery::build(&mesh, &properties, Some(&prescribed), None)
+                .unwrap();
+        assert!(crate::assembly::solid_recovery::build(
+            &mesh,
+            &properties,
+            Some(&prescribed),
+            Some(&vec![300.0; mesh.topology.nodes.len()]),
+        )
+        .is_err());
         for element in &recovery {
             let expected = if element.region_id == "mid_aluminum" {
                 323.15

@@ -393,6 +393,9 @@ pub(super) fn assemble_mixed_structural_system(
         nullspace_evidence,
     )
     .map_err(|error| LinearAssemblyError::SparseOperator(error.to_string()))?;
+    let structural_solid_recovery =
+        super::solid_recovery::build(mesh, &solid_properties, None, None)
+            .map_err(LinearAssemblyError::SolidOperator)?;
     Ok(AssemblySummary {
         dof_count,
         structural_node_count: layout.node_count(),
@@ -422,8 +425,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_connector_plan: Some(connector_summary.plan),
         structural_solid_element_count: mesh.topology.volume_elements.len(),
         structural_solid_total_mass_kg: solid.total_mass_kg,
-        structural_solid_recovery: super::solid_recovery::build(mesh, &solid_properties, None)
-            .map_err(LinearAssemblyError::SolidOperator)?,
+        structural_solid_recovery,
         structural_dof_layout: layout,
         structural_beam_recovery: beam_recovery,
         structural_shell_recovery: shell_recovery,

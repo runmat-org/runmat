@@ -25,6 +25,7 @@ pub struct BoundThermalStateTransfer {
     pub transition: CanonicalStateTransition,
     pub nodal_temperature_k: Vec<f64>,
     pub physical_nodal_load_n: Vec<f64>,
+    pub solid_recovery: Vec<crate::assembly::SolidRecoveryElementSummary>,
     pub reference_temperature_k: f64,
     pub source_time_s: f64,
 }
@@ -129,10 +130,20 @@ impl BoundThermalStateTransfer {
         let physical_nodal_load_n =
             assemble_solved_temperature_load(target_mesh, &properties, &nodal_temperature_k)
                 .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let solid_recovery = crate::assembly::solid_recovery::build(
+            target_mesh,
+            &properties,
+            None,
+            Some(&nodal_temperature_k),
+        )
+        .map_err(|error| {
+            AnalysisExecutionError::Invalid(format!("solid thermal recovery: {error:?}"))
+        })?;
         Ok(Self {
             transition,
             nodal_temperature_k,
             physical_nodal_load_n,
+            solid_recovery,
             reference_temperature_k,
             source_time_s: source_payload.sample_time_s,
         })

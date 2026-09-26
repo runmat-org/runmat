@@ -15,7 +15,8 @@ mod reduced_material_summary;
 mod reduced_rhs;
 mod solid_matrix;
 mod solid_properties;
-mod solid_recovery;
+pub(crate) mod solid_recovery;
+mod solid_recovery_types;
 pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
@@ -40,7 +41,6 @@ use runmat_analysis_core::{
 use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
 
-use self::elements::solid::SolidMaterial;
 use self::explicit_system::assemble_explicit_structural_system;
 use self::{
     constraint_projection::{
@@ -690,55 +690,9 @@ pub struct ShellRecoveryElementSummary {
     pub constitutive: ShellConstitutive,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SolidRecoveryElementSummary {
-    pub element_id: String,
-    pub region_id: String,
-    pub material: SolidMaterial,
-    pub thermal_eigenstrain: Option<f64>,
-    pub prescribed_temperature_k: Option<f64>,
-    pub geometry: SolidRecoveryGeometry,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "order", rename_all = "snake_case", deny_unknown_fields)]
-pub enum SolidRecoveryGeometry {
-    Tetrahedron4 {
-        node_indices: [usize; 4],
-        coordinates_m: [[f64; 3]; 4],
-    },
-    Tetrahedron10 {
-        node_indices: [usize; 10],
-        coordinates_m: [[f64; 3]; 10],
-    },
-}
-
-impl SolidRecoveryGeometry {
-    pub fn node_indices(&self) -> &[usize] {
-        match self {
-            Self::Tetrahedron4 { node_indices, .. } => node_indices,
-            Self::Tetrahedron10 { node_indices, .. } => node_indices,
-        }
-    }
-
-    /// Exact physical volume used by topology-changing recovery operations.
-    pub fn volume_m3(&self) -> Result<f64, String> {
-        use elements::solid::{Tetrahedron10ElementGeometry, Tetrahedron4ElementGeometry};
-
-        match self {
-            Self::Tetrahedron4 { coordinates_m, .. } => Tetrahedron4ElementGeometry {
-                nodes_m: *coordinates_m,
-            }
-            .volume_m3()
-            .map_err(|source| source.to_string()),
-            Self::Tetrahedron10 { coordinates_m, .. } => Tetrahedron10ElementGeometry {
-                nodes_m: *coordinates_m,
-            }
-            .volume_m3()
-            .map_err(|source| source.to_string()),
-        }
-    }
-}
+pub use solid_recovery_types::{
+    SolidRecoveryElementSummary, SolidRecoveryGeometry, SolvedThermalRecoveryQuadrature,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MomentProjectionSummary {
@@ -1234,6 +1188,7 @@ pub(super) fn assemble_linear_system_impl(
                     structural_requirement
                         == Some(StructuralFormulationRequirement::PhysicalDiscretization)
                 }),
+                None,
             )
         })
         .transpose()

@@ -13,6 +13,9 @@ use super::error::StructuralFieldRecoveryError;
 
 const COMPONENT_COUNT: usize = 6;
 
+mod stress;
+use stress::{recover_element_stress, thermal_eigenstrain_at};
+
 #[derive(Debug, PartialEq)]
 pub(super) struct SolidRecoveredFields {
     pub strain: Vec<f64>,
@@ -74,8 +77,15 @@ fn recover_solid_fields_checked(
         let recovered = recover_element_strain(element, displacement)?;
         let point_stress = recovered
             .strain
-            .map(|point_strain| recover_element_stress(element, point_strain))
-            .into_iter()
+            .iter()
+            .enumerate()
+            .map(|(point, &point_strain)| {
+                recover_element_stress(
+                    element,
+                    point_strain,
+                    thermal_eigenstrain_at(element, point),
+                )
+            })
             .collect::<Result<Vec<_>, _>>()?;
         let volume = recovered.integration_weight_m3.iter().sum::<f64>();
         if !volume.is_finite() || volume <= 0.0 {
@@ -105,8 +115,9 @@ fn recover_solid_fields_checked(
             .iter()
             .zip(&point_stress)
             .zip(recovered.integration_weight_m3)
-            .map(|((point_strain, point_stress), weight)| {
-                let eigenstrain = element.thermal_eigenstrain.unwrap_or(0.0);
+            .enumerate()
+            .map(|(point, ((point_strain, point_stress), weight))| {
+                let eigenstrain = thermal_eigenstrain_at(element, point);
                 0.5 * weight
                     * point_strain
                         .iter()
@@ -253,44 +264,6 @@ fn gather_displacement<const N: usize, const D: usize>(
     Ok(gathered)
 }
 
-fn recover_element_stress(
-    element: &SolidRecoveryElementSummary,
-    strain: [f64; COMPONENT_COUNT],
-) -> Result<[f64; COMPONENT_COUNT], StructuralFieldRecoveryError> {
-    let lambda = element.material.lame_lambda_pa().map_err(|_| {
-        StructuralFieldRecoveryError::InvalidMaterial {
-            element_id: element.element_id.clone(),
-        }
-    })?;
-    let mu = element.material.shear_modulus_pa().map_err(|_| {
-        StructuralFieldRecoveryError::InvalidMaterial {
-            element_id: element.element_id.clone(),
-        }
-    })?;
-    let eigenstrain = element.thermal_eigenstrain.unwrap_or(0.0);
-    let mechanical_normal_strain = [
-        strain[0] - eigenstrain,
-        strain[1] - eigenstrain,
-        strain[2] - eigenstrain,
-    ];
-    let trace = mechanical_normal_strain.iter().sum::<f64>();
-    let stress = [
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[0],
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[1],
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[2],
-        mu * strain[3],
-        mu * strain[4],
-        mu * strain[5],
-    ];
-    if stress.iter().all(|value| value.is_finite()) {
-        Ok(stress)
-    } else {
-        Err(StructuralFieldRecoveryError::NonFiniteResult {
-            element_id: element.element_id.clone(),
-        })
-    }
-}
-
 #[cfg(test)]
 #[path = "solid/thermoelastic_tests.rs"]
 mod thermoelastic_tests;
@@ -318,6 +291,7 @@ mod tests {
             },
             thermal_eigenstrain: None,
             prescribed_temperature_k: None,
+            solved_thermal_quadrature: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices: [0, 1, 2, 3],
                 coordinates_m: [
@@ -365,6 +339,7 @@ mod tests {
                 material: material(10.0),
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
@@ -373,6 +348,7 @@ mod tests {
                 material: material(20.0),
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry,
             },
         ];
@@ -451,6 +427,7 @@ mod tests {
             },
             thermal_eigenstrain: None,
             prescribed_temperature_k: None,
+            solved_thermal_quadrature: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices,
                 coordinates_m: node_indices.map(|node| coordinates[node]),
@@ -564,6 +541,7 @@ mod tests {
                 material: material(10.0),
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
@@ -572,6 +550,7 @@ mod tests {
                 material: material(30.0),
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry,
             },
         ];

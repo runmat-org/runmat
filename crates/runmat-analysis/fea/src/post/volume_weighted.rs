@@ -62,6 +62,7 @@ mod tests {
                 material,
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 1, 2, 3],
                     coordinates_m: [
@@ -78,6 +79,7 @@ mod tests {
                 material,
                 thermal_eigenstrain: None,
                 prescribed_temperature_k: None,
+                solved_thermal_quadrature: None,
                 geometry: SolidRecoveryGeometry::Tetrahedron4 {
                     node_indices: [0, 4, 5, 6],
                     coordinates_m: [

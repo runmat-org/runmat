@@ -546,7 +546,7 @@ pub(super) fn visit_volume_quadrature(
     Some(())
 }
 
-pub(super) fn volume_shape(
+pub(crate) fn volume_shape(
     order: ElementOrder,
     barycentric: [f64; 4],
 ) -> ([f64; 10], [[f64; 3]; 10]) {

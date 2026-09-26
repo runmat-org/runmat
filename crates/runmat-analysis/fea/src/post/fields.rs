@@ -70,11 +70,9 @@ pub fn recover_result_fields(
         local_execution,
         DeformationRecoveryDetail::Complete,
     )?;
-    let strain_energy = if summary
-        .structural_solid_recovery
-        .iter()
-        .any(|element| element.thermal_eigenstrain.is_some())
-    {
+    let strain_energy = if summary.structural_solid_recovery.iter().any(|element| {
+        element.thermal_eigenstrain.is_some() || element.solved_thermal_quadrature.is_some()
+    }) {
         super::thermoelastic_energy::total_elastic_energy(summary, &fields)?
     } else {
         recover_total_strain_energy(&solve_result.solution, &internal_force)
