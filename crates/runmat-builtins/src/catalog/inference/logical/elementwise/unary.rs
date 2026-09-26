@@ -22,9 +22,24 @@ pub(super) fn infer(
             diagnostics,
         );
     };
+    if super::output::invalid(input) {
+        diagnostics.push(super::super::super::argument_error(
+            "RM-CATALOG-LOGICAL-INPUT",
+            "unsupported logical operand",
+            0,
+        ));
+    }
+    if super::output::may_be_tabular(input) {
+        return super::super::super::finish_fixed(
+            entry,
+            request,
+            super::output::unknown(),
+            diagnostics,
+        );
+    }
     let output = super::output::tabular(input).unwrap_or_else(|| {
         let mut output = super::output::logical(input.shape.clone());
-        output.residency = input.residency.clone();
+        output.residency = super::output::residency(input);
         output
     });
     super::super::super::finish_fixed(entry, request, output, diagnostics)

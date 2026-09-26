@@ -1,4 +1,19 @@
 use super::*;
+
+#[test]
+fn not_character_pages_preserve_shape_and_column_major_truth() {
+    let shape = vec![2, 2, 2];
+    let chars = CharArray::new_with_shape(
+        vec!['A', '\0', 'B', 'C', '\0', 'D', '\0', 'E'],
+        shape.clone(),
+    )
+    .unwrap();
+    let Value::LogicalArray(result) = run_not(Value::CharArray(chars)).unwrap() else {
+        panic!("logical array")
+    };
+    assert_eq!(result.shape, shape);
+    assert_eq!(result.data, vec![0, 0, 1, 0, 1, 1, 0, 0]);
+}
 #[cfg(feature = "wgpu")]
 use crate::builtins::common::tensor;
 use crate::builtins::common::{gpu_helpers, test_support};

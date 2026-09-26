@@ -57,3 +57,28 @@ pub(super) fn tabular_class(input: &ValueFact) -> Option<&runmat_types::ClassIde
 pub(super) fn unknown() -> ValueFact {
     ValueFact::unknown(DynamicReason::RuntimeValue)
 }
+
+pub(super) fn may_be_tabular(input: &ValueFact) -> bool {
+    matches!(input.kind, ValueKindFact::Unknown)
+        || matches!(&input.kind, ValueKindFact::Object(object) if object.runtime_class.is_none())
+}
+
+pub(super) fn residency(input: &ValueFact) -> runmat_types::ResidencyFact {
+    // Device facts do not record explicit vs automatic residency; the latter
+    // may return host storage after a supported provider fallback.
+    match input.residency {
+        runmat_types::ResidencyFact::Host => runmat_types::ResidencyFact::Host,
+        _ => runmat_types::ResidencyFact::Unknown,
+    }
+}
+
+pub(super) fn invalid(input: &ValueFact) -> bool {
+    if may_be_tabular(input) || tabular_class(input).is_some() {
+        return false;
+    }
+    input.storage == StorageFact::Sparse
+        || !matches!(
+            input.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Character
+        )
+}

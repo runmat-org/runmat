@@ -83,6 +83,61 @@ fn unary_operator_preserves_shape() {
 }
 
 #[test]
+fn unknown_input_cannot_exclude_a_tabular_result() {
+    let unknown = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    for (name, rule, inputs) in [
+        (
+            "not",
+            LogicalElementwiseRule::Unary(LogicalUnaryOperator::Not),
+            vec![unknown.clone()],
+        ),
+        (
+            "and",
+            LogicalElementwiseRule::Binary(LogicalBinaryOperator::And),
+            vec![unknown.clone(), numeric(vec![Some(1), Some(1)])],
+        ),
+        (
+            "or",
+            LogicalElementwiseRule::Binary(LogicalBinaryOperator::Or),
+            vec![unknown.clone(), unknown.clone()],
+        ),
+        (
+            "xor",
+            LogicalElementwiseRule::Binary(LogicalBinaryOperator::Xor),
+            vec![unknown.clone(), unknown],
+        ),
+    ] {
+        let result = infer(
+            rule,
+            &request(inputs),
+            builtin_catalog_entry_by_name(name).unwrap(),
+        );
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown, "{name}");
+    }
+}
+
+#[test]
+fn invalid_input_and_device_fallback_are_not_overpromised() {
+    let entry = builtin_catalog_entry_by_name("not").unwrap();
+    let rule = LogicalElementwiseRule::Unary(LogicalUnaryOperator::Not);
+    let invalid = infer(
+        rule,
+        &request(vec![ValueFact::scalar(ValueKindFact::String)]),
+        entry,
+    );
+    assert!(!invalid.diagnostics.is_empty());
+    let mut device = numeric(vec![Some(2), Some(3)]);
+    device.residency = runmat_types::ResidencyFact::Device {
+        provider: Some("test".into()),
+    };
+    let result = infer(rule, &request(vec![device]), entry);
+    assert_eq!(
+        result.outputs[0].residency,
+        runmat_types::ResidencyFact::Unknown
+    );
+}
+
+#[test]
 fn tabular_operators_preserve_identity_and_reject_mixed_containers() {
     let entry = builtin_catalog_entry_by_name("and").expect("and entry");
     let table = tabular(runmat_types::standard::TABLE.owned());

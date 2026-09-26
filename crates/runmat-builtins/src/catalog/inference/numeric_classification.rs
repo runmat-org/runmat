@@ -82,7 +82,6 @@ pub(super) fn infer(
     output.view = ViewFact::Materialized;
     output.residency = match &input.residency {
         ResidencyFact::Host => ResidencyFact::Host,
-        ResidencyFact::Device { .. } => input.residency.clone(),
         _ => ResidencyFact::Unknown,
     };
     output.alias = AliasFact::Unique;
@@ -115,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    fn classification_preserves_shape_and_device_residency() {
+    fn classification_preserves_shape_without_inventing_fallback_residency() {
         let mut input = ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
                 class: NumericClass::Single,
@@ -137,7 +136,7 @@ mod tests {
         );
         assert!(matches!(
             result.outputs[0].residency,
-            ResidencyFact::Device { .. }
+            ResidencyFact::Unknown
         ));
     }
 

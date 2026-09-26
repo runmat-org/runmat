@@ -60,18 +60,14 @@ impl Buffer<f64> {
     }
 
     fn from_chars(value: CharArray) -> Self {
-        let CharArray {
-            data, rows, cols, ..
-        } = value;
-        let mut ordered = Vec::with_capacity(data.len());
-        for column in 0..cols {
-            for row in 0..rows {
-                ordered.push(data[row * cols + column] as u32 as f64);
-            }
-        }
+        let ordered = value
+            .to_column_major()
+            .into_iter()
+            .map(|character| character as u32 as f64)
+            .collect();
         Self {
             data: ordered,
-            shape: vec![rows, cols],
+            shape: value.shape,
         }
     }
 }

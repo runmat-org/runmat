@@ -4,6 +4,39 @@ use runmat_value::{SymbolicArray, SymbolicExpr, Value};
 use super::compare_symbolic;
 
 #[test]
+fn all_relations_preserve_character_pages_and_column_major_order() {
+    let shape = vec![2, 2, 2];
+    let chars = runmat_value::CharArray::new_with_shape(
+        vec!['A', '\0', 'B', 'C', '\0', 'D', '\0', 'E'],
+        shape.clone(),
+    )
+    .unwrap();
+    for (operator, expected) in [
+        (RelationalOperator::Equal, vec![0, 0, 1, 0, 1, 1, 0, 0]),
+        (RelationalOperator::NotEqual, vec![1, 1, 0, 1, 0, 0, 1, 1]),
+        (RelationalOperator::LessThan, vec![0; 8]),
+        (
+            RelationalOperator::LessThanOrEqual,
+            vec![0, 0, 1, 0, 1, 1, 0, 0],
+        ),
+        (
+            RelationalOperator::GreaterThan,
+            vec![1, 1, 0, 1, 0, 0, 1, 1],
+        ),
+        (RelationalOperator::GreaterThanOrEqual, vec![1; 8]),
+    ] {
+        let value =
+            super::evaluate_host(Value::CharArray(chars.clone()), Value::Num(0.0), operator)
+                .unwrap();
+        let Value::LogicalArray(result) = value else {
+            panic!("logical array")
+        };
+        assert_eq!(result.shape, shape, "{operator:?}");
+        assert_eq!(result.data, expected, "{operator:?}");
+    }
+}
+
+#[test]
 fn named_symbolic_relations_use_the_typed_operator_identity() {
     let lhs = Value::Symbolic(SymbolicExpr::variable("x"));
     let rhs = Value::Num(0.0);

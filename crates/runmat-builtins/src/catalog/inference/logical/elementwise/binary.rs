@@ -23,6 +23,15 @@ pub(super) fn infer(
         );
     };
 
+    for (index, input) in [left, right].into_iter().enumerate() {
+        if super::output::invalid(input) {
+            diagnostics.push(super::super::super::argument_error(
+                "RM-CATALOG-LOGICAL-INPUT",
+                "unsupported logical operand",
+                index,
+            ));
+        }
+    }
     let left_tabular = super::output::tabular(left);
     let right_tabular = super::output::tabular(right);
     if let (Some(left_class), Some(right_class)) = (
@@ -40,6 +49,14 @@ pub(super) fn infer(
     if let Some(output) = left_tabular.or(right_tabular) {
         return super::super::super::finish_fixed(entry, request, output, diagnostics);
     }
+    if super::output::may_be_tabular(left) || super::output::may_be_tabular(right) {
+        return super::super::super::finish_fixed(
+            entry,
+            request,
+            super::output::unknown(),
+            diagnostics,
+        );
+    }
 
     let shape = match broadcast_shape(&left.shape, &right.shape) {
         Ok(shape) => shape,
@@ -49,7 +66,12 @@ pub(super) fn infer(
         }
     };
     let mut output = super::output::logical(shape);
-    output.residency =
-        super::super::super::preserved_binary_residency(&left.residency, &right.residency);
+    output.residency = if super::output::residency(left) == runmat_types::ResidencyFact::Host
+        && super::output::residency(right) == runmat_types::ResidencyFact::Host
+    {
+        runmat_types::ResidencyFact::Host
+    } else {
+        runmat_types::ResidencyFact::Unknown
+    };
     super::super::super::finish_fixed(entry, request, output, diagnostics)
 }

@@ -282,9 +282,14 @@ impl RealOperand<'_> {
             ),
             RealSource::Logical { data } => RealValue::Float(f64::from(data[index] != 0)),
             RealSource::Char(array) => {
-                let row = index % array.rows;
-                let column = index / array.rows;
-                RealValue::Float(f64::from(array.data[row * array.cols + column] as u32))
+                let page_len = array.rows * array.cols;
+                let page_offset = (index / page_len) * page_len;
+                let in_page = index % page_len;
+                let row = in_page % array.rows;
+                let column = in_page / array.rows;
+                RealValue::Float(f64::from(
+                    array.data[page_offset + row * array.cols + column] as u32,
+                ))
             }
         }
     }
@@ -549,7 +554,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         }),
         Value::CharArray(array) => Some(RealOperand {
             source: RealSource::Char(array),
-            shape: vec![array.rows, array.cols],
+            shape: array.shape.clone(),
         }),
         _ => None,
     }

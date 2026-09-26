@@ -118,7 +118,8 @@ fn from_complex_tensor(tensor: ComplexTensor) -> LogicalBuffer {
 }
 
 fn from_char_array(array: CharArray) -> LogicalBuffer {
-    let CharArray { data, shape, .. } = array;
+    let data = array.to_column_major();
+    let shape = array.shape;
     LogicalBuffer {
         data: data
             .into_iter()
