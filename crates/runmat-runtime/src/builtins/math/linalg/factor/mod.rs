@@ -1,4 +1,5 @@
 pub mod chol;
+mod cholesky;
 pub mod decomposition;
 pub mod eig;
 pub mod eigs;
