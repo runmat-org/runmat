@@ -3,6 +3,8 @@ use super::*;
 mod fixtures;
 #[path = "short_circuit/receiver_replay.rs"]
 mod receiver_replay;
+#[path = "short_circuit/cancellation.rs"]
+mod cancellation;
 
 #[test]
 fn suspended_descendant_argument_defers_to_exact_child_without_replay() {

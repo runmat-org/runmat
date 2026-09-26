@@ -6,6 +6,8 @@ use runmat_value::{Value, ValueSequence};
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
+mod running_future;
+use running_future::RunningFuture;
 
 pub(super) enum AwaitStart {
     Ready(Value),
@@ -27,7 +29,7 @@ pub(super) struct PendingAwait {
 enum AwaitWork {
     Poll(Value),
     Execute {
-        handle: runmat_execution::FutureHandle,
+        running: RunningFuture,
         call: Box<DeferredCall>,
     },
 }
@@ -59,12 +61,13 @@ pub(super) fn begin(
             })
         }
         AwaitAction::ExecuteFuture { handle, call } => {
+            let running = RunningFuture::new(state.runtime.clone(), handle);
             let (continuation, generation) = state.next_suspension_identity()?;
             state.pending_await = Some(PendingAwait {
                 continuation,
                 generation,
                 edge,
-                work: AwaitWork::Execute { handle, call },
+                work: AwaitWork::Execute { running, call },
             });
             Ok(AwaitStart::Suspended {
                 continuation,
@@ -79,15 +82,10 @@ pub(super) async fn complete(
     continuation: u64,
     generation: u64,
 ) -> NativeExecutorResult<AwaitCompletion> {
+    validate_pending(state, continuation, generation)?;
     let pending = state.pending_await.take().ok_or_else(|| {
         NativeExecutorError::Host("native invocation has no pending await".into())
     })?;
-    if pending.continuation != continuation || pending.generation != generation {
-        state.pending_await = Some(pending);
-        return Err(NativeExecutorError::Host(
-            "native await continuation identity is stale or mismatched".into(),
-        ));
-    }
     let runtime = state.runtime.clone();
     let edge = pending.edge;
     let mut work = pending.work;
@@ -109,11 +107,14 @@ pub(super) async fn complete(
                     }
                     AwaitAction::Pending(value) => work = AwaitWork::Poll(value),
                     AwaitAction::ExecuteFuture { handle, call } => {
-                        work = AwaitWork::Execute { handle, call };
+                        work = AwaitWork::Execute {
+                            running: RunningFuture::new(runtime.clone(), handle),
+                            call,
+                        };
                     }
                 }
             }
-            AwaitWork::Execute { handle, call } => {
+            AwaitWork::Execute { mut running, call } => {
                 let requested_outputs = call.invocation.requested_outputs();
                 let result = match call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
@@ -138,10 +139,7 @@ pub(super) async fn complete(
                     .as_ref()
                     .map(Clone::clone)
                     .map_err(|error| ExecutionServiceError::Failed(error.to_string()));
-                runtime
-                    .execution()
-                    .complete_future(&handle, stored)
-                    .map_err(execution_error)?;
+                running.complete(stored).map_err(execution_error)?;
                 let sequence = result?;
                 return Ok(AwaitCompletion {
                     edge,
@@ -150,6 +148,22 @@ pub(super) async fn complete(
             }
         }
     }
+}
+
+pub(super) fn validate_pending(
+    state: &HostState,
+    continuation: u64,
+    generation: u64,
+) -> NativeExecutorResult<()> {
+    let pending = state.pending_await.as_ref().ok_or_else(|| {
+        NativeExecutorError::Host("native invocation has no pending await".into())
+    })?;
+    if pending.continuation != continuation || pending.generation != generation {
+        return Err(NativeExecutorError::Host(
+            "native await continuation identity is stale or mismatched".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn normalize_outputs(
