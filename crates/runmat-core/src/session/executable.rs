@@ -100,13 +100,17 @@ impl RunMatSession {
         Option<runmat_jit::tiering::RepresentationProfile>,
     )> {
         if !self.native_tiering_enabled {
+            log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=tiering_disabled");
             return None;
         }
         // Empty inputs and function-definition-only inputs intentionally have no
         // executable script entrypoint. They still update session state through
         // the interpreter path, but there is no native tier site to profile or
         // publish for them.
-        unit.script_entrypoint()?;
+        if unit.script_entrypoint().is_none() {
+            log::debug!(target: "runmat_core::native_tiering", "native interactive admission skipped reason=no_script_entrypoint");
+            return None;
+        }
         let values = self
             .workspace_values
             .iter()
@@ -135,6 +139,9 @@ impl RunMatSession {
         let profile = self
             .generic_native_cache
             .representation_profile(&profile_values);
+        log::debug!(target: "runmat_core::native_tiering",
+            "native interactive admission workspace_values={} specialization_profile_available={}",
+            profile_values.len(), profile.is_some());
         // Generic execution and feedback do not require a bounded specialization
         // profile. The complete workspace still reaches native execution.
         Some((workspace, profile))

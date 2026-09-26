@@ -11,6 +11,9 @@ use runmat_jit::{
 };
 
 use crate::ExecutableUnit;
+mod diagnostics;
+#[cfg(test)]
+mod diagnostic_tests;
 
 /// Core-owned publication boundary for generic-native products in one session.
 /// JIT owns cells and dependency matching; Core supplies authoritative program,
@@ -138,6 +141,13 @@ impl GenericNativeCache {
         } else {
             self.tiering.decide_generic(&site, &availability)
         };
+        diagnostics::decision(
+            &site,
+            &decision,
+            &availability,
+            invocation_profile.is_some(),
+            &self.tiering,
+        );
         match (decision, invocation_profile) {
             (TierDecision::Interpret, _) => Ok(None),
             (TierDecision::ExecuteGeneric, _) => Ok(self.entries.resolve(&key, &current)),
@@ -158,6 +168,7 @@ impl GenericNativeCache {
                     tier: CompilationTier::Generic,
                 };
                 if self.failed_compilations.contains(&compilation) {
+                    diagnostics::rejected(&compilation, "previous_compilation_failure", None);
                     return Ok(None);
                 }
                 match mode {
@@ -173,6 +184,11 @@ impl GenericNativeCache {
                         if !self
                             .code_budget_admits(compiled.executor.retained_code_bytes(), &current)
                         {
+                            diagnostics::rejected(
+                                &compilation,
+                                "code_budget",
+                                Some(compiled.executor.retained_code_bytes()),
+                            );
                             self.failed_compilations.insert(compilation);
                             return Ok(None);
                         }
@@ -376,6 +392,7 @@ impl GenericNativeCache {
             return Ok(());
         }
         let prepared = super::compile::prepare(unit, preferred_function, specialization)?;
+        diagnostics::scheduled(&key, &dependencies);
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("runmat-jit-compile".into())
@@ -453,11 +470,12 @@ impl GenericNativeCache {
                 .pending
                 .remove(&key)
                 .expect("completed native compilation must remain pending");
-            let Some(Ok(compiled)) = result else {
+            let Some(compiled) = diagnostics::completed(&key, result) else {
                 self.failed_compilations.insert(key);
                 continue;
             };
             if !pending.dependencies.is_satisfied_by(current) {
+                diagnostics::stale(&key, &pending.dependencies, current);
                 continue;
             }
             let admitted = match key.tier {
@@ -476,6 +494,11 @@ impl GenericNativeCache {
                     .is_ok(),
             };
             if !admitted {
+                diagnostics::rejected(
+                    &key,
+                    "code_or_version_budget",
+                    Some(compiled.executor.retained_code_bytes()),
+                );
                 self.failed_compilations.insert(key);
                 continue;
             }
@@ -483,6 +506,7 @@ impl GenericNativeCache {
             {
                 self.compilations += 1;
             }
+            diagnostics::publishing(&key, compiled.executor.retained_code_bytes());
             let published = match key.tier {
                 CompilationTier::Generic => self.entries.publish(
                     key.entry,
@@ -536,9 +560,11 @@ impl GenericNativeCache {
                 continue;
             }
             changed = true;
+            diagnostics::dependency_changed(&DependencyKey::SessionFunction(name.clone()));
             self.observe(DependencyKey::SessionFunction(name.clone()), after_revision)?;
         }
         if changed {
+            diagnostics::dependency_changed(&DependencyKey::SessionCatalog);
             self.failed_compilations.clear();
             self.observe(
                 DependencyKey::SessionCatalog,
