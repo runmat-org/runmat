@@ -22,13 +22,12 @@ fn path(value: &Value) -> BuiltinResult<PathBuf> {
     let text = match value {
         Value::String(text) => text.clone(),
         Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
-        Value::CharArray(chars) if chars.rows == 1 => chars
-            .data
-            .iter()
-            .take(chars.cols)
-            .collect::<String>()
-            .trim_end()
-            .to_owned(),
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+        {
+            chars.data.iter().collect::<String>().trim_end().to_owned()
+        }
         _ => return Err(super::error::contract(&runmat_builtins::WHAT_ERROR_FOLDER)),
     };
     expand_user_path(text.trim(), "what")

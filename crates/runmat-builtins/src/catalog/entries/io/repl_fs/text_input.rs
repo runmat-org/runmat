@@ -55,4 +55,36 @@ mod tests {
         unknown.kind = ValueKindFact::Logical;
         assert!(!scalar(&unknown));
     }
+
+    #[test]
+    fn scalar_path_consumers_share_conservative_effective_row_validation() {
+        for name in ["ls", "what", "dir"] {
+            let entry = crate::builtin_catalog_entry_by_name(name).unwrap();
+            for (dims, invalid) in [
+                (vec![Some(1), Some(2), Some(1)], false),
+                (vec![Some(1), Some(1), Some(2)], true),
+                (vec![Some(0), Some(0)], true),
+                (vec![None, Some(2), None], false),
+            ] {
+                let request = runmat_types::CallRequest {
+                    arguments: vec![ValueFact::proven(
+                        ValueKindFact::Character,
+                        ShapeFact::from(dims),
+                        runmat_types::StorageFact::Dense,
+                    )],
+                    literals: runmat_types::LiteralContext::default(),
+                    outputs: runmat_types::OutputSelection::new(
+                        runmat_types::RequestedOutputCount::One,
+                    ),
+                };
+                assert_eq!(
+                    !crate::infer_catalog_call(entry, &request)
+                        .diagnostics
+                        .is_empty(),
+                    invalid,
+                    "{name}"
+                );
+            }
+        }
+    }
 }
