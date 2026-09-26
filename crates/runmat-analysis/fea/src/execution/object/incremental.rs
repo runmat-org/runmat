@@ -1,12 +1,10 @@
 //! Incremental shared numerical-object chunking; partition inputs are never retained.
-use std::collections::BTreeSet;
-
 use super::*;
 
 /// Builds the shared canonical chunk inventory one semantic payload at a time. Final chunks
 /// remain resident until ownership is transferred by `finish`; this is not a constant-memory sink.
 pub struct AnalysisPayloadBuilder {
-    kind: AnalysisNumericalObjectKind,
+    plan: AnalysisPayloadPlan,
     logical_identity: Digest,
     chunk_bytes: usize,
     payload_hash: Sha256,
@@ -14,30 +12,25 @@ pub struct AnalysisPayloadBuilder {
     chunks: Vec<AnalysisChunkDescriptor>,
     payload_chunks: Vec<Vec<u8>>,
     partitions: Vec<AnalysisPayloadPartitionDescriptor>,
-    identities: BTreeSet<Digest>,
 }
 
 impl AnalysisPayloadBuilder {
     pub fn new(
-        kind: AnalysisNumericalObjectKind,
         logical_identity: Digest,
-        chunk_bytes: usize,
+        plan: AnalysisPayloadPlan,
     ) -> AnalysisExecutionResult<Self> {
-        if chunk_bytes == 0 {
-            return Err(AnalysisExecutionError::Invalid(
-                "chunk byte limit must be non-zero".into(),
-            ));
-        }
+        let chunks = usize::try_from(plan.transport_profile().chunk_count_upper_bound)
+            .map_err(|_| AnalysisExecutionError::Limit("planned chunk count"))?;
+        let partitions = plan.partitions.len();
         Ok(Self {
-            kind,
             logical_identity,
-            chunk_bytes,
+            chunk_bytes: plan.chunk_bytes,
             payload_hash: Sha256::new(),
             encoded_length: 0,
-            chunks: Vec::new(),
-            payload_chunks: Vec::new(),
-            partitions: Vec::new(),
-            identities: BTreeSet::new(),
+            chunks: plan::reserved(chunks)?,
+            payload_chunks: plan::reserved(chunks)?,
+            partitions: plan::reserved(partitions)?,
+            plan,
         })
     }
 
@@ -49,9 +42,17 @@ impl AnalysisPayloadBuilder {
                 "numerical object partitions must be non-empty".into(),
             ));
         }
-        if self.identities.contains(&partition.logical_identity) {
+        let expected = self.plan.partitions.get(self.partitions.len()).ok_or(
+            AnalysisExecutionError::Limit("partition exceeds planned inventory"),
+        )?;
+        if expected.logical_identity != partition.logical_identity {
             return Err(AnalysisExecutionError::Invalid(
-                "numerical object partition identities must be unique".into(),
+                "partition differs from next planned identity".into(),
+            ));
+        }
+        if partition.payload.len() as u64 > expected.encoded_bytes_upper_bound {
+            return Err(AnalysisExecutionError::Limit(
+                "partition exceeds planned byte bound",
             ));
         }
         let (chunk_count, encoded_length) = checked_append(
@@ -61,16 +62,22 @@ impl AnalysisPayloadBuilder {
             partition.payload.len(),
             self.chunk_bytes,
         )?;
-        // All cardinality, conversion and byte-total checks precede hash/inventory mutation.
-        let first_chunk_ordinal = self.chunks.len() as u32;
-        self.identities.insert(partition.logical_identity);
+        // Stage this partition fallibly before any mutation. Payload bytes move into already
+        // reserved output inventories; staging requires only additional outer Vec slots.
+        let mut staged = plan::reserved(chunk_count)?;
         for bytes in partition.payload.chunks(self.chunk_bytes) {
+            let mut owned = plan::reserved(bytes.len())?;
+            owned.extend_from_slice(bytes);
+            staged.push(owned);
+        }
+        let first_chunk_ordinal = self.chunks.len() as u32;
+        for bytes in staged {
             self.chunks.push(AnalysisChunkDescriptor {
                 ordinal: self.chunks.len() as u32,
-                digest: Digest::sha256(bytes),
+                digest: Digest::sha256(&bytes),
                 encoded_length: bytes.len() as u64,
             });
-            self.payload_chunks.push(bytes.to_vec());
+            self.payload_chunks.push(bytes);
         }
         self.partitions.push(AnalysisPayloadPartitionDescriptor {
             ordinal: self.partitions.len() as u32,
@@ -86,15 +93,15 @@ impl AnalysisPayloadBuilder {
     }
 
     pub fn finish(self) -> AnalysisExecutionResult<ChunkedAnalysisPayload> {
-        if self.partitions.is_empty() {
+        if self.partitions.len() != self.plan.partitions.len() {
             return Err(AnalysisExecutionError::Invalid(
-                "numerical object partitions must be non-empty".into(),
+                "numerical object omits planned partitions".into(),
             ));
         }
         Ok(ChunkedAnalysisPayload {
             manifest: AnalysisObjectManifest {
                 schema_version: 1,
-                kind: self.kind,
+                kind: self.plan.kind,
                 logical_identity: self.logical_identity,
                 payload_digest: Digest::from_bytes(self.payload_hash.finalize().into()),
                 encoded_length: self.encoded_length,

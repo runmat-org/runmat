@@ -129,12 +129,19 @@ fn manifest_validation_uses_checked_borrowed_slots_without_reordering() {
 
 #[test]
 fn manifest_validation_rejects_nonadjacent_duplicate_identities() {
-    let mut builder = AnalysisPayloadBuilder::new(
+    let plan = AnalysisPayloadPlan::new(
         AnalysisNumericalObjectKind::SolverResult,
-        Digest::sha256(b"result"),
         4,
+        [3, 1, 2]
+            .into_iter()
+            .map(|id| AnalysisPayloadPartitionPlan {
+                logical_identity: Digest::from_bytes([id; 32]),
+                encoded_bytes_upper_bound: 4,
+            })
+            .collect(),
     )
     .unwrap();
+    let mut builder = AnalysisPayloadBuilder::new(Digest::sha256(b"result"), plan).unwrap();
     for id in [3, 1, 2] {
         builder
             .push(AnalysisPayloadPartition {

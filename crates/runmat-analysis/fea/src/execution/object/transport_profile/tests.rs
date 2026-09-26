@@ -5,12 +5,19 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
     for chunk_bytes in [1, 7, 1024] {
         let data = [vec![1; 15], vec![2; 15], vec![3; 1]];
         let mut profiler = AnalysisTransportProfiler::new(chunk_bytes).unwrap();
-        let mut builder = AnalysisPayloadBuilder::new(
+        let plan = AnalysisPayloadPlan::new(
             AnalysisNumericalObjectKind::SolverResult,
-            Digest::sha256(b"result"),
             chunk_bytes,
+            data.iter()
+                .map(|payload| AnalysisPayloadPartitionPlan {
+                    logical_identity: Digest::sha256(payload),
+                    encoded_bytes_upper_bound: payload.len() as u64,
+                })
+                .collect(),
         )
         .unwrap();
+        let planned_transport = *plan.transport_profile();
+        let mut builder = AnalysisPayloadBuilder::new(Digest::sha256(b"result"), plan).unwrap();
         for payload in &data {
             profiler.push(payload.len() as u64).unwrap();
             builder
@@ -23,6 +30,7 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
         let profile = profiler
             .finish(AnalysisNumericalObjectKind::SolverResult)
             .unwrap();
+        assert_eq!(planned_transport, profile);
         let actual = builder.finish().unwrap();
         assert_eq!(profile.partition_count, 3);
         assert_eq!(

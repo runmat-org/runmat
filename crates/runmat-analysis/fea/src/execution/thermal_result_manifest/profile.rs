@@ -12,12 +12,13 @@ impl ThermalSolverResultManifest {
     /// Profile metadata plus every field partition before encoding numerical payloads.
     /// This is post-solve: runtime provenance is known. It is not pre-solve admission.
     pub fn encoding_profile(&self) -> AnalysisExecutionResult<ThermalResultEncodingProfile> {
+        self.validate()?;
         let mut result = ThermalResultEncodingProfile {
             contract_count: 0,
             encoded_bytes_upper_bound: 0,
             largest_contract_materialization_bytes: 0,
         };
-        self.visit_encoding_profiles(|profile| {
+        self.visit_encoding_profiles(|_, profile| {
             result.contract_count = result
                 .contract_count
                 .checked_add(1)
@@ -40,18 +41,55 @@ impl ThermalSolverResultManifest {
         chunk_bytes: usize,
     ) -> AnalysisExecutionResult<AnalysisTransportProfile> {
         let mut transport = AnalysisTransportProfiler::new(chunk_bytes)?;
-        self.visit_encoding_profiles(|profile| transport.push(profile.encoded_bytes_upper_bound))?;
+        self.validate()?;
+        self.visit_encoding_profiles(|_, profile| {
+            transport.push(profile.encoded_bytes_upper_bound)
+        })?;
         transport.finish(AnalysisNumericalObjectKind::SolverResult)
+    }
+
+    /// Ordered post-solve plan consumed by the shared bounded incremental builder.
+    pub fn transport_plan(
+        &self,
+        chunk_bytes: usize,
+    ) -> AnalysisExecutionResult<AnalysisPayloadPlan> {
+        AnalysisTransportProfiler::new(chunk_bytes)?;
+        self.validate()?;
+        let count = self
+            .fields
+            .iter()
+            .flatten()
+            .try_fold(1_usize, |count, entry| {
+                count
+                    .checked_add(entry.partitions.len())
+                    .ok_or_else(|| invalid("transport partition count overflows"))
+            })?;
+        let mut entries = AnalysisPayloadPlan::reserve_partitions(count)?;
+        self.visit_encoding_profiles(|logical_identity, profile| {
+            entries.push(AnalysisPayloadPartitionPlan {
+                logical_identity,
+                encoded_bytes_upper_bound: profile.encoded_bytes_upper_bound,
+            });
+            Ok(())
+        })?;
+        AnalysisPayloadPlan::new(
+            AnalysisNumericalObjectKind::SolverResult,
+            chunk_bytes,
+            entries,
+        )
     }
 
     fn visit_encoding_profiles(
         &self,
         mut visit: impl FnMut(
+            Digest,
             runmat_canonical_codec::SerializedCanonicalProfile,
         ) -> AnalysisExecutionResult<()>,
     ) -> AnalysisExecutionResult<()> {
-        self.validate()?;
-        visit(runmat_canonical_codec::profile_serialized(self, LIMITS)?)?;
+        visit(
+            self.identity().digest(),
+            runmat_canonical_codec::profile_serialized(self, LIMITS)?,
+        )?;
         for entry in self.fields.iter().flatten() {
             // A canonical field consists of equal full blocks and at most one trailing block.
             // Cache the previous shape: profiling work is bounded by two shapes per field,
@@ -71,7 +109,7 @@ impl ThermalSolverResultManifest {
                         profile
                     }
                 };
-                visit(profile)?;
+                visit(partition.partition.digest(), profile)?;
             }
         }
         Ok(())

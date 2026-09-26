@@ -4,19 +4,26 @@ mod peak_allocator;
 
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadBuilder,
-    AnalysisPayloadPartition,
+    AnalysisPayloadPartition, AnalysisPayloadPartitionPlan, AnalysisPayloadPlan,
 };
 use runmat_execution::Digest;
 
 #[test]
 fn manifest_validation_uses_only_reserved_borrowed_slots() {
     for count in [1_u64, 64, 4096] {
-        let mut builder = AnalysisPayloadBuilder::new(
+        let plan = AnalysisPayloadPlan::new(
             AnalysisNumericalObjectKind::SolverResult,
-            Digest::sha256(b"validation-memory"),
             1024,
+            (0..count)
+                .map(|ordinal| AnalysisPayloadPartitionPlan {
+                    logical_identity: Digest::sha256(ordinal.to_le_bytes()),
+                    encoded_bytes_upper_bound: b"partition".len() as u64,
+                })
+                .collect(),
         )
         .unwrap();
+        let mut builder =
+            AnalysisPayloadBuilder::new(Digest::sha256(b"validation-memory"), plan).unwrap();
         for ordinal in 0..count {
             builder
                 .push(AnalysisPayloadPartition {

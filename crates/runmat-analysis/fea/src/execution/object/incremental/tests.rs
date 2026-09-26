@@ -1,19 +1,28 @@
 use super::*;
 
-fn builder(chunk_bytes: usize) -> AnalysisPayloadBuilder {
-    AnalysisPayloadBuilder::new(
+fn builder(chunk_bytes: usize, partitions: &[(Digest, u64)]) -> AnalysisPayloadBuilder {
+    let plan = AnalysisPayloadPlan::new(
         AnalysisNumericalObjectKind::SolverResult,
-        Digest::sha256(b"root"),
         chunk_bytes,
+        partitions
+            .iter()
+            .map(
+                |&(logical_identity, encoded_bytes_upper_bound)| AnalysisPayloadPartitionPlan {
+                    logical_identity,
+                    encoded_bytes_upper_bound,
+                },
+            )
+            .collect(),
     )
-    .unwrap()
+    .unwrap();
+    AnalysisPayloadBuilder::new(Digest::sha256(b"root"), plan).unwrap()
 }
 
 #[test]
 fn incremental_chunks_match_independently_described_partition_boundaries() {
     let first = Digest::sha256(b"first");
     let second = Digest::sha256(b"second");
-    let mut incremental = builder(3);
+    let mut incremental = builder(3, &[(first, 5), (second, 2)]);
     let mut input = b"abcde".to_vec();
     incremental
         .push(AnalysisPayloadPartition {
@@ -95,7 +104,10 @@ fn bulk_and_incremental_paths_share_identical_canonical_output() {
         },
     ];
     for chunk_bytes in [1, 2, 3, 5, 8, usize::MAX] {
-        let mut incremental = builder(chunk_bytes);
+        let mut incremental = builder(
+            chunk_bytes,
+            &partitions.map(|p| (p.logical_identity, p.payload.len() as u64)),
+        );
         for partition in partitions {
             incremental.push(partition).unwrap();
         }
@@ -118,30 +130,38 @@ fn bulk_and_incremental_paths_share_identical_canonical_output() {
 
 #[test]
 fn rejected_partition_does_not_change_prior_output_or_reserve_identity() {
-    assert!(
-        AnalysisPayloadBuilder::new(AnalysisNumericalObjectKind::Field, Digest::sha256([]), 0)
-            .is_err()
-    );
-    assert!(builder(1).finish().is_err());
+    assert!(AnalysisPayloadPlan::new(AnalysisNumericalObjectKind::Field, 0, vec![]).is_err());
+    assert!(AnalysisPayloadPlan::new(AnalysisNumericalObjectKind::Field, 1, vec![]).is_err());
     let first = AnalysisPayloadPartition {
         logical_identity: Digest::sha256(b"a"),
         payload: b"ok",
     };
-    let mut actual = builder(1);
+    let next = Digest::sha256(b"b");
+    let mut actual = builder(1, &[(first.logical_identity, 2), (next, 3)]);
+    assert!(actual
+        .push(AnalysisPayloadPartition {
+            logical_identity: next,
+            payload: b"yes"
+        })
+        .is_err());
+    assert!(actual
+        .push(AnalysisPayloadPartition {
+            logical_identity: Digest::sha256(b"unexpected"),
+            payload: b"ok"
+        })
+        .is_err());
     actual.push(first).unwrap();
     assert!(actual.push(first).is_err());
-    let next = Digest::sha256(b"b");
     assert!(actual
         .push(AnalysisPayloadPartition {
             logical_identity: next,
             payload: &[]
         })
         .is_err());
-    let oversized = vec![0; MAX_CHUNKS + 1];
     assert!(actual
         .push(AnalysisPayloadPartition {
             logical_identity: next,
-            payload: &oversized
+            payload: b"four"
         })
         .is_err());
     actual
@@ -150,11 +170,39 @@ fn rejected_partition_does_not_change_prior_output_or_reserve_identity() {
             payload: b"yes",
         })
         .unwrap();
+    assert!(actual.push(first).is_err());
     let actual = actual.finish().unwrap();
     actual.revalidate(1).unwrap();
     assert_eq!(actual.manifest.encoded_length, 5);
     assert_eq!(actual.manifest.payload_digest, Digest::sha256(b"okyes"));
     assert_eq!(actual.manifest.partitions.len(), 2);
+}
+
+#[test]
+fn missing_partitions_cannot_finish_and_duplicate_plans_are_rejected() {
+    let first = Digest::sha256(b"first");
+    let second = Digest::sha256(b"second");
+    assert!(builder(1, &[(first, 1)]).finish().is_err());
+    let mut incomplete = builder(1, &[(first, 1), (second, 1)]);
+    incomplete
+        .push(AnalysisPayloadPartition {
+            logical_identity: first,
+            payload: b"a",
+        })
+        .unwrap();
+    assert!(incomplete.finish().is_err());
+    assert!(AnalysisPayloadPlan::new(
+        AnalysisNumericalObjectKind::SolverResult,
+        1,
+        vec![
+            AnalysisPayloadPartitionPlan {
+                logical_identity: first,
+                encoded_bytes_upper_bound: 1
+            };
+            2
+        ],
+    )
+    .is_err());
 }
 
 #[test]

@@ -538,11 +538,16 @@ also preserves earlier error precedence; for a manifest with multiple simultaneo
 reported defect may change. These components exclude error strings, allocator overhead and RSS.
 The isolated manifest-validation test measures 8, 512 and 32,768 requested heap bytes for
 1, 64 and 4,096 partitions on the tested 64-bit host, exactly matching the reserved reference slots.
-Incremental builder uniqueness storage and object-conversion overlap remain separate admission work.
+Object-conversion overlap remains separate admission work.
 
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
-entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
-counts and total-byte arithmetic before changing retained content. Canonical chunks still restart
+entrypoint delegates to it. Its constructor consumes an `AnalysisPayloadPlan` with unique ordered
+identities and per-partition encoded bounds. The plan uses the actual chunk size and shared root
+profile, and reports requested heap for its owned capacity, output-vector slots, accumulated payload
+bytes, one partition's staging slots and validation references. Output vectors are reserved fallibly
+before encoding. Each append checks the next planned identity and byte bound, then stages its chunks
+fallibly before changing hashes or inventory. Missing, duplicate, unexpected or out-of-order entries
+cannot produce a completed result. No incremental identity tree remains. Canonical chunks still restart
 at each semantic partition boundary. Thermal preparation no longer retains an all-payload inventory
 alongside those chunks. Chunks move into transport objects through the existing validated bridge.
 Tests compare complete Tet4/Tet10 thermal prepared closures against collected-input preparation,
@@ -550,10 +555,13 @@ including two chunk sizes, and independently specify small partition/chunk diges
 
 `cargo test -p runmat-analysis-fea --test incremental_chunk_residency -- --nocapture` includes
 generated input buffers and retained output chunks. With 512 KiB partitions and 64 KiB chunks,
-8,388,608 output bytes required 8,924,720 B peak additional Rust heap; 33,554,432 output bytes
-required 34,124,256 B. The bound tested is output bytes plus one source partition and metadata,
-not full thermal serialization or producer residency. Initial field identity materialization and
-post-projection whole-lifetime admission remain separate work.
+the test now compares peak requested heap against the checked plan reservation plus one generated
+source partition, replacing a fixed metadata allowance. The plan exists before the measurement
+baseline, so including its retained capacity in the tested bound is conservative. This is not full
+thermal serialization, producer residency or an enforced caller heap ceiling. Root conversion and
+pre-solve whole-lifetime admission remain separate work.
+The checked-plan implementation measured 8,923,712 B for 8,388,608 output bytes and 34,121,408 B
+for 33,554,432 output bytes on the tested host; both fit that composed bound.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

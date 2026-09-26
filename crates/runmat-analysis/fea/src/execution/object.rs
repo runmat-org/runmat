@@ -21,7 +21,9 @@ mod incremental;
 pub use incremental::AnalysisPayloadBuilder;
 mod transport_profile;
 pub use transport_profile::{AnalysisTransportProfile, AnalysisTransportProfiler};
+mod plan;
 mod serialization;
+pub use plan::{AnalysisPayloadPartitionPlan, AnalysisPayloadPlan};
 
 #[cfg(test)]
 #[path = "object_tests.rs"]
@@ -332,7 +334,17 @@ pub fn chunk_partitioned_numerical_payload(
     partitions: &[AnalysisPayloadPartition<'_>],
     chunk_bytes: usize,
 ) -> AnalysisExecutionResult<ChunkedAnalysisPayload> {
-    let mut builder = AnalysisPayloadBuilder::new(kind, logical_identity, chunk_bytes)?;
+    AnalysisTransportProfiler::new(chunk_bytes)?;
+    let mut entries = AnalysisPayloadPlan::reserve_partitions(partitions.len())?;
+    for partition in partitions {
+        entries.push(AnalysisPayloadPartitionPlan {
+            logical_identity: partition.logical_identity,
+            encoded_bytes_upper_bound: u64::try_from(partition.payload.len())
+                .map_err(|_| AnalysisExecutionError::Limit("partition byte length"))?,
+        });
+    }
+    let plan = AnalysisPayloadPlan::new(kind, chunk_bytes, entries)?;
+    let mut builder = AnalysisPayloadBuilder::new(logical_identity, plan)?;
     for partition in partitions {
         builder.push(*partition)?;
     }

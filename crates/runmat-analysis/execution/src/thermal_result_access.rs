@@ -23,7 +23,8 @@ pub fn prepare_thermal_solver_result_objects(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
     let manifest = ThermalSolverResultManifest::from_result(result)?;
-    let transport = manifest.transport_profile(chunk_bytes)?;
+    let plan = manifest.transport_plan(chunk_bytes)?;
+    let transport = plan.transport_profile();
     // Reject the complete projected output closure before allocating output chunks.
     // Manifest construction above already encodes field and partition identities.
     // Root/chunk inventory validation remains authoritative after transport construction;
@@ -37,11 +38,7 @@ pub fn prepare_thermal_solver_result_objects(
             "thermal canonical payload projection exceeds output inventory limits".into(),
         ));
     }
-    let mut builder = AnalysisPayloadBuilder::new(
-        AnalysisNumericalObjectKind::SolverResult,
-        manifest.identity().digest(),
-        chunk_bytes,
-    )?;
+    let mut builder = AnalysisPayloadBuilder::new(manifest.identity().digest(), plan)?;
     builder.push(AnalysisPayloadPartition {
         logical_identity: manifest.identity().digest(),
         payload: &manifest.canonical_bytes()?,
