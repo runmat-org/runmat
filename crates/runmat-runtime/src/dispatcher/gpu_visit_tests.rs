@@ -1,6 +1,24 @@
 use super::*;
 
 #[test]
+fn live_borrow_conflict_is_not_absence_of_device_aliases() {
+    runmat_gc::gc_test_context(|| {
+        let target = runmat_gc::gc_allocate(Value::Num(1.)).unwrap();
+        let value = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "TraversalFixture".into(),
+            target,
+            valid: true,
+        });
+        runmat_gc::gc_with_value_mut(&target, |_| {
+            assert!(try_visit_gpu_handles(&value, &mut |_| {}).is_err());
+            assert!(value_contains_gpu(&value));
+        })
+        .unwrap();
+        assert!(try_visit_gpu_handles(&value, &mut |_| {}).is_ok());
+    });
+}
+
+#[test]
 fn visits_object_arrays_and_cyclic_handle_properties_once() {
     runmat_gc::gc_test_context(|| {
         let device = Value::GpuTensor(GpuTensorHandle::new(vec![1, 1], 72, 8));

@@ -95,6 +95,45 @@ fn second_upload_alias_releases_first_allocation_exactly_once() {
     assert!(prepare(provider, &[host(), host()]).is_err());
     assert_eq!(*provider.freed.lock().unwrap(), vec![1]);
 }
+
+#[test]
+fn inaccessible_borrowed_graph_fails_before_any_upload() {
+    runmat_gc::gc_test_context(|| {
+        let provider = provider(None);
+        let target = runmat_gc::gc_allocate(Value::Num(1.)).unwrap();
+        let value = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "OwnershipFixture".into(),
+            target,
+            valid: true,
+        });
+        runmat_gc::gc_with_value_mut(&target, |_| {
+            assert!(prepare(provider, &[host(), host(), value]).is_err());
+        })
+        .unwrap();
+        assert_eq!(provider.next.load(Ordering::Relaxed), 1);
+        assert!(provider.freed.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn inaccessible_result_graph_fails_without_publishing_and_releases_uploads() {
+    runmat_gc::gc_test_context(|| {
+        let provider = provider(None);
+        let prepared = prepare(provider, &[host(), host()]).unwrap();
+        let target = runmat_gc::gc_allocate(prepared.args()[0].clone()).unwrap();
+        let value = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "OwnershipFixture".into(),
+            target,
+            valid: true,
+        });
+        runmat_gc::gc_with_value_mut(&target, |_| {
+            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }));
+            assert!(result.is_err());
+        })
+        .unwrap();
+        assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2]);
+    });
+}
 fn host() -> Value {
     Value::Tensor(Tensor::new(vec![1.; 2], vec![1, 2]).unwrap())
 }
@@ -125,7 +164,8 @@ fn abandoned_preparation_and_failed_call_release_uploads() {
             prepared
                 .into_execution()
                 .1
-                .finish(&Err(RuntimeError::new("call failure")));
+                .finish(&Err(RuntimeError::new("call failure")))
+                .unwrap();
         } else {
             drop(prepared);
         }
@@ -138,7 +178,7 @@ fn nested_return_alias_adopts_only_its_own_upload() {
     let provider = provider(None);
     let prepared = prepare(provider, &[host(), host()]).unwrap();
     let output = Value::OutputList(vec![Value::OutputList(vec![prepared.args()[0].clone()])]);
-    prepared.into_execution().1.finish(&Ok(output));
+    prepared.into_execution().1.finish(&Ok(output)).unwrap();
     assert_eq!(*provider.freed.lock().unwrap(), vec![2]);
 }
 
@@ -153,7 +193,8 @@ fn borrowed_input_is_never_released_on_call_failure() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("call failure")));
+        .finish(&Err(RuntimeError::new("call failure")))
+        .unwrap();
     assert_eq!(*provider.freed.lock().unwrap(), vec![1]);
 }
 

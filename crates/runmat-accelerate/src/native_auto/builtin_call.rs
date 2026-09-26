@@ -28,13 +28,14 @@ impl BuiltinCallGuard {
         }
     }
 
-    pub fn finish(mut self, result: &Result<Value, RuntimeError>) {
+    pub fn finish(mut self, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
         if let (Some(uploads), Ok(value)) = (self.uploads.as_mut(), result) {
-            uploads.adopt(value);
+            uploads.adopt(value)?;
         }
         if let Some(observation) = self.observation.take() {
             observation.finish(result);
         }
+        Ok(())
     }
 }
 
@@ -75,7 +76,7 @@ impl PreparedBuiltinCall {
         async move {
             guard.begin_execution();
             let result = call(args).await;
-            guard.finish(&result);
+            guard.finish(&result)?;
             result
         }
     }

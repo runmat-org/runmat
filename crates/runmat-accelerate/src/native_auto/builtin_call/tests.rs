@@ -150,7 +150,11 @@ fn errors_abandonment_and_cancelled_call_futures_report_failure() {
 fn provider_return_is_not_a_completed_device_cost_sample() {
     let probe = Rc::new(Probe::default());
     let prepared = observed(&probe, true, vec![]);
-    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
+    prepared
+        .into_execution()
+        .1
+        .finish(&Ok(Value::Num(1.)))
+        .unwrap();
     assert!(
         probe.feedback.borrow().is_empty(),
         "host retry or provider submission cannot establish device timing"
@@ -159,7 +163,8 @@ fn provider_return_is_not_a_completed_device_cost_sample() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("provider failed")));
+        .finish(&Err(RuntimeError::new("provider failed")))
+        .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
@@ -174,7 +179,7 @@ fn resident_input_or_output_prevents_unproven_cpu_sample() {
     ));
     for (input, output) in [(device.clone(), Value::Num(1.)), (Value::Num(1.), device)] {
         let prepared = observed(&probe, false, vec![input]);
-        prepared.into_execution().1.finish(&Ok(output));
+        prepared.into_execution().1.finish(&Ok(output)).unwrap();
     }
     assert!(probe.feedback.borrow().is_empty());
 }
@@ -188,7 +193,11 @@ fn preparation_fallback_is_failed_provider_attempt_not_cpu_success() {
         .as_mut()
         .unwrap()
         .preparation_fallback();
-    prepared.into_execution().1.finish(&Ok(Value::Num(2.)));
+    prepared
+        .into_execution()
+        .1
+        .finish(&Ok(Value::Num(2.)))
+        .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
@@ -208,7 +217,11 @@ fn cancellation_flag_prevents_a_success_sample() {
         .runtime
         .cancellation()
         .store(true, std::sync::atomic::Ordering::Relaxed);
-    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
+    prepared
+        .into_execution()
+        .1
+        .finish(&Ok(Value::Num(1.)))
+        .unwrap();
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
 
@@ -223,7 +236,11 @@ fn preparation_passes_session_and_exact_operation_to_existing_planner() {
     assert_eq!(probe.requests.borrow()[0].signature.operation, "mean");
     assert!(probe.feedback.borrow().is_empty());
     assert!(matches!(prepared.args()[0], Value::Tensor(_)));
-    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
+    prepared
+        .into_execution()
+        .1
+        .finish(&Ok(Value::Num(1.)))
+        .unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }

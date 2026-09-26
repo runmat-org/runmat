@@ -136,7 +136,7 @@ impl NativeAutoOffload {
         let mut observation =
             BuiltinCallObservation::new(feedback, trace, evaluation.recommend_gpu, args);
         let mut processed = args.to_vec();
-        let mut uploads = super::ownership::OwnedUploads::new(self.provider, args);
+        let mut uploads = super::ownership::OwnedUploads::new(self.provider, args)?;
         if evaluation.recommend_gpu {
             for value in processed.iter_mut().take(operation.count()) {
                 *value = self.promote_tensor_protecting(

@@ -11,22 +11,25 @@ pub(super) struct OwnedUploads {
 }
 
 impl OwnedUploads {
-    pub(super) fn new(provider: &'static dyn AccelProvider, args: &[Value]) -> Self {
+    pub(super) fn new(
+        provider: &'static dyn AccelProvider,
+        args: &[Value],
+    ) -> Result<Self, RuntimeError> {
         let mut borrowed = BTreeSet::new();
         let mut borrowed_handles = Vec::new();
         for value in args {
-            runmat_runtime::dispatcher::visit_gpu_handles(value, &mut |handle| {
+            runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
                 if borrowed.insert((handle.device_id, handle.buffer_id)) {
                     borrowed_handles.push(handle.clone());
                 }
-            });
+            })?;
         }
-        Self {
+        Ok(Self {
             provider,
             borrowed,
             borrowed_handles,
             owned: Vec::new(),
-        }
+        })
     }
 
     pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
@@ -47,13 +50,14 @@ impl OwnedUploads {
         });
     }
 
-    pub(super) fn adopt(&mut self, value: &Value) {
+    pub(super) fn adopt(&mut self, value: &Value) -> Result<(), RuntimeError> {
         let mut retained = BTreeSet::new();
-        runmat_runtime::dispatcher::visit_gpu_handles(value, &mut |handle| {
+        runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
             retained.insert((handle.device_id, handle.buffer_id));
-        });
+        })?;
         self.owned
             .retain(|handle| !retained.contains(&(handle.device_id, handle.buffer_id)));
+        Ok(())
     }
 
     pub(super) fn transfer_all(mut self) {
