@@ -1,7 +1,11 @@
 use super::*;
 use runmat_types::{
-    LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount,
+    LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact, OutputSelection,
+    RequestedOutputCount,
 };
+
+#[path = "tests/options.rs"]
+mod options;
 
 #[test]
 fn variadic_empty_placeholders_preserve_dimension_and_default_inference() {
@@ -111,7 +115,7 @@ fn vecdim_reduces_each_selected_dimension_without_changing_rank() {
 }
 
 #[test]
-fn dynamic_dimension_preserves_rank_without_claiming_extents() {
+fn unknown_selector_may_reduce_all_dimensions_and_change_rank() {
     let result = infer_logical(
         &request(
             ShapeFact::from(vec![Some(2), Some(3), Some(4)]),
@@ -120,7 +124,8 @@ fn dynamic_dimension_preserves_rank_without_claiming_extents() {
         &crate::ANY_CATALOG_ENTRY,
         LogicalReductionKind::Any,
     );
-    assert_eq!(result.outputs[0].shape, ShapeFact::Ranked { rank: 3 });
+    assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+    assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
 }
 
 #[test]
@@ -144,11 +149,14 @@ fn invalid_input_and_arity_are_diagnostics_not_invented_facts() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-LOGICAL-REDUCTION-INPUT"));
-    assert!(result
+    assert!(!result
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-LOGICAL-REDUCTION-ARITY"));
-    assert!(!result.diagnostics.is_empty());
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-CALL-ARITY"));
 
     request.arguments.clear();
     let missing = infer_logical(
