@@ -634,8 +634,17 @@ The lower-level planner accepts supplied prepared facts; worker integration must
 from immutable inputs rather than trust submitted byte counts. Only an explicit CPU backend is
 admitted by this new plan builder. Tests cover source/phase binding, canonical plan round trips,
 additive receipt storage, exact/one-byte-short memory ceilings and undersized output inventory.
-These are planning tests, not a measured portable-worker admission claim. The executable thermal
-workkind, task wiring, native dispatch and independent accuracy/release gates remain pending.
+These are planning tests, not a measured portable-worker admission claim.
+
+The `SolveThermal` host task now carries the canonical workload, mesh and resource plan. Native
+dispatch validates their identities and selected step, rederives the plan at the effective output
+policy, and checks the execution identity before solving. It returns a moved prepared result and
+a source-bound numerical receipt. Result import validates the exact returned reference inventory,
+workload, topology and receipt without gathering field arrays. Terminal-temperature publication
+uses the thermal manifest's semantic result identity rather than a host/transport-derived identity.
+Resource-planned task submission uses the shared analysis allocation check. This path remains an
+explicit-CPU, experimental formulation envelope: isolated-process/durable/remote thermal
+conformance, measured worker residency, and independent accuracy/release gates are not yet proven.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

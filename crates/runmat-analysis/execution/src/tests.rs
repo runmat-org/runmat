@@ -1609,7 +1609,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         deadline_unix_millis: None,
         priority: 0,
     };
-    let submission = build_structural_task_submission(
+    let submission = build_resource_planned_task_submission(
         &prepared.host,
         &prepared.resource_plan,
         roots.clone(),
@@ -1628,7 +1628,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     );
     let mut understated = scheduled_resources.clone();
     understated.memory_bytes -= 1;
-    assert!(build_structural_task_submission(
+    assert!(build_resource_planned_task_submission(
         &prepared.host,
         &prepared.resource_plan,
         roots,
@@ -1995,7 +1995,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         resources
             .required_capabilities
             .extend(partition.host.workload.generic_capabilities().unwrap());
-        let submission = build_structural_task_submission(
+        let submission = build_resource_planned_task_submission(
             &partition.host,
             &partition.resource_plan,
             roots,
@@ -2092,7 +2092,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         resources
             .required_capabilities
             .extend(reduction.host.workload.generic_capabilities().unwrap());
-        let submission = build_structural_task_submission(
+        let submission = build_resource_planned_task_submission(
             &reduction.host,
             &reduction.resource_plan,
             roots,

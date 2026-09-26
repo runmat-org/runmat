@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use rcgen::{generate_simple_self_signed, CertifiedKey};
 use runmat_analysis_execution::{
-    build_analysis_task_submission, build_structural_task_submission, import_analysis_objects,
-    import_analysis_output_set, import_structural_linear_completion,
+    build_analysis_task_submission, build_resource_planned_task_submission,
+    import_analysis_objects, import_analysis_output_set, import_structural_linear_completion,
     prepare_structural_linear_program, prepare_structural_resource_usage, AnalysisExecutionContext,
     AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
     PreparedStructuralResourceUsage, StructuralLinearProgramPreparation,
@@ -1984,7 +1984,7 @@ fn analysis_submission(
         priority: 0,
     };
     match resource_plan {
-        Some(resource_plan) => build_structural_task_submission(
+        Some(resource_plan) => build_resource_planned_task_submission(
             host,
             resource_plan,
             roots,

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_execution::{
-    build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
-    AnalysisHostWorkload, PreparedAnalysisProgram,
+    build_analysis_task_submission, build_resource_planned_task_submission,
+    AnalysisExecutionContext, AnalysisHostWorkload, PreparedAnalysisProgram,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
 use runmat_analysis_fea::planning::resource::FeaResourcePlan;
@@ -60,7 +60,7 @@ pub(crate) fn prepare_analysis_task(
         priority: policy.priority,
     };
     let submission = match policy.resource_plan {
-        Some(resource_plan) => build_structural_task_submission(
+        Some(resource_plan) => build_resource_planned_task_submission(
             host,
             resource_plan,
             roots,

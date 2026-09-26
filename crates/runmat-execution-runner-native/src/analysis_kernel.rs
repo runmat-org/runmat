@@ -106,6 +106,7 @@ mod random_response_tests;
 mod response_spectrum;
 #[cfg(test)]
 mod response_spectrum_tests;
+mod thermal;
 mod transient_scope;
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -118,6 +119,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         match invocation.kind {
             AnalysisWorkKind::Solve => execute_structural_linear(invocation),
+            AnalysisWorkKind::SolveThermal => thermal::execute(invocation),
             AnalysisWorkKind::RecoverField => field_recovery::execute_field_recovery(invocation),
             AnalysisWorkKind::EvaluateObservationPartition => {
                 observation::execute_observation_partition(invocation)

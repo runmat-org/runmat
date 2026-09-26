@@ -28,7 +28,7 @@ pub struct AnalysisExecutionContext {
     pub priority: i16,
 }
 
-pub fn build_structural_task_submission(
+pub fn build_resource_planned_task_submission(
     host: &AnalysisHostWorkload,
     resource_plan: &FeaResourcePlan,
     program_roots: Vec<ValueRef>,
@@ -37,7 +37,7 @@ pub fn build_structural_task_submission(
     context: AnalysisExecutionContext,
 ) -> AnalysisBridgeResult<TaskSubmission> {
     resource_plan.validate_identity().map_err(|error| {
-        crate::AnalysisBridgeError::Invalid(format!("invalid structural resource plan: {error}"))
+        crate::AnalysisBridgeError::Invalid(format!("invalid analysis resource plan: {error}"))
     })?;
     let matching_plan_inputs = host
         .workload
@@ -48,13 +48,13 @@ pub fn build_structural_task_submission(
     if !matches!(matching_plan_inputs.as_slice(), [input] if input.logical_identity == resource_plan.identity.digest())
     {
         return Err(crate::AnalysisBridgeError::Identity(
-            "structural workload does not bind the canonical resource plan",
+            "analysis workload does not bind the canonical resource plan",
         ));
     }
     let planned = &resource_plan.request;
     if !allocation_matches_plan(&context.resources, planned) {
         return Err(crate::AnalysisBridgeError::Identity(
-            "structural task resources differ from the canonical post-projection plan",
+            "analysis task resources differ from the canonical post-projection plan",
         ));
     }
     build_analysis_task_submission(

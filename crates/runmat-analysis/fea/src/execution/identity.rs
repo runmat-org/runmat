@@ -359,6 +359,13 @@ impl AccuracyIdentity {
 }
 
 impl NumericalPlanIdentity {
+    /// Thermal numerical intent is independent of task placement and transport chunking.
+    pub fn from_thermal_intent(
+        intent: ThermalNumericalIntentIdentity,
+        topology: Digest,
+    ) -> AnalysisExecutionResult<Self> {
+        Self::derive("thermal-numerical-plan", &(intent, topology))
+    }
     pub fn new(
         operator: OperatorIdentity,
         solver_contract_digest: Digest,

@@ -58,7 +58,13 @@ mod structural_transient_sequence;
 mod task;
 mod thermal_execution;
 mod thermal_plan;
-pub use thermal_plan::{prepare_thermal_inputs, PreparedThermalInputs};
+pub use thermal_plan::{
+    prepare_thermal_inputs, rederive_thermal_resource_plan, PreparedThermalInputs,
+};
+mod thermal_task;
+mod thermal_task_result;
+pub use thermal_task::{prepare_thermal_task, PreparedThermalTask, ThermalTaskPreparation};
+pub use thermal_task_result::{import_thermal_result, ImportedThermalResult};
 mod thermal_result_access;
 mod transient_block_task;
 mod transient_object_access;
@@ -327,8 +333,8 @@ pub use structural_transient_sequence::{
     StructuralTransientSequencePreparation, StructuralTransientSequencePreparationInput,
 };
 pub use task::{
-    build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
-    DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+    build_analysis_task_submission, build_resource_planned_task_submission,
+    AnalysisExecutionContext, DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
 pub use thermal_execution::execute_thermal_solver_result_objects;
 pub use thermal_result_access::{

@@ -102,6 +102,7 @@ identity_type!(StructuralBucklingWorkloadIdentity);
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisWorkKind {
+    SolveThermal,
     MaterializeSignal,
     CompileConstraints,
     AssembleOperator,

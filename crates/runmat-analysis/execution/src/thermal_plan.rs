@@ -1,6 +1,7 @@
 //! Canonical thermal inputs and shared bridge-derived output reservations.
 use crate::{
-    prepare_analysis_objects, prepared_input_resource_facts, projected_output_set_resource_facts,
+    prepare_analysis_objects, prepared_input_resource_facts,
+    prepared_input_resource_facts_without_resource_plan, projected_output_set_resource_facts,
     projected_transport_output_resource_facts, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisOutputPolicy, PreparedAnalysisObjects,
 };
@@ -20,6 +21,55 @@ pub struct PreparedThermalInputs {
     pub resource_plan: FeaResourcePlan,
 }
 
+/// Recompute the worker plan using validated imported inputs, without cloning their buffers.
+pub fn rederive_thermal_resource_plan(
+    workload: &ThermalWorkload,
+    mesh: &SolverMeshArtifact,
+    inputs: &[PreparedAnalysisObjects],
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<FeaResourcePlan> {
+    let count = |kind| {
+        inputs
+            .iter()
+            .filter(|input| input.manifest.kind == kind)
+            .count()
+    };
+    if inputs.len() != 3
+        || count(AnalysisNumericalObjectKind::ThermalWorkload) != 1
+        || count(AnalysisNumericalObjectKind::Mesh) != 1
+        || count(AnalysisNumericalObjectKind::ResourcePlan) != 1
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "thermal execution requires exactly workload, mesh and resource-plan inputs".into(),
+        ));
+    }
+    let workload_identity = workload.identity()?.digest();
+    if !inputs.iter().any(|input| {
+        input.manifest.kind == AnalysisNumericalObjectKind::ThermalWorkload
+            && input.manifest.logical_identity == workload_identity
+    }) || !inputs.iter().any(|input| {
+        input.manifest.kind == AnalysisNumericalObjectKind::Mesh
+            && input.manifest.logical_identity == Digest::from_bytes(*mesh.canonical_digest.bytes())
+    }) {
+        return Err(AnalysisBridgeError::Identity(
+            "thermal resource inputs differ from decoded workload or mesh",
+        ));
+    }
+    let (result_output, receipt_output) = projected_thermal_outputs(workload, mesh, policy)?;
+    let facts = PreparedThermalResourceFacts {
+        inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
+        result_output,
+        receipt_output,
+        output_set: projected_output_set_resource_facts(),
+    };
+    Ok(build_thermal_resource_plan(
+        workload,
+        mesh,
+        policy.chunk_bytes(),
+        facts,
+    )?)
+}
+
 /// Prepare governed numerical inputs, not an executable worker task. Native execution must
 /// rederive this plan and compare it with the admitted plan before invoking the numerical solve.
 pub fn prepare_thermal_inputs(
@@ -27,13 +77,7 @@ pub fn prepare_thermal_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
-    let numerical = workload.prepare(mesh)?;
-    let result_profile = numerical.transport_profile(policy.chunk_bytes())?;
-    crate::thermal_execution::require_inventory(&result_profile, policy.inventory_limits())?;
-    let mut receipt_profile = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
-    receipt_profile.push(THERMAL_RECEIPT_MAX_ENCODED_BYTES)?;
-    let receipt_profile = receipt_profile.finish(AnalysisNumericalObjectKind::NumericalReceipt)?;
-    crate::thermal_execution::require_inventory(&receipt_profile, policy.inventory_limits())?;
+    let (result_output, receipt_output) = projected_thermal_outputs(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ThermalWorkload,
         workload.identity()?.digest(),
@@ -56,16 +100,34 @@ pub fn prepare_thermal_inputs(
     let inputs = vec![workload_objects, mesh_objects];
     let facts = PreparedThermalResourceFacts {
         inputs: prepared_input_resource_facts(&inputs)?,
-        result_output: projected_transport_output_resource_facts(&result_profile)?,
-        receipt_output: projected_transport_output_resource_facts(&receipt_profile)?,
+        result_output,
+        receipt_output,
         output_set: projected_output_set_resource_facts(),
     };
-    // Drop the preparation before the source-bound plan rederives it; two compiled property
-    // maps must not coexist as an accidental preparation duplicate.
-    drop(numerical);
     let resource_plan = build_thermal_resource_plan(workload, mesh, policy.chunk_bytes(), facts)?;
     Ok(PreparedThermalInputs {
         inputs,
         resource_plan,
     })
+}
+
+fn projected_thermal_outputs(
+    workload: &ThermalWorkload,
+    mesh: &SolverMeshArtifact,
+    policy: AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<(
+    runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
+    runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
+)> {
+    let numerical = workload.prepare(mesh)?;
+    let result = numerical.transport_profile(policy.chunk_bytes())?;
+    let mut receipt = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
+    receipt.push(THERMAL_RECEIPT_MAX_ENCODED_BYTES)?;
+    let receipt = receipt.finish(AnalysisNumericalObjectKind::NumericalReceipt)?;
+    crate::thermal_execution::require_inventory(&result, policy.inventory_limits())?;
+    crate::thermal_execution::require_inventory(&receipt, policy.inventory_limits())?;
+    Ok((
+        projected_transport_output_resource_facts(&result)?,
+        projected_transport_output_resource_facts(&receipt)?,
+    ))
 }

@@ -50,6 +50,9 @@ pub fn prepare_semantic_state_publication(
     let source_kind_matches = matches!(
         (preparation.source, preparation.source_host.workload.kind),
         (
+            SemanticStatePublicationSource::ThermalPrimaryField,
+            AnalysisWorkKind::SolveThermal
+        ) | (
             SemanticStatePublicationSource::StructuralPrimaryFields,
             AnalysisWorkKind::Solve
         ) | (
@@ -75,10 +78,27 @@ pub fn prepare_semantic_state_publication(
                 .into(),
         ));
     }
-    let source_result = SolverResultIdentity::new(
-        preparation.source_host.workload.identity,
-        preparation.source_result.manifest.payload_digest,
-    )?;
+    let source_result = if preparation.source == SemanticStatePublicationSource::ThermalPrimaryField
+    {
+        let manifest = crate::decode_prepared_thermal_manifest(&preparation.source_result)?;
+        if manifest.producer != preparation.source_host.workload.step
+            || manifest.topology_digest != preparation.topology_digest
+            || !preparation.source_host.workload.inputs.iter().any(|input| {
+                input.kind == AnalysisNumericalObjectKind::ThermalWorkload
+                    && input.logical_identity == manifest.source_workload.digest()
+            })
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "thermal state source differs from its workload",
+            ));
+        }
+        manifest.identity()
+    } else {
+        SolverResultIdentity::new(
+            preparation.source_host.workload.identity,
+            preparation.source_result.manifest.payload_digest,
+        )?
+    };
     if preparation.source_result.manifest.logical_identity != source_result.digest() {
         return Err(AnalysisBridgeError::Identity(
             "solver result identity does not match its source workload and content",
