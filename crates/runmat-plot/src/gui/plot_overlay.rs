@@ -1863,6 +1863,9 @@ impl PlotOverlay {
                             - ((y_val.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()))
                                 as f32
                                 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         if (y_screen - plot_rect.min.y).abs() <= edge_eps
                             || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -1899,6 +1902,9 @@ impl PlotOverlay {
                             }
                             let y_screen = plot_rect.max.y
                                 - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                            let y_screen = plot_renderer
+                                .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                                .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                             let y_screen = Self::snap_coord(y_screen, ppp);
                             if (y_screen - plot_rect.min.y).abs() <= edge_eps
                                 || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -1933,6 +1939,9 @@ impl PlotOverlay {
                             plot_rect.max.y
                                 - ((y_val - y_min) / y_range) as f32 * plot_rect.height()
                         };
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         if (y_screen - plot_rect.min.y).abs() <= edge_eps
                             || (y_screen - plot_rect.max.y).abs() <= edge_eps
@@ -2154,6 +2163,9 @@ impl PlotOverlay {
                     } else {
                         plot_rect.max.y - ((*y_val - y_min) / y_range) as f32 * plot_rect.height()
                     };
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2197,6 +2209,9 @@ impl PlotOverlay {
                         }
                         let y_screen = plot_rect.max.y
                             - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         ui.painter().line_segment(
                             [
@@ -2283,6 +2298,9 @@ impl PlotOverlay {
                         }
                         let y_screen = plot_rect.max.y
                             - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                        let y_screen = plot_renderer
+                            .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                            .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                         let y_screen = Self::snap_coord(y_screen, ppp);
                         // Tick
                         ui.painter().line_segment(
@@ -2371,6 +2389,9 @@ impl PlotOverlay {
                         - ((decade.log10() - y_min.log10()) / (y_max.log10() - y_min.log10()))
                             as f32
                             * plot_rect.height();
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2393,6 +2414,9 @@ impl PlotOverlay {
                 for y_val in plot_utils::generate_major_ticks(y_min, y_max) {
                     let y_screen =
                         plot_rect.max.y - ((y_val - y_min) / y_range) as f32 * plot_rect.height();
+                    let y_screen = plot_renderer
+                        .overlay_y_direction_for_axes(axes_index.unwrap_or(0))
+                        .orient(y_screen, plot_rect.min.y, plot_rect.max.y);
                     let y_screen = Self::snap_coord(y_screen, ppp);
                     ui.painter().line_segment(
                         [
@@ -2499,7 +2523,10 @@ impl PlotOverlay {
             },
             AxisItem {
                 label: "Y",
-                dir_world: Vec3::Y,
+                dir_world: Vec3::Y
+                    * plot_renderer
+                        .overlay_y_direction_for_axes(axes_index)
+                        .orient(1., -1., 1.),
                 color: Color32::from_rgb(90, 220, 120),
                 z_sort: 0.0,
             },
@@ -2582,7 +2609,7 @@ impl PlotOverlay {
         let w = plot_rect.width().max(1.0);
         let h = plot_rect.height().max(1.0);
         cam.update_aspect_ratio(w / h);
-        let view_proj = cam.view_proj_matrix();
+        let view_proj = cam.view_proj_matrix() * plot_renderer.axes_model_matrix(axes_index);
 
         let project = |p: Vec3| -> Option<Pos2> {
             let clip: Vec4 = view_proj * Vec4::new(p.x, p.y, p.z, 1.0);
@@ -3019,6 +3046,9 @@ impl PlotOverlay {
             if !style.visible || text.trim().is_empty() {
                 continue;
             }
+            let position = plot_renderer
+                .axes_model_matrix(axes_index)
+                .transform_point3(position);
             let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
                 continue;
             };

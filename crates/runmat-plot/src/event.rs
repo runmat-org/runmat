@@ -1228,6 +1228,8 @@ impl From<SerializedLegendStyle> for LegendStyle {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAxesMetadata {
+    #[serde(default)]
+    pub y_direction: crate::plots::figure::YDirection,
     #[serde(default, skip_serializing_if = "is_cartesian_axes_kind")]
     pub axes_kind: SerializedAxesKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1472,6 +1474,7 @@ pub struct SerializedMeshDeformation {
 impl From<AxesMetadata> for SerializedAxesMetadata {
     fn from(value: AxesMetadata) -> Self {
         Self {
+            y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,
@@ -1532,6 +1535,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
 impl From<SerializedAxesMetadata> for AxesMetadata {
     fn from(value: SerializedAxesMetadata) -> Self {
         Self {
+            y_direction: value.y_direction,
             axes_kind: value.axes_kind.into(),
             overlay_parent: value.overlay_parent,
             y_axis_location: value.y_axis_location,

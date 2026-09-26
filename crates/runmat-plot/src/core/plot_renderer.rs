@@ -25,6 +25,8 @@ use std::sync::OnceLock;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+#[path = "plot_renderer/y_direction.rs"]
+mod y_direction;
 
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
@@ -43,6 +45,7 @@ struct AxesViewContract {
 
 #[derive(Clone, Debug, PartialEq)]
 struct AxesViewContractEntry {
+    y_direction: crate::plots::figure::YDirection,
     has_3d_content: bool,
     axes_kind: AxesKind,
     x_limits: Option<(f64, f64)>,
@@ -56,8 +59,6 @@ struct AxesViewContractEntry {
     view_revision: u64,
 }
 
-const PATCH_3D_ABS_EPSILON: f32 = 1e-9;
-const PATCH_3D_REL_EPSILON: f32 = 1e-6;
 const MAX_2D_GRID_LINES_PER_AXIS: usize = 4096;
 
 fn render_item_diagnostics_enabled() -> bool {
@@ -355,31 +356,6 @@ impl PlotRenderer {
         })
     }
 
-    fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
-        match plot {
-            crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
-            crate::plots::figure::PlotElement::Mesh(_) => true,
-            crate::plots::figure::PlotElement::Patch(patch) => {
-                if patch.force_3d() {
-                    return true;
-                }
-
-                let mut max_xy = 0.0_f32;
-                let mut max_z = 0.0_f32;
-                for point in patch.vertices() {
-                    max_xy = max_xy.max(point.x.abs().max(point.y.abs()));
-                    max_z = max_z.max(point.z.abs());
-                }
-
-                max_z > PATCH_3D_ABS_EPSILON.max(max_xy * PATCH_3D_REL_EPSILON)
-            }
-            crate::plots::figure::PlotElement::Line3(_) => true,
-            crate::plots::figure::PlotElement::Scatter3(_) => true,
-            crate::plots::figure::PlotElement::Contour(contour) => contour.is_3d(),
-            _ => false,
-        }
-    }
-
     pub fn axes_has_3d_content(&self, axes_index: usize) -> bool {
         self.last_figure
             .as_ref()
@@ -388,7 +364,7 @@ impl PlotRenderer {
                     .plots()
                     .zip(figure.plot_axes_indices().iter().copied())
                     .any(|(plot, plot_axes_index)| {
-                        plot_axes_index == axes_index && Self::plot_element_is_3d(plot)
+                        plot_axes_index == axes_index && plot.is_3d_content()
                     })
             })
             .unwrap_or(false)
@@ -402,7 +378,7 @@ impl PlotRenderer {
             .plots()
             .zip(figure.plot_axes_indices().iter().copied())
         {
-            if axes_index < axes_count && Self::plot_element_is_3d(plot) {
+            if axes_index < axes_count && plot.is_3d_content() {
                 has_3d_content[axes_index] = true;
             }
         }
@@ -410,6 +386,7 @@ impl PlotRenderer {
             .map(|axes_index| {
                 let meta = figure.axes_metadata(axes_index);
                 AxesViewContractEntry {
+                    y_direction: meta.map(|m| m.y_direction).unwrap_or_default(),
                     has_3d_content: has_3d_content[axes_index],
                     axes_kind: meta.map(|m| m.axes_kind).unwrap_or(AxesKind::Cartesian),
                     x_limits: meta.and_then(|m| m.x_limits),
@@ -999,33 +976,14 @@ impl PlotRenderer {
             .and_then(|fig| fig.axes_metadata(axes_index))
         {
             if meta.x_log {
-                (x_min, x_max) = Self::positive_log_bounds(x_min, x_max);
+                (x_min, x_max) = crate::plots::figure::positive_log_bounds(x_min, x_max);
             }
             if meta.y_log {
-                (y_min, y_max) = Self::positive_log_bounds(y_min, y_max);
+                (y_min, y_max) = crate::plots::figure::positive_log_bounds(y_min, y_max);
             }
         }
 
         Some((x_min, x_max, y_min, y_max))
-    }
-
-    fn positive_log_bounds(lo: f64, hi: f64) -> (f64, f64) {
-        if lo.is_finite() && hi.is_finite() && lo > 0.0 && hi > 0.0 && lo != hi {
-            return (lo, hi);
-        }
-        let upper = if hi.is_finite() && hi > 0.0 {
-            hi
-        } else if lo.is_finite() && lo > 0.0 {
-            lo
-        } else {
-            1.0
-        };
-        let lower = (upper / 1000.0).max(f64::MIN_POSITIVE);
-        if lower < upper {
-            (lower, upper)
-        } else {
-            (upper * 0.1, upper * 10.0)
-        }
     }
 
     fn apply_3d_display_limits_to_bounds(
@@ -1074,10 +1032,6 @@ impl PlotRenderer {
 
     fn display_bounds_3d_for_axes(&self, axes_index: usize) -> Option<BoundingBox> {
         self.current_3d_display_bounds_for_axes(axes_index)
-    }
-
-    fn axes_model_matrix(&self, _axes_index: usize) -> Mat4 {
-        Mat4::IDENTITY
     }
 
     fn fit_cameras_to_axes_data(&mut self) -> bool {
@@ -1430,8 +1384,9 @@ impl PlotRenderer {
         let mut cam = self.camera().clone();
         let view_proj_matrix = cam.view_proj_matrix();
 
+        let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
+            .update_uniforms(view_proj_matrix, model_matrix);
 
         // Create render pass (respect MSAA)
         let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
@@ -1493,6 +1448,11 @@ impl PlotRenderer {
         let ndc_right = ((vx + vw) / sw) * 2.0 - 1.0;
         let ndc_top = 1.0 - (vy / sh) * 2.0;
         let ndc_bottom = 1.0 - ((vy + vh) / sh) * 2.0;
+        let direction = self.overlay_y_direction_for_axes(0);
+        let (ndc_bottom, ndc_top) = (
+            direction.orient(ndc_bottom, ndc_bottom, ndc_top),
+            direction.orient(ndc_top, ndc_bottom, ndc_top),
+        );
 
         // data_bounds passed in from caller: (x_min, y_min, x_max, y_max)
         let (x_min, y_min, x_max, y_max) = (0.0_f64, 0.0_f64, 1.0_f64, 1.0_f64);
@@ -1617,12 +1577,13 @@ impl PlotRenderer {
                 config.width,
                 config.height
             );
+            let (ndc_y_min, ndc_y_max) = self.overlay_y_direction_for_axes(0).ndc_endpoints();
             self.wgpu_renderer
                 .update_direct_uniforms(DirectUniforms::new(
                     [x_min as f32, y_min as f32],
                     [x_max as f32, y_max as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
+                    [-1.0, ndc_y_min],
+                    [1.0, ndc_y_max],
                     [config.width as f32, config.height as f32],
                     [0, 0],
                 ));
@@ -2262,7 +2223,7 @@ impl PlotRenderer {
         // triad is drawn separately and remains available as navigation context.
         // These are generated per-frame so they can adapt to zoom level.
         if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
-            let view_proj = view_proj_matrix;
+            let view_proj = view_proj_matrix * model_matrix;
             let inv_view_proj = view_proj.inverse();
 
             let unproject = |ndc_x: f32, ndc_y: f32, ndc_z: f32| -> Option<Vec3> {
@@ -2626,14 +2587,18 @@ impl PlotRenderer {
                     b = -radius;
                     t = radius;
                 }
+                // Reflect output coordinates after log mapping; limits stay ordered.
+                let (ndc_y_min, ndc_y_max) = self
+                    .overlay_y_direction_for_axes(axes_index)
+                    .ndc_endpoints();
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
                         [r as f32, t as f32],
-                        [-1.0, -1.0],
-                        [1.0, 1.0],
+                        [-1.0, ndc_y_min],
+                        [1.0, ndc_y_max],
                         [sw.max(1) as f32, sh.max(1) as f32],
                         log_flags,
                     ),
@@ -2727,13 +2692,16 @@ impl PlotRenderer {
         };
         if is_2d {
             if let Some((l, r, b, t)) = bounds_opt {
+                let (ndc_y_min, ndc_y_max) = self
+                    .overlay_y_direction_for_axes(axes_index)
+                    .ndc_endpoints();
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
                         [r as f32, t as f32],
-                        [-1.0, -1.0],
-                        [1.0, 1.0],
+                        [-1.0, ndc_y_min],
+                        [1.0, ndc_y_max],
                         [sw.max(1) as f32, sh.max(1) as f32],
                         log_flags,
                     ),
@@ -4212,7 +4180,7 @@ mod tests {
             Vec3::new(0.0, 1.0e-4, 1.0e-8),
         ]);
 
-        assert!(PlotRenderer::plot_element_is_3d(&patch));
+        assert!(patch.is_3d_content());
     }
 
     #[test]
@@ -4223,7 +4191,7 @@ mod tests {
             Vec3::new(0.0, 1.0e6, 0.5),
         ]);
 
-        assert!(!PlotRenderer::plot_element_is_3d(&patch));
+        assert!(!patch.is_3d_content());
     }
 
     #[test]
@@ -4282,12 +4250,15 @@ mod tests {
 
     #[test]
     fn positive_log_bounds_preserve_valid_positive_range() {
-        assert_eq!(PlotRenderer::positive_log_bounds(1.0, 100.0), (1.0, 100.0));
+        assert_eq!(
+            crate::plots::figure::positive_log_bounds(1.0, 100.0),
+            (1.0, 100.0)
+        );
     }
 
     #[test]
     fn positive_log_bounds_recover_from_nonpositive_lower_bound() {
-        let (lo, hi) = PlotRenderer::positive_log_bounds(-10.0, 100.0);
+        let (lo, hi) = crate::plots::figure::positive_log_bounds(-10.0, 100.0);
 
         assert!(lo > 0.0);
         assert_eq!(hi, 100.0);

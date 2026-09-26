@@ -28,6 +28,9 @@ mod colorbar;
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
 pub use clear_axes::{clear_axes_target, clear_current_axes};
+#[path = "state/axes_modes.rs"]
+mod axes_modes;
+pub use axes_modes::{lock_axes_limits, set_y_direction_for_axes};
 pub use colorbar::{
     colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,
     set_colorbar_enabled, set_colorbar_enabled_for_axes, set_colorbar_visible, toggle_colorbar,
@@ -2647,6 +2650,12 @@ fn display_bounds_for_state_axes(
         if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
             (x_min, x_max, y_min, y_max) =
                 data_aspect_adjusted_bounds(x_min, x_max, y_min, y_max, meta.data_aspect_ratio);
+        }
+        if meta.x_log {
+            (x_min, x_max) = runmat_plot::plots::figure::positive_log_bounds(x_min, x_max);
+        }
+        if meta.y_log {
+            (y_min, y_max) = runmat_plot::plots::figure::positive_log_bounds(y_min, y_max);
         }
     }
 

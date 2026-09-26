@@ -907,6 +907,7 @@ fn get_axes_property(
                 Value::String(if meta.y_log { "log" } else { "linear" }.into()),
             );
             st.insert("YAxisLocation", Value::String(meta.y_axis_location.clone()));
+            st.insert("YDir", Value::String(meta.y_direction.as_str().into()));
             Ok(Value::Struct(st))
         }
         Some("title") => Ok(Value::Num(super::state::encode_plot_object_handle(
@@ -1015,6 +1016,7 @@ fn get_axes_property(
             if meta.y_log { "log" } else { "linear" }.into(),
         )),
         Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
+        Some("ydir") => Ok(Value::String(meta.y_direction.as_str().into())),
         Some("type") => Ok(Value::String("axes".into())),
         Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("position") => Ok(figure_position_value(meta.position)),
@@ -1425,6 +1427,7 @@ fn canonical_property_name(name: &str) -> Cow<'_, str> {
         "xscale" => Cow::Borrowed("xscale"),
         "yscale" => Cow::Borrowed("yscale"),
         "yaxislocation" => Cow::Borrowed("yaxislocation"),
+        "ydir" => Cow::Borrowed("ydir"),
         "currentaxes" => Cow::Borrowed("currentaxes"),
         "currentfigure" => Cow::Borrowed("currentfigure"),
         "sgtitle" | "supertitle" => Cow::Borrowed("sgtitle"),
@@ -2025,6 +2028,23 @@ fn apply_axes_property(
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
+        }
+        "ydir" => {
+            let direction = match value_as_string(value)
+                .map(|text| text.trim().to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("normal") => runmat_plot::plots::figure::YDirection::Normal,
+                Some("reverse") => runmat_plot::plots::figure::YDirection::Reverse,
+                _ => {
+                    return Err(plotting_error(
+                        builtin,
+                        format!("{builtin}: YDir must be 'normal' or 'reverse'"),
+                    ))
+                }
+            };
+            super::state::set_y_direction_for_axes(handle, axes_index, direction)
+                .map_err(|err| map_figure_error(builtin, err))
         }
         "yaxislocation" => {
             let location = value_as_string(value)

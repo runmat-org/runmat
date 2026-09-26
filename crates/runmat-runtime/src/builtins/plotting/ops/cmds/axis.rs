@@ -243,10 +243,25 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             set_current_axis_visibility(false)?;
             Ok(Value::Bool(true))
         }
-        "manual" | "ij" | "xy" => {
-            // These MATLAB axis modes are accepted as command tokens for compatibility.
-            // The current plot scene model does not yet track direction or manual
-            // limit-lock state separately from concrete limits.
+        "manual" => {
+            let state = current_axes_state();
+            crate::builtins::plotting::state::lock_axes_limits(state.handle, state.active_index)
+                .map_err(|_| axis_invalid_argument())?;
+            Ok(Value::Bool(true))
+        }
+        "ij" | "xy" => {
+            let state = current_axes_state();
+            let direction = if mode.trim() == "ij" {
+                runmat_plot::plots::figure::YDirection::Reverse
+            } else {
+                runmat_plot::plots::figure::YDirection::Normal
+            };
+            crate::builtins::plotting::state::set_y_direction_for_axes(
+                state.handle,
+                state.active_index,
+                direction,
+            )
+            .map_err(|_| axis_invalid_argument())?;
             Ok(Value::Bool(true))
         }
         other => Err(cmd_error_with_message(

@@ -15,6 +15,14 @@ use log::trace;
 use std::collections::HashMap;
 #[path = "figure/axes_reset.rs"]
 mod axes_reset;
+#[path = "figure/y_direction.rs"]
+mod y_direction;
+pub use y_direction::YDirection;
+#[path = "figure/dimensionality.rs"]
+mod dimensionality;
+#[path = "figure/limits.rs"]
+mod limits;
+pub use limits::positive_log_bounds;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
@@ -132,6 +140,7 @@ impl Default for LegendStyle {
 
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    pub y_direction: YDirection,
     pub axes_kind: AxesKind,
     pub overlay_parent: Option<usize>,
     pub y_axis_location: String,
