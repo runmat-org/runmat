@@ -38,6 +38,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         };
         if !valid_kind
             || invalid_shape
+            || (input.kind == ValueKindFact::Logical && input.storage == StorageFact::Dense)
             || input.storage == StorageFact::Sparse
             || matches!(input.residency, ResidencyFact::Device { .. })
         {
@@ -61,6 +62,23 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn logical_scalar_and_array_representations_match_runtime_admission() {
+        for (kind, storage, rejected) in [
+            (ValueKindFact::Logical, StorageFact::Scalar, false),
+            (ValueKindFact::Logical, StorageFact::Dense, true),
+            (ValueKindFact::Logical, StorageFact::Unknown, false),
+            (ValueKindFact::Unknown, StorageFact::Dense, false),
+        ] {
+            let request = CallRequest {
+                arguments: vec![ValueFact::proven(kind, ShapeFact::Scalar, storage)],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::default(),
+            };
+            let result = infer(&request, &super::super::SYM_CATALOG_ENTRY);
+            assert_eq!(!result.diagnostics.is_empty(), rejected);
+        }
+    }
     #[test]
     fn unknown_and_exact_integer_literals_have_symbolic_scalar_result() {
         for literal in [
