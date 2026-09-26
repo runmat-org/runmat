@@ -281,7 +281,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             ..BuiltinSemantics::unknown()
         },
 
-        "load" | "run" => BuiltinSemantics {
+        "load" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_filesystem().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::LoadsExternalBindings),
             purity: BuiltinPurity::Impure,

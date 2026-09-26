@@ -246,11 +246,6 @@ pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::Num])
 }
 
-pub fn run_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Unknown
-}
-
 pub fn unzip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::cell_of(Type::String)
