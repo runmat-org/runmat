@@ -38,7 +38,7 @@ test("migration phases bind the authored commit separately from integration prod
   ));
 });
 
-test("authored and integration phases reject changes owned by the other authority", () => {
+test("authored and integration phases reject changes outside the bundle and products", () => {
   const authoredViolation = controlledFixture();
   appendAndCommit(authoredViolation.repository, "Cargo.toml", "# outside lease\n", "outside");
   assert.throws(() => captureMigrationPhases(
@@ -54,7 +54,23 @@ test("authored and integration phases reject changes owned by the other authorit
   assert.throws(() => captureMigrationPhases(
     integrationViolation.repository, integrationViolation.lease, integrationViolation.control,
     subjectInventory(integrationViolation), authoredRevision,
-  ), /integration phase changed non-product paths/);
+  ), /integration phase changed paths outside bundle repair and product scope/);
+});
+
+test("integration may repair the current bundle's authored file after assembly", () => {
+  const fixture = controlledFixture();
+  const runtimePath = "crates/runmat-runtime/src/builtins/math/basic/foo.rs";
+  appendAndCommit(fixture.repository, runtimePath, "\n// authored migration\n", "authored");
+  const authoredRevision = revision(fixture.repository);
+  appendAndCommit(fixture.repository, runtimePath, "\n// integrated repair\n", "integration repair");
+  const phases = captureMigrationPhases(
+    fixture.repository, fixture.lease, fixture.control, subjectInventory(fixture), authoredRevision,
+  );
+  assert.deepEqual(phases.authored_changed_paths, [runtimePath]);
+  assert.deepEqual(phases.integration_changed_paths, [runtimePath]);
+  assert.doesNotThrow(() => validateSealedMigrationPhases(
+    fixture.repository, fixture.control, fixture.bundleId, phases,
+  ));
 });
 
 test("phase capture rejects an authored revision outside the integrated ancestry", () => {
@@ -108,10 +124,11 @@ test("integration path policy handles shared products and bundles with no produc
   }, ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"], [sharedProduct]));
   assert.doesNotThrow(() => validateMigrationPhasePaths({
     authored_write_set: authored, integration_outputs: [], source_migrations: [],
-  }, ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"], []));
+  }, ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"],
+  ["crates/runmat-runtime/src/builtins/math/basic/foo.rs"]));
   assert.throws(() => validateMigrationPhasePaths({
     authored_write_set: authored, integration_outputs: [], source_migrations: [],
-  }, [], [sharedProduct]), /non-product paths/);
+  }, [], [sharedProduct]), /outside bundle repair and product scope/);
 });
 
 function subjectInventory(fixture) {

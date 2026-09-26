@@ -107,9 +107,10 @@ export function validateMigrationPhasePaths(bundle, authoredChangedPaths, integr
   if (missingMigrationEndpoints.length) {
     throw new Error(`authored phase did not change reviewed source migration endpoints: ${missingMigrationEndpoints.join(", ")}`);
   }
-  const integrationViolations = integrationChangedPaths.filter((sourcePath) => !integrationPaths.has(sourcePath));
+  const integrationViolations = integrationChangedPaths.filter((sourcePath) =>
+    !integrationPaths.has(sourcePath) && !pathAllowed(bundle.authored_write_set, sourcePath));
   if (integrationViolations.length) {
-    throw new Error(`integration phase changed non-product paths: ${integrationViolations.join(", ")}`);
+    throw new Error(`integration phase changed paths outside bundle repair and product scope: ${integrationViolations.join(", ")}`);
   }
 }
 
