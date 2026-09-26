@@ -7,7 +7,6 @@ use std::time::Duration;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use glob::glob;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -17,9 +16,10 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
 use url::Url;
 
-use crate::builtins::common::fs::{expand_user_path, path_to_string};
+use crate::builtins::common::fs::{enumeration, expand_user_path, path_to_string};
+use crate::builtins::common::shape::effective_rank;
 use crate::builtins::io::http::transport::{self, HttpMethod, HttpRequest};
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -73,22 +73,12 @@ pub const GUNZIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &[],
 };
 
-async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut out = Vec::with_capacity(args.len());
-    for value in args {
-        out.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(|err| archive_error(name, format!("{name}: {}", err.message())))?,
-        );
-    }
-    Ok(out)
-}
-
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
+            Ok(array.data.iter().collect())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(archive_error(
             name,
@@ -126,22 +116,33 @@ fn path_from_text(text: &str, name: &str) -> BuiltinResult<PathBuf> {
     ))
 }
 
-fn expand_input_paths(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Vec<PathBuf>> {
+async fn expand_input_paths(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Vec<PathBuf>> {
     let mut out = Vec::new();
     for path in paths {
         let text = path_to_string(&path);
         if text.contains('*') || text.contains('?') {
-            for entry in glob(&text).map_err(|err| archive_error(name, err.to_string()))? {
-                out.push(entry.map_err(|err| archive_error(name, err.to_string()))?);
-            }
+            let mut matches: Vec<_> = enumeration::matching(&path)
+                .await
+                .map_err(|err| archive_error(name, format!("{name}: {err}")))?
+                .into_iter()
+                .map(|entry| entry.path)
+                .collect();
+            // glob's historical ordered results must not depend on a provider's
+            // directory iteration order or the traversal's deduplication set.
+            matches.sort();
+            out.extend(matches);
             continue;
         }
-        if vfs::metadata(&path).is_ok_and(|meta| meta.is_dir()) {
-            for entry in
-                vfs::read_dir(&path).map_err(|err| archive_error(name, format!("{name}: {err}")))?
+        if vfs::metadata_async(&path)
+            .await
+            .is_ok_and(|meta| meta.is_dir())
+        {
+            for entry in enumeration::directory(&path)
+                .await
+                .map_err(|err| archive_error(name, format!("{name}: {err}")))?
             {
-                if !entry.is_dir() {
-                    out.push(entry.path().to_path_buf());
+                if !entry.metadata.is_dir() {
+                    out.push(entry.path);
                 }
             }
         } else {
@@ -181,19 +182,20 @@ fn cellstr(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Value> {
     builtin_path = "crate::builtins::io::archive::gzip"
 )]
 async fn gzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("gzip", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(archive_error(
             "gzip",
             "gzip: filename and optional output folder are expected",
         ));
     }
-    let inputs = expand_input_paths(paths_from_value(&args[0], "gzip", "filename")?, "gzip")?;
+    let inputs = paths_from_value(&args[0], "gzip", "filename")?;
     let output_folder = if let Some(value) = args.get(1) {
         Some(path_from_value(value, "gzip", "outputfolder")?)
     } else {
         None
     };
+    // Admit every public control before the first filesystem operation.
+    let inputs = expand_input_paths(inputs, "gzip").await?;
     let mut outputs = Vec::with_capacity(inputs.len());
     for input in inputs {
         outputs.push(gzip_one(&input, output_folder.as_deref()).await?);
@@ -241,7 +243,6 @@ async fn gzip_one(input: &Path, output_folder: Option<&Path>) -> BuiltinResult<P
     builtin_path = "crate::builtins::io::archive::gzip"
 )]
 async fn gunzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let args = gather_args("gunzip", &args).await?;
     if args.is_empty() || args.len() > 2 {
         return Err(archive_error(
             "gunzip",
@@ -407,5 +408,56 @@ mod tests {
         assert!(dir.join("a.txt.gz").exists());
         assert!(dir.join("b.txt.gz").exists());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn wildcard_round_trip_uses_active_memory_filesystem_and_sorted_paths() {
+        let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
+        let filesystem = vfs::MemoryFsProvider::with_current_dir("/workspace");
+        filesystem
+            .write_project_path("/workspace/in/b.txt", b"second")
+            .unwrap();
+        filesystem
+            .write_project_path("/workspace/in/a.txt", b"first")
+            .unwrap();
+        vfs::with_provider_override(std::sync::Arc::new(filesystem), || {
+            let output = run(gzip_builtin(vec![
+                Value::String("in/*.txt".into()),
+                Value::String("compressed".into()),
+            ]))
+            .unwrap();
+            let Value::Cell(files) = output else {
+                panic!("expected cell paths")
+            };
+            let names: Vec<_> = files
+                .data
+                .iter()
+                .map(|value| scalar_text(value, "gzip", "output").unwrap())
+                .collect();
+            assert_eq!(names, vec!["compressed/a.txt.gz", "compressed/b.txt.gz"]);
+            run(gunzip_builtin(vec![
+                Value::Cell(files),
+                Value::String("restored".into()),
+            ]))
+            .unwrap();
+            assert_eq!(
+                futures::executor::block_on(vfs::read_async("restored/a.txt")).unwrap(),
+                b"first"
+            );
+            assert_eq!(
+                futures::executor::block_on(vfs::read_async("restored/b.txt")).unwrap(),
+                b"second"
+            );
+        });
+    }
+
+    #[test]
+    fn invalid_output_folder_is_admitted_before_wildcard_filesystem_access() {
+        let error = run(gzip_builtin(vec![
+            Value::String("/missing/gzip-admission/*.txt".into()),
+            Value::Num(1.0),
+        ]))
+        .unwrap_err();
+        assert!(error.message().contains("outputfolder must be"), "{error}");
     }
 }
