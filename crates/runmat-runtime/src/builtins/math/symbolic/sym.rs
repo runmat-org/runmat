@@ -86,12 +86,17 @@ mod tests {
             ("18446744073709551615", "18446744073709551615"),
             ("-9007199254740993", "-9007199254740993"),
             ("9007199254740993/2", "9007199254740993/2"),
-            ("3.25", "3.25"),
         ] {
             let result =
                 futures::executor::block_on(sym_builtin(Value::from(text), vec![])).unwrap();
             assert_eq!(result.to_string(), expected);
         }
+        let decimal = futures::executor::block_on(sym_builtin(Value::from("3.25"), vec![]))
+            .unwrap();
+        let Value::Symbolic(decimal) = decimal else {
+            panic!("expected symbolic decimal");
+        };
+        assert_eq!(decimal.numeric_constant_value(), Some(3.25));
         let result = futures::executor::block_on(sym_builtin(
             Value::Int(runmat_value::IntValue::U64(u64::MAX)),
             vec![],

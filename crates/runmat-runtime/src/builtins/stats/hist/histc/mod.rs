@@ -24,7 +24,6 @@ const NAME: &str = "histc";
 const MAX_DIMENSION_ARGUMENT: usize = runmat_builtins::HISTC_MAX_DIMENSION;
 #[runtime_builtin(
     name = "histc",
-    descriptor(runmat_builtins::HISTC_DESCRIPTOR),
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::hist::histc"
 )]

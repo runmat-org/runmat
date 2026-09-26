@@ -110,4 +110,52 @@ mod tests {
             assert!(validate_fixed_outputs(descriptor, &ERROR, "output_test").is_ok());
         }
     }
+
+    #[test]
+    fn overload_bound_is_the_maximum_not_the_first_signature() {
+        const OVERLOADED: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &[
+                BuiltinSignatureDescriptor {
+                    label: "value = output_test()",
+                    inputs: &[],
+                    outputs: &[OUTPUT],
+                },
+                BuiltinSignatureDescriptor {
+                    label: "[first, second] = output_test(option)",
+                    inputs: &[OUTPUT],
+                    outputs: &[OUTPUT, OUTPUT],
+                },
+            ],
+            ..FIXED
+        };
+        for count in [0, 1, 2] {
+            let _guard = super::super::push_output_count(Some(count));
+            assert!(validate_fixed_outputs(&OVERLOADED, &ERROR, "output_test").is_ok());
+        }
+        let _guard = super::super::push_output_count(Some(3));
+        assert!(validate_fixed_outputs(&OVERLOADED, &ERROR, "output_test").is_err());
+    }
+
+    #[test]
+    fn empty_signatures_do_not_mean_a_declared_zero_output_signature() {
+        const UNDECLARED: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &[],
+            ..FIXED
+        };
+        const ZERO: BuiltinDescriptor = BuiltinDescriptor {
+            signatures: &[BuiltinSignatureDescriptor {
+                label: "output_test()",
+                inputs: &[],
+                outputs: &[],
+            }],
+            ..FIXED
+        };
+        for count in [None, Some(0)] {
+            let _guard = super::super::push_output_count(count);
+            assert!(validate_fixed_outputs(&ZERO, &ERROR, "output_test").is_ok());
+        }
+        let _guard = super::super::push_output_count(Some(1));
+        assert!(validate_fixed_outputs(&UNDECLARED, &ERROR, "output_test").is_ok());
+        assert!(validate_fixed_outputs(&ZERO, &ERROR, "output_test").is_err());
+    }
 }

@@ -55,7 +55,7 @@ fn requested_cell_outputs_preserve_nested_resident_values_without_provider_acces
 fn discard_still_validates_paths_and_overload_admission() {
     block_on(crate::register_test_classes_builtin()).unwrap();
     let _guard = crate::output_count::push_output_count(Some(0));
-    let object = Value::Object(ObjectInstance::new("OverIdx".into()));
+    let object = Value::Object(ObjectInstance::new("OverIdx"));
     // Invalid selectors must fail even when the read targets an overloaded class
     // and the caller retains no outputs.
     let path = substruct("{}", Value::Num(1.0));

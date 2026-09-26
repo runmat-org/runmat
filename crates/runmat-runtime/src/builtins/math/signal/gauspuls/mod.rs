@@ -31,7 +31,6 @@ const DEFAULT_BWR: f64 = -6.;
 const DEFAULT_TPE: f64 = -60.;
 #[runtime_builtin(
     name = "gauspuls",
-    descriptor(runmat_builtins::GAUSPULS_DESCRIPTOR),
     binding_variant = "default",
     builtin_path = "crate::builtins::math::signal::gauspuls"
 )]

@@ -28,7 +28,6 @@ use std::cmp::Ordering;
 const NAME: &str = "corr";
 #[runtime_builtin(
     name = "corr",
-    descriptor(runmat_builtins::CORR_DESCRIPTOR),
     binding_variant = "default",
     builtin_path = "crate::builtins::stats::summary::corr"
 )]

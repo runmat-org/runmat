@@ -4,7 +4,7 @@ use runmat_value::{CellArray, IntValue, ObjectInstance};
 
 #[test]
 fn backing_fields_preserve_wide_integer_and_nested_resident_payloads() {
-    let source = Value::Object(ObjectInstance::new("PropertyCutover".into()));
+    let source = Value::Object(ObjectInstance::new("PropertyCutover"));
     assert_eq!(
         block_on(get_p_builtin(source.clone())).unwrap(),
         Value::Num(0.0)

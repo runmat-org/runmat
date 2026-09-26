@@ -21,8 +21,8 @@ pub const SYMS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: Some(BuiltinWorkspaceEffect::CreatesBinding),
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::WorkspaceWrite,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },
