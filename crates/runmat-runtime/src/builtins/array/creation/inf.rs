@@ -98,7 +98,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::inf"
 )]
-async fn inf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn inf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        let error = &runmat_builtins::INF_ERROR_TOO_MANY_OUTPUTS;
+        return Err(crate::build_runtime_error(error.message)
+            .with_builtin("inf")
+            .with_identifier(error.identifier.expect("output count error identifier"))
+            .build());
+    }
     let parsed = ParsedInf::parse(rest).await?;
     build_output(parsed).await
 }

@@ -98,4 +98,72 @@ mod tests {
             .diagnostics
             .is_empty());
     }
+
+    #[test]
+    fn unknown_dimensions_do_not_commit_to_dense_storage() {
+        let request = request(vec![LiteralValue::Unknown]);
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.storage, StorageFact::Unknown);
+        assert_eq!(output.residency, ResidencyFact::Host);
+    }
+    #[test]
+    fn resident_row_size_is_control_not_output_residency() {
+        let mut request = request(vec![LiteralValue::Unknown]);
+        request.arguments[0].shape = ShapeFact::from(vec![Some(1), Some(2)]);
+        request.arguments[0].storage = StorageFact::Dense;
+        request.arguments[0].residency = ResidencyFact::Device {
+            provider: Some("owner".into()),
+        };
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.residency, ResidencyFact::Host);
+        assert_eq!(output.shape, ShapeFact::Unknown);
+    }
+    #[test]
+    fn resident_like_is_dense_even_for_scalar_shape() {
+        let mut request = request(vec![
+            LiteralValue::String("like".into()),
+            LiteralValue::Unknown,
+        ]);
+        request.arguments[1].residency = ResidencyFact::Device {
+            provider: Some("owner".into()),
+        };
+        request.arguments[1].storage = StorageFact::Dense;
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.shape.element_count(), Some(1));
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, request.arguments[1].residency);
+    }
+    #[test]
+    fn sparse_like_preserves_storage_without_borrowing_shape() {
+        let mut request = request(vec![
+            LiteralValue::String("like".into()),
+            LiteralValue::Unknown,
+        ]);
+        request.arguments[1].shape = ShapeFact::from(vec![Some(3), Some(4)]);
+        request.arguments[1].storage = StorageFact::Sparse;
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.shape.element_count(), Some(1));
+        assert_eq!(output.storage, StorageFact::Sparse);
+    }
+    #[test]
+    fn unknown_option_does_not_fabricate_representation() {
+        let mut request = request(vec![LiteralValue::Unknown]);
+        request.arguments[0].kind = ValueKindFact::String;
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.storage, StorageFact::Unknown);
+        assert_eq!(output.residency, ResidencyFact::Unknown);
+        assert_eq!(output.kind, ValueKindFact::Logical);
+    }
+    #[test]
+    fn implicit_matrix_prototype_can_select_residency() {
+        let mut request = request(vec![LiteralValue::Unknown]);
+        request.arguments[0].shape = ShapeFact::from(vec![Some(2), Some(2)]);
+        request.arguments[0].storage = StorageFact::Dense;
+        request.arguments[0].residency = ResidencyFact::Device {
+            provider: Some("owner".into()),
+        };
+        let output = &infer(&request, &super::super::TRUE_CATALOG_ENTRY).outputs[0];
+        assert_eq!(output.residency, ResidencyFact::Unknown);
+        assert_eq!(output.kind, ValueKindFact::Logical);
+    }
 }

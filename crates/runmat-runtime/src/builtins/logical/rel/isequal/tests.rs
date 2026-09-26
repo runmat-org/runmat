@@ -459,3 +459,114 @@ fn empty_nd_and_complex_nan_boundaries() {
         Value::Bool(true)
     );
 }
+
+#[test]
+fn structs_compare_by_field_name_not_insertion_order() {
+    use runmat_value::{StructArray, StructValue};
+    let record = |reverse: bool, nan: bool| {
+        let mut value = StructValue::new();
+        let a = Value::Num(if nan { f64::NAN } else { 1.0 });
+        if reverse {
+            value.insert("b", Value::Bool(true));
+            value.insert("a", a);
+        } else {
+            value.insert("a", a);
+            value.insert("b", Value::Bool(true));
+        }
+        value
+    };
+    for nan in [false, true] {
+        for nan_equal in [false, true] {
+            let left = record(false, nan);
+            let right = record(true, nan);
+            let expected = !nan || nan_equal;
+            assert_eq!(
+                values_equal(
+                    &Value::Struct(left.clone()),
+                    &Value::Struct(right.clone()),
+                    nan_equal
+                ),
+                expected
+            );
+            let left_array = StructArray::new(vec![left.clone(), left], vec![1, 2]).unwrap();
+            let right_array = StructArray::new(vec![right.clone(), right], vec![1, 2]).unwrap();
+            assert_eq!(
+                values_equal(
+                    &Value::StructArray(left_array),
+                    &Value::StructArray(right_array),
+                    nan_equal
+                ),
+                expected
+            );
+        }
+    }
+    let left = record(false, false);
+    let mut renamed = record(true, false);
+    renamed.remove("a");
+    renamed.insert("c", Value::Num(1.0));
+    assert!(!values_equal(
+        &Value::Struct(left.clone()),
+        &Value::Struct(renamed.clone()),
+        false
+    ));
+    let left_array = StructArray::new(vec![left.clone(), left], vec![1, 2]).unwrap();
+    let right_array = StructArray::new(vec![renamed.clone(), renamed], vec![1, 2]).unwrap();
+    assert!(!values_equal(
+        &Value::StructArray(left_array),
+        &Value::StructArray(right_array),
+        true
+    ));
+    let empty_left = StructArray::empty(vec!["a".into(), "b".into()], vec![0, 2]).unwrap();
+    let empty_right = StructArray::empty(vec!["b".into(), "a".into()], vec![0, 2]).unwrap();
+    assert!(values_equal(
+        &Value::StructArray(empty_left),
+        &Value::StructArray(empty_right),
+        false
+    ));
+}
+
+#[test]
+fn complex_scalar_tensor_bridge_is_symmetric_and_exact() {
+    let scalar = Value::Complex(3.0, 2.0);
+    for tensor in [
+        ComplexTensor::new(vec![(3.0, 2.0)], vec![1, 1]).unwrap(),
+        ComplexTensor::from_f32(vec![(3.0, 2.0)], vec![1, 1]).unwrap(),
+        typed_complex_u64(3, 2),
+    ] {
+        let array = Value::ComplexTensor(tensor);
+        assert_eq!(
+            run_isequal(vec![scalar.clone(), array.clone()]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequaln(vec![array, scalar.clone()]).unwrap(),
+            Value::Bool(true)
+        );
+    }
+    let wide = (1_u64 << 53) + 1;
+    assert!(!values_equal(
+        &Value::Complex(wide as f64, 0.0),
+        &Value::ComplexTensor(typed_complex_u64(wide, 0)),
+        false
+    ));
+    let nonscalar =
+        Value::ComplexTensor(ComplexTensor::new(vec![(3.0, 2.0); 2], vec![1, 2]).unwrap());
+    assert!(!values_equal(&scalar, &nonscalar, false));
+    for (real, imag) in [(f64::NAN, 2.0), (3.0, f64::NAN)] {
+        let scalar = Value::Complex(real, imag);
+        let array =
+            Value::ComplexTensor(ComplexTensor::new(vec![(real, imag)], vec![1, 1]).unwrap());
+        assert_eq!(
+            run_isequal(vec![scalar.clone(), array.clone()]).unwrap(),
+            Value::Bool(false)
+        );
+        assert_eq!(
+            run_isequaln(vec![scalar.clone(), array.clone()]).unwrap(),
+            Value::Bool(true)
+        );
+        assert_eq!(
+            run_isequaln(vec![array, scalar]).unwrap(),
+            Value::Bool(true)
+        );
+    }
+}

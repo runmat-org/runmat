@@ -4,13 +4,42 @@ use runmat_value::{ComplexTensor, IntValue, NumericScalar, Value};
 pub(crate) fn validate_constructor_gpu_output(
     label: &str,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    mut output: runmat_accelerate_api::GpuTensorHandle,
+    output: runmat_accelerate_api::GpuTensorHandle,
     expected_shape: &[usize],
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
 ) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
+    validate_constructor_gpu_output_protecting(
+        label,
+        provider,
+        output,
+        expected_shape,
+        expected_storage,
+        expected_precision,
+        expected_integer,
+        expected_logical,
+        &[],
+    )
+}
+
+/// Validate a newly allocated constructor result without adopting, relabelling,
+/// or releasing borrowed inputs (including a `like` prototype).
+pub(crate) fn validate_constructor_gpu_output_protecting(
+    label: &str,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    mut output: runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_storage: runmat_accelerate_api::GpuTensorStorage,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
+    expected_logical: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
+    use crate::builtins::common::gpu_helpers::{
+        exact_provider_for_handle, free_rejected_provider_output, same_gpu_handle,
+    };
     let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
         expected_precision,
         expected_integer,
@@ -29,10 +58,13 @@ pub(crate) fn validate_constructor_gpu_output(
             })
         });
     let existing_class = runmat_accelerate_api::handle_class_identity(&output);
-    let valid = output.device_id == provider.device_id()
+    let valid = expected_class.is_some()
+        && !protected
+            .iter()
+            .any(|input| same_gpu_handle(&output, input))
+        && output.device_id == provider.device_id()
         && output.shape == expected_shape
-        && runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
         && output.descriptor.storage == Some(expected_storage)
         && output.descriptor.element_type == expected_element
         && (!runmat_accelerate_api::handle_is_logical(&output) || expected_logical)
@@ -40,14 +72,13 @@ pub(crate) fn validate_constructor_gpu_output(
             .as_ref()
             .is_none_or(|class_identity| Some(class_identity) == expected_class.as_ref());
     if !valid {
-        let _ = provider.free(&output);
+        free_rejected_provider_output(&output, protected, provider);
         return Err(format!(
             "{label}: provider returned an invalid constructor result"
         ));
     }
     runmat_accelerate_api::set_handle_logical(&output, expected_logical);
-    let expected_class = expected_class
-        .ok_or_else(|| format!("{label}: expected numeric class metadata is missing"))?;
+    let expected_class = expected_class.expect("validated expected numeric class metadata");
     runmat_accelerate_api::set_handle_class_identity(&output, expected_class);
     runmat_accelerate_api::mark_handle_explicit(&mut output);
     Ok(output)
@@ -254,6 +285,91 @@ mod constructor_dimension_tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn constructor_validation_releases_rejected_output_through_its_actual_owner() {
+        use runmat_accelerate_api::{
+            AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision,
+        };
+        crate::builtins::common::test_support::with_rejecting_native_result_provider(|provider| {
+            // This fixture deliberately returns an allocation owned by another provider.
+            let dummy = GpuTensorHandle::new(vec![1, 1], provider.device_id(), 0);
+            let mut output = provider
+                .cross(&dummy, &dummy, None)
+                .expect("foreign-owner result");
+            output.descriptor.storage = Some(GpuTensorStorage::Real);
+            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&output)
+                .expect("registered output owner");
+            assert_ne!(owner.device_id(), provider.device_id());
+            let retained = output.clone();
+            let before = provider.free_count();
+            let error = validate_constructor_gpu_output(
+                "constructor",
+                provider,
+                output,
+                &[1, 1],
+                GpuTensorStorage::Real,
+                Some(ProviderPrecision::F64),
+                None,
+                false,
+            )
+            .expect_err("wrong owner must not be adopted");
+            assert!(error.contains("invalid constructor result"));
+            assert_eq!(provider.free_count(), before + 1);
+            assert!(
+                block_on(owner.download(&retained)).is_err(),
+                "actual owner released allocation"
+            );
+        });
+    }
+
+    #[test]
+    fn constructor_validation_preserves_borrowed_prototype_and_its_metadata() {
+        use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
+            let prototype = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("prototype");
+            let original_class = runmat_accelerate_api::handle_class_identity(&prototype);
+            let original_logical = runmat_accelerate_api::handle_is_logical(&prototype);
+            for (expected_shape, expected_logical) in [
+                (&[1, 2][..], false),
+                (&[1, 2][..], true),
+                (&[2, 1][..], false),
+            ] {
+                let error = validate_constructor_gpu_output_protecting(
+                    "constructor",
+                    provider,
+                    prototype.clone(),
+                    expected_shape,
+                    GpuTensorStorage::Real,
+                    Some(ProviderPrecision::F64),
+                    None,
+                    expected_logical,
+                    &[&prototype],
+                )
+                .expect_err("borrowed alias must not be adopted or freed");
+                assert!(error.contains("invalid constructor result"));
+                assert_eq!(
+                    runmat_accelerate_api::handle_class_identity(&prototype),
+                    original_class
+                );
+                assert_eq!(
+                    runmat_accelerate_api::handle_is_logical(&prototype),
+                    original_logical
+                );
+                assert_eq!(
+                    block_on(provider.download(&prototype))
+                        .expect("prototype remains live")
+                        .data,
+                    vec![1.0, 2.0]
+                );
+            }
+            provider
+                .free(&prototype)
+                .expect("release owned test prototype");
+        });
+    }
 
     #[test]
     fn exact_integer_size_vectors_cover_every_integer_class() {

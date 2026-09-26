@@ -468,15 +468,16 @@ fn migrated_registry_is_valid_and_case_insensitive() {
 #[test]
 fn catalog_entries_keep_domain_modules_out_of_the_root() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/catalog/entries");
-    let root_files = std::fs::read_dir(&root)
+    let mut root_files = std::fs::read_dir(&root)
         .expect("catalog entries directory")
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.is_file())
         .collect::<Vec<_>>();
+    root_files.sort();
     assert_eq!(
         root_files,
-        vec![root.join("mod.rs")],
+        vec![root.join("aggregation.rs"), root.join("mod.rs")],
         "builtin contract files belong in mirrored domain directories"
     );
 }

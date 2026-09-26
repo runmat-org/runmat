@@ -239,12 +239,13 @@ fn logical_gpu_output(
     fill: bool,
     name: &str,
 ) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-        builtin_error(
-            name,
-            format!("{name}: GPU prototype has no owning provider"),
-        )
-    })?;
+    let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(prototype)
+        .ok_or_else(|| {
+            builtin_error(
+                name,
+                format!("{name}: GPU prototype has no owning provider"),
+            )
+        })?;
     let result = match if fill {
         provider.ones(shape)
     } else {
@@ -257,35 +258,29 @@ fn logical_gpu_output(
                 shape.to_vec(),
             )
             .map_err(|error| builtin_error(name, format!("{name}: {error}")))?;
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)
-                .map_err(|error| builtin_error(name, format!("{name}: {error}")))?
+            crate::builtins::common::gpu_helpers::upload_tensor_protecting(
+                provider,
+                &host,
+                &[prototype],
+            )
+            .map_err(|error| builtin_error(name, format!("{name}: {error}")))?
         }
     };
-    // The prototype is borrowed. A provider must return a fresh allocation;
-    // rejecting an alias must neither mutate its metadata nor free its storage.
-    if result.device_id == prototype.device_id && result.buffer_id == prototype.buffer_id {
-        return Err(builtin_error(
-            name,
-            format!("{name}: provider aliased the borrowed prototype"),
-        ));
-    }
-    runmat_accelerate_api::set_handle_logical(&result, true);
-    let valid = result.device_id == prototype.device_id
-        && result.shape == shape
-        && runmat_accelerate_api::provider_for_handle(&result)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&result)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(&result).is_none()
-        && runmat_accelerate_api::handle_is_logical(&result);
-    if !valid {
-        let owner = runmat_accelerate_api::provider_for_handle(&result).unwrap_or(provider);
-        let _ = owner.free(&result);
-        return Err(builtin_error(
-            name,
-            format!("{name}: provider returned an invalid logical result"),
-        ));
-    }
+    // ones/zeros allocate a numeric buffer. Validate its physical floating
+    // representation and ownership before converting this fresh result to
+    // logical. In particular, never relabel or free a borrowed prototype alias.
+    let result = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+        name,
+        provider,
+        result,
+        shape,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+        Some(provider.precision()),
+        None,
+        false,
+        &[prototype],
+    )
+    .map_err(|error| builtin_error(name, error))?;
     Ok(crate::builtins::common::gpu_helpers::logical_gpu_value(
         result,
     ))

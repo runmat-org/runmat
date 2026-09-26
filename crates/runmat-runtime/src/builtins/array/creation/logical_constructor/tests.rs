@@ -6,6 +6,9 @@ use futures::executor::block_on;
 use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_value::{IntegerStorage, SparseTensor, Tensor};
 
+#[path = "contract_tests.rs"]
+mod contract_tests;
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn true_default_scalar() {

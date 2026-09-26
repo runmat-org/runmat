@@ -193,7 +193,14 @@ pub const INF_ERROR_INTEGER_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErro
     message: "inf: integer 'like' prototypes are not supported",
 };
 
-const INF_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const INF_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.INF.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:inf:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "inf: too many output arguments",
+};
+const INF_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    INF_ERROR_TOO_MANY_OUTPUTS,
     INF_ERROR_LIKE_EXPECTED_PROTOTYPE,
     INF_ERROR_CLASS_CONFLICT,
     INF_ERROR_UNRECOGNIZED_OPTION,
@@ -226,8 +233,8 @@ pub const INF_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

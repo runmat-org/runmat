@@ -209,7 +209,14 @@ const FALSE_SIGNATURES: [BuiltinSignatureDescriptor; 7] = [
     },
 ];
 
-const FALSE_ERRORS: [BuiltinErrorDescriptor; 4] = [
+pub const FALSE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FALSE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:false:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "false: too many output arguments",
+};
+const FALSE_ERRORS: [BuiltinErrorDescriptor; 5] = [
+    FALSE_ERROR_TOO_MANY_OUTPUTS,
     BuiltinErrorDescriptor {
         code: "RM.FALSE.LIKE_EXPECTED_PROTOTYPE",
         identifier: None,
@@ -261,8 +268,8 @@ pub const FALSE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

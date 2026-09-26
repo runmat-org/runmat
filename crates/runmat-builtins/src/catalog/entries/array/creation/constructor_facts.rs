@@ -55,6 +55,13 @@ pub(super) fn infer(
                     continue;
                 }
                 "single" | "double" if !logical => {
+                    if class_option || explicit_device {
+                        diagnostics.push(argument_error(
+                            "RM-CONSTRUCTOR-CLASS-CONFLICT",
+                            "class and gpuArray specifiers cannot be repeated or combined",
+                            index,
+                        ));
+                    }
                     class_option = true;
                     output.kind = ValueKindFact::Numeric(NumericFact {
                         class: if text.eq_ignore_ascii_case("single") {
@@ -65,7 +72,16 @@ pub(super) fn infer(
                         domain: NumericDomain::Real,
                     });
                 }
-                "gpuarray" if !logical => explicit_device = true,
+                "gpuarray" if !logical => {
+                    if class_option || explicit_device {
+                        diagnostics.push(argument_error(
+                            "RM-CONSTRUCTOR-CLASS-CONFLICT",
+                            "class and gpuArray specifiers cannot be repeated or combined",
+                            index,
+                        ));
+                    }
+                    explicit_device = true;
+                }
                 "logical" if logical => {}
                 _ => diagnostics.push(argument_error(
                     "RM-CONSTRUCTOR-OPTION",
@@ -114,7 +130,11 @@ pub(super) fn infer(
                     if matches!(
                         request.arguments[index].kind,
                         ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
-                    ) {
+                    ) || (logical && !definite_size_control(&request.arguments[index]))
+                    {
+                        // Logical constructors also admit implicit prototypes.
+                        // An unknown matrix can therefore select sparse/device
+                        // output; it is not just an unknown size vector.
                         unknown_options = true;
                         output = ValueFact::unknown(DynamicReason::RuntimeValue);
                         if logical {
@@ -152,6 +172,9 @@ pub(super) fn infer(
     };
     output.storage = if output.is_scalar() {
         StorageFact::Scalar
+    } else if output.shape.element_count().is_none() {
+        // Unknown dimensions can still evaluate to 1-by-1 and return a scalar.
+        StorageFact::Unknown
     } else {
         StorageFact::Dense
     };
@@ -173,18 +196,60 @@ pub(super) fn infer(
                     0,
                 ));
             }
+            if !matches!(
+                prototype.kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::Unknown
+            ) {
+                diagnostics.push(argument_error(
+                    "RM-CONSTRUCTOR-LIKE-CLASS",
+                    "nonfinite constructors require a single or double prototype",
+                    0,
+                ));
+                output.kind = ValueKindFact::Unknown;
+            }
+        } else if !matches!(
+            prototype.kind,
+            ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
+        ) {
+            diagnostics.push(argument_error(
+                "RM-CONSTRUCTOR-LIKE-CLASS",
+                "logical constructors require a numeric or logical prototype",
+                0,
+            ));
         }
         output.residency = prototype.residency.clone();
         if matches!(
             prototype.storage,
             StorageFact::Sparse | StorageFact::Unknown
         ) {
-            output.storage = prototype.storage.clone();
+            output.storage = prototype.storage;
         }
     }
     if explicit_device {
+        // The unqualified device form uses the selected provider's precision,
+        // not a statically guaranteed double result.
+        output.kind = ValueKindFact::Unknown;
+        output.certainty = runmat_types::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
         output.residency = ResidencyFact::Device { provider: None };
         output.storage = StorageFact::Dense;
+    }
+    if matches!(output.residency, ResidencyFact::Device { .. }) {
+        output.storage = StorageFact::Dense;
+    }
+    if matches!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            ..
+        })
+    ) && prototype
+        .is_none_or(|value| !matches!(value.storage, StorageFact::Sparse | StorageFact::Unknown))
+    {
+        // RunMat preserves single scalars in typed tensor storage.
+        output.storage = StorageFact::Dense;
+    }
+    if prototype.is_some() && matches!(output.residency, ResidencyFact::Unknown) {
+        output.storage = StorageFact::Unknown;
     }
     if unknown_options {
         output.storage = StorageFact::Unknown;
@@ -194,6 +259,26 @@ pub(super) fn infer(
         }
     }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+fn definite_size_control(argument: &ValueFact) -> bool {
+    if !matches!(
+        argument.kind,
+        ValueKindFact::Numeric(NumericFact {
+            domain: NumericDomain::Real,
+            ..
+        })
+    ) || matches!(
+        argument.storage,
+        StorageFact::Sparse | StorageFact::Unknown | StorageFact::Opaque
+    ) {
+        return false;
+    }
+    argument.is_scalar()
+        || argument
+            .shape
+            .known_dims()
+            .is_some_and(|dims| dims.first() == Some(&Some(1)))
 }
 
 fn dimension(value: &LiteralValue) -> Option<usize> {

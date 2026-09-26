@@ -170,6 +170,10 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         (Value::ComplexTensor(a), Value::ComplexTensor(b)) => {
             complex_tensors_equal(a, b, nan_equal)
         }
+        (Value::Complex(real, imag), Value::ComplexTensor(tensor))
+        | (Value::ComplexTensor(tensor), Value::Complex(real, imag)) => {
+            complex_scalar_tensor_equal(*real, *imag, tensor, nan_equal)
+        }
 
         // Strings
         (Value::String(a), Value::String(b)) => a == b,
@@ -188,7 +192,7 @@ fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
         (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b, nan_equal),
         (Value::StructArray(a), Value::StructArray(b)) => {
             a.shape() == b.shape()
-                && a.field_names().eq(b.field_names())
+                && a.field_names().count() == b.field_names().count()
                 && a.field_names().all(|name| {
                     a.field_values(name)
                         .zip(b.field_values(name))
@@ -353,6 +357,22 @@ fn complex_tensors_equal(a: &ComplexTensor, b: &ComplexTensor, nan_equal: bool) 
     })
 }
 
+fn complex_scalar_tensor_equal(
+    real: f64,
+    imag: f64,
+    tensor: &ComplexTensor,
+    nan_equal: bool,
+) -> bool {
+    if tensor.shape != [1, 1] || tensor.len() != 1 {
+        return false;
+    }
+    let (tensor_real, tensor_imag) = tensor
+        .numeric_value_at(0)
+        .expect("scalar complex tensor index validated by length");
+    numeric_scalars_equal(NumericScalar::F64(real), tensor_real, nan_equal)
+        && numeric_scalars_equal(NumericScalar::F64(imag), tensor_imag, nan_equal)
+}
+
 fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
     if a.shape != b.shape {
         return false;
@@ -378,12 +398,11 @@ fn structs_equal(
     if a.fields.len() != b.fields.len() {
         return false;
     }
-    a.fields
-        .iter()
-        .zip(&b.fields)
-        .all(|((left_name, left), (right_name, right))| {
-            left_name == right_name && values_equal(left, right, nan_equal)
-        })
+    a.fields.iter().all(|(name, left)| {
+        b.fields
+            .get(name)
+            .is_some_and(|right| values_equal(left, right, nan_equal))
+    })
 }
 
 fn equality_error(

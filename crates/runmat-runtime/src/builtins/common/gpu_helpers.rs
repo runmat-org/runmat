@@ -768,6 +768,15 @@ pub fn upload_complex_tensor(
     provider: &dyn AccelProvider,
     tensor: &ComplexTensor,
 ) -> crate::BuiltinResult<GpuTensorHandle> {
+    upload_complex_tensor_protecting(provider, tensor, &[])
+}
+
+/// Upload without adopting or freeing a provider result that aliases a borrowed input.
+pub fn upload_complex_tensor_protecting(
+    provider: &dyn AccelProvider,
+    tensor: &ComplexTensor,
+    protected: &[&GpuTensorHandle],
+) -> crate::BuiltinResult<GpuTensorHandle> {
     let data = interleaved_complex_data(tensor)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
     let transfer = HostNumericTensorView {
@@ -778,7 +787,7 @@ pub fn upload_complex_tensor(
     let handle = provider
         .upload_numeric(&transfer)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
-    validate_numeric_upload(provider, handle, transfer)
+    validate_numeric_upload(provider, handle, transfer, protected)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())
 }
 
@@ -809,6 +818,15 @@ pub fn upload_tensor(
     provider: &dyn AccelProvider,
     tensor: &Tensor,
 ) -> Result<GpuTensorHandle, String> {
+    upload_tensor_protecting(provider, tensor, &[])
+}
+
+/// Upload without adopting or freeing a provider result that aliases a borrowed input.
+pub fn upload_tensor_protecting(
+    provider: &dyn AccelProvider,
+    tensor: &Tensor,
+    protected: &[&GpuTensorHandle],
+) -> Result<GpuTensorHandle, String> {
     let transfer = HostNumericTensorView {
         data: tensor_numeric_view(tensor),
         shape: &tensor.shape,
@@ -817,22 +835,30 @@ pub fn upload_tensor(
     let handle = provider
         .upload_numeric(&transfer)
         .map_err(|error| error.to_string())?;
-    validate_numeric_upload(provider, handle, transfer)
+    validate_numeric_upload(provider, handle, transfer, protected)
 }
 
 fn validate_numeric_upload(
     provider: &dyn AccelProvider,
     handle: GpuTensorHandle,
     transfer: HostNumericTensorView<'_>,
+    protected: &[&GpuTensorHandle],
 ) -> Result<GpuTensorHandle, String> {
-    let valid = handle.device_id == provider.device_id()
+    let aliases_input = protected
+        .iter()
+        .any(|input| same_gpu_handle(&handle, input));
+    let valid = !aliases_input
+        && handle.device_id == provider.device_id()
         && handle.shape == transfer.shape
         && handle.descriptor.element_type == Some(transfer.element_type())
         && handle.descriptor.storage == Some(transfer.storage);
     if valid {
         return Ok(handle);
     }
-    let detail = format!(
+    let detail = if aliases_input {
+        "provider returned an upload result aliasing a borrowed input".to_string()
+    } else {
+        format!(
         "provider returned descriptor {:?}, shape {:?}, and device {} for {:?} {:?} upload with shape {:?} on device {}",
         handle.descriptor,
         handle.shape,
@@ -841,9 +867,9 @@ fn validate_numeric_upload(
         transfer.storage,
         transfer.shape,
         provider.device_id()
-    );
-    let _ = provider.free(&handle);
-    runmat_accelerate_api::clear_handle_metadata(&handle);
+    )
+    };
+    free_rejected_provider_output(&handle, protected, provider);
     Err(detail)
 }
 
@@ -1168,6 +1194,99 @@ mod preserving_download_tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+
+    struct ReturningUploadProvider<'a> {
+        inner: &'a dyn AccelProvider,
+        output: GpuTensorHandle,
+        frees: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AccelProvider for ReturningUploadProvider<'_> {
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            Ok(self.output.clone())
+        }
+        fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(self.output.clone())
+        }
+        fn download<'a>(
+            &'a self,
+            handle: &'a GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            self.inner.download(handle)
+        }
+        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+            self.frees.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.free(handle)
+        }
+        fn device_info(&self) -> String {
+            "fixed upload result test provider".into()
+        }
+        fn device_id(&self) -> u32 {
+            self.inner.device_id()
+        }
+    }
+
+    #[test]
+    fn protected_numeric_and_complex_uploads_preserve_borrowed_aliases() {
+        test_support::with_test_provider(|owner| {
+            let real = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let complex = ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2]).unwrap();
+            for prototype in [
+                upload_tensor(owner, &real).unwrap(),
+                upload_complex_tensor(owner, &complex).unwrap(),
+            ] {
+                let before = snapshot_handle_metadata(&prototype);
+                let provider = ReturningUploadProvider {
+                    inner: owner,
+                    output: prototype.clone(),
+                    frees: 0.into(),
+                };
+                // Both helpers must reject even an otherwise correctly described alias;
+                // the opposite storage request also exercises malformed-alias rejection.
+                assert!(upload_tensor_protecting(&provider, &real, &[&prototype])
+                    .unwrap_err()
+                    .contains("borrowed input"));
+                assert!(
+                    upload_complex_tensor_protecting(&provider, &complex, &[&prototype])
+                        .unwrap_err()
+                        .to_string()
+                        .contains("borrowed input")
+                );
+                assert_eq!(provider.frees.load(std::sync::atomic::Ordering::SeqCst), 0);
+                assert_eq!(snapshot_handle_metadata(&prototype), before);
+                assert!(
+                    block_on(owner.download_numeric(&prototype)).is_ok(),
+                    "borrowed allocation remains live"
+                );
+                owner.free(&prototype).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(&prototype);
+            }
+        });
+    }
+
+    #[test]
+    fn invalid_numeric_upload_releases_the_registered_owner_not_the_invoked_provider() {
+        test_support::with_rejecting_native_result_provider(|invoked| {
+            let dummy = GpuTensorHandle::new(vec![1, 1], invoked.device_id(), 0);
+            let output = invoked.cross(&dummy, &dummy, None).unwrap();
+            let owner = exact_provider_for_handle(&output).expect("fixture owner");
+            assert_ne!(owner.device_id(), invoked.device_id());
+            let provider = ReturningUploadProvider {
+                inner: invoked,
+                output: output.clone(),
+                frees: 0.into(),
+            };
+            let before = invoked.free_count();
+            let host = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+            assert!(upload_tensor(&provider, &host).is_err());
+            assert_eq!(provider.frees.load(std::sync::atomic::Ordering::SeqCst), 0);
+            assert_eq!(invoked.free_count(), before + 1);
+            assert!(block_on(owner.download(&output)).is_err());
+        });
+    }
 
     #[test]
     fn unary_output_contract_checks_owner_class_shape_storage_and_alias_policy() {

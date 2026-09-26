@@ -221,6 +221,10 @@ mod tests {
             assert!(
                 provenance
                     .module_path
+                    .split("::")
+                    .map(|segment| segment.strip_prefix("r#").unwrap_or(segment))
+                    .collect::<Vec<_>>()
+                    .join("::")
                     .ends_with(&source_module_suffix(provenance.source_file)),
                 "constant {} reports source {} but module {}",
                 entry.name,

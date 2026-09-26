@@ -65,7 +65,7 @@ pub(super) async fn nan_like_gpu(
             "nan: 'like' prototype must be single or double",
         ));
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
         let precision =
             runmat_accelerate_api::handle_precision(handle).unwrap_or_else(|| provider.precision());
         let storage = runmat_accelerate_api::handle_storage(handle);
@@ -77,17 +77,22 @@ pub(super) async fn nan_like_gpu(
                 dtype_from_precision(precision),
             )
             .map_err(|e| builtin_error(format!("nan: {e}")))?;
-            if let Ok(gpu) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                if let Ok(gpu) = validate_constructor_gpu_output(
-                    "nan",
-                    provider,
-                    gpu,
-                    shape,
-                    GpuTensorStorage::ComplexInterleaved,
-                    Some(precision),
-                    None,
-                    false,
-                ) {
+            if let Ok(gpu) =
+                gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[handle])
+            {
+                if let Ok(gpu) =
+                    crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                        "nan",
+                        provider,
+                        gpu,
+                        shape,
+                        GpuTensorStorage::ComplexInterleaved,
+                        Some(precision),
+                        None,
+                        false,
+                        &[handle],
+                    )
+                {
                     return Ok(Value::GpuTensor(gpu));
                 }
             }
@@ -101,32 +106,38 @@ pub(super) async fn nan_like_gpu(
             provider.fill(shape, f64::NAN)
         };
         if let Ok(gpu) = attempt {
-            if let Ok(gpu) = validate_constructor_gpu_output(
-                "nan",
-                provider,
-                gpu,
-                shape,
-                GpuTensorStorage::Real,
-                Some(precision),
-                None,
-                false,
-            ) {
+            if let Ok(gpu) =
+                crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                    "nan",
+                    provider,
+                    gpu,
+                    shape,
+                    GpuTensorStorage::Real,
+                    Some(precision),
+                    None,
+                    false,
+                    &[handle],
+                )
+            {
                 return Ok(Value::GpuTensor(gpu));
             }
         }
 
         let host = nan_tensor(shape, dtype_from_precision(precision))?;
-        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &host) {
-            if let Ok(gpu) = validate_constructor_gpu_output(
-                "nan",
-                provider,
-                gpu,
-                shape,
-                GpuTensorStorage::Real,
-                Some(precision),
-                None,
-                false,
-            ) {
+        if let Ok(gpu) = gpu_helpers::upload_tensor_protecting(provider, &host, &[handle]) {
+            if let Ok(gpu) =
+                crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+                    "nan",
+                    provider,
+                    gpu,
+                    shape,
+                    GpuTensorStorage::Real,
+                    Some(precision),
+                    None,
+                    false,
+                    &[handle],
+                )
+            {
                 return Ok(Value::GpuTensor(gpu));
             }
         }

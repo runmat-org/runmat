@@ -192,7 +192,14 @@ pub const NAN_ERROR_INTEGER_LIKE_PROTOTYPE: BuiltinErrorDescriptor = BuiltinErro
     message: "nan: integer 'like' prototypes are not supported",
 };
 
-const NAN_ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const NAN_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NAN.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:nan:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "nan: too many output arguments",
+};
+const NAN_ERRORS: [BuiltinErrorDescriptor; 6] = [
+    NAN_ERROR_TOO_MANY_OUTPUTS,
     NAN_ERROR_LIKE_EXPECTED_PROTOTYPE,
     NAN_ERROR_CLASS_CONFLICT,
     NAN_ERROR_UNRECOGNIZED_OPTION,
@@ -225,8 +232,8 @@ pub const NAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

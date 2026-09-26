@@ -97,7 +97,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::array::creation::nan"
 )]
-async fn nan_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub(crate) async fn nan_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        let error = &runmat_builtins::NAN_ERROR_TOO_MANY_OUTPUTS;
+        return Err(crate::build_runtime_error(error.message)
+            .with_builtin("nan")
+            .with_identifier(error.identifier.expect("output count error identifier"))
+            .build());
+    }
     let parsed = ParsedNan::parse(rest).await?;
     build_output(parsed).await
 }
