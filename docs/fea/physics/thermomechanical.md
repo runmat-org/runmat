@@ -168,8 +168,12 @@ provider-owned storage. `ThermalWorkspaceResourceFacts` adds the audited live ho
 12 nodal f64 vectors and three masks for solve/driver work; two assemblies' source, Robin,
 prescribed-value and material arrays plus construction property arrays; six element f64 values
 of recovery scratch. It also reuses `TopologyResourceFacts` for the two live projections. That
-topology figure is the shared estimate, not a measured or exact metadata bound. Sparse assembly
-builders, model/property/evidence metadata, observations, and transport still require admission.
+topology figure is the shared estimate, not a measured or exact metadata bound. Thermal conductivity,
+capacity, and backward-Euler effective operators now accumulate into preplanned shared CSR buffers,
+rejecting nonzero entries outside admitted support. Zero entries are compacted in place, preserving
+canonical numerical identities without sparse-map builders for those operators. Constraint
+preparation still uses discovered sparse rows; its builders, model/property/evidence metadata,
+observations, and transport still require admission.
 Passing this partial reservation is not whole-process memory admission or GPU qualification.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4

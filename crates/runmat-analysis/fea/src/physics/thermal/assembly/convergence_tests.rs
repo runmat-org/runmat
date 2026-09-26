@@ -102,6 +102,9 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
         let assembly = assemble(
             model,
             &mesh,
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                .unwrap()
+                .support(),
             &RealizedExcitations::default(),
             ExcitationSamplePoint::Static,
         )
@@ -195,6 +198,9 @@ fn transient_slab_has_second_order_spatial_convergence() {
         let assembly = assemble(
             &model,
             &mesh,
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                .unwrap()
+                .support(),
             &RealizedExcitations::default(),
             ExcitationSamplePoint::Static,
         )

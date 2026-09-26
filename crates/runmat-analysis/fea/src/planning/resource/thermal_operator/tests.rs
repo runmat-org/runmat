@@ -59,12 +59,33 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         let assembly = crate::physics::thermal::assembly::assemble(
             &workload.model,
             &mesh,
+            facts.support(),
             &excitations,
             sample,
         )
         .unwrap();
         facts.verify_matrix(&assembly.conductivity).unwrap();
         facts.verify_matrix(&assembly.capacity).unwrap();
+        let nodes = projection.nodes.len() as u64;
+        let insufficient = crate::algebra::SparsePattern::try_new(
+            nodes,
+            nodes,
+            (0..=nodes).collect(),
+            (0..nodes).collect(),
+        )
+        .unwrap();
+        let rejected = crate::physics::thermal::assembly::assemble(
+            &workload.model,
+            &mesh,
+            &insufficient,
+            &excitations,
+            sample,
+        )
+        .unwrap_err();
+        assert!(
+            rejected.to_string().contains("OutsidePlannedPattern"),
+            "{rejected}"
+        );
         let live_assembly_arrays = std::mem::size_of_val(assembly.source.as_slice())
             + std::mem::size_of_val(assembly.positive_robin_weight.as_slice())
             + std::mem::size_of_val(assembly.prescribed_temperature_k.as_slice())

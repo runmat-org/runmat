@@ -104,6 +104,7 @@ pub enum RealSparseMatrixError {
     DenseShapeMismatch { expected: usize, actual: usize },
     NonFiniteValue { entry: usize },
     StorageAllocation { elements: usize },
+    OutsidePlannedPattern { row: usize, column: usize },
     ShapeMismatch,
 }
 
@@ -434,105 +435,8 @@ impl RealSparseMatrix {
         assembler.finish()
     }
 }
-
-pub struct RealSparseAssembler {
-    columns: usize,
-    rows: Vec<BTreeMap<usize, f64>>,
-    role: OperatorRole,
-    properties: MatrixProperties,
-    contributions: Vec<ContributionProvenance>,
-    error: Option<RealSparseMatrixError>,
-}
-
-impl RealSparseAssembler {
-    pub fn new(
-        rows: usize,
-        columns: usize,
-        role: OperatorRole,
-        properties: MatrixProperties,
-    ) -> Self {
-        Self {
-            columns,
-            rows: (0..rows).map(|_| BTreeMap::new()).collect(),
-            role,
-            properties,
-            contributions: Vec::new(),
-            error: None,
-        }
-    }
-
-    pub fn square(size: usize, role: OperatorRole, properties: MatrixProperties) -> Self {
-        Self::new(size, size, role, properties)
-    }
-
-    pub fn add(&mut self, row: usize, column: usize, value: f64) {
-        if row >= self.rows.len() || column >= self.columns {
-            self.error
-                .get_or_insert(RealSparseMatrixError::ShapeMismatch);
-            return;
-        }
-        if !value.is_finite() {
-            self.error
-                .get_or_insert(RealSparseMatrixError::NonFiniteValue { entry: 0 });
-            return;
-        }
-        if value != 0.0 {
-            *self.rows[row].entry(column).or_insert(0.0) += value;
-        }
-    }
-
-    pub fn add_contribution(&mut self, provenance: ContributionProvenance) {
-        self.contributions.push(provenance);
-    }
-
-    pub fn finish(self) -> Result<RealSparseMatrix, RealSparseMatrixError> {
-        if let Some(error) = self.error {
-            return Err(error);
-        }
-        let row_count = self.rows.len();
-        let offset_count = row_count
-            .checked_add(1)
-            .ok_or(SparsePatternError::DimensionOverflow)?;
-        // Count after cancellation, before allocating final storage. Reserving once avoids
-        // geometric vector growth while the sparse builders are still live. Allocator
-        // rounding/metadata is not included in this logical payload count.
-        let entry_count = self.rows.iter().try_fold(0_usize, |count, row| {
-            count
-                .checked_add(row.values().filter(|value| **value != 0.0).count())
-                .ok_or(SparsePatternError::DimensionOverflow)
-        })?;
-        let mut offsets = reserve_payload(offset_count)?;
-        let mut columns = reserve_payload(entry_count)?;
-        let mut values = reserve_payload(entry_count)?;
-        offsets.push(0_u64);
-        for row in self.rows {
-            for (column, value) in row {
-                if value != 0.0 {
-                    columns.push(
-                        u64::try_from(column).map_err(|_| SparsePatternError::DimensionOverflow)?,
-                    );
-                    values.push(value);
-                }
-            }
-            offsets.push(
-                u64::try_from(values.len()).map_err(|_| SparsePatternError::DimensionOverflow)?,
-            );
-        }
-        let pattern = SparsePattern::try_new(
-            u64::try_from(row_count).map_err(|_| SparsePatternError::DimensionOverflow)?,
-            u64::try_from(self.columns).map_err(|_| SparsePatternError::DimensionOverflow)?,
-            offsets,
-            columns,
-        )?;
-        RealSparseMatrix::try_new(
-            pattern,
-            values,
-            self.role,
-            self.properties,
-            self.contributions,
-        )
-    }
-}
+mod assembler;
+pub use assembler::RealSparseAssembler;
 
 fn reserve_payload<T>(elements: usize) -> Result<Vec<T>, RealSparseMatrixError> {
     let mut values = Vec::new();

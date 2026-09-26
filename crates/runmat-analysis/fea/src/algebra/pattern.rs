@@ -194,6 +194,10 @@ impl SparsePattern {
         &self.column_indices
     }
 
+    pub(crate) fn into_index_buffers(self) -> (Vec<u64>, Vec<u64>) {
+        (self.row_offsets, self.column_indices)
+    }
+
     /// Find the first assembled entry not covered by this planned upper-bound pattern.
     /// Both row sets are canonical, so a merge walk uses no additional allocation.
     pub fn first_uncovered_entry(

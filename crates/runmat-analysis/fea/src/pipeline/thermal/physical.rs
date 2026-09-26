@@ -69,9 +69,14 @@ pub(super) fn run(
     let initial_sample = sample_point(thermal_step, time_origin_s, SignalSampleApproach::At)?;
     let initial_excitations =
         realize_excitations_for_step(&active_model, thermal_step, initial_sample)?;
-    let initial_assembly =
-        assemble_thermal_operator(&active_model, mesh, &initial_excitations, initial_sample)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let initial_assembly = assemble_thermal_operator(
+        &active_model,
+        mesh,
+        operators.support(),
+        &initial_excitations,
+        initial_sample,
+    )
+    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     operators.verify_matrix(&initial_assembly.conductivity)?;
     operators.verify_matrix(&initial_assembly.capacity)?;
     let initial = initial_state::realize(
@@ -381,8 +386,14 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         let approach = input.schedule.approach(step_index);
         let sample = sample_point(input.step, time_s, approach)?;
         let excitations = realize_excitations_for_step(input.model, input.step, sample)?;
-        let assembly = assemble_thermal_operator(input.model, input.mesh, &excitations, sample)
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        let assembly = assemble_thermal_operator(
+            input.model,
+            input.mesh,
+            input.operators.support(),
+            &excitations,
+            sample,
+        )
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         input.operators.verify_matrix(&assembly.conductivity)?;
         input.operators.verify_matrix(&assembly.capacity)?;
         source_evidence.extend(assembly.source_evidence.clone());
