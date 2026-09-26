@@ -93,7 +93,7 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
             let _outputs = crate::output_count::push_output_count(count);
             assert!(evaluate(args.clone()).is_ok(), "{name} count {count:?}");
             assert!(
-                dispatch_validator(name, args.clone()).is_ok(),
+                invoke_validator(name, args.clone()).is_ok(),
                 "{name} retained API"
             );
         }

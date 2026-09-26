@@ -13,6 +13,7 @@ pub fn value_is_member(value: &Value, set: &Value) -> Result<bool, RuntimeError>
 }
 
 pub async fn value_is_member_async(value: &Value, set: &Value) -> BuiltinResult<bool> {
+    ensure_member_class_compatibility(value, set)?;
     let value = host_value(value).await?;
     let set = host_value(set).await?;
     ensure_member_class_compatibility(&value, &set)?;

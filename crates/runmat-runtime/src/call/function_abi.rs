@@ -230,16 +230,20 @@ async fn validator_passes(
         V::A(names) => validation::must_be_a(value, names.clone())?,
         V::Column => validation::value_is_column(value),
         V::Finite => {
-            validation::ensure_resident_extension(value, "mustBeFinite")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_FINITE_RESIDENT_EXTENSION,
+                "mustBeFinite",
+            )?;
             validation::value_is_finite_async(value).await?
         }
         V::Float => validation::value_is_float(value),
-        V::Folder => validation::dispatch_validator_async("mustBeFolder", vec![value.clone()])
+        V::Folder => validation::value_is_folder_async(value)
             .await
-            .is_ok(),
-        V::File => validation::dispatch_validator_async("mustBeFile", vec![value.clone()])
+            .unwrap_or(false),
+        V::File => validation::value_is_file_async(value)
             .await
-            .is_ok(),
+            .unwrap_or(false),
         V::NumericOrLogical => validation::value_is_numeric_or_logical(value),
         V::Numeric => validation::value_is_numeric(value),
         V::Text => validation::value_is_text(value),
@@ -249,7 +253,11 @@ async fn validator_passes(
         V::ScalarOrEmpty => validation::value_is_scalar_or_empty(value),
         V::Real => validation::value_is_real_async(value).await?,
         V::Integer => {
-            validation::ensure_resident_extension(value, "mustBeInteger")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_INTEGER_RESIDENT_EXTENSION,
+                "mustBeInteger",
+            )?;
             validation::value_is_integer_async(value).await?
         }
         V::Vector { allow_all_empties } => {
@@ -260,11 +268,19 @@ async fn validator_passes(
         V::Nonnegative => validation::value_is_nonnegative_async(value).await?,
         V::Nonmissing => validation::value_is_nonmissing_async(value).await?,
         V::NonNan => {
-            validation::ensure_resident_extension(value, "mustBeNonNan")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_NON_NAN_RESIDENT_EXTENSION,
+                "mustBeNonNan",
+            )?;
             validation::value_is_non_nan_async(value).await?
         }
         V::Nonzero => {
-            validation::ensure_resident_extension(value, "mustBeNonzero")?;
+            validation::ensure_resident_extension(
+                value,
+                &runmat_builtins::MUST_BE_NONZERO_RESIDENT_EXTENSION,
+                "mustBeNonzero",
+            )?;
             validation::value_is_nonzero_async(value).await?
         }
         V::Nonpositive => validation::value_is_nonpositive_async(value).await?,

@@ -11,6 +11,7 @@ pub(super) async fn value_is_ordered_against_zero_async(
     value: &Value,
     operation: IntegerComparisonOp,
 ) -> BuiltinResult<bool> {
+    admit_pair_before_download(value, &Value::Num(0.0))?;
     let value = host_value(value).await?;
     comparison_all_normalized(&value, &Value::Num(0.0), operation)
 }
@@ -45,6 +46,7 @@ async fn compare_values_async(
     bound: &Value,
     operation: IntegerComparisonOp,
 ) -> BuiltinResult<bool> {
+    admit_pair_before_download(value, bound)?;
     let value = host_value(value).await?;
     let bound = host_value(bound).await?;
     comparison_all_normalized(&value, &bound, operation)
@@ -56,6 +58,8 @@ pub async fn value_is_in_range_values_async(
     upper: &Value,
     inclusivity: RangeInclusivity,
 ) -> BuiltinResult<bool> {
+    admit_pair_before_download(value, lower)?;
+    admit_pair_before_download(value, upper)?;
     let value = host_value(value).await?;
     let lower = host_value(lower).await?;
     let upper = host_value(upper).await?;
@@ -71,6 +75,24 @@ pub async fn value_is_in_range_values_async(
     };
     Ok(comparison_all_normalized(&value, &lower, lower_op)?
         && comparison_all_normalized(&value, &upper, upper_op)?)
+}
+
+fn admit_pair_before_download(lhs: &Value, rhs: &Value) -> BuiltinResult<()> {
+    // The exact comparison domain owns dense numeric admission. Sparse forms
+    // retain their existing specialized path; false means that domain did not
+    // claim the operands, not that the validator should reject them.
+    crate::builtins::logical::rel::integer_comparison::admit_numeric_pair(lhs, rhs).map_err(
+        |error| match error {
+            IntegerComparisonError::SizeMismatch => invalid_argument_error(
+                "argumentValidation",
+                "numeric inputs are not compatible for implicit expansion",
+            ),
+            IntegerComparisonError::Internal => {
+                invalid_argument_error("argumentValidation", "numeric comparison failed")
+            }
+        },
+    )?;
+    Ok(())
 }
 
 pub async fn value_is_in_range_documented_async(

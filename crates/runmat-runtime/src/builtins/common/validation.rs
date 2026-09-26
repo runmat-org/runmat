@@ -1,23 +1,10 @@
 //! Shared MATLAB argument-validation helpers and callable `mustBe*` builtins.
 
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
 use std::cmp::Ordering;
-use std::path::Path;
 
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_storage, GpuTensorStorage,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, IntegerStorage, NumericDType, SparseTensor,
     Value,
@@ -57,21 +44,12 @@ pub use contracts::{
     MUST_BE_TEXT_INTEGER_AUDIT, MUST_BE_TEXT_SCALAR_INTEGER_AUDIT,
     MUST_BE_UNDERLYING_TYPE_INTEGER_CAPABILITIES, MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT,
     MUST_BE_VECTOR_INTEGER_CAPABILITIES, NAMEDARGS2CELL_DESCRIPTOR, NAMEDARGS2CELL_INTEGER_AUDIT,
-    VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT, VALIDATOR_DESCRIPTOR,
+    VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT,
 };
-use contracts::{
-    MUST_BE_FINITE_RESIDENT_EXTENSION, MUST_BE_INTEGER_RESIDENT_EXTENSION,
-    MUST_BE_NONZERO_RESIDENT_EXTENSION, MUST_BE_NON_NAN_RESIDENT_EXTENSION,
-    VALIDATION_ERROR_PROVIDER_OWNERSHIP, VALIDATION_ERROR_PROVIDER_PAYLOAD,
-};
+use contracts::{VALIDATION_ERROR_PROVIDER_OWNERSHIP, VALIDATION_ERROR_PROVIDER_PAYLOAD};
 mod errors;
 pub use errors::validation_error;
-use errors::{
-    check_validator, invalid_argument_error, pass, require_arg_count, require_args,
-    require_exact_arg_count,
-};
-mod dispatch;
-pub use dispatch::{dispatch_validator, dispatch_validator_async};
+use errors::{check_validator, invalid_argument_error, pass, require_arg_count};
 mod shape;
 pub use shape::{
     value_is_column, value_is_empty, value_is_scalar_or_empty, value_is_vector,
@@ -90,6 +68,8 @@ pub use text::{
     value_is_nonzero_length_text, value_is_text, value_is_text_scalar,
 };
 mod numeric;
+mod cell_leaves;
+mod path;
 pub use numeric::{
     value_is_finite, value_is_finite_async, value_is_greater_than, value_is_greater_than_or_equal,
     value_is_in_range, value_is_integer, value_is_integer_async, value_is_less_than,
@@ -99,6 +79,7 @@ pub use numeric::{
     value_is_nonzero_async, value_is_positive, value_is_positive_async, value_is_real,
     value_is_real_async,
 };
+pub use path::{value_is_file_async, value_is_folder_async};
 mod comparison;
 use comparison::{numeric_class_identity, value_is_ordered_against_zero_async};
 pub use comparison::{
@@ -129,168 +110,6 @@ mod resident;
 use resident::host_value;
 pub use resident::{ensure_resident_extension, validate_resident_metadata};
 
-macro_rules! validator_builtin {
-    ($func:ident, $name:literal, capabilities = $capabilities:path) => {
-        #[runtime_builtin(
-            name = $name,
-            category = "argument-validation",
-            summary = "Validate an input argument and throw if the constraint is not satisfied.",
-            sink = true,
-            suppress_auto_output = true,
-            descriptor(self::VALIDATOR_DESCRIPTOR),
-            integer_capabilities($capabilities),
-            builtin_path = "crate::builtins::common::validation"
-        )]
-        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
-            dispatch_validator_async($name, args).await
-        }
-    };
-    ($func:ident, $name:literal, capabilities = $capabilities:path, extensions = $extensions:path) => {
-        #[runtime_builtin(
-            name = $name,
-            category = "argument-validation",
-            summary = "Validate an input argument and throw if the constraint is not satisfied.",
-            sink = true,
-            suppress_auto_output = true,
-            descriptor(self::VALIDATOR_DESCRIPTOR),
-            extensions($extensions),
-            integer_capabilities($capabilities),
-            builtin_path = "crate::builtins::common::validation"
-        )]
-        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
-            dispatch_validator_async($name, args).await
-        }
-    };
-    ($func:ident, $name:literal, audit = $audit:path) => {
-        #[runtime_builtin(
-            name = $name,
-            category = "argument-validation",
-            summary = "Validate an input argument and throw if the constraint is not satisfied.",
-            sink = true,
-            suppress_auto_output = true,
-            descriptor(self::VALIDATOR_DESCRIPTOR),
-            integer_audit($audit),
-            builtin_path = "crate::builtins::common::validation"
-        )]
-        async fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
-            dispatch_validator_async($name, args).await
-        }
-    };
-    ($func:ident, $name:literal) => {
-        #[runtime_builtin(
-            name = $name,
-            category = "argument-validation",
-            summary = "Validate an input argument and throw if the constraint is not satisfied.",
-            sink = true,
-            suppress_auto_output = true,
-            descriptor(self::VALIDATOR_DESCRIPTOR),
-            builtin_path = "crate::builtins::common::validation"
-        )]
-        fn $func(args: Vec<Value>) -> BuiltinResult<Value> {
-            dispatch_validator($name, args)
-        }
-    };
-}
-
-validator_builtin!(
-    must_be_file_builtin,
-    "mustBeFile",
-    audit = self::MUST_BE_FILE_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_finite_builtin,
-    "mustBeFinite",
-    capabilities = self::MUST_BE_FINITE_INTEGER_CAPABILITIES,
-    extensions = self::MUST_BE_FINITE_EXTENSIONS
-);
-
-validator_builtin!(
-    must_be_folder_builtin,
-    "mustBeFolder",
-    audit = self::MUST_BE_FOLDER_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_greater_than_builtin,
-    "mustBeGreaterThan",
-    capabilities = self::MUST_BE_GREATER_THAN_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_greater_than_or_equal_builtin,
-    "mustBeGreaterThanOrEqual",
-    capabilities = self::MUST_BE_GREATER_THAN_OR_EQUAL_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_in_range_builtin,
-    "mustBeInRange",
-    capabilities = self::MUST_BE_IN_RANGE_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_integer_builtin,
-    "mustBeInteger",
-    capabilities = self::MUST_BE_INTEGER_INTEGER_CAPABILITIES,
-    extensions = self::MUST_BE_INTEGER_EXTENSIONS
-);
-validator_builtin!(
-    must_be_less_than_builtin,
-    "mustBeLessThan",
-    capabilities = self::MUST_BE_LESS_THAN_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_less_than_or_equal_builtin,
-    "mustBeLessThanOrEqual",
-    capabilities = self::MUST_BE_LESS_THAN_OR_EQUAL_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_member_builtin,
-    "mustBeMember",
-    capabilities = self::MUST_BE_MEMBER_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_negative_builtin,
-    "mustBeNegative",
-    capabilities = self::MUST_BE_NEGATIVE_INTEGER_CAPABILITIES
-);
-
-validator_builtin!(
-    must_be_nonmissing_builtin,
-    "mustBeNonmissing",
-    capabilities = self::MUST_BE_NONMISSING_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_non_nan_builtin,
-    "mustBeNonNan",
-    capabilities = self::MUST_BE_NON_NAN_INTEGER_CAPABILITIES,
-    extensions = self::MUST_BE_NON_NAN_EXTENSIONS
-);
-validator_builtin!(
-    must_be_nonnegative_builtin,
-    "mustBeNonnegative",
-    capabilities = self::MUST_BE_NONNEGATIVE_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_nonpositive_builtin,
-    "mustBeNonpositive",
-    capabilities = self::MUST_BE_NONPOSITIVE_INTEGER_CAPABILITIES
-);
-
-validator_builtin!(
-    must_be_nonzero_builtin,
-    "mustBeNonzero",
-    capabilities = self::MUST_BE_NONZERO_INTEGER_CAPABILITIES,
-    extensions = self::MUST_BE_NONZERO_EXTENSIONS
-);
-
-validator_builtin!(
-    must_be_positive_builtin,
-    "mustBePositive",
-    capabilities = self::MUST_BE_POSITIVE_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_real_builtin,
-    "mustBeReal",
-    capabilities = self::MUST_BE_REAL_INTEGER_CAPABILITIES
-);
-
 mod admission;
 pub(crate) mod isvarname;
 pub(crate) mod must_be_a;
@@ -313,3 +132,22 @@ pub(crate) mod validate_function_signatures_json;
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod must_be_file;
+pub(crate) mod must_be_folder;
+pub(crate) mod must_be_finite;
+pub(crate) mod must_be_integer;
+pub(crate) mod must_be_non_nan;
+pub(crate) mod must_be_nonzero;
+pub(crate) mod must_be_nonmissing;
+pub(crate) mod must_be_real;
+pub(crate) mod must_be_positive;
+pub(crate) mod must_be_negative;
+pub(crate) mod must_be_nonnegative;
+pub(crate) mod must_be_nonpositive;
+pub(crate) mod must_be_greater_than;
+pub(crate) mod must_be_greater_than_or_equal;
+pub(crate) mod must_be_less_than;
+pub(crate) mod must_be_less_than_or_equal;
+pub(crate) mod must_be_in_range;
+pub(crate) mod must_be_member;

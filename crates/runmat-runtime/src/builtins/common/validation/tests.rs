@@ -2,6 +2,9 @@ use super::*;
 mod class_shape;
 mod admission;
 mod ownership;
+mod numeric_cutover;
+mod download_lifecycle;
+mod filesystem;
 mod text_shape;
 use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
 use crate::builtins::common::test_support;
@@ -11,14 +14,14 @@ use runmat_value::{
 };
 
 fn ok(builtin: &str, args: Vec<Value>) {
-    dispatch_validator(builtin, args).unwrap_or_else(|err| {
+    invoke_validator(builtin, args).unwrap_or_else(|err| {
         panic!("{builtin} unexpectedly failed: {err}");
     });
 }
 
 fn err(builtin: &str, args: Vec<Value>) {
     assert!(
-        dispatch_validator(builtin, args).is_err(),
+        invoke_validator(builtin, args).is_err(),
         "{builtin} unexpectedly passed"
     );
 }
@@ -196,7 +199,7 @@ fn resident_text_validators_reject_before_provider_lookup() {
         runmat_accelerate_api::GpuTensorStorage::Real,
     );
     for builtin in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
-        let error = dispatch_validator(builtin, vec![Value::GpuTensor(handle.clone())])
+        let error = invoke_validator(builtin, vec![Value::GpuTensor(handle.clone())])
             .expect_err("resident integer must fail text validation");
         let expected_identifier = format!("RunMat:{builtin}:ValidationFailed");
         assert_eq!(error.identifier(), Some(expected_identifier.as_str()));
@@ -233,10 +236,10 @@ fn resident_integer_structural_validators_do_not_read_freed_payloads() {
 #[test]
 fn numeric_validators_check_all_elements() {
     let ok = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
-    assert!(dispatch_validator("mustBePositive", vec![Value::Tensor(ok)]).is_ok());
+    assert!(invoke_validator("mustBePositive", vec![Value::Tensor(ok)]).is_ok());
 
     let bad = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-    assert!(dispatch_validator("mustBePositive", vec![Value::Tensor(bad)]).is_err());
+    assert!(invoke_validator("mustBePositive", vec![Value::Tensor(bad)]).is_err());
 }
 
 #[test]
@@ -475,7 +478,7 @@ fn resident_secondary_validator_operands_require_coherent_metadata() {
                 .expect("upload lower");
         lower_handle.descriptor.storage =
             Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        let error = dispatch_validator(
+        let error = invoke_validator(
             "mustBeGreaterThan",
             vec![
                 Value::GpuTensor(value_handle.clone()),
@@ -513,14 +516,14 @@ fn threshold_validators_read_typed_sparse_and_complex_integer_storage() {
 #[test]
 fn member_validator_accepts_numeric_and_text_sets() {
     let allowed = Tensor::new(vec![1.0, 3.0, 5.0], vec![1, 3]).unwrap();
-    assert!(dispatch_validator(
+    assert!(invoke_validator(
         "mustBeMember",
         vec![Value::Num(3.0), Value::Tensor(allowed)]
     )
     .is_ok());
 
     let allowed = StringArray::new(vec!["on".into(), "off".into()], vec![1, 2]).unwrap();
-    assert!(dispatch_validator(
+    assert!(invoke_validator(
         "mustBeMember",
         vec![Value::String("on".into()), Value::StringArray(allowed)]
     )
@@ -690,7 +693,7 @@ fn member_validator_does_not_equate_wide_integer_with_rounded_double() {
 
 #[test]
 fn text_and_varname_validators_follow_core_shapes() {
-    assert!(dispatch_validator(
+    assert!(invoke_validator(
         "mustBeNonzeroLengthText",
         vec![Value::CharArray(CharArray::new_row("alpha"))]
     )
@@ -1204,12 +1207,8 @@ fn resident_content_validators_download_exactly_and_preserve_source() {
             .expect("upload resident integer");
         let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
         let value = Value::GpuTensor(handle.clone());
-        assert!(block_on(dispatch_validator_async(
-            "mustBeNonzero",
-            vec![value.clone()],
-        ))
-        .is_ok());
-        assert!(block_on(dispatch_validator_async("mustBePositive", vec![value],)).is_err());
+        assert!(block_on(invoke_validator_async("mustBeNonzero", vec![value.clone()],)).is_ok());
+        assert!(block_on(invoke_validator_async("mustBePositive", vec![value],)).is_err());
         assert!(crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle).is_some());
         let gathered = block_on(provider.download_integer(&handle)).expect("source survives");
         assert_eq!(
@@ -1250,33 +1249,29 @@ fn wgpu_resident_integer_validators_preserve_exact_source_and_provenance() {
         "mustBeNonzero",
         "mustBePositive",
     ] {
-        block_on(dispatch_validator_async(name, vec![value.clone()]))
+        block_on(invoke_validator_async(name, vec![value.clone()]))
             .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
     }
     let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
     let value = Value::GpuTensor(handle.clone());
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     for name in ["mustBeReal", "mustBeVector"] {
-        block_on(dispatch_validator_async(name, vec![value.clone()]))
+        block_on(invoke_validator_async(name, vec![value.clone()]))
             .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
     }
-    block_on(dispatch_validator_async(
+    block_on(invoke_validator_async(
         "mustBeUnderlyingType",
         vec![value.clone(), Value::String("uint64".into())],
     ))
     .expect("resident underlying type metadata");
-    assert!(block_on(dispatch_validator_async(
+    assert!(block_on(invoke_validator_async(
         "mustBeScalarOrEmpty",
         vec![value.clone()],
     ))
     .is_err());
-    assert!(block_on(dispatch_validator_async(
-        "mustBeSparse",
-        vec![value.clone()],
-    ))
-    .is_err());
+    assert!(block_on(invoke_validator_async("mustBeSparse", vec![value.clone()],)).is_err());
     for name in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
-        let error = block_on(dispatch_validator_async(name, vec![value.clone()]))
+        let error = block_on(invoke_validator_async(name, vec![value.clone()]))
             .expect_err("resident integer must reject text validation");
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
     }
@@ -1309,7 +1304,7 @@ fn undocumented_explicit_resident_validators_are_mode_gated() {
             "mustBeNonNan",
             "mustBeNonzero",
         ] {
-            let error = dispatch_validator(name, vec![value.clone()])
+            let error = invoke_validator(name, vec![value.clone()])
                 .expect_err("explicit resident extension must reject in compatibility mode");
             assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
         }
@@ -1352,7 +1347,15 @@ fn validate_function_signatures_json_checks_json_syntax() {
         buffer_id: u64::MAX,
         descriptor: Default::default(),
     });
-    let error = dispatch_validator("validateFunctionSignaturesJSON", vec![resident])
+    let error = invoke_validator("validateFunctionSignaturesJSON", vec![resident])
         .expect_err("resident numeric input must reject as invalid text");
     assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+}
+
+// Tests exercise canonical runtime binding selection, not a validator name switch.
+async fn invoke_validator_async(name: &str, args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::call_builtin_async(name, &args).await
+}
+fn invoke_validator(name: &str, args: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(invoke_validator_async(name, args))
 }

@@ -32,19 +32,6 @@ pub(super) fn pass() -> BuiltinResult<Value> {
     Ok(Value::Num(0.0))
 }
 
-pub(super) fn require_args<'a>(
-    builtin: &str,
-    args: &'a [Value],
-    min: usize,
-    max: usize,
-) -> BuiltinResult<&'a Value> {
-    if args.len() < min || args.len() > max {
-        return Err(invalid_argument_error(builtin, "invalid number of inputs").into());
-    }
-    args.first()
-        .ok_or_else(|| invalid_argument_error(builtin, "missing value").into())
-}
-
 pub(super) fn require_arg_count(
     builtin: &str,
     args: &[Value],
@@ -55,14 +42,6 @@ pub(super) fn require_arg_count(
         return Err(invalid_argument_error(builtin, "invalid number of inputs").into());
     }
     Ok(())
-}
-
-pub(super) fn require_exact_arg_count(
-    builtin: &str,
-    args: &[Value],
-    expected: usize,
-) -> BuiltinResult<()> {
-    require_arg_count(builtin, args, expected, expected)
 }
 
 pub(super) fn check_validator(builtin: &str, ok: bool) -> BuiltinResult<Value> {

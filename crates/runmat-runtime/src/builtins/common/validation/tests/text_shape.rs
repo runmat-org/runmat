@@ -27,8 +27,8 @@ fn text_admission_ignores_only_trailing_singletons() {
     assert!(!isvarname_value(&pages));
     for name in ["mustBeA", "mustBeUnderlyingType"] {
         ok(name, vec![Value::Num(1.0), shaped_text("double", false)]);
-        let error = dispatch_validator(name, vec![Value::Num(1.0), shaped_text("double", true)])
-            .unwrap_err();
+        let error =
+            invoke_validator(name, vec![Value::Num(1.0), shaped_text("double", true)]).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:argumentValidation:InvalidArgument")
@@ -47,7 +47,7 @@ fn remaining_file_and_folder_consumers_share_row_admission() {
     ] {
         let text = path.to_str().unwrap();
         ok(name, vec![shaped_text(text, false)]);
-        let error = dispatch_validator(name, vec![shaped_text(text, true)]).unwrap_err();
+        let error = invoke_validator(name, vec![shaped_text(text, true)]).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:argumentValidation:InvalidArgument")

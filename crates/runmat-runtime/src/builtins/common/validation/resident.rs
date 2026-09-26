@@ -2,9 +2,8 @@
 
 use super::{
     build_runtime_error, handle_integer_type, handle_is_logical, handle_storage, BuiltinResult,
-    GpuTensorStorage, Value, MUST_BE_FINITE_RESIDENT_EXTENSION, MUST_BE_INTEGER_RESIDENT_EXTENSION,
-    MUST_BE_NONZERO_RESIDENT_EXTENSION, MUST_BE_NON_NAN_RESIDENT_EXTENSION,
-    VALIDATION_ERROR_PROVIDER_OWNERSHIP, VALIDATION_ERROR_PROVIDER_PAYLOAD,
+    GpuTensorStorage, Value, VALIDATION_ERROR_PROVIDER_OWNERSHIP,
+    VALIDATION_ERROR_PROVIDER_PAYLOAD,
 };
 
 async fn resident_host_value(value: &Value) -> BuiltinResult<Option<Value>> {
@@ -34,17 +33,14 @@ fn explicit_resident(value: &Value) -> bool {
     matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_provenance(handle) == Some(runmat_accelerate_api::GpuHandleProvenance::Explicit))
 }
 
-pub fn ensure_resident_extension(value: &Value, builtin: &str) -> BuiltinResult<()> {
-    if !explicit_resident(value) {
+pub fn ensure_resident_extension(
+    value: &Value,
+    extension: &runmat_builtins::BuiltinExtensionDescriptor,
+    builtin: &str,
+) -> BuiltinResult<()> {
+    if !super::cell_leaves::CellLeaves::new(value).any(explicit_resident) {
         return Ok(());
     }
-    let extension = match builtin {
-        "mustBeFinite" => &MUST_BE_FINITE_RESIDENT_EXTENSION,
-        "mustBeInteger" => &MUST_BE_INTEGER_RESIDENT_EXTENSION,
-        "mustBeNonNan" => &MUST_BE_NON_NAN_RESIDENT_EXTENSION,
-        "mustBeNonzero" => &MUST_BE_NONZERO_RESIDENT_EXTENSION,
-        _ => return Ok(()),
-    };
     crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
 }
 

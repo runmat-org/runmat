@@ -295,21 +295,21 @@ pub async fn value_is_integer_async(value: &Value) -> BuiltinResult<bool> {
 }
 
 pub async fn value_is_non_nan_async(value: &Value) -> BuiltinResult<bool> {
-    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
-    {
-        return Ok(true);
+    for leaf in super::cell_leaves::CellLeaves::new(value) {
+        super::validate_resident_metadata(leaf)?;
+        if matches!(leaf, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
+        {
+            continue;
+        }
+        if !value_is_non_nan(&host_value(leaf).await?) {
+            return Ok(false);
+        }
     }
-    let value = host_value(value).await?;
-    Ok(value_is_non_nan(&value))
+    Ok(true)
 }
 
 pub async fn value_is_nonmissing_async(value: &Value) -> BuiltinResult<bool> {
-    if matches!(value, Value::GpuTensor(handle) if handle_integer_type(handle).is_some() || handle_is_logical(handle))
-    {
-        return Ok(true);
-    }
-    let value = host_value(value).await?;
-    Ok(value_is_nonmissing(&value))
+    value_is_non_nan_async(value).await
 }
 
 pub async fn value_is_positive_async(value: &Value) -> BuiltinResult<bool> {
