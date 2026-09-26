@@ -13,6 +13,9 @@ pub struct BuiltinPreparationAdmission {
     pub form: BuiltinPreparationFormId,
     pub signature: usize,
     pub input_count: usize,
+    /// Already admitted by the domain. None preserves its default convention;
+    /// zero still executes effects. Fixed descriptors can admit padded RunMat
+    /// extensions, so output policy and public errors remain domain-owned.
     pub requested_outputs: Option<usize>,
 }
 
@@ -42,20 +45,28 @@ impl AdmittedBuiltinPreparation {
         if entry.identity != admission.binding.builtin {
             return Err(invalid("preparation binding and catalog identity disagree"));
         }
-        if !runmat_builtins::validate_builtin_preparation(entry).is_empty() {
-            return Err(invalid("invalid canonical operand preparation declaration"));
-        }
+        // Immutable declaration validation belongs to the existing catalog
+        // validation gate. Do not allocate sets or scan every form on each call.
         let BuiltinOperandPreparation::Forms(forms) = entry.placement.preparation else {
             return Err(invalid(
                 "runtime-owned builtin has no shared preparation form",
             ));
         };
-        let form = forms
-            .iter()
-            .find(|form| form.id == admission.form)
+        let mut matching_forms = forms.iter().filter(|form| form.id == admission.form);
+        let form = matching_forms
+            .next()
             .ok_or_else(|| invalid("unknown canonical preparation form"))?;
+        if matching_forms.next().is_some() {
+            return Err(invalid("ambiguous canonical preparation form"));
+        }
         if form.binding_variant != admission.binding.variant
             || !form.signatures.contains(&admission.signature)
+            || entry
+                .bindings
+                .iter()
+                .filter(|binding| binding.variant == admission.binding.variant)
+                .count()
+                != 1
         {
             return Err(invalid(
                 "admitted binding/signature does not belong to preparation form",
@@ -73,7 +84,25 @@ impl AdmittedBuiltinPreparation {
         }
         // A consistency check on the domain's witness, not normal call admission
         // and not a replacement for domain-specific errors or option parsing.
-        let signature = &entry.descriptor.signatures[admission.signature];
+        let signature = entry
+            .descriptor
+            .signatures
+            .get(admission.signature)
+            .ok_or_else(|| invalid("admitted signature is absent from the descriptor"))?;
+        if form
+            .data_arguments
+            .iter()
+            .any(|&position| position >= signature.inputs.len())
+            || !form.data_arguments.windows(2).all(|pair| pair[0] < pair[1])
+            || form
+                .operation
+                .data_arity()
+                .is_some_and(|count| count != operands.len())
+        {
+            return Err(invalid(
+                "selected preparation form has inconsistent data roles",
+            ));
+        }
         let required = signature
             .inputs
             .iter()

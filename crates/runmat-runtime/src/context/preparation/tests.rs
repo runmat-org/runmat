@@ -94,6 +94,69 @@ fn admitted_like_controls_never_cross_the_preparation_boundary() {
     assert_eq!(request.form().data_arguments, &[0]);
 }
 
+#[test]
+fn domain_admitted_output_count_including_padding_is_preserved() {
+    for requested_outputs in [None, Some(0), Some(1), Some(4)] {
+        let request = request_with(
+            BuiltinPreparationAdmission {
+                requested_outputs,
+                ..admission()
+            },
+            vec![Value::Num(1.0)],
+        )
+        .unwrap();
+        assert_eq!(request.admission().requested_outputs, requested_outputs);
+    }
+}
+
+#[test]
+fn ambiguous_selected_form_or_binding_is_rejected() {
+    let mut entry = SIN_CATALOG_ENTRY;
+    entry.placement.preparation = BuiltinOperandPreparation::Forms(&[FORM, FORM]);
+    assert!(AdmittedBuiltinPreparation::from_entry(
+        Box::leak(Box::new(entry)),
+        admission(),
+        vec![Value::Num(1.0)]
+    )
+    .is_err());
+    let mut entry = SIN_CATALOG_ENTRY;
+    entry.placement.preparation = BuiltinOperandPreparation::Forms(&[FORM]);
+    entry.bindings = &[
+        BuiltinBindingDeclaration {
+            variant: "default",
+            availability: BuiltinBindingAvailability::Required,
+        },
+        BuiltinBindingDeclaration {
+            variant: "default",
+            availability: BuiltinBindingAvailability::Required,
+        },
+    ];
+    assert!(AdmittedBuiltinPreparation::from_entry(
+        Box::leak(Box::new(entry)),
+        admission(),
+        vec![Value::Num(1.0)]
+    )
+    .is_err());
+}
+
+#[test]
+fn malformed_selected_signature_returns_error_without_panicking() {
+    let mut entry = SIN_CATALOG_ENTRY;
+    entry.placement.preparation = BuiltinOperandPreparation::Forms(&[BuiltinPreparationForm {
+        signatures: &[99],
+        ..FORM
+    }]);
+    assert!(AdmittedBuiltinPreparation::from_entry(
+        Box::leak(Box::new(entry)),
+        BuiltinPreparationAdmission {
+            signature: 99,
+            ..admission()
+        },
+        vec![Value::Num(1.0)]
+    )
+    .is_err());
+}
+
 type Events = Rc<RefCell<Vec<&'static str>>>;
 struct Observation(Events);
 impl BuiltinPreparationObservation for Observation {
