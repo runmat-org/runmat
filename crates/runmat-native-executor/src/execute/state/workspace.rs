@@ -1,7 +1,21 @@
 use super::*;
 use runmat_value::Value;
 
+#[cfg(test)]
+#[path = "workspace_initialization_tests.rs"]
+mod tests;
+
 impl HostState {
+    /// Initialization is a frame-state transition shared by ordinary writes,
+    /// call/edge results, optimized writes, and workspace reconciliation.
+    /// A NULL transfer is still unassigned and cannot satisfy an omitted input.
+    fn record_local_initialization(&mut self, slot: usize, value: NativeValueRef) {
+        if !value.is_null() {
+            self.missing_input_locals
+                .retain(|local| local.0 as usize != slot);
+        }
+    }
+
     pub(in crate::execute) fn assignment_root(
         &self,
         slot: usize,
@@ -38,6 +52,7 @@ impl HostState {
                 workspace.synchronize_local(slot, self.arena.get(value)?.clone());
             }
         }
+        self.record_local_initialization(slot, value);
         self.synchronize_session_binding(slot, value)
     }
 
@@ -53,6 +68,7 @@ impl HostState {
                 NativeExecutorError::Host("native workspace local is out of bounds".into())
             })?;
             *local = reference;
+            self.record_local_initialization(slot, reference);
         }
         Ok(())
     }

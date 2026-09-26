@@ -2849,6 +2849,14 @@ fn member_assignment_fixture_with_root(
     initialize: bool,
     nested: bool,
 ) -> runmat_native_codegen::NativeAssembly {
+    member_assignment_fixture_with_input(initialize, nested, false)
+}
+
+fn member_assignment_fixture_with_input(
+    initialize: bool,
+    nested: bool,
+    omitted_formal: bool,
+) -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
     let base = if nested {
         MirPlace::Member(
@@ -2892,13 +2900,39 @@ fn member_assignment_fixture_with_root(
             span,
         },
     ]);
-    lower_body(
+    lower_body_with_inputs(
         "member_assignment",
         1,
         statements,
         MirOperand::Local(MirLocalId(0)),
         span,
+        if omitted_formal {
+            vec![MirLocalId(0)]
+        } else {
+            vec![]
+        },
     )
+}
+
+#[test]
+fn generic_native_omitted_input_can_be_initialized_before_member_assignment() {
+    for initialize in [false, true] {
+        let executor = compile_executor(member_assignment_fixture_with_input(
+            initialize, false, true,
+        ))
+        .unwrap();
+        let result = executor.invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context());
+        if initialize {
+            let output = result.unwrap().outputs.pop().unwrap();
+            let Value::Struct(root) = output else {
+                panic!("initialized struct")
+            };
+            assert_eq!(root.fields.get("answer"), Some(&Value::Num(42.0)));
+        } else {
+            assert!(matches!(result, Err(NativeExecutorError::Runtime(error))
+                if error.identifier() == Some("RunMat:NotEnoughInputs")));
+        }
+    }
 }
 
 #[test]
@@ -3255,6 +3289,17 @@ fn lower_body(
     returned: MirOperand,
     span: Span,
 ) -> runmat_native_codegen::NativeAssembly {
+    lower_body_with_inputs(name, local_count, statements, returned, span, Vec::new())
+}
+
+fn lower_body_with_inputs(
+    name: &str,
+    local_count: usize,
+    statements: Vec<MirStmt>,
+    returned: MirOperand,
+    span: Span,
+    fixed_inputs: Vec<MirLocalId>,
+) -> runmat_native_codegen::NativeAssembly {
     let function = FunctionId(0);
     let mir = MirAssembly {
         bodies: [(
@@ -3262,7 +3307,7 @@ fn lower_body(
             MirBody {
                 function,
                 abi: FunctionAbi {
-                    fixed_inputs: Vec::new(),
+                    fixed_inputs,
                     varargin: None,
                     fixed_outputs: Vec::new(),
                     varargout: None,
