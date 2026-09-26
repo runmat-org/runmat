@@ -1,6 +1,7 @@
 use super::*;
 mod ownership;
 mod admitted;
+mod integer_conversion;
 use crate::placement::{begin_trace, LocalPlacementFeedback};
 use runmat_execution::{
     Digest, PlacementFeedback, PlacementPlanRequest, PlacementRevision, PlacementSignature,
