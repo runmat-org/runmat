@@ -8,7 +8,24 @@ pub struct ThermalResultEncodingProfile {
     pub largest_contract_materialization_bytes: u64,
 }
 
+#[cfg(test)]
+#[test]
+fn composed_header_admission_uses_the_canonical_contract_byte_ceiling() {
+    let maximum = LIMITS.maximum_encoded_bytes as u64;
+    ThermalSolverResultManifest::require_header_byte_bound(maximum).unwrap();
+    assert!(ThermalSolverResultManifest::require_header_byte_bound(maximum + 1).is_err());
+}
+
 impl ThermalSolverResultManifest {
+    /// Admission of a composed pre-solve header bound against this contract's wire ceiling.
+    pub(crate) fn require_header_byte_bound(bytes: u64) -> AnalysisExecutionResult<()> {
+        if bytes > LIMITS.maximum_encoded_bytes as u64 {
+            return Err(AnalysisExecutionError::Limit(
+                "projected thermal result header",
+            ));
+        }
+        Ok(())
+    }
     /// Profile metadata plus every field partition before encoding numerical payloads.
     /// This is post-solve: runtime provenance is known. It is not pre-solve admission.
     pub fn encoding_profile(&self) -> AnalysisExecutionResult<ThermalResultEncodingProfile> {

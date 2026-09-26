@@ -8,6 +8,7 @@ use serde::ser::SerializeSeq;
 pub struct AnalysisTransportProfile {
     pub partition_count: u64,
     pub chunk_count_upper_bound: u64,
+    pub maximum_partition_chunks_upper_bound: u64,
     pub payload_bytes_upper_bound: u64,
     pub largest_chunk_bytes_upper_bound: u64,
     /// Requested borrowed-key slots used by manifest validation, not canonical encoding scratch.
@@ -16,11 +17,43 @@ pub struct AnalysisTransportProfile {
     pub total_bytes_upper_bound: u64,
 }
 
+impl AnalysisTransportProfile {
+    /// Requested Rust heap for the builder: owned plan capacity, output inventories and bytes,
+    /// one partition's staging-vector slots, and manifest validation slots. Excludes caller
+    /// source buffers, root encoding, LogicalObject conversion, allocator overhead and RSS.
+    /// The caller must reserve the stated plan capacity; no hypothetical identities are needed.
+    pub fn builder_resident_bytes(&self, plan_capacity: usize) -> AnalysisExecutionResult<u64> {
+        let partitions = usize::try_from(self.partition_count).map_err(|_| overflow())?;
+        if plan_capacity < partitions {
+            return Err(AnalysisExecutionError::Invalid(
+                "plan capacity must cover the projected partition inventory".into(),
+            ));
+        }
+        let chunks = usize::try_from(self.chunk_count_upper_bound).map_err(|_| overflow())?;
+        let staging =
+            usize::try_from(self.maximum_partition_chunks_upper_bound).map_err(|_| overflow())?;
+        [
+            plan::slots::<AnalysisPayloadPartitionPlan>(plan_capacity)?,
+            plan::slots::<AnalysisChunkDescriptor>(chunks)?,
+            plan::slots::<Vec<u8>>(chunks)?,
+            plan::slots::<AnalysisPayloadPartitionDescriptor>(partitions)?,
+            plan::slots::<Vec<u8>>(staging)?,
+            self.payload_bytes_upper_bound,
+            self.manifest_validation_scratch_bytes,
+        ]
+        .into_iter()
+        .try_fold(0_u64, |total, bytes| {
+            total.checked_add(bytes).ok_or_else(overflow)
+        })
+    }
+}
+
 /// Feed each independently encoded semantic partition, including the domain result header.
 pub struct AnalysisTransportProfiler {
     chunk_bytes: u64,
     partitions: u64,
     chunks: u64,
+    maximum_partition_chunks: u64,
     payload_bytes: u64,
     largest_chunk: u64,
 }
@@ -36,6 +69,7 @@ impl AnalysisTransportProfiler {
             chunk_bytes: u64::try_from(chunk_bytes).map_err(|_| overflow())?,
             partitions: 0,
             chunks: 0,
+            maximum_partition_chunks: 0,
             payload_bytes: 0,
             largest_chunk: 0,
         })
@@ -49,9 +83,10 @@ impl AnalysisTransportProfiler {
                 "partition byte bound must be non-zero".into(),
             ));
         }
+        let partition_chunks = encoded_bytes_upper_bound.div_ceil(self.chunk_bytes);
         let chunks = self
             .chunks
-            .checked_add(encoded_bytes_upper_bound.div_ceil(self.chunk_bytes))
+            .checked_add(partition_chunks)
             .ok_or_else(overflow)?;
         let partitions = self.partitions.checked_add(1).ok_or_else(overflow)?;
         let bytes = self
@@ -64,6 +99,7 @@ impl AnalysisTransportProfiler {
             ));
         }
         self.chunks = chunks;
+        self.maximum_partition_chunks = self.maximum_partition_chunks.max(partition_chunks);
         self.partitions = partitions;
         self.payload_bytes = bytes;
         self.largest_chunk = self
@@ -116,6 +152,7 @@ impl AnalysisTransportProfiler {
         Ok(AnalysisTransportProfile {
             partition_count: self.partitions,
             chunk_count_upper_bound: self.chunks,
+            maximum_partition_chunks_upper_bound: self.maximum_partition_chunks,
             payload_bytes_upper_bound: self.payload_bytes,
             largest_chunk_bytes_upper_bound: self.largest_chunk,
             manifest_validation_scratch_bytes: AnalysisObjectManifest::validation_scratch_bytes(

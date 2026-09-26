@@ -13,7 +13,6 @@ pub struct AnalysisPayloadPlan {
     pub(super) chunk_bytes: usize,
     pub(super) partitions: Vec<AnalysisPayloadPartitionPlan>,
     transport: AnalysisTransportProfile,
-    maximum_partition_chunks: usize,
 }
 
 impl AnalysisPayloadPlan {
@@ -32,17 +31,8 @@ impl AnalysisPayloadPlan {
     ) -> AnalysisExecutionResult<Self> {
         let mut profiler = AnalysisTransportProfiler::new(chunk_bytes)?;
         check_partition_count(partitions.len())?;
-        let mut maximum_partition_chunks = 0;
         for partition in &partitions {
             profiler.push(partition.encoded_bytes_upper_bound)?;
-            maximum_partition_chunks = maximum_partition_chunks.max(
-                usize::try_from(
-                    partition
-                        .encoded_bytes_upper_bound
-                        .div_ceil(chunk_bytes as u64),
-                )
-                .map_err(|_| AnalysisExecutionError::Limit("planned partition chunks"))?,
-            );
         }
         let transport = profiler.finish(kind)?;
         let mut identities = reserved::<&Digest>(partitions.len())?;
@@ -59,7 +49,6 @@ impl AnalysisPayloadPlan {
             chunk_bytes,
             partitions,
             transport,
-            maximum_partition_chunks,
         };
         plan.resident_bytes()?;
         Ok(plan)
@@ -73,25 +62,8 @@ impl AnalysisPayloadPlan {
     /// one partition's staging-vector slots and identity-validation slots. Excludes caller source
     /// buffers, root encoding, LogicalObject conversion, allocator overhead and process RSS.
     pub fn resident_bytes(&self) -> AnalysisExecutionResult<u64> {
-        let chunks = usize::try_from(self.transport.chunk_count_upper_bound)
-            .map_err(|_| AnalysisExecutionError::Limit("planned chunk count"))?;
-        [
-            slots::<AnalysisPayloadPartitionPlan>(self.partitions.capacity())?,
-            slots::<AnalysisChunkDescriptor>(chunks)?,
-            slots::<Vec<u8>>(chunks)?,
-            slots::<AnalysisPayloadPartitionDescriptor>(self.partitions.len())?,
-            slots::<Vec<u8>>(self.maximum_partition_chunks)?,
-            self.transport.payload_bytes_upper_bound,
-            self.transport.manifest_validation_scratch_bytes,
-        ]
-        .into_iter()
-        .try_fold(0_u64, |total, bytes| {
-            total
-                .checked_add(bytes)
-                .ok_or(AnalysisExecutionError::Limit(
-                    "planned builder resident bytes",
-                ))
-        })
+        self.transport
+            .builder_resident_bytes(self.partitions.capacity())
     }
 }
 
@@ -103,7 +75,7 @@ fn check_partition_count(count: usize) -> AnalysisExecutionResult<()> {
     }
 }
 
-fn slots<T>(count: usize) -> AnalysisExecutionResult<u64> {
+pub(super) fn slots<T>(count: usize) -> AnalysisExecutionResult<u64> {
     count
         .checked_mul(std::mem::size_of::<T>())
         .and_then(|n| u64::try_from(n).ok())

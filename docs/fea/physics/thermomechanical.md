@@ -567,15 +567,39 @@ The execution bridge's `projected_chunked_output_resource_facts` composes the pa
 retained `LogicalObject` slots, logical-name/media strings, the root descriptor copy, root canonical
 encoding/materialization and borrowed inventory-validation keys. Conversion reserves strings and
 inventory vectors fallibly; chunk byte buffers move without copying. Canonical names and bytes
-remain unchanged. Thermal output preflight uses these shared facts, but does not yet enforce their
-resident component against a pre-solve caller budget. Source fields and their canonical encoding,
-allocator overhead and native/process memory are excluded.
+remain unchanged. `projected_transport_output_resource_facts` uses the same formula before
+partition identities exist. The conversion component alone excludes source fields and their
+canonical encoding, allocator overhead and native/process memory.
 
 `cargo test -p runmat-analysis-execution --test object_conversion_residency -- --nocapture`
 measures the public bulk preparation path above caller-owned input buffers. For 16 and 64 partitions
 of 512 KiB, with 64 KiB chunks, peak requested growth was 8,560,281 and 34,237,545 B against
 8,697,944 and 34,582,712 B reservations on the tested host. It also checks the root encoding and
 legacy logical-name/media identity. These fixtures are not whole-process memory qualification.
+
+The local `execute_thermal_solver_result_objects` bridge now calls `ThermalWorkload::prepare`
+before assembly. This immutable preparation owns the existing admitted numerical facts and compiled
+properties, borrowing the unchanged model and mesh. Its output projection combines the complete
+header bound with full/trailing field block shapes at the longest sample-name ordinal, using the
+actual chunk policy. It checks the thermal header byte ceiling, shared root limits, artifact count,
+per-object and total bytes. The bridge then adds builder/conversion residency to the conservative
+numerical/producer/field-encoding reservation and enforces the selected step's resident ceiling
+before consuming preparation to execute. It does not rerun property compilation or introduce
+transport policy into numerical identity. Summing lifetimes is deliberately conservative and may
+reject cases that a tighter liveness analysis could admit.
+
+Tet4/Tet10 steady and 12-sample transient tests verify analytic uniform temperature, unchanged
+prepared results, and pre-solve bounds covering post-solve profiles at two chunk sizes. Boundary
+tests reject inventory ceilings and one byte below combined residency, admitting the exact bound.
+This guarantee applies to the transport-aware bridge, not numerical-only `execute`/`run_thermal`
+or conversion of an already computed result. Portable native worker routing, scheduler/receipt
+integration and whole-process qualification remain required; no production promotion is implied.
+
+The isolated `thermal_execution_residency` integration test measures the complete public bridge
+above caller-owned model/mesh storage. Tet4 at 8/128 samples measured 203,014/2,973,342 B against
+4,129,474/33,981,668 B admission bounds; Tet10 measured 203,691/2,979,779 B against
+4,745,367/34,616,281 B. These small insulated fixtures demonstrate the tested requested-heap
+envelope, not large-mesh, allocator/native-memory or portable-worker qualification.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

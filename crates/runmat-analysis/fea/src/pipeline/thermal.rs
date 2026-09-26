@@ -13,6 +13,8 @@ use crate::{
 };
 
 mod physical;
+mod prepared;
+pub use prepared::PreparedThermalSolve;
 
 pub fn run_thermal_with_options(
     model: &AnalysisModel,
@@ -37,15 +39,15 @@ pub fn run_thermal_with_options(
     execute_validated_model(model, backend, options, &mesh, step)
 }
 
-pub(crate) fn run_selected(
-    model: &AnalysisModel,
+pub(crate) fn prepare_selected<'a>(
+    model: &'a AnalysisModel,
     backend: ComputeBackend,
     options: ThermalSolveOptions,
-    mesh: &SolverMeshArtifact,
-    step: &ProcedureStep,
-) -> Result<FeaThermalRunResult, FeaRunError> {
+    mesh: &'a SolverMeshArtifact,
+    step: &'a ProcedureStep,
+) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_run(model, &options)?;
-    execute_validated_model(model, backend, options, mesh, step)
+    prepare_validated_model(model, backend, options, mesh, step)
 }
 
 fn validate_run(model: &AnalysisModel, options: &ThermalSolveOptions) -> Result<(), FeaRunError> {
@@ -85,6 +87,16 @@ fn execute_validated_model(
     mesh: &SolverMeshArtifact,
     step: &ProcedureStep,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
+    prepare_validated_model(model, backend, options, mesh, step)?.execute()
+}
+
+fn prepare_validated_model<'a>(
+    model: &'a AnalysisModel,
+    backend: ComputeBackend,
+    options: ThermalSolveOptions,
+    mesh: &'a SolverMeshArtifact,
+    step: &'a ProcedureStep,
+) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_step(step, options.procedure)?;
     let identity = crate::admission::admit_nonstructural(
         PhysicsFamily::Thermal,
@@ -99,7 +111,15 @@ fn execute_validated_model(
         model, step, mesh, &schedule, &identity,
     )?;
     facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
-    physical::run(model, backend, options, mesh, step, &schedule, &facts)
+    Ok(PreparedThermalSolve {
+        model,
+        backend,
+        options,
+        mesh,
+        step,
+        schedule,
+        facts,
+    })
 }
 
 pub(crate) fn validate_controls(

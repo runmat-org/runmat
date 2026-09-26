@@ -32,6 +32,17 @@ fn plan_counts_owned_capacity_and_each_live_inventory() {
         AnalysisPayloadPlan::new(AnalysisNumericalObjectKind::SolverResult, 4, entries).unwrap();
     assert_eq!(plan.transport_profile().chunk_count_upper_bound, 5);
     assert_eq!(
+        plan.transport_profile()
+            .maximum_partition_chunks_upper_bound,
+        3
+    );
+    assert_eq!(
+        plan.resident_bytes().unwrap(),
+        plan.transport_profile()
+            .builder_resident_bytes(capacity)
+            .unwrap()
+    );
+    assert_eq!(
         plan.resident_bytes().unwrap(),
         slots::<AnalysisPayloadPartitionPlan>(capacity).unwrap()
             + slots::<AnalysisChunkDescriptor>(5).unwrap()

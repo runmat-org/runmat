@@ -19,7 +19,9 @@ use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 mod conversion;
 use conversion::logical_object;
 pub(crate) use conversion::prepare_chunked_analysis_objects;
-pub use conversion::projected_chunked_output_resource_facts;
+pub use conversion::{
+    projected_chunked_output_resource_facts, projected_transport_output_resource_facts,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedAnalysisObjects {

@@ -56,6 +56,7 @@ mod structural_sequence;
 mod structural_transient_recovery;
 mod structural_transient_sequence;
 mod task;
+mod thermal_execution;
 mod thermal_result_access;
 mod transient_block_task;
 mod transient_object_access;
@@ -143,8 +144,9 @@ pub use object::{
     analysis_object_references, import_analysis_objects, import_analysis_partition,
     prepare_analysis_objects, prepare_partitioned_analysis_objects, prepared_input_resource_facts,
     prepared_input_resource_facts_without_resource_plan, projected_chunked_output_resource_facts,
-    projected_output_resource_facts, projected_output_set_resource_facts, AnalysisPartitionImport,
-    ImportedAnalysisPartition, PreparedAnalysisObjects,
+    projected_output_resource_facts, projected_output_set_resource_facts,
+    projected_transport_output_resource_facts, AnalysisPartitionImport, ImportedAnalysisPartition,
+    PreparedAnalysisObjects,
 };
 pub use observation_assembly::{
     import_structural_observation_assembly, prepare_structural_observation_assembly,
@@ -325,6 +327,7 @@ pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
     DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
 };
+pub use thermal_execution::execute_thermal_solver_result_objects;
 pub use thermal_result_access::{
     decode_prepared_thermal_state, import_thermal_state, prepare_thermal_solver_result_objects,
     ThermalStateImport,

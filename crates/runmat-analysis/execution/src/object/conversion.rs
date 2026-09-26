@@ -1,6 +1,6 @@
 //! Numerical payload ownership transfer into the shared artifact inventory.
 use super::*;
-use runmat_analysis_fea::execution::AnalysisPayloadPlan;
+use runmat_analysis_fea::execution::{AnalysisPayloadPlan, AnalysisTransportProfile};
 use runmat_execution_artifact::object::inventory_validation_scratch_bytes;
 use std::fmt::Write;
 
@@ -15,7 +15,22 @@ const DIGEST_SUFFIX_BYTES: usize = 65; // Slash and raw SHA-256 hex (no algorith
 pub fn projected_chunked_output_resource_facts(
     plan: &AnalysisPayloadPlan,
 ) -> AnalysisBridgeResult<PreparedOutputResourceFacts> {
-    let profile = plan.transport_profile();
+    projected_conversion_facts(plan.transport_profile(), plan.resident_bytes()?)
+}
+
+/// Pre-solve shape projection, before partition identities exist. Planned entries must use the
+/// exact-reserved inventory; the post-solve plan variant additionally counts excess capacity.
+pub fn projected_transport_output_resource_facts(
+    profile: &AnalysisTransportProfile,
+) -> AnalysisBridgeResult<PreparedOutputResourceFacts> {
+    let count = usize::try_from(profile.partition_count).map_err(|_| overflow())?;
+    projected_conversion_facts(profile, profile.builder_resident_bytes(count)?)
+}
+
+fn projected_conversion_facts(
+    profile: &AnalysisTransportProfile,
+    builder_bytes: u64,
+) -> AnalysisBridgeResult<PreparedOutputResourceFacts> {
     let count = profile
         .chunk_count_upper_bound
         .checked_add(1)
@@ -26,7 +41,7 @@ pub fn projected_chunked_output_resource_facts(
         + ANALYSIS_CHUNK_MEDIA_TYPE.len();
     let root_strings = ROOT_PREFIX.len() + DIGEST_SUFFIX_BYTES + ANALYSIS_MANIFEST_MEDIA_TYPE.len();
     let components = [
-        plan.resident_bytes()?,
+        builder_bytes,
         count
             .checked_mul(std::mem::size_of::<LogicalObject>() as u64)
             .ok_or_else(overflow)?,

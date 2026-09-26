@@ -42,6 +42,10 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
             actual.chunks.len()
         );
         assert_eq!(profile.payload_bytes_upper_bound, 31);
+        assert_eq!(
+            profile.maximum_partition_chunks_upper_bound,
+            15_u64.div_ceil(chunk_bytes as u64)
+        );
         let root = actual.manifest.canonical_bytes().unwrap();
         assert!(root.len() as u64 <= profile.root.encoded_bytes_upper_bound);
         assert!(root.len() as u64 + 31 <= profile.total_bytes_upper_bound);
@@ -64,6 +68,25 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
             encode_contract(MANIFEST_PREFIX, MANIFEST_DOMAIN, &legacy, MANIFEST_LIMITS).unwrap()
         );
     }
+}
+
+#[test]
+fn builder_shape_rejects_insufficient_capacity_and_checked_overflow() {
+    let mut profiler = AnalysisTransportProfiler::new(4).unwrap();
+    profiler.push(9).unwrap();
+    profiler.push(1).unwrap();
+    let profile = profiler
+        .finish(AnalysisNumericalObjectKind::SolverResult)
+        .unwrap();
+    assert!(profile.builder_resident_bytes(1).is_err());
+    assert!(profile.builder_resident_bytes(usize::MAX).is_err());
+    assert!(profile.builder_resident_bytes(2).is_ok());
+    let mut overflow = profile;
+    overflow.payload_bytes_upper_bound = u64::MAX;
+    assert!(overflow.builder_resident_bytes(2).is_err());
+    let mut slot_overflow = profile;
+    slot_overflow.maximum_partition_chunks_upper_bound = u64::MAX;
+    assert!(slot_overflow.builder_resident_bytes(2).is_err());
 }
 
 #[test]

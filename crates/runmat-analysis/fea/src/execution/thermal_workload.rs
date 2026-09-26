@@ -166,10 +166,19 @@ impl ThermalWorkload {
     /// Executes the selected step without rewriting the authored sequence or its producer identity.
     /// Resource planning and portable worker task admission must surround this numerical entry.
     pub fn execute(&self, mesh: &SolverMeshArtifact) -> Result<FeaThermalRunResult, FeaRunError> {
+        self.prepare(mesh)?.execute()
+    }
+
+    /// Validates and reserves numerical components without assembling or solving. The returned
+    /// immutable preparation allows transport admission before consuming it to execute.
+    pub fn prepare<'a>(
+        &'a self,
+        mesh: &'a SolverMeshArtifact,
+    ) -> Result<super::PreparedThermalSolve<'a>, FeaRunError> {
         let step = self
             .validated_step()
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-        crate::pipeline::thermal::run_selected(
+        crate::pipeline::thermal::prepare_selected(
             &self.model,
             self.backend,
             crate::ThermalSolveOptions {
