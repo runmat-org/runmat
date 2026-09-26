@@ -214,6 +214,7 @@ fn graphics_handle_matches_type(value: &Value, kind: &str) -> bool {
             PlotChildHandleState::Text(_) => kind == "text",
             PlotChildHandleState::TextScatter(_) => kind == "textscatter",
             PlotChildHandleState::WordCloud(_) => kind == "wordcloud",
+            PlotChildHandleState::ColorBar(_) => kind == "colorbar",
             PlotChildHandleState::StackedPlot(_) => kind == "stackedplot",
         },
         Err(_) => false,

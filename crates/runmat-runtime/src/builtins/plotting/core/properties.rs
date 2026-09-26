@@ -34,6 +34,8 @@ use crate::builtins::stats::summary::binscatter;
 use crate::BuiltinResult;
 
 const MAX_AXES_FONT_SIZE_POINTS: f64 = 512.0;
+#[path = "properties/colorbar.rs"]
+mod colorbar;
 
 #[derive(Clone, Debug)]
 pub enum PlotHandle {
@@ -416,7 +418,8 @@ fn get_figure_property(
 ) -> BuiltinResult<Value> {
     let figure = super::state::clone_figure(handle)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
-    let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
+    let mut axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
+    axes.extend(super::state::colorbar_handles_for_figure(handle));
     let current_axes =
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let sg_title_handle =
@@ -2492,6 +2495,7 @@ fn get_plot_child_property(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(bar) => colorbar::get(bar, property, builtin),
         super::state::PlotChildHandleState::Histogram(hist) => {
             get_histogram_property(hist, property, builtin)
         }
@@ -2591,6 +2595,9 @@ fn apply_plot_child_property(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     match state {
+        super::state::PlotChildHandleState::ColorBar(_) => {
+            colorbar::set(handle, key, value, builtin)
+        }
         super::state::PlotChildHandleState::Histogram(hist) => {
             apply_histogram_property(hist, key, value, builtin)
         }

@@ -23,6 +23,14 @@ use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
 
+#[path = "state/colorbar.rs"]
+mod colorbar;
+pub use colorbar::{
+    colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,
+    set_colorbar_enabled, set_colorbar_enabled_for_axes, set_colorbar_visible, toggle_colorbar,
+    ColorBarHandleState,
+};
+
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
 type AxisTickSnapshot = (Option<Vec<f64>>, Option<Vec<f64>>);
 type AxisTickLabelSnapshot = (Option<Vec<String>>, Option<Vec<String>>);
@@ -790,6 +798,7 @@ pub struct StackedPlotHandleState {
 
 #[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
+    ColorBar(ColorBarHandleState),
     Histogram(HistogramHandleState),
     Histogram2(Histogram2HandleState),
     Line(SimplePlotHandleState),
@@ -823,6 +832,7 @@ pub enum PlotChildHandleState {
 impl PlotChildHandleState {
     pub fn figure_axes(&self) -> (FigureHandle, usize) {
         match self {
+            Self::ColorBar(state) => (state.figure, state.axes_index),
             Self::Histogram(state) => (state.figure, state.axes_index),
             Self::Histogram2(state) => (state.figure, state.axes_index),
             Self::Line(state)
@@ -859,6 +869,7 @@ impl PlotChildHandleState {
 
     pub fn plot_index(&self) -> Option<usize> {
         Some(match self {
+            Self::ColorBar(_) => return None,
             Self::Histogram(state) => state.plot_index,
             Self::Histogram2(state) => state.plot_index,
             Self::Line(state)
@@ -1066,6 +1077,7 @@ impl PlotChildHandleState {
                 axes_index,
                 plot_index,
             }),
+            Self::ColorBar(_) => return None,
             Self::Text(_) => return None,
             Self::TextScatter(_) => return None,
             Self::WordCloud(_) => return None,
@@ -1075,6 +1087,7 @@ impl PlotChildHandleState {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Self::ColorBar(_) => "colorbar",
             Self::Histogram(_) => "histogram",
             Self::Histogram2(_) => "histogram2",
             Self::Line(_) | Self::Line3(_) => "line",
@@ -3321,31 +3334,6 @@ pub fn clear_current_axes() {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
-pub fn set_colorbar_enabled(enabled: bool) {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        state.figure.set_axes_colorbar_enabled(axes, enabled);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_colorbar_enabled_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    enabled: bool,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_colorbar_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
 pub fn set_legend_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -3461,25 +3449,6 @@ pub fn legend_entries_snapshot(
         });
     }
     Ok(state.figure.legend_entries_for_axes(axes_index))
-}
-
-pub fn toggle_colorbar() -> bool {
-    let (handle, figure_clone, enabled) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        let next = !state
-            .figure
-            .axes_metadata(axes)
-            .map(|m| m.colorbar_enabled)
-            .unwrap_or(false);
-        state.figure.set_axes_colorbar_enabled(axes, next);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone(), next)
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    enabled
 }
 
 pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
@@ -4976,6 +4945,7 @@ fn trim_oldest_xyz(maximum: Option<usize>, x: &mut Vec<f64>, y: &mut Vec<f64>, z
 
 fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
     reg.plot_children.retain(|_, state| match state {
+        PlotChildHandleState::ColorBar(bar) => bar.figure != handle,
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
         PlotChildHandleState::Histogram2(hist) => hist.figure != handle,
         PlotChildHandleState::Line(plot)
@@ -5013,6 +4983,8 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
 
 fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, axes_index: usize) {
     reg.plot_children.retain(|_, state| match state {
+        // Colorbars belong to the figure; clearing plotted axes children keeps them live.
+        PlotChildHandleState::ColorBar(_) => true,
         PlotChildHandleState::Histogram(hist) => {
             !(hist.figure == handle && hist.axes_index == axes_index)
         }
@@ -5177,6 +5149,7 @@ fn notify_event<'a>(view: FigureEventView<'a>) {
 }
 
 fn notify_with_figure(handle: FigureHandle, figure: &Figure, kind: FigureEventKind) {
+    colorbar::reconcile_publication(handle, figure);
     notify_event(FigureEventView {
         handle,
         kind,
@@ -5364,6 +5337,9 @@ pub fn plot_child_handles_for_axes(handle: FigureHandle, axes_index: usize) -> V
         .plot_children
         .iter()
         .filter_map(|(id, state)| {
+            if matches!(state, PlotChildHandleState::ColorBar(_)) {
+                return None;
+            }
             let (figure, axes) = state.figure_axes();
             (figure == handle && axes == axes_index).then_some(*id as f64)
         })
