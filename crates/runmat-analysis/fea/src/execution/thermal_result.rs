@@ -21,6 +21,8 @@ mod fields;
 impl FeaThermalRunResult {
     pub(super) fn metadata(&self) -> ThermalResultMetadata<'_> {
         ThermalResultMetadata {
+            source_workload: self.source_workload,
+            numerical_intent: self.numerical_intent,
             run: &self.run,
             time_points_s: &self.time_points_s,
             residual_norms: &self.residual_norms,
@@ -115,6 +117,8 @@ fn validate_history(
 }
 
 pub(super) struct ThermalResultMetadata<'a> {
+    pub source_workload: super::AnalysisWorkloadIdentity,
+    pub numerical_intent: super::ThermalNumericalIntentIdentity,
     pub run: &'a crate::FeaRunResult,
     pub time_points_s: &'a [f64],
     pub residual_norms: &'a [f64],
@@ -198,8 +202,9 @@ impl ThermalResultMetadata<'_> {
         // Numerical identity excludes presentation diagnostics and execution telemetry.
         let content = encode_contract(
             PREFIX,
-            "thermal-solver-result-field-content",
+            "thermal-solver-result-intent-field-content",
             &(
+                self.numerical_intent,
                 &self.run.identity,
                 &self.time_points_s,
                 &fields,

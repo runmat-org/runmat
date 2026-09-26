@@ -29,17 +29,18 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         )
         .unwrap();
         let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
-        // Pin the pre-manifest numerical identity tuple/domain, independently of the
+        // Pin the workload-bound numerical identity tuple/domain, independently of the
         // shared metadata helper used by the two production entry points.
         let field_ids = manifest
             .fields
             .iter()
             .map(|entries| entries.each_ref().map(|entry| entry.field))
             .collect::<Vec<_>>();
-        let legacy_content = encode_contract(
+        let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",
-            "thermal-solver-result-field-content",
+            "thermal-solver-result-intent-field-content",
             &(
+                result.numerical_intent,
                 &result.run.identity,
                 &result.time_points_s,
                 &field_ids,
@@ -56,8 +57,11 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         .unwrap();
         assert_eq!(
             manifest.identity(),
-            SolverResultIdentity::from_step_result(result.producer, Digest::sha256(legacy_content))
-                .unwrap()
+            SolverResultIdentity::from_step_result(
+                result.producer,
+                Digest::sha256(expected_content)
+            )
+            .unwrap()
         );
         assert_eq!(
             manifest.identity(),

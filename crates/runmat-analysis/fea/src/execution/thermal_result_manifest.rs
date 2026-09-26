@@ -23,6 +23,8 @@ mod tests;
 #[serde(deny_unknown_fields)]
 pub struct ThermalSolverResultManifest {
     pub schema_version: u16,
+    pub source_workload: AnalysisWorkloadIdentity,
+    pub numerical_intent: ThermalNumericalIntentIdentity,
     identity: SolverResultIdentity,
     pub run: FeaRunResult,
     pub producer: StepIdentity,
@@ -102,6 +104,8 @@ impl ThermalSolverResultManifest {
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
+            source_workload: result.source_workload,
+            numerical_intent: result.numerical_intent,
             identity: result.source_result_identity()?,
             run: FeaRunResult {
                 identity: run.identity.clone(),
@@ -139,6 +143,8 @@ impl ThermalSolverResultManifest {
 
     fn metadata(&self) -> ThermalResultMetadata<'_> {
         ThermalResultMetadata {
+            source_workload: self.source_workload,
+            numerical_intent: self.numerical_intent,
             run: &self.run,
             time_points_s: &self.time_points_s,
             residual_norms: &self.residual_norms,

@@ -127,11 +127,20 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
         let observations = ThermalObservationResourceFacts::derive(&mesh, step).unwrap();
         let shared = observations.shared.as_ref().unwrap();
         assert_eq!(shared.retained_sample_count.0, 8);
+        let result = workload.execute(&mesh).unwrap();
+        let source_sample_bytes: usize = [
+            &result.temperature_snapshots[0],
+            &result.temperature_gradient_snapshots[0],
+            &result.heat_flux_snapshots[0],
+            &result.energy_storage_rate_snapshots[0],
+        ]
+        .iter()
+        .map(|field| std::mem::size_of_val(field.as_host_f64().unwrap()))
+        .sum();
         assert_eq!(
             observations.catalog_copy_bytes.0,
-            (mesh.topology.nodes.len() + 6 * mesh.topology.volume_elements.len()) as u64 * 8
+            source_sample_bytes as u64
         );
-        let result = workload.execute(&mesh).unwrap();
         let retained_samples: usize = result
             .run
             .observation_histories

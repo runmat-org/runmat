@@ -42,7 +42,9 @@ mod state;
 pub(crate) mod structural_identity;
 mod study_workloads;
 mod sweep;
+mod thermal_receipt;
 mod thermal_result;
+pub use thermal_receipt::{ThermalNumericalReceipt, ThermalNumericalReceiptArtifact};
 mod thermal_result_manifest;
 pub use thermal_result_manifest::ThermalSolverResultManifest;
 mod thermal_schedule;
@@ -134,6 +136,7 @@ pub use identity::{
     StructuralTransientResultAssemblyRequestIdentity, StructuralTransientScheduleIdentity,
     StructuralTransientSegmentIdentity, StructuralTransientSegmentSampleIdentity,
     StructuralTransientSolverOptionsIdentity, StudyIdentity, SweepIdentity, SweepResultIdentity,
+    ThermalNumericalIntentIdentity,
 };
 pub use modal_result::{StructuralModalNumericalReceipt, StructuralModalSolverResult};
 pub use modal_workload::{

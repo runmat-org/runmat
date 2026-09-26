@@ -180,8 +180,10 @@ and transport still require complete allocation accounting.
 
 Thermal history observation preflight resolves the same shared field-definition inventory used
 at runtime. It reserves shared stored-history/reduction costs, the larger of the monolithic and
-partition evaluation peaks, and the evaluator's copied temperature/gradient/flux catalog payload
-(`8 * (nodes + 6 * elements)`). This is added to numerical reservation under the same authored
+partition evaluation peaks, and the evaluator's copied temperature/gradient/flux/storage-rate catalog
+payload (`8 * (nodes + 7 * elements)`). Copy widths are derived from the shared field definitions,
+not a separate three-field formula. Tet4/Tet10 tests compare this allowance with all four actual
+sample buffers and exercise the exact combined ceiling. This is added under the same authored
 resident ceiling before assembly. Unsupported source quantities and event histories without a
 thermal event detector fail during preflight. Counts remain planner estimates/logical payloads;
 dynamic plan/catalog metadata and transport are not thereby fully admitted.
@@ -335,13 +337,23 @@ are not qualified by these tests. Production admission remains closed.
 
 ## Shared numerical transport memory evidence
 
-Thermal source-result identity binds shared recovered-field identities for every retained
+Thermal source-result identity binds producer-recorded numerical intent and shared recovered-field identities for every retained
 temperature, gradient, flux and storage-rate-density sample. Fields are identified one at a time
 from borrowed storage; the final identity envelope contains field identities and numerical
 metadata, not all history values. Snapshot identifiers and physical times remain bound. Shared
 owned-field construction uses the same validating identity function without hashing twice.
 
-This intentionally changes experimental thermal source-result identities; there is no legacy
+The result retains separate mandatory exact-workload and numerical-intent bindings. Numerical
+intent uses the shared solver-model contract, selected step and thermal controls, excluding backend
+and formulation-admission requests. The exact workload binding also retains those requests.
+Matching only sequence/step and schedule was insufficient: a result could otherwise be relabeled
+with a changed conductivity model. Compact thermal numerical receipts now check this binding,
+the exact accepted schedule, reference temperature, backend request and residual target against
+the retained result manifest. Tet4/Tet10 tests reject material substitutions even when the sequence
+is unchanged. The receipt is accepted-solver evidence, not an independent accuracy report; mesh
+binding and portable worker receipt routing still require the task integration path.
+
+The numerical-intent-bound identity domain intentionally changes experimental thermal source-result identities; there is no legacy
 identity fallback. Shared recovered-field canonical limits apply to each field, and negative-zero
 sample times are rejected consistently. A thermal result may fit its monolithic serialization
 limit yet exceed a shared per-field identity limit; publication fails closed in that case. This
@@ -361,6 +373,12 @@ Preparation still retains encoded partitions and output chunks, and the existing
 input closure can retain all chunks. This is not streaming producer execution or a whole-process
 memory bound. Portable thermal Solve/task/receipt routing and native partial input acquisition
 remain open; the isolated state-publication path does not qualify whole-study thermal execution.
+
+The shared canonical codec can report both conservative encoded size and materialization residency
+from a single borrowed Serde traversal, without constructing encoded bytes or a value tree. Each
+separately encoded field partition needs its own contract envelope. Thermal producer metadata and
+overlapping output construction still need domain-owned sizing before portable worker admission;
+a generic manifest schema limit is not a demonstrated useful thermal execution envelope.
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

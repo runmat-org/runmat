@@ -15,6 +15,13 @@ use compound::{Compound, Kind};
 // Maximum accepted prefix/domain lengths, plus conservative array/string CBOR headers.
 const ENVELOPE_BYTES: u64 = 128 + 9 + 9 + 128;
 
+/// Conservative encoding and materialization estimates from one borrowed traversal.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SerializedCanonicalProfile {
+    pub encoded_bytes_upper_bound: u64,
+    pub materialization_resident_bytes_estimate: u64,
+}
+
 /// Projects canonical materialization residency directly from a borrowed Serde value.
 ///
 /// The traversal itself allocates no value tree, output buffer, or owned strings. Custom
@@ -31,6 +38,18 @@ pub fn serialized_materialization_resident_bytes_estimate<T: Serialize + ?Sized>
     value: &T,
     limits: CanonicalLimits,
 ) -> Result<u64, CanonicalCodecError> {
+    Ok(profile_serialized(value, limits)?.materialization_resident_bytes_estimate)
+}
+
+/// Profiles both canonical wire size and materialization without constructing either.
+///
+/// Uses the same traversal, conservative envelope, validation and custom-serializer caveats as
+/// [`serialized_materialization_resident_bytes_estimate`]. The wire bound includes one contract
+/// envelope; separately encoded partitions must each be profiled with their own envelope.
+pub fn profile_serialized<T: Serialize + ?Sized>(
+    value: &T,
+    limits: CanonicalLimits,
+) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
     let mut counter = Counter {
         profile: MaterializationProfile::default(),
         encoded_bytes: 0,
@@ -38,7 +57,13 @@ pub fn serialized_materialization_resident_bytes_estimate<T: Serialize + ?Sized>
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;
-    materialization_resident_bytes_estimate(counter.profile, counter.encoded_bytes)
+    Ok(SerializedCanonicalProfile {
+        encoded_bytes_upper_bound: counter.encoded_bytes,
+        materialization_resident_bytes_estimate: materialization_resident_bytes_estimate(
+            counter.profile,
+            counter.encoded_bytes,
+        )?,
+    })
 }
 
 fn invalid(reason: &'static str) -> CanonicalCodecError {

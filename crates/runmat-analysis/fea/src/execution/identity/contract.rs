@@ -44,6 +44,7 @@ identity_type!(OperatorIdentity);
 identity_type!(NumericalPlanIdentity);
 identity_type!(ExecutionPlanIdentity);
 identity_type!(AnalysisWorkloadIdentity);
+identity_type!(ThermalNumericalIntentIdentity);
 identity_type!(AnalysisTaskIdentity);
 identity_type!(AnalysisAttemptIdentity);
 identity_type!(ObservationIdentity);

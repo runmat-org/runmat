@@ -6,7 +6,10 @@
 mod serialized_profile;
 mod value;
 
-pub use serialized_profile::serialized_materialization_resident_bytes_estimate;
+pub use serialized_profile::{
+    profile_serialized, serialized_materialization_resident_bytes_estimate,
+    SerializedCanonicalProfile,
+};
 
 use serde::{de::DeserializeOwned, Serialize};
 

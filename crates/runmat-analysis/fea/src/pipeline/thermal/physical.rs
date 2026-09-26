@@ -39,7 +39,23 @@ pub(super) fn run(
     schedule: &crate::execution::ThermalSolveSchedule,
     facts: &crate::planning::resource::ThermalPreassemblyResourceFacts,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
+    let source_workload = crate::execution::ThermalWorkload::identity_for(
+        model,
+        &thermal_step.step_id,
+        backend,
+        options.formulation_requirement,
+        options.procedure,
+        options.residual_target,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let operators = &facts.operators;
+    let numerical_intent = crate::execution::ThermalWorkload::numerical_intent_identity_for(
+        model,
+        &thermal_step.step_id,
+        options.procedure,
+        options.residual_target,
+    )
+    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     emit_phase(
         "fea.run_thermal",
         FeaProgressPhase::ModelAssembly,
@@ -251,6 +267,8 @@ pub(super) fn run(
     let producer = crate::execution::StepIdentity::from_solver_contract(sequence, thermal_step)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     Ok(FeaThermalRunResult {
+        source_workload,
+        numerical_intent,
         run,
         producer,
         topology_digest: runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),

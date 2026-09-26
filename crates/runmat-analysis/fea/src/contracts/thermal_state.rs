@@ -45,6 +45,9 @@ impl Default for ThermalSolveOptions {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeaThermalRunResult {
+    /// Exact authored numerical intent captured by the executing thermal pipeline.
+    pub source_workload: crate::execution::AnalysisWorkloadIdentity,
+    pub numerical_intent: crate::execution::ThermalNumericalIntentIdentity,
     pub run: FeaRunResult,
     pub producer: crate::execution::StepIdentity,
     pub topology_digest: Digest,

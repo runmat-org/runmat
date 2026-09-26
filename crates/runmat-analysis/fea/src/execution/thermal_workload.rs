@@ -71,9 +71,88 @@ impl ThermalWorkload {
     }
 
     pub fn identity(&self) -> AnalysisExecutionResult<AnalysisWorkloadIdentity> {
-        AnalysisWorkloadIdentity::derive(
+        self.validate()?;
+        Self::identity_for(
+            &self.model,
+            &self.step_id,
+            self.backend,
+            self.formulation_requirement,
+            self.procedure,
+            self.residual_target,
+        )
+    }
+
+    /// Bind the exact executed intent without cloning the model. Local coupled execution
+    /// shares these wire fields but does not adopt the standalone portable-workload envelope.
+    pub(crate) fn identity_for(
+        model: &AnalysisModel,
+        step_id: &ProcedureStepId,
+        backend: ComputeBackend,
+        formulation_requirement: FormulationRequirement,
+        procedure: ThermalProcedureControl,
+        residual_target: f64,
+    ) -> AnalysisExecutionResult<AnalysisWorkloadIdentity> {
+        #[derive(Serialize)]
+        struct BorrowedWorkload<'a> {
+            model: &'a AnalysisModel,
+            step_id: &'a ProcedureStepId,
+            backend: ComputeBackend,
+            formulation_requirement: FormulationRequirement,
+            procedure: ThermalProcedureControl,
+            residual_target: f64,
+        }
+        let bytes = encode_contract(
+            PREFIX,
             "thermal-workload",
-            &Digest::sha256(self.canonical_bytes()?),
+            &BorrowedWorkload {
+                model,
+                step_id,
+                backend,
+                formulation_requirement,
+                procedure,
+                residual_target,
+            },
+            LIMITS,
+        )?;
+        AnalysisWorkloadIdentity::derive("thermal-workload", &Digest::sha256(bytes))
+    }
+
+    /// Placement-independent physical model and numerical controls. Admission requirements
+    /// and requested backend remain bound separately by the exact workload identity.
+    pub fn numerical_intent_identity(
+        &self,
+    ) -> AnalysisExecutionResult<super::ThermalNumericalIntentIdentity> {
+        self.validate()?;
+        Self::numerical_intent_identity_for(
+            &self.model,
+            &self.step_id,
+            self.procedure,
+            self.residual_target,
+        )
+    }
+
+    pub(crate) fn numerical_intent_identity_for(
+        model: &AnalysisModel,
+        step_id: &ProcedureStepId,
+        procedure: ThermalProcedureControl,
+        residual_target: f64,
+    ) -> AnalysisExecutionResult<super::ThermalNumericalIntentIdentity> {
+        // The shared solver view excludes display/import provenance. Its borrowed selection
+        // vectors and canonical encoding are identity scratch, not allocation-free streaming.
+        let bytes = encode_contract(
+            PREFIX,
+            "thermal-numerical-intent",
+            &(
+                model.solver_identity_contract(),
+                step_id,
+                procedure,
+                residual_target,
+            ),
+            LIMITS,
+        )?;
+        super::ThermalNumericalIntentIdentity::derive(
+            "thermal-numerical-intent",
+            &Digest::sha256(bytes),
         )
     }
 

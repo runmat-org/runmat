@@ -7,10 +7,36 @@ use crate::{canonical_payload_materialization_resident_bytes_estimate, encode_co
 
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1_000_000, 10_000, 4096, 64);
 
+#[test]
+fn combined_profile_visits_a_borrowed_source_once() {
+    struct Counted<'a>(&'a std::cell::Cell<usize>);
+    impl Serialize for Counted<'_> {
+        fn serialize<S: ser::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            self.0.set(self.0.get() + 1);
+            let mut sequence = serializer.serialize_seq(Some(4096))?;
+            for _ in 0..4096 {
+                sequence.serialize_element(&f64::MAX)?;
+            }
+            sequence.end()
+        }
+    }
+    let visits = std::cell::Cell::new(0);
+    let profile = profile_serialized(&Counted(&visits), LIMITS).unwrap();
+    assert_eq!(visits.get(), 1);
+    assert_eq!(
+        profile.encoded_bytes_upper_bound,
+        ENVELOPE_BYTES + 9 + 4096 * 9
+    );
+    assert!(profile.materialization_resident_bytes_estimate > profile.encoded_bytes_upper_bound);
+}
+
 fn covers<T: Serialize>(value: &T) {
     let encoded = encode_contract(b"profile-test\0", "profile", value, LIMITS).unwrap();
     let expected = canonical_payload_materialization_resident_bytes_estimate(&encoded).unwrap();
     let actual = serialized_materialization_resident_bytes_estimate(value, LIMITS).unwrap();
+    let profile = profile_serialized(value, LIMITS).unwrap();
+    assert!(profile.encoded_bytes_upper_bound >= encoded.len() as u64);
+    assert_eq!(profile.materialization_resident_bytes_estimate, actual);
     assert!(
         actual >= expected,
         "estimate {actual} < encoded profile {expected}"

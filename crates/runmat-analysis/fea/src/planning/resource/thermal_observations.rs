@@ -61,18 +61,35 @@ impl ThermalObservationResourceFacts {
                 .unwrap_or(0)
                 .max(shared.peak_resident_bytes.0),
         );
-        // evaluate_field_histories clones all three source fields, even for one requested quantity.
-        let nodes = u64::try_from(projection.nodes.len()).map_err(invalid)?;
-        let elements = u64::try_from(projection.elements.len()).map_err(invalid)?;
-        let catalog_copy_bytes = ByteCount(
-            elements
-                .checked_mul(6)
-                .and_then(|values| values.checked_add(nodes))
+        // Evaluation clones the complete source inventory, even for one requested quantity.
+        // Derive widths from the same definitions used by the evaluator (including storage rate).
+        let counts = crate::results::field::RecoveredFieldEntityCounts {
+            structural_nodes: projection.nodes.len(),
+            solid_elements: projection.elements.len(),
+            solid_integration_points: 0,
+            beam_elements: 0,
+            shell_elements: 0,
+            connectors: 0,
+            constraint_groups: 0,
+        };
+        let catalog_copy_bytes = ByteCount(definitions.iter().try_fold(0u64, |total, field| {
+            let entities =
+                u64::try_from(counts.entity_count(field.entity_domain())).map_err(invalid)?;
+            if entities == 0 {
+                return Err(invalid(
+                    "thermal catalog field has no admitted entity domain",
+                ));
+            }
+            let components = u64::try_from(field.storage_component_count().map_err(invalid)?)
+                .map_err(invalid)?;
+            entities
+                .checked_mul(components)
                 .and_then(|values| values.checked_mul(8))
+                .and_then(|bytes| total.checked_add(bytes))
                 .ok_or(ResourcePlanningError::Overflow(
                     "thermal history catalog copy",
-                ))?,
-        );
+                ))
+        })?);
         Ok(Self {
             shared: Some(shared),
             catalog_copy_bytes,
