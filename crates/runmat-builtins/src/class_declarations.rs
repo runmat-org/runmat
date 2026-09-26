@@ -52,6 +52,43 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
         .into_iter()
         .find(|candidate| identity.is(*candidate))
     {
+        let mut methods = vec![ExternalMethodDeclaration {
+            name: StaticMethodName::new("zeros").owned(),
+            attributes: MethodAttributes {
+                access: MemberAccess::Public,
+                ..MethodAttributes::default()
+            },
+            is_static: true,
+            callable: CallableIdentity::Builtin(BuiltinId("zeros".into())),
+            implicit_class_argument: Some(primitive.display_name().to_owned()),
+        }];
+        if [
+            standard::INT8,
+            standard::INT16,
+            standard::INT32,
+            standard::INT64,
+            standard::UINT8,
+            standard::UINT16,
+            standard::UINT32,
+            standard::UINT64,
+        ]
+        .into_iter()
+        .any(|class| identity.is(class))
+        {
+            methods.push(ExternalMethodDeclaration {
+                name: StaticMethodName::new("empty").owned(),
+                attributes: MethodAttributes {
+                    access: MemberAccess::Public,
+                    ..MethodAttributes::default()
+                },
+                is_static: true,
+                callable: CallableIdentity::Builtin(BuiltinId(format!(
+                    "{}.empty",
+                    primitive.display_name()
+                ))),
+                implicit_class_argument: None,
+            });
+        }
         return Some(ExternalClassDeclaration {
             name: identity.qualified_name(),
             parent: None,
@@ -59,16 +96,7 @@ pub fn standard_class_declaration(identity: &ClassIdentity) -> Option<ExternalCl
             is_sealed: false,
             is_abstract: false,
             properties: Vec::new(),
-            methods: vec![ExternalMethodDeclaration {
-                name: StaticMethodName::new("zeros").owned(),
-                attributes: MethodAttributes {
-                    access: MemberAccess::Public,
-                    ..MethodAttributes::default()
-                },
-                is_static: true,
-                callable: CallableIdentity::Builtin(BuiltinId("zeros".into())),
-                implicit_class_argument: Some(primitive.display_name().to_owned()),
-            }],
+            methods,
         });
     }
     let (parent, kind) = if identity.is(standard::HANDLE) {

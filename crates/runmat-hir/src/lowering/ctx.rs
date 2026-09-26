@@ -25,6 +25,7 @@ use runmat_types::{
 use std::collections::{HashMap, HashSet};
 
 mod subscript_chain;
+mod static_member;
 
 const IDENT_AWAIT_EXTENSION_DISABLED: &str = "RunMat:AwaitExtensionDisabled";
 const IDENT_AWAIT_CONTEXT_INVALID: &str = "RunMat:AwaitContextInvalid";
@@ -2485,6 +2486,13 @@ impl LoweringCtx {
         requested_outputs: RequestedOutputCount,
         indexing_context: runmat_types::ObjectIndexingContext,
     ) -> Result<HirExpr, HirError> {
+        if let AstExpr::Member(base, name, _) = expr {
+            if let Some(call) =
+                self.lower_external_static_method(base, name, &[], requested_outputs, expr.span())?
+            {
+                return Ok(call);
+            }
+        }
         if let Some(chain) =
             self.lower_subscript_chain(expr, requested_outputs, indexing_context)?
         {
@@ -2873,6 +2881,11 @@ impl LoweringCtx {
             },
             AstExpr::DottedInvoke(base, name, args, _)
             | AstExpr::MethodCall(base, name, args, _) => {
+                if let Some(call) =
+                    self.lower_external_static_method(base, name, args, requested_outputs, span)?
+                {
+                    return Ok(call);
+                }
                 if let AstExpr::MetaClass(class_name, _) = &**base {
                     let mut call_args = vec![self.classref_expr(class_name, base.span())?];
                     call_args.extend(self.lower_call_arguments(args)?);
@@ -2889,47 +2902,6 @@ impl LoweringCtx {
                     });
                 }
                 if let AstExpr::Ident(class_name, _) = &**base {
-                    if let Some(method) =
-                        self.external_class_declaration(class_name)
-                            .and_then(|declaration| {
-                                declaration
-                                    .methods
-                                    .into_iter()
-                                    .find(|method| method.name.0 == *name)
-                            })
-                    {
-                        if !method.is_static || method.attributes.access != MemberAccess::Public {
-                            return Err(HirError::new(format!(
-                                "method {class_name}.{name} is not accessible as a public static method"
-                            ))
-                            .with_span(span));
-                        }
-                        let mut call_args = self.lower_call_arguments(args)?;
-                        if let Some(class_argument) = method.implicit_class_argument {
-                            call_args.push(HirExpr {
-                                id: self.alloc_expr_id(),
-                                kind: HirExprKind::String(StringLiteral(class_argument)),
-                                span: base.span(),
-                            });
-                        }
-                        let Some(function_name) = method.callable.display_name() else {
-                            return Err(HirError::new(format!(
-                                "method {class_name}.{name} has no callable name"
-                            ))
-                            .with_span(span));
-                        };
-                        return Ok(HirExpr {
-                            id: self.alloc_expr_id(),
-                            kind: HirExprKind::Call(self.call_for_name(
-                                &function_name,
-                                call_args,
-                                CallSyntax::Plain,
-                                requested_outputs,
-                                span,
-                            )?),
-                            span,
-                        });
-                    }
                     if self.lookup_binding(class_name).is_none()
                         && (self.class_id_for_unqualified_name(class_name).is_some()
                             || self
@@ -2958,7 +2930,7 @@ impl LoweringCtx {
                         });
                     }
                     let qualified_name = format!("{class_name}.{name}");
-                    if is_builtin(&qualified_name) {
+                    if self.lookup_binding(class_name).is_none() && is_builtin(&qualified_name) {
                         let call_args =
                             self.lower_call_arguments_for_name(&qualified_name, args)?;
                         return Ok(HirExpr {
