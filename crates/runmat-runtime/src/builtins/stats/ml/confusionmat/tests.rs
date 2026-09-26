@@ -4,6 +4,23 @@ use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn scalar_text_rejects_multirow_and_nd_labels_and_option_names() {
+    for shape in [vec![2, 1], vec![1, 1, 2]] {
+        let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap());
+        let cell = Value::Cell(CellArray::new(vec![chars.clone()], 1, 1).unwrap());
+        let error = block_on(confusionmat_builtin(cell.clone(), cell, vec![])).unwrap_err();
+        assert!(error.message.contains("string scalar"));
+        let error = block_on(confusionmat_builtin(
+            Value::Num(1.),
+            Value::Num(1.),
+            vec![chars, Value::Num(1.)],
+        ))
+        .unwrap_err();
+        assert!(error.message.contains("string scalar"));
+    }
+}
+
+#[test]
 fn gathered_labels_do_not_release_borrowed_provider_inputs() {
     test_support::with_test_provider(|provider| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

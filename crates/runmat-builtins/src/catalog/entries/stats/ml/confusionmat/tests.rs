@@ -2,6 +2,52 @@ use super::*;
 use runmat_types::*;
 
 #[test]
+fn rejects_proven_bad_shapes_complexity_lengths_and_classes() {
+    let numeric = |class, domain, shape| {
+        ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact { class, domain }),
+            shape,
+            StorageFact::Dense,
+        )
+    };
+    let shape = |dims: Vec<usize>| ShapeFact::from(dims.into_iter().map(Some).collect::<Vec<_>>());
+    let real = |class, dims| numeric(class, NumericDomain::Real, shape(dims));
+    for arguments in [
+        vec![
+            real(NumericClass::Double, vec![2, 2]),
+            real(NumericClass::Double, vec![4, 1]),
+        ],
+        vec![
+            numeric(
+                NumericClass::Double,
+                NumericDomain::Complex,
+                shape(vec![2, 1]),
+            ),
+            real(NumericClass::Double, vec![2, 1]),
+        ],
+        vec![
+            real(NumericClass::Double, vec![2, 1]),
+            real(NumericClass::Double, vec![3, 1]),
+        ],
+        vec![
+            real(NumericClass::Int16, vec![2, 1]),
+            real(NumericClass::UInt16, vec![2, 1]),
+        ],
+    ] {
+        let request = CallRequest {
+            arguments,
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::default(),
+        };
+        assert!(
+            !super::inference::infer(&request, &CONFUSIONMAT_CATALOG_ENTRY)
+                .diagnostics
+                .is_empty()
+        );
+    }
+}
+
+#[test]
 fn unknown_order_keyword_does_not_claim_logical_order() {
     let mut request = request(ValueKindFact::Logical, 2);
     request.arguments.push(ValueFact::proven(

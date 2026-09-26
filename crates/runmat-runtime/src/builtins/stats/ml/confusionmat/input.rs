@@ -126,7 +126,11 @@ pub(super) fn ensure_categorical_vector_shape(
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::CharArray(chars)
+            if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
+        {
+            Ok(chars.data.iter().collect())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         other => Err(invalid(format!(
             "confusionmat: {name} must be a string scalar, got {other:?}"

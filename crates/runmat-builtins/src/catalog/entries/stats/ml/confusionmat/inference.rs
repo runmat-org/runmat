@@ -1,8 +1,10 @@
 use crate::catalog::inference::{argument_error, literal_text};
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
+mod validation;
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    validation::validate(request, &mut diagnostics);
     if request.arguments.len() < 2 {
         diagnostics.push(argument_error(
             "RM-CATALOG-CONFUSIONMAT-ARITY",
