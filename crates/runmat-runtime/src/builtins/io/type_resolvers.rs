@@ -209,10 +209,6 @@ pub fn delete_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Void
 }
 
-pub fn exist_type(args: &[Type], ctx: &ResolveContext) -> Type {
-    num_type(args, ctx)
-}
-
 pub fn fileattrib_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![
         Type::Num,
@@ -463,7 +459,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
-    assert_resolver!(exist_type_resolver, exist_type, &[], Type::Num);
     assert_resolver!(
         uigetfile_type_resolver,
         uigetfile_type,

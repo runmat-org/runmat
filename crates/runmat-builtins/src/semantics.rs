@@ -323,17 +323,6 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
             semantic_kind: BuiltinSemanticKind::Workspace,
             ..BuiltinSemantics::unknown()
         },
-        "exist" => BuiltinSemantics {
-            effects: BuiltinEffects::none()
-                .with_filesystem()
-                .with_workspace()
-                .with_environment(),
-            workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
-            environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
-            purity: BuiltinPurity::DeterministicReadOnly,
-            semantic_kind: BuiltinSemanticKind::Workspace,
-            ..BuiltinSemantics::unknown()
-        },
         "eval" | "evalin" => BuiltinSemantics {
             effects: BuiltinEffects::none().with_workspace(),
             workspace_effect: Some(BuiltinWorkspaceEffect::DynamicEval),
