@@ -1077,7 +1077,10 @@ mod tests {
             ProgramExecutionResponse::Failure { message }
                 if message.contains("MIR actual 2 expected 3")
                     && message.contains("analysis actual 2 expected 3")
-                    && message.contains("bytecode actual 6 expected 7")
+                    && message.contains(&format!(
+                        "bytecode actual 6 expected {}",
+                        crate::BYTECODE_SCHEMA_VERSION
+                    ))
         ));
 
         let compiler_one =

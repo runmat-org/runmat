@@ -17,11 +17,12 @@ fn workspace_member_assignment_initializes_only_unassigned_roots() {
                 let result = execute_text_request_for_testing(&mut session, source).unwrap();
                 assert!(result.error.is_none(), "{source}: {:?}", result.error);
             }
-            let result =
-                execute_text_request_for_testing(&mut session, "neverAssigned.field").unwrap();
+            let result = execute_text_request_for_testing(&mut session, "neverAssigned.field")
+                .expect_err("ordinary reads must not create structures");
             assert!(
-                result.error.is_some(),
-                "ordinary reads must not create structures"
+                matches!(result, runmat_core::RunError::Semantic(error)
+                    if error.identifier.as_deref() == Some("RunMat:UndefinedVariable")),
+                "ordinary undefined reads retain their semantic diagnostic"
             );
             let result =
                 execute_text_request_for_testing(&mut session, "number = 7; number.field = 1;")
