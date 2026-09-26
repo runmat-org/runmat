@@ -103,13 +103,21 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
         .plan_for_assembly(
             result.assembly(),
             prepared_inputs(),
-            prepared_output(result_payload),
-            prepared_output(structural_modal_response_spectrum_receipt_payload_bytes_upper_bound()),
-            prepared_output(
-                projection
-                    .field_recovery_payload_bytes_upper_bound()
-                    .unwrap(),
-            ),
+            crate::planning::resource::PreparedStructuralResponseSpectrumAssemblyOutputs {
+                result: prepared_output(result_payload),
+                receipt: prepared_output(
+                    structural_modal_response_spectrum_receipt_payload_bytes_upper_bound(),
+                ),
+                field_recovery: prepared_output(
+                    projection
+                        .field_recovery_payload_bytes_upper_bound()
+                        .unwrap(),
+                ),
+                state_profiles: publication_output(
+                    &workload,
+                    result.assembly().scope().topology_digest(),
+                ),
+            },
             prepared_output_set(),
         )
         .unwrap();
@@ -303,17 +311,41 @@ fn assembly_plan(spectra: Vec<ResponseSpectrum>) -> crate::planning::resource::F
         .plan_for_assembly(
             result.assembly(),
             prepared_inputs(),
-            prepared_output(result_payload),
-            prepared_output(structural_modal_response_spectrum_receipt_payload_bytes_upper_bound()),
-            prepared_output(
-                prepared
-                    .resources()
-                    .field_recovery_payload_bytes_upper_bound()
-                    .unwrap(),
-            ),
+            crate::planning::resource::PreparedStructuralResponseSpectrumAssemblyOutputs {
+                result: prepared_output(result_payload),
+                receipt: prepared_output(
+                    structural_modal_response_spectrum_receipt_payload_bytes_upper_bound(),
+                ),
+                field_recovery: prepared_output(
+                    prepared
+                        .resources()
+                        .field_recovery_payload_bytes_upper_bound()
+                        .unwrap(),
+                ),
+                state_profiles: publication_output(
+                    &workload,
+                    result.assembly().scope().topology_digest(),
+                ),
+            },
             prepared_output_set(),
         )
         .unwrap()
+}
+
+fn publication_output(
+    workload: &StructuralModalResponseSpectrumWorkload,
+    topology: Digest,
+) -> PreparedOutputResourceFacts {
+    prepared_output(
+        crate::execution::structural_state_publication_profiles_encoding_profile(
+            workload.model(),
+            workload.procedure_step().unwrap(),
+            &[crate::execution::SemanticStatePublicationSource::StructuralResponseEnvelope],
+            topology,
+        )
+        .unwrap()
+        .encoded_bytes_upper_bound,
+    )
 }
 
 fn prepared_response(

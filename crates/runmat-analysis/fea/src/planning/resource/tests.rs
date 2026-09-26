@@ -23,83 +23,114 @@ mod curved_connector;
 mod exact_work;
 mod thermal_state;
 
+#[test]
+fn static_catalog_construction_cannot_be_underreserved() {
+    let mut planned = input(PartitioningPolicy::Monolithic);
+    let FeaResourceDemand::StructuralLinearPipeline(demand) = &mut planned.demand else {
+        panic!("static demand")
+    };
+    demand
+        .state_profiles_output
+        .construction_resident_bytes_admission_budget
+        .0 -= 1;
+    assert!(build_resource_plan(planned).is_err());
+    let planned = input(PartitioningPolicy::Monolithic);
+    assert!(planned
+        .demand
+        .output_facts(crate::execution::AnalysisNumericalObjectKind::StatePublicationProfiles)
+        .is_some());
+    assert!(
+        !planned.demand.governs_prepared_outputs(),
+        "legacy result/receipt admission remains separate debt"
+    );
+}
+
 fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
-        demand: FeaResourceDemand::StructuralLinearPipeline(StructuralOperatorResourceDemand {
-            topology_digest: Digest::sha256("topology"),
-            numerical_scope_digest: Digest::sha256("pattern"),
-            topology: TopologyResourceFacts {
-                nodes: Count(4),
-                elements: Count(1),
-                boundary_faces: Count(4),
-                element_node_references: Count(4),
-                boundary_node_references: Count(12),
-                node_neighbor_references: Count(12),
-                estimated_resident_bytes: ByteCount(1_088),
-            },
-            sparse: SparseResourceFacts {
-                rows: Count(4),
-                columns: Count(4),
-                operator_nonzeros: vec![Count(10), Count(4), Count(4)],
-            },
-            constraints: ConstraintResourceFacts {
-                rows: Count(1),
-                coefficients: Count(1),
-                reference_points: Count(0),
-                estimated_resident_bytes: ByteCount(120),
-            },
-            assembly: AssemblyResourcePolicy {
-                contribution_nonzero_upper_bound: Count(10),
-                contribution_bytes_upper_bound: ByteCount(240),
-                scratch_bytes_per_element: ByteCount(10),
-                fixed_scratch_bytes_per_worker: ByteCount(20),
-            },
-            solve: SolveResourcePolicy::Iterative {
-                vector_count: Count(5),
-                scalar: NumericalScalar::RealF64,
-                preconditioner: PreconditionerStorage::Diagonal,
-                transpose_index_bytes_upper_bound: ByteCount(0),
-                admission: SolverAdmissionResourcePolicy {
-                    dimension: Count(4),
-                    factor_nonzero_upper_bound: Count(10),
-                    update_count_upper_bound: Count(12),
-                    resident_bytes_upper_bound: ByteCount(200),
+        demand: FeaResourceDemand::StructuralLinearPipeline(
+            StructuralLinearPipelineResourceDemand {
+                state_profiles_output: PreparedOutputResourceFacts {
+                    encoded_payload_bytes_upper_bound: ByteCount(1),
+                    transport_closure_bytes_upper_bound: ByteCount(1),
+                    construction_resident_bytes_admission_budget: ByteCount(65_665),
+                },
+                operator: StructuralOperatorResourceDemand {
+                    topology_digest: Digest::sha256("topology"),
+                    numerical_scope_digest: Digest::sha256("pattern"),
+                    topology: TopologyResourceFacts {
+                        nodes: Count(4),
+                        elements: Count(1),
+                        boundary_faces: Count(4),
+                        element_node_references: Count(4),
+                        boundary_node_references: Count(12),
+                        node_neighbor_references: Count(12),
+                        estimated_resident_bytes: ByteCount(1_088),
+                    },
+                    sparse: SparseResourceFacts {
+                        rows: Count(4),
+                        columns: Count(4),
+                        operator_nonzeros: vec![Count(10), Count(4), Count(4)],
+                    },
+                    constraints: ConstraintResourceFacts {
+                        rows: Count(1),
+                        coefficients: Count(1),
+                        reference_points: Count(0),
+                        estimated_resident_bytes: ByteCount(120),
+                    },
+                    assembly: AssemblyResourcePolicy {
+                        contribution_nonzero_upper_bound: Count(10),
+                        contribution_bytes_upper_bound: ByteCount(240),
+                        scratch_bytes_per_element: ByteCount(10),
+                        fixed_scratch_bytes_per_worker: ByteCount(20),
+                    },
+                    solve: SolveResourcePolicy::Iterative {
+                        vector_count: Count(5),
+                        scalar: NumericalScalar::RealF64,
+                        preconditioner: PreconditionerStorage::Diagonal,
+                        transpose_index_bytes_upper_bound: ByteCount(0),
+                        admission: SolverAdmissionResourcePolicy {
+                            dimension: Count(4),
+                            factor_nonzero_upper_bound: Count(10),
+                            update_count_upper_bound: Count(12),
+                            resident_bytes_upper_bound: ByteCount(200),
+                        },
+                    },
+                    phase_resources: PhaseResourcePolicy {
+                        resident_value_count: Count(4),
+                        resident_bytes_upper_bound: ByteCount(32),
+                        scratch_bytes: ByteCount(40),
+                        retained_bytes: ByteCount(32),
+                    },
+                    field_recovery: Default::default(),
+                    observations: ObservationResourceFacts {
+                        maximum_samples_per_observation: Count(1),
+                        produced_sample_count: Count(1),
+                        retained_sample_count: Count(1),
+                        operation_count: Count(100),
+                        peak_resident_bytes: ByteCount(64),
+                        stored_bytes: ByteCount(200),
+                        transfer_bytes: ByteCount(150),
+                        collective_count: Count(0),
+                    },
+                    publication: CheckpointArtifactPolicy {
+                        result_artifact_bytes: ByteCount(33),
+                        checkpoint_bytes: ByteCount(50),
+                        artifact_overhead_bytes: ByteCount(20),
+                        relay_bytes: ByteCount(12),
+                        result_egress_bytes: ByteCount(30),
+                        checkpoint_egress_bytes: ByteCount(40),
+                    },
+                    partitioning,
+                    accuracy_demand: AccuracyResourceDemand {
+                        refinement_cycles: Count(0),
+                        solver_tightenings: Count(0),
+                        samples: Count(1),
+                    },
                 },
             },
-            phase_resources: PhaseResourcePolicy {
-                resident_value_count: Count(4),
-                resident_bytes_upper_bound: ByteCount(32),
-                scratch_bytes: ByteCount(40),
-                retained_bytes: ByteCount(32),
-            },
-            field_recovery: Default::default(),
-            observations: ObservationResourceFacts {
-                maximum_samples_per_observation: Count(1),
-                produced_sample_count: Count(1),
-                retained_sample_count: Count(1),
-                operation_count: Count(100),
-                peak_resident_bytes: ByteCount(64),
-                stored_bytes: ByteCount(200),
-                transfer_bytes: ByteCount(150),
-                collective_count: Count(0),
-            },
-            publication: CheckpointArtifactPolicy {
-                result_artifact_bytes: ByteCount(33),
-                checkpoint_bytes: ByteCount(50),
-                artifact_overhead_bytes: ByteCount(20),
-                relay_bytes: ByteCount(12),
-                result_egress_bytes: ByteCount(30),
-                checkpoint_egress_bytes: ByteCount(40),
-            },
-            partitioning,
-            accuracy_demand: AccuracyResourceDemand {
-                refinement_cycles: Count(0),
-                solver_tightenings: Count(0),
-                samples: Count(1),
-            },
-        }),
+        ),
         output_set: None,
         worker: WorkerResourcePolicy {
             cpu_millicores: 1_000,
@@ -127,8 +158,17 @@ fn operator_mut(input: &mut FeaResourcePlanningInput) -> &mut StructuralOperator
 
 #[test]
 fn affine_transpose_index_bytes_are_included_in_solve_memory_and_identity() {
-    let base = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
-    let mut indexed_input = input(PartitioningPolicy::Monolithic);
+    let mut baseline_input = input(PartitioningPolicy::Monolithic);
+    // Exercise a solve-dominant peak; the small fixture now correctly peaks at catalog
+    // construction, which does not overlap the transpose-index workspace.
+    let SolveResourcePolicy::Iterative { vector_count, .. } =
+        &mut operator_mut(&mut baseline_input).solve
+    else {
+        panic!("iterative fixture")
+    };
+    *vector_count = Count(10_000);
+    let base = build_resource_plan(baseline_input.clone()).unwrap();
+    let mut indexed_input = baseline_input;
     let SolveResourcePolicy::Iterative {
         transpose_index_bytes_upper_bound,
         ..
@@ -139,7 +179,10 @@ fn affine_transpose_index_bytes_are_included_in_solve_memory_and_identity() {
     *transpose_index_bytes_upper_bound = ByteCount(1_000_000);
     let indexed = build_resource_plan(indexed_input).unwrap();
     assert_ne!(indexed.identity, base.identity);
-    assert!(indexed.request.memory_bytes >= base.request.memory_bytes + 1_000_000);
+    assert_eq!(
+        indexed.request.memory_bytes,
+        base.request.memory_bytes + 1_000_000
+    );
 }
 
 #[test]
@@ -908,6 +951,11 @@ fn explicit_preflight_derives_complete_bounds_without_a_solver_mesh() {
 #[test]
 fn exact_small_estimate_separates_all_resource_classes() {
     let plan = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
+    let catalog = plan
+        .input
+        .demand
+        .output_facts(crate::execution::AnalysisNumericalObjectKind::StatePublicationProfiles)
+        .unwrap();
 
     assert_eq!(plan.breakdown.topology_bytes, ByteCount(1_088));
     assert_eq!(plan.breakdown.csr_row_offset_bytes, ByteCount(120));
@@ -941,16 +989,17 @@ fn exact_small_estimate_separates_all_resource_classes() {
                     + plan.breakdown.factorization_bytes.0)
                     .max(
                         plan.breakdown.phase_resident_bytes.0
+                            + catalog.construction_resident_bytes_admission_budget.0
                             + plan.breakdown.observation_peak_bytes.0
                             + plan.breakdown.output_set_bytes.0,
                     ),
             )
     );
     assert_eq!(plan.request.scratch_bytes, 45);
-    assert_eq!(plan.breakdown.result_artifact_bytes, ByteCount(33));
+    assert_eq!(plan.breakdown.result_artifact_bytes, ByteCount(34));
     assert_eq!(plan.breakdown.phase_retained_bytes, ByteCount(32));
-    assert_eq!(plan.request.max_artifact_bytes, 303);
-    assert_eq!(plan.request.max_egress_bytes, 220);
+    assert_eq!(plan.request.max_artifact_bytes, 304);
+    assert_eq!(plan.request.max_egress_bytes, 221);
     assert_eq!(
         plan.request.max_relay_bytes,
         12 + plan.breakdown.resource_plan_transport_closure_bytes.0
@@ -1063,10 +1112,19 @@ fn understated_resident_bounds_are_rejected() {
 
 #[test]
 fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
-    let real = build_resource_plan(input(PartitioningPolicy::Monolithic)).unwrap();
-    let mut complex_input = input(PartitioningPolicy::Monolithic);
+    let mut real_input = input(PartitioningPolicy::Monolithic);
+    // Keep this width test in the solve-dominant regime rather than the independently
+    // reserved producer-catalog construction phase.
+    let SolveResourcePolicy::Iterative { vector_count, .. } =
+        &mut operator_mut(&mut real_input).solve
+    else {
+        panic!("iterative fixture")
+    };
+    *vector_count = Count(10_000);
+    let real = build_resource_plan(real_input.clone()).unwrap();
+    let mut complex_input = real_input;
     operator_mut(&mut complex_input).solve = SolveResourcePolicy::Iterative {
-        vector_count: Count(5),
+        vector_count: Count(10_000),
         scalar: NumericalScalar::ComplexF64,
         preconditioner: PreconditionerStorage::Diagonal,
         transpose_index_bytes_upper_bound: ByteCount(0),
@@ -1079,11 +1137,12 @@ fn complex_solve_vectors_and_diagonal_storage_use_complex_width() {
     };
     let complex = build_resource_plan(complex_input).unwrap();
 
-    assert_eq!(complex.breakdown.workspace_bytes, ByteCount(320));
+    assert_eq!(real.breakdown.workspace_bytes, ByteCount(320_000));
+    assert_eq!(complex.breakdown.workspace_bytes, ByteCount(640_000));
     assert_eq!(complex.breakdown.preconditioner_bytes, ByteCount(64));
     assert_eq!(
         complex.request.memory_bytes - real.request.memory_bytes,
-        (320 + 64 + 280) - (160 + 32 + 200)
+        (640_000 + 64 + 280) - (320_000 + 32 + 200)
     );
 }
 
@@ -1282,9 +1341,9 @@ fn reconciliation_reports_every_overrun_without_mutating_the_plan() {
             cpu_core_millis: 1_001,
             memory_byte_millis: u128::from(plan.request.memory_bytes) * 1_000 + 1,
             wall_millis: 1_001,
-            egress_bytes: 221,
+            egress_bytes: plan.request.max_egress_bytes + 1,
             relay_bytes: plan.request.max_relay_bytes + 1,
-            retained_byte_millis: 303_001,
+            retained_byte_millis: u128::from(plan.request.max_artifact_bytes) * 1_000 + 1,
             ..ResourceUsage::default()
         },
         peak_cpu_millicores: 1_001,

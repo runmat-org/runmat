@@ -18,8 +18,12 @@ fn solved_thermal_inventory_changes_preflight_identity_memory_and_publication() 
     )
     .unwrap();
     let build = |step: &runmat_analysis_core::ProcedureStep| {
+        // The preflight profiles the actual authored producer declaration, not a detached
+        // step that differs from the model's sequence.
+        let mut authored_model = model.clone();
+        authored_model.sequence.steps[0] = step.clone();
         build_static_resource_plan(StaticResourcePreflight {
-            model: &model,
+            model: &authored_model,
             step,
             backend: crate::ComputeBackend::Cpu,
             preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,

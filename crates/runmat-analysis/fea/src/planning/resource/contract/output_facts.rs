@@ -8,6 +8,26 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (
+                Self::StructuralLinearPipeline(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
+            (
+                Self::StructuralModalExtraction(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
+            (
+                Self::StructuralModalResponseSpectrumAssembly(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
+            (
+                Self::StructuralRandomResponseAssembly(demand),
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+            ) => Some(&demand.state_profiles_output),
+            (
+                Self::SemanticStatePublication(demand),
+                AnalysisNumericalObjectKind::SemanticState,
+            ) => Some(&demand.output),
             (Self::AccuracyEvaluation(demand), AnalysisNumericalObjectKind::AccuracyReport) => {
                 Some(&demand.output)
             }

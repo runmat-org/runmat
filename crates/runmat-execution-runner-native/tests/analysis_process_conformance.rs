@@ -351,12 +351,19 @@ async fn parent() {
     cancelled_sequence_config.worker_arguments = vec!["--child".into()];
     cancelled_sequence_config.max_workers = 2;
     cancelled_sequence_config.store_root = directory.path().join("cancelled-analysis-sequence");
-    let mut cancellation_policy = sequence_policy();
-    cancellation_policy.resources.max_wall_millis = 1;
+    // Every task now has an authoritative plan: fallback resources no longer control
+    // state publication. Set the authored solve budget to exercise deadline cancellation.
+    let mut cancellation_preparation =
+        sequence_preparation(revision(), "cancelled-analysis-sequence");
+    for workload in cancellation_preparation.workloads.values_mut() {
+        for step in &mut workload.model.sequence.steps {
+            step.accuracy.resources.maximum_wall_time_milliseconds = 1;
+        }
+    }
     let cancellation = execute_structural_sequence_locally(
         cancelled_sequence_config,
-        sequence_preparation(revision(), "cancelled-analysis-sequence"),
-        cancellation_policy,
+        cancellation_preparation,
+        sequence_policy(),
     )
     .await;
     let Err(cancellation) = cancellation else {
@@ -1250,9 +1257,13 @@ fn import_result(
     host: &AnalysisHostWorkload,
 ) -> Vec<u8> {
     let output_set = import_analysis_output_set(store, response, host).unwrap();
-    let [result, _receipt] = output_set.manifest.outputs.as_slice() else {
-        panic!("analysis result set must contain result and numerical receipt")
+    let [result, _receipt, profiles] = output_set.manifest.outputs.as_slice() else {
+        panic!("analysis result set must contain result, numerical receipt and state profiles")
     };
+    assert_eq!(
+        profiles.kind,
+        AnalysisNumericalObjectKind::StatePublicationProfiles
+    );
     let result_identity = runmat_analysis_fea::execution::SolverResultIdentity::new(
         host.workload.identity,
         result.payload_digest,
@@ -1865,6 +1876,23 @@ fn assert_sequence(sequence: &runmat_analysis_execution::CompletedStructuralSequ
         vec!["preload", "right", "left"]
     );
     assert_eq!(sequence.states.len(), 3);
+    for state in &sequence.states {
+        let runmat_analysis_execution::StructuralSequenceStateResourceAttempt::Metered(attempt) =
+            &state.resource_attempt
+        else {
+            panic!("native state publication must retain its admitted scheduler attempt");
+        };
+        assert!(matches!(
+            attempt.plan.input.phase,
+            runmat_analysis_fea::planning::resource::FeaResourcePhase::SemanticStatePublication(_)
+        ));
+        assert!(
+            runmat_analysis_fea::planning::resource::allocation_matches_plan(
+                &attempt.accounting.resources.allocation,
+                &attempt.plan.request,
+            )
+        );
+    }
     assert_eq!(
         sequence.steps[1].result.run.fields,
         sequence.steps[2].result.run.fields

@@ -200,10 +200,27 @@ pub fn build_structural_modal_resource_plan(
         ObservationResourceFacts::from_plan(observations, workload.observation_execution())?;
     let result_payload_bytes = modal_result_payload_bytes(modal_output_values, 0)?;
     let receipt_payload_bytes = structural_modal_receipt_payload_bytes_upper_bound();
+    let profiles_payload_bytes =
+        crate::execution::structural_state_publication_profiles_encoding_profile(
+            workload.model(),
+            workload
+                .procedure_step()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+            &[crate::execution::SemanticStatePublicationSource::ModalBasis],
+            topology_digest,
+        )
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+        .encoded_bytes_upper_bound;
     if prepared.result_output.encoded_payload_bytes_upper_bound.0 != result_payload_bytes
         || prepared.receipt_output.encoded_payload_bytes_upper_bound.0 != receipt_payload_bytes
         || !prepared_output_covers_transport(&prepared.result_output)
         || !prepared_output_covers_transport(&prepared.receipt_output)
+        || prepared
+            .state_profiles_output
+            .encoded_payload_bytes_upper_bound
+            .0
+            != profiles_payload_bytes
+        || !prepared_output_covers_transport(&prepared.state_profiles_output)
         || prepared.output_set.encoded_bytes_upper_bound.0 == 0
     {
         return Err(ResourcePlanningError::Invalid(
@@ -217,12 +234,23 @@ pub fn build_structural_modal_resource_plan(
         .transport_closure_bytes_upper_bound
         .0;
     let artifact_payload_bytes = checked_add(
-        result_payload_bytes,
+        checked_add(
+            result_payload_bytes,
+            profiles_payload_bytes,
+            "modal profile payload",
+        )?,
         receipt_payload_bytes,
         "modal artifact payloads",
     )?;
     let artifact_transport_bytes = checked_add(
-        result_transport,
+        checked_add(
+            result_transport,
+            prepared
+                .state_profiles_output
+                .transport_closure_bytes_upper_bound
+                .0,
+            "modal profile transport",
+        )?,
         receipt_transport,
         "modal artifact transport",
     )?;
@@ -232,10 +260,17 @@ pub fn build_structural_modal_resource_plan(
             "modal output transport is smaller than its payloads".into(),
         ))?;
     let output_construction_bytes = checked_add(
-        prepared
-            .result_output
-            .construction_resident_bytes_admission_budget
-            .0,
+        checked_add(
+            prepared
+                .state_profiles_output
+                .construction_resident_bytes_admission_budget
+                .0,
+            prepared
+                .result_output
+                .construction_resident_bytes_admission_budget
+                .0,
+            "modal profile construction",
+        )?,
         prepared
             .receipt_output
             .construction_resident_bytes_admission_budget
@@ -305,6 +340,7 @@ pub fn build_structural_modal_resource_plan(
             inputs: prepared.inputs.clone(),
             result_output: prepared.result_output.clone(),
             receipt_output: prepared.receipt_output.clone(),
+            state_profiles_output: prepared.state_profiles_output.clone(),
             operator: StructuralOperatorResourceDemand {
                 topology_digest: facts.topology_digest,
                 numerical_scope_digest,

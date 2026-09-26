@@ -24,8 +24,8 @@ use super::{
     FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput,
     FieldRecoveryResourceFacts, LocalExecutionPlan, NumericalScalar, ObservationResourceFacts,
     PartitioningPolicy, PhaseResourcePolicy, PreconditionerStorage, ResourcePlanningError,
-    SolveResourcePolicy, SolverAdmissionResourcePolicy, StructuralOperatorResourceDemand,
-    WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
+    SolveResourcePolicy, SolverAdmissionResourcePolicy, StructuralLinearPipelineResourceDemand,
+    StructuralOperatorResourceDemand, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
 const STRUCTURAL_FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
@@ -120,6 +120,8 @@ pub(crate) fn build_static_resource_plan(
         local_execution,
     } = input;
     let facts = derive_structural_resource_facts(model, mesh, constraints)?;
+    let state_profiles_output =
+        super::structural_state_profiles_output_resource_facts(model, step, facts.topology_digest)?;
     let thermal_storage = super::thermal_state::ThermalStateStorage::derive(step, mesh)?;
     if observations.topology_digest != facts.topology_digest {
         return Err(ResourcePlanningError::Invalid(
@@ -270,44 +272,49 @@ pub(crate) fn build_static_resource_plan(
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralLinearPipeline,
-        demand: FeaResourceDemand::StructuralLinearPipeline(StructuralOperatorResourceDemand {
-            topology_digest: facts.topology_digest,
-            numerical_scope_digest: facts.symbolic.identity(),
-            topology: facts.topology,
-            sparse: facts.sparse,
-            constraints: facts.constraints,
-            assembly: AssemblyResourcePolicy {
-                contribution_nonzero_upper_bound: Count(contribution_nonzeros),
-                contribution_bytes_upper_bound: ByteCount(contribution_bytes),
-                scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
-                fixed_scratch_bytes_per_worker: fixed_assembly_scratch,
+        demand: FeaResourceDemand::StructuralLinearPipeline(
+            StructuralLinearPipelineResourceDemand {
+                state_profiles_output,
+                operator: StructuralOperatorResourceDemand {
+                    topology_digest: facts.topology_digest,
+                    numerical_scope_digest: facts.symbolic.identity(),
+                    topology: facts.topology,
+                    sparse: facts.sparse,
+                    constraints: facts.constraints,
+                    assembly: AssemblyResourcePolicy {
+                        contribution_nonzero_upper_bound: Count(contribution_nonzeros),
+                        contribution_bytes_upper_bound: ByteCount(contribution_bytes),
+                        scratch_bytes_per_element: ByteCount(ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT),
+                        fixed_scratch_bytes_per_worker: fixed_assembly_scratch,
+                    },
+                    solve,
+                    phase_resources: PhaseResourcePolicy {
+                        resident_value_count: Count(recovery_values),
+                        resident_bytes_upper_bound: ByteCount(recovery_resident),
+                        scratch_bytes: ByteCount(recovery_resident),
+                        retained_bytes: ByteCount(recovery_payload_bytes),
+                    },
+                    field_recovery,
+                    observations: observations.clone(),
+                    publication: CheckpointArtifactPolicy {
+                        result_artifact_bytes: ByteCount(recovery_payload_bytes),
+                        checkpoint_bytes: ByteCount(checkpoint_bytes),
+                        artifact_overhead_bytes: ByteCount(STRUCTURAL_ARTIFACT_OVERHEAD_BYTES),
+                        relay_bytes: ByteCount(0),
+                        result_egress_bytes: ByteCount(recovery_payload_bytes),
+                        checkpoint_egress_bytes: ByteCount(checkpoint_bytes),
+                    },
+                    // The current structural kernel is monolithic. A recommendation would be dishonest
+                    // until the operator-domain execution path can consume it.
+                    partitioning: PartitioningPolicy::Monolithic,
+                    accuracy_demand: AccuracyResourceDemand {
+                        refinement_cycles: Count(0),
+                        solver_tightenings: Count(0),
+                        samples: observations.maximum_samples_per_observation,
+                    },
+                },
             },
-            solve,
-            phase_resources: PhaseResourcePolicy {
-                resident_value_count: Count(recovery_values),
-                resident_bytes_upper_bound: ByteCount(recovery_resident),
-                scratch_bytes: ByteCount(recovery_resident),
-                retained_bytes: ByteCount(recovery_payload_bytes),
-            },
-            field_recovery,
-            observations: observations.clone(),
-            publication: CheckpointArtifactPolicy {
-                result_artifact_bytes: ByteCount(recovery_payload_bytes),
-                checkpoint_bytes: ByteCount(checkpoint_bytes),
-                artifact_overhead_bytes: ByteCount(STRUCTURAL_ARTIFACT_OVERHEAD_BYTES),
-                relay_bytes: ByteCount(0),
-                result_egress_bytes: ByteCount(recovery_payload_bytes),
-                checkpoint_egress_bytes: ByteCount(checkpoint_bytes),
-            },
-            // The current structural kernel is monolithic. A recommendation would be dishonest
-            // until the operator-domain execution path can consume it.
-            partitioning: PartitioningPolicy::Monolithic,
-            accuracy_demand: AccuracyResourceDemand {
-                refinement_cycles: Count(0),
-                solver_tightenings: Count(0),
-                samples: observations.maximum_samples_per_observation,
-            },
-        }),
+        ),
         output_set: None,
         worker: WorkerResourcePolicy {
             cpu_millicores,

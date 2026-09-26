@@ -106,6 +106,7 @@ mod random_response_tests;
 mod response_spectrum;
 #[cfg(test)]
 mod response_spectrum_tests;
+mod state_publication;
 mod thermal;
 mod transient_scope;
 
@@ -132,7 +133,7 @@ impl AnalysisKernel for NativeAnalysisKernel {
             }
             AnalysisWorkKind::EvaluateAccuracy => execute_accuracy_evaluation(invocation),
             AnalysisWorkKind::PublishResult => execute_result_publication(invocation),
-            AnalysisWorkKind::PublishState => execute_state_publication(invocation),
+            AnalysisWorkKind::PublishState => state_publication::execute(invocation),
             AnalysisWorkKind::CheckpointObservationHistory => {
                 observation::execute_observation_history_checkpoint(invocation)
             }
@@ -668,6 +669,7 @@ fn execute_structural_linear(
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -862,6 +864,13 @@ fn execute_structural_linear(
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::new(invocation.host.workload.identity, &result)?;
     let result_identity = numerical_receipt.source_result;
+    let profiles = runmat_analysis_execution::structural_state_publication_profiles(
+        &solve.model,
+        solve.procedure_step()?,
+        result_identity,
+        runmat_execution::Digest::sha256(&payload),
+        runmat_analysis_execution::StructuralStateProfileResult::Linear(&result),
+    )?;
     Ok(vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
@@ -872,6 +881,11 @@ fn execute_structural_linear(
             AnalysisNumericalObjectKind::NumericalReceipt,
             numerical_receipt.identity().digest(),
             numerical_receipt.canonical_bytes()?,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+            profiles.identity(),
+            profiles.canonical_bytes()?,
         ),
     ])
 }
@@ -884,87 +898,6 @@ fn constraint_plan_manifest_identity(
             .manifest
             .logical_identity,
     )
-}
-
-fn execute_state_publication(
-    invocation: AnalysisKernelInvocation<'_>,
-) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
-    let publication = unique_input(
-        &invocation,
-        AnalysisNumericalObjectKind::StatePublicationRequest,
-    )?;
-    let solver_result = unique_input(&invocation, AnalysisNumericalObjectKind::SolverResult)?;
-    if invocation.inputs.len() != 2
-        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::SemanticState]
-    {
-        return Err(AnalysisBridgeError::Invalid(
-            "state publication requires one publication request, one solver result, and one semantic-state output"
-                .into(),
-        ));
-    }
-    let publication =
-        SemanticStatePublicationRequest::from_canonical_bytes(&publication.payload())?;
-    if solver_result.manifest.logical_identity != publication.source_result.digest() {
-        return Err(AnalysisBridgeError::Identity(
-            "state publication received a substituted solver result",
-        ));
-    }
-    let state = match publication.source {
-        SemanticStatePublicationSource::ThermalPrimaryField => {
-            runmat_analysis_execution::decode_prepared_thermal_state(&publication, solver_result)?
-        }
-        SemanticStatePublicationSource::StructuralPrimaryFields => {
-            let solver_result =
-                StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
-            CanonicalSemanticState::from_publication(&publication, &solver_result.run.fields)?
-        }
-        SemanticStatePublicationSource::StructuralLinearization => {
-            let solver_result =
-                StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
-            let linearization = solver_result.linearization.ok_or_else(|| {
-                AnalysisBridgeError::Invalid(
-                    "solver result did not publish its declared structural linearization".into(),
-                )
-            })?;
-            CanonicalSemanticState::from_linearization_publication(&publication, linearization)?
-        }
-        SemanticStatePublicationSource::ModalBasis => {
-            let solver_result =
-                StructuralModalSolverResult::from_canonical_bytes(&solver_result.payload())?;
-            if solver_result.topology_digest() != publication.topology_digest {
-                return Err(AnalysisBridgeError::Identity(
-                    "modal state publication topology differs from its solver result",
-                ));
-            }
-            CanonicalSemanticState::from_modal_publication(
-                &publication,
-                solver_result.basis().clone(),
-            )?
-        }
-        SemanticStatePublicationSource::StructuralResponseEnvelope => {
-            let solver_result = StructuralModalResponseSpectrumSolverResult::from_canonical_bytes(
-                &solver_result.payload(),
-            )?;
-            CanonicalSemanticState::from_structural_response_envelope_publication(
-                &publication,
-                &solver_result,
-            )?
-        }
-        SemanticStatePublicationSource::StructuralRandomStatistics => {
-            let solver_result = StructuralRandomResponseSolverResult::from_canonical_bytes(
-                &solver_result.payload(),
-            )?;
-            CanonicalSemanticState::from_structural_random_statistics_publication(
-                &publication,
-                &solver_result,
-            )?
-        }
-    };
-    Ok(vec![AnalysisKernelOutput::whole(
-        AnalysisNumericalObjectKind::SemanticState,
-        state.identity.digest(),
-        state.canonical_bytes()?,
-    )])
 }
 
 fn unique_input<'a>(

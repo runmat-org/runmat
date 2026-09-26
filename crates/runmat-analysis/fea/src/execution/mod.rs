@@ -206,6 +206,10 @@ pub use state::{
     SemanticStatePublicationSource, StatePublicationProfileEntry, StatePublicationProfiles,
     STATE_PUBLICATION_PROFILES_MAX_ENTRIES,
 };
+mod structural_state_profiles;
+pub use structural_state_profiles::{
+    structural_state_publication_profiles_encoding_profile, structural_state_publication_requests,
+};
 pub use study_workloads::{
     StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,
 };

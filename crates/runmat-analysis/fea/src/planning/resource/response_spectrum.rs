@@ -45,6 +45,15 @@ pub use sizing::{
 };
 
 /// Reusable exact projection for every independently scheduled direction in one spectrum step.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PreparedStructuralResponseSpectrumAssemblyOutputs {
+    pub result: PreparedOutputResourceFacts,
+    pub receipt: PreparedOutputResourceFacts,
+    pub field_recovery: PreparedOutputResourceFacts,
+    pub state_profiles: PreparedOutputResourceFacts,
+}
+
+/// Reusable exact projection for every independently scheduled direction in one spectrum step.
 #[derive(Clone)]
 pub struct StructuralModalResponseSpectrumResourceProjection {
     workload: StructuralModalResponseSpectrumWorkload,
@@ -356,11 +365,15 @@ impl StructuralModalResponseSpectrumResourceProjection {
         &self,
         request: &StructuralModalResponseSpectrumAssemblyRequest,
         inputs: PreparedInputResourceFacts,
-        result_output: PreparedOutputResourceFacts,
-        receipt_output: PreparedOutputResourceFacts,
-        field_recovery_output: PreparedOutputResourceFacts,
+        outputs: PreparedStructuralResponseSpectrumAssemblyOutputs,
         output_set: PreparedOutputSetResourceFacts,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+        let PreparedStructuralResponseSpectrumAssemblyOutputs {
+            result: result_output,
+            receipt: receipt_output,
+            field_recovery: field_recovery_output,
+            state_profiles: state_profiles_output,
+        } = outputs;
         request.validate().map_err(invalid_error)?;
         request
             .scope()
@@ -380,6 +393,20 @@ impl StructuralModalResponseSpectrumResourceProjection {
         let result_bytes =
             structural_modal_response_spectrum_assembly_payload_bytes_upper_bound(request)?;
         let receipt_bytes = structural_modal_response_spectrum_receipt_payload_bytes_upper_bound();
+        let profiles_bytes =
+            crate::execution::structural_state_publication_profiles_encoding_profile(
+                self.workload.model(),
+                self.workload.procedure_step().map_err(invalid_error)?,
+                &[crate::execution::SemanticStatePublicationSource::StructuralResponseEnvelope],
+                request.scope().topology_digest(),
+            )
+            .map_err(invalid_error)?
+            .encoded_bytes_upper_bound;
+        validate_output(
+            &state_profiles_output,
+            profiles_bytes,
+            "response-spectrum publication profiles",
+        )?;
         let field_recovery_bytes = self.field_recovery_payload_bytes_upper_bound()?;
         validate_output(&result_output, result_bytes, "response-spectrum result")?;
         validate_output(&receipt_output, receipt_bytes, "response-spectrum receipt")?;
@@ -473,6 +500,7 @@ impl StructuralModalResponseSpectrumResourceProjection {
                     result_output,
                     receipt_output,
                     field_recovery_output,
+                    state_profiles_output,
                 },
             ),
             output_set: Some(output_set),

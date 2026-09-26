@@ -249,8 +249,50 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         )
         .unwrap();
         assert_eq!(usage.evidence.attempts.len(), 2);
-        // Solve and accuracy attempts are measured. State and publication still lack phase
-        // plans and are not claimed as whole-study resource evidence.
+        let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
+            source_host: prepared.host.clone(),
+            source_result: process.objects.clone(),
+            source_profiles: process.state_publication_profile_objects.clone(),
+            source: SemanticStatePublicationSource::ThermalPrimaryField,
+            declaration: workload.model.sequence.steps[0].state_outputs[0].clone(),
+            topology_digest: process.manifest.topology_digest,
+            program_revision: revision.clone(),
+            chunk_bytes: limits.chunk_bytes,
+            inventory_limits: limits.inventory,
+        })
+        .unwrap();
+        let response = driver
+            .execute(
+                &publication.host,
+                &publication.program,
+                Some(&publication.resource_plan),
+            )
+            .await;
+        let state = import_semantic_state(
+            driver.store(),
+            response.response,
+            &publication,
+            limits.inventory,
+        )
+        .unwrap();
+        let state_wall = response.resources.resources.usage.wall_millis;
+        let usage = runmat_analysis_execution::extend_resource_usage(
+            &usage,
+            &runmat_analysis_execution::PlannedResourceUsageGraph::new(
+                vec![runmat_analysis_execution::PlannedResourceUsageAttempt {
+                    plan: publication.resource_plan.clone(),
+                    accounting: response.resources,
+                }],
+                state_wall,
+            )
+            .unwrap(),
+            &prepared.host.artifact_access,
+            output_policy,
+        )
+        .unwrap();
+        assert_eq!(usage.evidence.attempts.len(), 3);
+        // Solve, accuracy and state attempts are measured. The final result-publication
+        // task's own interval remains outside this evidence; this is not whole-study cost.
         let result_publication = runmat_analysis_execution::prepare_result_publication(
             runmat_analysis_execution::ResultPublicationPreparation {
                 accuracy_host: accuracy.host.clone(),
@@ -290,27 +332,6 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             published.accuracy_status,
             runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
         );
-        let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-            source_host: prepared.host.clone(),
-            source_result: process.objects,
-            source: SemanticStatePublicationSource::ThermalPrimaryField,
-            declaration: workload.model.sequence.steps[0].state_outputs[0].clone(),
-            topology_digest: process.manifest.topology_digest,
-            program_revision: revision.clone(),
-            chunk_bytes: limits.chunk_bytes,
-            inventory_limits: limits.inventory,
-        })
-        .unwrap();
-        let response = driver
-            .execute(&publication.host, &publication.program, None)
-            .await;
-        let state = import_semantic_state(
-            driver.store(),
-            response.response,
-            &publication,
-            limits.inventory,
-        )
-        .unwrap();
         assert_eq!(state.kind, runmat_analysis_core::StateKind::Thermal);
         assert_eq!(state.topology_digest, process.manifest.topology_digest);
         let fields = state.payload.fields().unwrap();

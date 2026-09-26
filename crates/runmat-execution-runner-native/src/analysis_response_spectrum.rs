@@ -67,6 +67,7 @@ async fn execute_with_pool(
     let inventory_limits = preparation.inventory_limits;
     let mut coordinator =
         StructuralModalResponseSpectrumStudyCoordinator::new(preparation).map_err(protocol)?;
+    let workflow_started = Instant::now();
 
     let modal = coordinator.prepare_modal().map_err(protocol)?;
     let [executed_modal] = execute_analysis_task_batch(
@@ -84,6 +85,7 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("modal extraction returned an invalid task inventory"))?;
     let modal_dependency = dependency(&executed_modal);
+    let modal_attempt = planned_resource_attempt(&modal.resource_plan, &executed_modal)?;
     coordinator
         .complete_modal(pool, executed_modal.response, &modal)
         .map_err(protocol)?;
@@ -94,7 +96,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &basis.host,
             program: &basis.program,
-            resource_plan: None,
+            resource_plan: Some(&basis.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![modal_dependency],
         }],
@@ -104,11 +106,11 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("modal-basis publication returned an invalid task inventory"))?;
     let basis_dependency = dependency(&executed_basis);
+    let basis_attempt = planned_resource_attempt(&basis.resource_plan, &executed_basis)?;
     coordinator
         .complete_basis_state(pool, executed_basis.response, &basis)
         .map_err(protocol)?;
 
-    let response_started = Instant::now();
     let directions = coordinator.prepare_directions().map_err(protocol)?;
     let prepared = directions
         .iter()
@@ -126,7 +128,9 @@ async fn execute_with_pool(
         .iter()
         .map(dependency)
         .collect::<Vec<_>>();
-    let mut resource_attempts = Vec::with_capacity(directions.len() + 1);
+    let mut resource_attempts = Vec::with_capacity(directions.len() + 3);
+    resource_attempts.push(modal_attempt);
+    resource_attempts.push(basis_attempt);
     let mut responses = BTreeMap::new();
     for (direction, executed) in directions.iter().zip(executed_directions) {
         resource_attempts.push(planned_resource_attempt(
@@ -164,7 +168,7 @@ async fn execute_with_pool(
         .map_err(protocol)?;
     let graph = PlannedResourceUsageGraph::new(
         resource_attempts,
-        u64::try_from(response_started.elapsed().as_millis()).unwrap_or(u64::MAX),
+        u64::try_from(workflow_started.elapsed().as_millis()).unwrap_or(u64::MAX),
     )
     .map_err(protocol)?;
     let resource_usage = prepare_planned_resource_graph_usage(
@@ -216,6 +220,37 @@ async fn execute_with_pool(
             .map_err(protocol)?,
     )
     .map_err(protocol)?;
+
+    let envelope = coordinator.prepare_envelope_state().map_err(protocol)?;
+    let [executed_envelope] = execute_analysis_task_batch(
+        pool,
+        vec![PreparedAnalysisTask {
+            host: &envelope.host,
+            program: &envelope.program,
+            resource_plan: Some(&envelope.resource_plan),
+            fallback_resources: policy.resources.clone(),
+            dependencies: vec![accuracy_dependency],
+        }],
+        task_policy(&policy),
+    )
+    .await?
+    .try_into()
+    .map_err(|_| protocol("response-envelope publication returned an invalid task inventory"))?;
+    let envelope_dependency = dependency(&executed_envelope);
+    let envelope_attempt = planned_resource_attempt(&envelope.resource_plan, &executed_envelope)?;
+    coordinator
+        .complete_envelope_state(pool, executed_envelope.response, &envelope)
+        .map_err(protocol)?;
+
+    let envelope_wall = envelope_attempt.accounting.resources.usage.wall_millis;
+    let resource_usage = runmat_analysis_execution::extend_resource_usage(
+        &resource_usage,
+        &PlannedResourceUsageGraph::new(vec![envelope_attempt], envelope_wall).map_err(protocol)?,
+        &publication_access,
+        runmat_analysis_execution::AnalysisOutputPolicy::new(chunk_bytes, inventory_limits)
+            .map_err(protocol)?,
+    )
+    .map_err(protocol)?;
     pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     let publication = coordinator
@@ -228,35 +263,15 @@ async fn execute_with_pool(
             program: &publication.program,
             resource_plan: None,
             fallback_resources: policy.resources.clone(),
-            dependencies: vec![accuracy_dependency],
+            dependencies: vec![envelope_dependency],
         }],
         task_policy(&policy),
     )
     .await?
     .try_into()
     .map_err(|_| protocol("response-spectrum publication returned an invalid task inventory"))?;
-    let publication_dependency = dependency(&executed_publication);
     coordinator
         .complete_publication(pool, executed_publication.response, &publication)
-        .map_err(protocol)?;
-
-    let envelope = coordinator.prepare_envelope_state().map_err(protocol)?;
-    let [executed_envelope] = execute_analysis_task_batch(
-        pool,
-        vec![PreparedAnalysisTask {
-            host: &envelope.host,
-            program: &envelope.program,
-            resource_plan: None,
-            fallback_resources: policy.resources.clone(),
-            dependencies: vec![publication_dependency],
-        }],
-        task_policy(&policy),
-    )
-    .await?
-    .try_into()
-    .map_err(|_| protocol("response-envelope publication returned an invalid task inventory"))?;
-    coordinator
-        .complete_envelope_state(pool, executed_envelope.response, &envelope)
         .map_err(protocol)?;
 
     Ok(CompletedStructuralModalResponseSpectrumStudy {

@@ -232,6 +232,7 @@ pub(super) fn build_response_spectrum_assembly_resource_plan(
                 &demand.result_output,
                 &demand.receipt_output,
                 &demand.field_recovery_output,
+                &demand.state_profiles_output,
             ],
         ),
     )
@@ -257,7 +258,11 @@ pub(super) fn build_random_response_assembly_resource_plan(
             &demand.inputs,
             demand.ordering_workspace_bytes_upper_bound,
             ByteCount(0),
-            &[&demand.result_output, &demand.receipt_output],
+            &[
+                &demand.result_output,
+                &demand.receipt_output,
+                &demand.state_profiles_output,
+            ],
         ),
     )
 }

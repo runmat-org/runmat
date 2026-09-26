@@ -128,6 +128,7 @@ impl StructuralModalProducerCoordinator {
         let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: modal.host.clone(),
             source_result: modal.objects.clone(),
+            source_profiles: modal.state_publication_profile_objects.clone(),
             source: SemanticStatePublicationSource::ModalBasis,
             declaration: self.preparation.workload.modal_basis_output()?.clone(),
             topology_digest: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),

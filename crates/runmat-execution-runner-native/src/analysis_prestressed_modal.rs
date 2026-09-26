@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use runmat_analysis_execution::{
     ImportedSemanticState, ImportedStructuralLinearResult, ImportedStructuralModalResult,
-    StructuralPrestressedModalStudyCoordinator, StructuralPrestressedModalStudyPreparation,
+    PlannedResourceUsageAttempt, StructuralPrestressedModalStudyCoordinator,
+    StructuralPrestressedModalStudyPreparation,
 };
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
-        RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
+        PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver, StructuralSequenceExecutionPolicy,
@@ -19,6 +20,7 @@ use crate::{
 pub struct CompletedStructuralPrestressedModalStudy {
     pub preload: ImportedStructuralLinearResult,
     pub prestress_state: ImportedSemanticState,
+    pub state_publication_usage: PlannedResourceUsageAttempt,
     pub modal: ImportedStructuralModalResult,
 }
 
@@ -89,7 +91,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &state.host,
             program: &state.program,
-            resource_plan: None,
+            resource_plan: Some(&state.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![AnalysisTaskDependency {
                 identity: executed_preload.identity,
@@ -101,6 +103,7 @@ async fn execute_with_pool(
     .await?
     .try_into()
     .map_err(|_| protocol("prestress publication returned an invalid task inventory"))?;
+    let state_publication_usage = planned_resource_attempt(&state.resource_plan, &executed_state)?;
     coordinator
         .complete_state(pool, executed_state.response, &state)
         .map_err(protocol)?;
@@ -146,6 +149,7 @@ async fn execute_with_pool(
             .semantic_state()
             .cloned()
             .ok_or_else(|| protocol("published prestress state is absent"))?,
+        state_publication_usage,
         modal: coordinator
             .modal_result()
             .cloned()

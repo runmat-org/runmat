@@ -1,6 +1,14 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
 mod accuracy;
+mod state_publication;
+mod static_profiles;
+pub use contract::SemanticStatePublicationResourceDemand;
+pub use contract::StructuralLinearPipelineResourceDemand;
+pub use state_publication::build_state_publication_resource_plan;
+pub use static_profiles::{
+    projected_canonical_output_resource_facts, structural_state_profiles_output_resource_facts,
+};
 mod admission;
 pub use accuracy::build_accuracy_resource_plan;
 mod assembly_sizing;
@@ -126,6 +134,7 @@ pub use response_spectrum::{
     structural_modal_response_spectrum_assembly_payload_bytes_upper_bound,
     structural_modal_response_spectrum_direction_payload_bytes_upper_bound,
     structural_modal_response_spectrum_receipt_payload_bytes_upper_bound,
+    PreparedStructuralResponseSpectrumAssemblyOutputs,
     StructuralModalResponseSpectrumResourceProjection,
 };
 pub use scoped_execution::{

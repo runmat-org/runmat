@@ -63,8 +63,13 @@ mod thermal_plan;
 pub use thermal_plan::{
     prepare_thermal_inputs, rederive_thermal_resource_plan, PreparedThermalInputs,
 };
+mod structural_state_profiles;
 mod thermal_completion;
 mod thermal_state_profiles;
+pub use structural_state_profiles::{
+    structural_state_profiles_output_facts, structural_state_publication_profiles,
+    StructuralStateProfileResult,
+};
 mod thermal_task;
 mod thermal_task_result;
 pub use thermal_completion::{import_thermal_completion, ImportedThermalCompletion};
@@ -288,6 +293,8 @@ pub use state_publication::{
     import_semantic_state, import_semantic_state_completion, prepare_semantic_state_publication,
     ImportedSemanticState, PreparedSemanticStatePublication, SemanticStatePublicationPreparation,
 };
+mod state_publication_resource;
+pub use state_publication_resource::build_prepared_state_publication_resource_plan;
 pub use state_transition::bind_upstream_state_transition;
 pub use structural::{
     import_structural_linear_completion, import_structural_linear_result,
@@ -326,6 +333,7 @@ pub use structural_sequence::{
     PreparedStructuralSolveTask, PreparedStructuralSolveWave, PreparedStructuralStateTask,
     PreparedStructuralStateWave, StructuralSequenceCoordinator, StructuralSequenceNode,
     StructuralSequencePreparation, StructuralSequenceResultClosure,
+    StructuralSequenceStateResourceAttempt,
 };
 pub use structural_transient_recovery::{
     StructuralTransientExecutionCheckpoint, StructuralTransientExecutionCheckpointIdentity,

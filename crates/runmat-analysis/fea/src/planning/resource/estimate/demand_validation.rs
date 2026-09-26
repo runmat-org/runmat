@@ -119,6 +119,7 @@ pub(super) fn validate_modal_demand(
         || demand.operator.partitioning != PartitioningPolicy::Monolithic
         || !prepared_output_is_valid(&demand.result_output)
         || !prepared_output_is_valid(&demand.receipt_output)
+        || !prepared_output_is_valid(&demand.state_profiles_output)
     {
         return Err(ResourcePlanningError::Invalid(
             "structural modal output, subspace, or placement bounds are inconsistent".into(),

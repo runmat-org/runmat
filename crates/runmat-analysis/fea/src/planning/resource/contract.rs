@@ -28,7 +28,11 @@ mod error;
 mod modal_demand;
 mod prepared;
 mod random_response_demand;
+mod state_publication_demand;
+mod static_demand;
+pub use static_demand::StructuralLinearPipelineResourceDemand;
 mod thermal_demand;
+pub use state_publication_demand::SemanticStatePublicationResourceDemand;
 mod transient_block_demand;
 mod transient_recovery_demand;
 mod transient_scope_demand;
@@ -59,7 +63,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 28;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 29;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -231,6 +235,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "request")]
 pub enum FeaResourcePhase {
+    SemanticStatePublication(Digest),
     AccuracyEvaluation(AccuracyEvaluationRequestIdentity),
     ThermalSolve(AnalysisWorkloadIdentity),
     StructuralLinearPipeline,
@@ -373,9 +378,10 @@ pub struct ObservationAssemblyResourceDemand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
+    SemanticStatePublication(SemanticStatePublicationResourceDemand),
     AccuracyEvaluation(AccuracyEvaluationResourceDemand),
     ThermalSolve(ThermalSolveResourceDemand),
-    StructuralLinearPipeline(StructuralOperatorResourceDemand),
+    StructuralLinearPipeline(StructuralLinearPipelineResourceDemand),
     StructuralModalExtraction(StructuralModalResourceDemand),
     StructuralBuckling(StructuralBucklingResourceDemand),
     StructuralFrequencyEntry(StructuralFrequencyOperatorResourceDemand),

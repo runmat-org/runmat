@@ -17,6 +17,7 @@ pub(super) fn execute_structural_modal_extraction(
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -102,6 +103,13 @@ pub(super) fn execute_structural_modal_extraction(
             receipt_output: projected_output_resource_facts(
                 structural_modal_receipt_payload_bytes_upper_bound(),
             )?,
+            state_profiles_output:
+                runmat_analysis_execution::structural_state_profiles_output_facts(
+                    workload.model(),
+                    workload.procedure_step()?,
+                    &[SemanticStatePublicationSource::ModalBasis],
+                    Digest::from_bytes(*mesh.canonical_digest.bytes()),
+                )?,
             output_set: projected_output_set_resource_facts(),
         },
     )
@@ -123,16 +131,30 @@ pub(super) fn execute_structural_modal_extraction(
     }
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let receipt = StructuralModalNumericalReceipt::new(invocation.host.workload.identity, &result)?;
+    let payload = result.canonical_bytes()?;
+    let profiles = runmat_analysis_execution::structural_state_publication_profiles(
+        workload.model(),
+        workload.procedure_step()?,
+        receipt.source_result(),
+        Digest::sha256(&payload),
+        runmat_analysis_execution::StructuralStateProfileResult::Modal(&result),
+    )?;
     Ok(vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
             receipt.source_result().digest(),
-            result.canonical_bytes()?,
+            payload,
         ),
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::NumericalReceipt,
             receipt.identity().digest(),
             receipt.canonical_bytes()?,
         ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+            profiles.identity(),
+            profiles.canonical_bytes()?,
+        ),
     ])
 }
+use runmat_execution::Digest;

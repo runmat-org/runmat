@@ -46,6 +46,7 @@ pub struct StructuralModalResponseSpectrumAssemblyResourceDemand {
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
     pub field_recovery_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -60,4 +61,5 @@ pub struct StructuralRandomResponseAssemblyResourceDemand {
     pub ordering_workspace_bytes_upper_bound: ByteCount,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
 }

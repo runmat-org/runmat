@@ -61,6 +61,8 @@ pub struct PreparedStructuralLinearProgram {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedStructuralLinearResult {
+    pub state_publication_profiles: runmat_analysis_fea::execution::StatePublicationProfiles,
+    pub state_publication_profile_objects: PreparedAnalysisObjects,
     pub identity: SolverResultIdentity,
     pub result: StructuralLinearWorkloadResult,
     pub objects: PreparedAnalysisObjects,
@@ -323,6 +325,7 @@ pub fn prepare_structural_linear_program(
         vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
         required_capabilities,
     )?;
@@ -336,100 +339,8 @@ pub fn prepare_structural_linear_program(
     })
 }
 
-pub fn import_structural_linear_result(
-    source: &impl CacheImport,
-    response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralLinearProgram,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<StructuralLinearWorkloadResult> {
-    Ok(import_structural_linear_completion(source, response, prepared, limits)?.result)
-}
-
-pub fn import_structural_linear_completion(
-    source: &impl CacheImport,
-    response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralLinearProgram,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<ImportedStructuralLinearResult> {
-    response.validate_against(&prepared.program.request)?;
-    let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [result_output, receipt_output] = output_set.manifest.outputs.as_slice() else {
-        return Err(AnalysisBridgeError::Invalid(
-            "structural analysis must return result and numerical-receipt roots".into(),
-        ));
-    };
-    let expected_result = SolverResultIdentity::new(
-        prepared.host.workload.identity,
-        result_output.payload_digest,
-    )?;
-    let imported = import_analysis_objects(
-        source,
-        &result_output.root,
-        AnalysisNumericalObjectKind::SolverResult,
-        expected_result.digest(),
-        result_output.payload_digest,
-        &prepared.host.artifact_access,
-        limits,
-    )?;
-    let receipt_objects = import_analysis_objects(
-        source,
-        &receipt_output.root,
-        AnalysisNumericalObjectKind::NumericalReceipt,
-        receipt_output.logical_identity,
-        receipt_output.payload_digest,
-        &prepared.host.artifact_access,
-        limits,
-    )?;
-    let mut expected =
-        imported.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
-    expected.extend(
-        receipt_objects
-            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
-    );
-    crate::object::retain_unique_references(&mut expected);
-    expected.push(output_set.root);
-    if output_set.result_objects != expected {
-        return Err(AnalysisBridgeError::Identity(
-            "analysis result inventory differs from its canonical closure",
-        ));
-    }
-    let result_object_bytes = output_set
-        .result_objects
-        .iter()
-        .try_fold(0_u64, |total, reference| {
-            total.checked_add(reference.encoded_length)
-        })
-        .ok_or_else(|| {
-            AnalysisBridgeError::Invalid("analysis result byte accounting overflowed".into())
-        })?;
-    let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
-    let numerical_receipt =
-        StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
-    if numerical_receipt.identity().digest() != receipt_output.logical_identity {
-        return Err(AnalysisBridgeError::Identity(
-            "numerical receipt manifest differs from its canonical identity",
-        ));
-    }
-    numerical_receipt.validate_against(expected_result, &result)?;
-    let constraint_plan = prepared
-        .inputs
-        .iter()
-        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ConstraintPlan)
-        .ok_or_else(|| {
-            AnalysisBridgeError::Invalid(
-                "prepared structural program has no canonical constraint plan".into(),
-            )
-        })?;
-    validate_result_semantics(&prepared.inputs[0], constraint_plan, &result)?;
-    Ok(ImportedStructuralLinearResult {
-        identity: expected_result,
-        result,
-        objects: imported,
-        numerical_receipt,
-        numerical_receipt_objects: receipt_objects,
-        result_object_bytes,
-    })
-}
+mod import;
+pub use import::{import_structural_linear_completion, import_structural_linear_result};
 
 struct StructuralIdentities {
     study: StudyIdentity,

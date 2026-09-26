@@ -21,9 +21,9 @@ use crate::{
     import_semantic_state_completion, import_structural_linear_completion,
     prepare_semantic_state_publication, prepare_structural_sequence_step, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    PreparedAnalysisObjects, PreparedResourceUsage, PreparedSemanticStatePublication,
-    PreparedStructuralLinearProgram, SemanticStatePublicationPreparation,
-    StructuralLinearProgramPreparation,
+    PlannedResourceUsageAttempt, PreparedAnalysisObjects, PreparedResourceUsage,
+    PreparedSemanticStatePublication, PreparedStructuralLinearProgram,
+    SemanticStatePublicationPreparation, StructuralLinearProgramPreparation,
 };
 
 /// Stable semantic node names used to bind generic scheduler dependencies to an authored
@@ -105,7 +105,16 @@ pub struct CompletedStructuralSequenceState {
     pub state_id: StateId,
     pub state: CanonicalSemanticState,
     pub objects: PreparedAnalysisObjects,
+    pub resource_attempt: StructuralSequenceStateResourceAttempt,
     pub response: ProgramExecutionResponse,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum StructuralSequenceStateResourceAttempt {
+    /// Completion imported from durable closures without a live scheduler attempt.
+    UnmeteredImport,
+    /// Exact resource plan and scheduler accounting for the publication attempt.
+    Metered(Box<PlannedResourceUsageAttempt>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -169,7 +178,7 @@ pub fn import_structural_sequence_completion(
             state_wave.tasks.iter().map(|task| &task.node),
             &mut responses,
         )?;
-        coordinator.complete_state_wave(source, state_wave, state_responses)?;
+        coordinator.complete_unmetered_state_wave(source, state_wave, state_responses)?;
     }
     if !responses.is_empty() {
         return Err(AnalysisBridgeError::Invalid(
@@ -443,6 +452,7 @@ impl StructuralSequenceCoordinator {
                     prepare_semantic_state_publication(SemanticStatePublicationPreparation {
                         source_host: task.prepared.host.clone(),
                         source_result: imported.objects.clone(),
+                        source_profiles: imported.state_publication_profile_objects.clone(),
                         source: match declaration.kind {
                             runmat_analysis_core::StateKind::StructuralPrimary => {
                                 SemanticStatePublicationSource::StructuralPrimaryFields
@@ -506,11 +516,31 @@ impl StructuralSequenceCoordinator {
         })
     }
 
-    pub fn complete_state_wave(
+    pub(crate) fn complete_unmetered_state_wave(
+        &mut self,
+        source: &impl CacheImport,
+        wave: PreparedStructuralStateWave,
+        responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+    ) -> AnalysisBridgeResult<()> {
+        self.complete_state_wave_internal(source, wave, responses, None)
+    }
+
+    pub fn complete_metered_state_wave(
+        &mut self,
+        source: &impl CacheImport,
+        wave: PreparedStructuralStateWave,
+        responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+        attempts: BTreeMap<StructuralSequenceNode, PlannedResourceUsageAttempt>,
+    ) -> AnalysisBridgeResult<()> {
+        self.complete_state_wave_internal(source, wave, responses, Some(attempts))
+    }
+
+    fn complete_state_wave_internal(
         &mut self,
         source: &impl CacheImport,
         wave: PreparedStructuralStateWave,
         mut responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
+        mut attempts: Option<BTreeMap<StructuralSequenceNode, PlannedResourceUsageAttempt>>,
     ) -> AnalysisBridgeResult<()> {
         if self.phase != CoordinatorPhase::AwaitingStatePublication || wave.level != self.next_level
         {
@@ -526,6 +556,14 @@ impl StructuralSequenceCoordinator {
         if responses.keys().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(AnalysisBridgeError::Invalid(
                 "state responses do not exactly cover the prepared wave".into(),
+            ));
+        }
+        if attempts
+            .as_ref()
+            .is_some_and(|attempts| attempts.keys().cloned().collect::<BTreeSet<_>>() != expected)
+        {
+            return Err(AnalysisBridgeError::Invalid(
+                "state resource accounting does not exactly cover the prepared wave".into(),
             ));
         }
         let mut completed_states = Vec::with_capacity(wave.tasks.len());
@@ -554,11 +592,28 @@ impl StructuralSequenceCoordinator {
                     "published state identity differs from its sequence node",
                 ));
             }
+            let resource_attempt = match attempts.as_mut() {
+                Some(attempts) => {
+                    let attempt = attempts.remove(&task.node).ok_or_else(|| {
+                        AnalysisBridgeError::Invalid(
+                            "prepared state has no scheduler resource accounting".into(),
+                        )
+                    })?;
+                    if attempt.plan != task.prepared.resource_plan {
+                        return Err(AnalysisBridgeError::Identity(
+                            "state scheduler accounting names another resource plan",
+                        ));
+                    }
+                    StructuralSequenceStateResourceAttempt::Metered(Box::new(attempt))
+                }
+                None => StructuralSequenceStateResourceAttempt::UnmeteredImport,
+            };
             completed_states.push(CompletedStructuralSequenceState {
                 producer_step: producer_step.clone(),
                 state_id: state_id.clone(),
                 state: imported.state,
                 objects: imported.objects,
+                resource_attempt,
                 response: retained_response,
             });
         }

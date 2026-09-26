@@ -338,6 +338,7 @@ impl StructuralRandomResponseResourceProjection {
         inputs: PreparedInputResourceFacts,
         result_output: PreparedOutputResourceFacts,
         receipt_output: PreparedOutputResourceFacts,
+        state_profiles_output: PreparedOutputResourceFacts,
         output_set: PreparedOutputSetResourceFacts,
     ) -> Result<FeaResourcePlan, ResourcePlanningError> {
         request.validate().map_err(invalid_error)?;
@@ -374,6 +375,20 @@ impl StructuralRandomResponseResourceProjection {
         )?;
         let result_bytes = structural_random_response_assembly_payload_bytes_upper_bound(request)?;
         let receipt_bytes = structural_random_response_receipt_payload_bytes_upper_bound();
+        let profiles_bytes =
+            crate::execution::structural_state_publication_profiles_encoding_profile(
+                self.workload.model(),
+                self.workload.procedure_step().map_err(invalid_error)?,
+                &[crate::execution::SemanticStatePublicationSource::StructuralRandomStatistics],
+                request.scope().topology_digest(),
+            )
+            .map_err(invalid_error)?
+            .encoded_bytes_upper_bound;
+        validate_output(
+            &state_profiles_output,
+            profiles_bytes,
+            "random-response publication profiles",
+        )?;
         validate_output(&result_output, result_bytes, "random-response result")?;
         validate_output(&receipt_output, receipt_bytes, "random-response receipt")?;
         let ordering_workspace = multiply(
@@ -399,6 +414,7 @@ impl StructuralRandomResponseResourceProjection {
                     ordering_workspace_bytes_upper_bound: ByteCount(ordering_workspace),
                     result_output,
                     receipt_output,
+                    state_profiles_output,
                 },
             ),
             output_set: Some(output_set),

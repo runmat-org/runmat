@@ -115,6 +115,7 @@ pub(super) fn execute_assembly(
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
                 AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -171,19 +172,27 @@ pub(super) fn execute_assembly(
         .plan_for_assembly(
             &request,
             prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
-            projected_output_resource_facts(
+            runmat_analysis_fea::planning::resource::PreparedStructuralResponseSpectrumAssemblyOutputs {
+            result: projected_output_resource_facts(
                 structural_modal_response_spectrum_assembly_payload_bytes_upper_bound(&request)
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             )?,
-            projected_output_resource_facts(
+            receipt: projected_output_resource_facts(
                 structural_modal_response_spectrum_receipt_payload_bytes_upper_bound(),
             )?,
-            projected_output_resource_facts(
+            field_recovery: projected_output_resource_facts(
                 prepared
                     .resources()
                     .field_recovery_payload_bytes_upper_bound()
                     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             )?,
+            state_profiles: runmat_analysis_execution::structural_state_profiles_output_facts(
+                decoded.workload.model(),
+                decoded.workload.procedure_step()?,
+                &[SemanticStatePublicationSource::StructuralResponseEnvelope],
+                request.scope().topology_digest(),
+            )?,
+            },
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -200,6 +209,14 @@ pub(super) fn execute_assembly(
         invocation.host.workload.identity,
         &result,
     )?;
+    let payload = result.canonical_bytes()?;
+    let profiles = runmat_analysis_execution::structural_state_publication_profiles(
+        decoded.workload.model(),
+        decoded.workload.procedure_step()?,
+        receipt.source_result(),
+        Digest::sha256(&payload),
+        runmat_analysis_execution::StructuralStateProfileResult::ResponseSpectrum(&result),
+    )?;
     let field_recovery = runmat_analysis_fea::recover_structural_modal_response_spectrum_fields(
         &decoded.workload,
         &prepared,
@@ -212,7 +229,7 @@ pub(super) fn execute_assembly(
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
             receipt.source_result().digest(),
-            result.canonical_bytes()?,
+            payload,
         ),
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::NumericalReceipt,
@@ -227,6 +244,11 @@ pub(super) fn execute_assembly(
             field_recovery
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+            profiles.identity(),
+            profiles.canonical_bytes()?,
         ),
     ])
 }
@@ -294,3 +316,4 @@ fn decode_physical_inputs(
         resource_plan,
     })
 }
+use runmat_execution::Digest;

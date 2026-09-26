@@ -126,7 +126,7 @@ pub(super) fn prepare_static_preassembly(
     // Both PCG and saddle-point GMRES prove a prepared SPD operator (reduced where needed).
     // The multiplier's Krylov workspace still needs measured reconciliation.
     let solver_admission = match &resource_plan.input.demand {
-        FeaResourceDemand::StructuralLinearPipeline(demand) => match &demand.solve {
+        FeaResourceDemand::StructuralLinearPipeline(demand) => match &demand.operator.solve {
             SolveResourcePolicy::Iterative { admission, .. }
             | SolveResourcePolicy::SaddlePointGmres { admission, .. } => Some(admission.clone()),
             _ => None,

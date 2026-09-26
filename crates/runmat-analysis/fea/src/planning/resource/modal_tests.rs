@@ -33,6 +33,14 @@ fn prepared(
         structural_modal_result_payload_bytes_upper_bound(Some(mesh), constraints, workload)
             .unwrap();
     let receipt = structural_modal_receipt_payload_bytes_upper_bound();
+    let profiles = crate::execution::structural_state_publication_profiles_encoding_profile(
+        workload.model(),
+        workload.procedure_step().unwrap(),
+        &[crate::execution::SemanticStatePublicationSource::ModalBasis],
+        runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
+    )
+    .unwrap()
+    .encoded_bytes_upper_bound;
     PreparedStructuralModalResourceFacts {
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(1024),
@@ -48,6 +56,11 @@ fn prepared(
             encoded_payload_bytes_upper_bound: ByteCount(receipt),
             transport_closure_bytes_upper_bound: ByteCount(receipt + 128 * 1024),
             construction_resident_bytes_admission_budget: ByteCount(receipt * 2),
+        },
+        state_profiles_output: PreparedOutputResourceFacts {
+            encoded_payload_bytes_upper_bound: ByteCount(profiles),
+            transport_closure_bytes_upper_bound: ByteCount(profiles + 128 * 1024),
+            construction_resident_bytes_admission_budget: ByteCount(profiles * 2),
         },
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(64 * 1024),
@@ -187,6 +200,21 @@ fn modal_plan_binds_k_m_probe_and_monolithic_peak() {
     )
     .is_err());
     let mut substituted_observations = observations.clone();
+    let mut understated_profiles = prepared(&mesh, &constraints, &small_workload);
+    understated_profiles
+        .state_profiles_output
+        .encoded_payload_bytes_upper_bound
+        .0 -= 1;
+    assert!(build_structural_modal_resource_plan(
+        Some(&mesh),
+        &constraints,
+        &observations,
+        &small_workload,
+        None,
+        &[],
+        understated_profiles,
+    )
+    .is_err());
     substituted_observations.step_id = ProcedureStepId("another-step".into());
     assert!(build_structural_modal_resource_plan(
         Some(&mesh),

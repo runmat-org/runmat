@@ -44,11 +44,12 @@ pub struct PreparedPhaseResourceFacts {
     pub output_set: PreparedOutputSetResourceFacts,
 }
 
-/// Prepared transport envelopes for the two modal task outputs and their shared output-set root.
+/// Prepared transport envelopes for the modal task outputs and their shared output-set root.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedStructuralModalResourceFacts {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
 }

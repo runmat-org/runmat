@@ -223,30 +223,10 @@ fn prepared_input_resource_facts_from_refs<'a>(
 pub fn projected_output_resource_facts(
     encoded_payload_bytes_upper_bound: u64,
 ) -> AnalysisBridgeResult<PreparedOutputResourceFacts> {
-    if encoded_payload_bytes_upper_bound == 0 {
-        return Err(AnalysisBridgeError::Invalid(
-            "projected output payload must be nonzero".into(),
-        ));
-    }
-    let transport_closure_bytes_upper_bound = encoded_payload_bytes_upper_bound
-        .checked_add(runmat_analysis_fea::execution::ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
-        .ok_or_else(|| AnalysisBridgeError::Invalid("projected output closure overflows".into()))?;
-    let construction_resident_bytes_admission_budget =
-        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
-            encoded_payload_bytes_upper_bound,
-            1,
-        )
-        .and_then(|bytes| bytes.checked_add(transport_closure_bytes_upper_bound))
-        .ok_or_else(|| {
-            AnalysisBridgeError::Invalid("projected output construction overflows".into())
-        })?;
-    Ok(PreparedOutputResourceFacts {
-        encoded_payload_bytes_upper_bound: ByteCount(encoded_payload_bytes_upper_bound),
-        transport_closure_bytes_upper_bound: ByteCount(transport_closure_bytes_upper_bound),
-        construction_resident_bytes_admission_budget: ByteCount(
-            construction_resident_bytes_admission_budget,
-        ),
-    })
+    runmat_analysis_fea::planning::resource::projected_canonical_output_resource_facts(
+        encoded_payload_bytes_upper_bound,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
 }
 
 pub fn projected_output_set_resource_facts(

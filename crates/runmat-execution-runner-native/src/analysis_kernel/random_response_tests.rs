@@ -134,6 +134,7 @@ fn native_random_response_is_portable_order_independent_and_publishes_typed_stat
     let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
         source_host: assembly.host.clone(),
         source_result: imported.result_objects,
+        source_profiles: imported.state_publication_profile_objects,
         source: SemanticStatePublicationSource::StructuralRandomStatistics,
         declaration: workload.procedure_step().unwrap().state_outputs[0].clone(),
         topology_digest: Digest::from_bytes(*mesh.canonical_digest.bytes()),
@@ -263,12 +264,18 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
     coordinator
         .complete_accuracy(&store, accuracy_response, &accuracy)
         .unwrap();
+    let statistics = coordinator.prepare_statistics_state().unwrap();
+    let statistics_response = execute(&mut store, &statistics.host, &statistics.program, limits);
+    coordinator
+        .complete_statistics_state(&store, statistics_response, &statistics)
+        .unwrap();
     let mut attempts = interval_plans
         .iter()
         .enumerate()
         .map(|(ordinal, plan)| planned_attempt(plan, ordinal))
         .collect::<Vec<_>>();
     attempts.push(planned_attempt(&assembly.resource_plan, attempts.len()));
+    attempts.push(planned_attempt(&statistics.resource_plan, attempts.len()));
     let graph = PlannedResourceUsageGraph::new(attempts, 1).unwrap();
     let resource_usage = prepare_planned_resource_graph_usage(
         &assembly.resource_plan,
@@ -288,14 +295,9 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
     coordinator
         .complete_publication(&store, publication_response, &publication)
         .unwrap();
-    let statistics = coordinator.prepare_statistics_state().unwrap();
-    let statistics_response = execute(&mut store, &statistics.host, &statistics.program, limits);
-    coordinator
-        .complete_statistics_state(&store, statistics_response, &statistics)
-        .unwrap();
     assert!(coordinator.is_complete());
     let usage = coordinator.resource_usage().unwrap();
-    assert_eq!(usage.evidence.attempts.len(), interval_plans.len() + 1);
+    assert_eq!(usage.evidence.attempts.len(), interval_plans.len() + 2);
     assert_eq!(usage.evidence.primary_plan, assembly.resource_plan.identity);
     assert!(usage.evidence.overruns.is_empty());
     let publication = &coordinator.publication().unwrap().result;

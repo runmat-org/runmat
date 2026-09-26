@@ -169,6 +169,7 @@ impl StructuralPrestressProducerCoordinator {
         let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: host.clone(),
             source_result: preload.objects.clone(),
+            source_profiles: preload.state_publication_profile_objects.clone(),
             source: SemanticStatePublicationSource::StructuralLinearization,
             declaration,
             topology_digest: preload

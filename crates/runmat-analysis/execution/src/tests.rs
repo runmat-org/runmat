@@ -1215,6 +1215,22 @@ impl AnalysisKernel for StructuralResultKernel {
                 &result,
             )?;
         assert_eq!(receipt.source_result, result_identity);
+        let workload_input = invocation
+            .inputs
+            .iter()
+            .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::SolverInvocation)
+            .unwrap();
+        let workload =
+            runmat_analysis_fea::execution::StructuralLinearWorkload::from_canonical_bytes(
+                &workload_input.payload(),
+            )?;
+        let profiles = structural_state_publication_profiles(
+            &workload.model,
+            workload.procedure_step()?,
+            result_identity,
+            Digest::sha256(&self.0),
+            StructuralStateProfileResult::Linear(&result),
+        )?;
         Ok(vec![
             AnalysisKernelOutput::whole(
                 AnalysisNumericalObjectKind::SolverResult,
@@ -1225,6 +1241,11 @@ impl AnalysisKernel for StructuralResultKernel {
                 AnalysisNumericalObjectKind::NumericalReceipt,
                 receipt.identity().digest(),
                 receipt.canonical_bytes()?,
+            ),
+            AnalysisKernelOutput::whole(
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
+                profiles.identity(),
+                profiles.canonical_bytes()?,
             ),
         ])
     }
@@ -1685,7 +1706,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    assert_eq!(completed.outputs.len(), 2);
+    assert_eq!(completed.outputs.len(), 3);
+    assert_eq!(
+        completed.outputs[2].manifest.kind,
+        AnalysisNumericalObjectKind::StatePublicationProfiles
+    );
     assert_eq!(
         completed.outputs[1].manifest.kind,
         AnalysisNumericalObjectKind::NumericalReceipt
@@ -2472,6 +2497,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let state_prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
         source_host: prepared.host.clone(),
         source_result: completed.outputs[0].clone(),
+        source_profiles: completed.outputs[2].clone(),
         source:
             runmat_analysis_fea::execution::SemanticStatePublicationSource::StructuralPrimaryFields,
         declaration: solve.model.sequence.steps[0].state_outputs[0].clone(),
@@ -3031,7 +3057,12 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
             .iter()
             .map(|input| input.reference_kind)
             .collect::<Vec<_>>(),
-        vec![ValueRefKind::DriverObject, ValueRefKind::ResultObject]
+        vec![
+            ValueRefKind::DriverObject,
+            ValueRefKind::ResultObject,
+            ValueRefKind::ResultObject,
+            ValueRefKind::DriverObject,
+        ]
     );
     let root_state_node = StructuralSequenceNode::PublishState {
         producer_step: root.step_id.clone(),
@@ -3057,7 +3088,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         );
     }
     coordinator
-        .complete_state_wave(&store, state_wave, state_responses)
+        .complete_unmetered_state_wave(&store, state_wave, state_responses)
         .unwrap();
 
     let branches = coordinator.prepare_next_solve_wave().unwrap();
@@ -3167,7 +3198,7 @@ fn structural_sequence_coordinator_publishes_once_then_prepares_parallel_branche
         );
     }
     coordinator
-        .complete_state_wave(&store, branch_states, branch_state_responses)
+        .complete_unmetered_state_wave(&store, branch_states, branch_state_responses)
         .unwrap();
     assert!(coordinator.is_complete());
     let completed = coordinator.finish().unwrap();

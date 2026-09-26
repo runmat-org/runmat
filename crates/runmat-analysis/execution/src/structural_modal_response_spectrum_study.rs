@@ -208,6 +208,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         let task = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: modal.host.clone(),
             source_result: modal.objects.clone(),
+            source_profiles: modal.state_publication_profile_objects.clone(),
             source: SemanticStatePublicationSource::ModalBasis,
             declaration: self.modal_workload.modal_basis_output()?.clone(),
             topology_digest: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
@@ -435,7 +436,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         let accuracy = import_accuracy(source, response, task, self.preparation.inventory_limits)?;
         self.accuracy_host = Some(task.host.clone());
         self.accuracy = Some(accuracy);
-        self.phase = StudyPhase::ReadyForPublication;
+        self.phase = StudyPhase::ReadyForEnvelopeState;
         Ok(())
     }
 
@@ -493,7 +494,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             task,
             self.preparation.inventory_limits,
         )?);
-        self.phase = StudyPhase::ReadyForEnvelopeState;
+        self.phase = StudyPhase::Complete;
         Ok(())
     }
 
@@ -527,6 +528,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
                 .ok_or_else(|| invalid("response-spectrum assembly host is absent"))?
                 .clone(),
             source_result: result.result_objects.clone(),
+            source_profiles: result.state_publication_profile_objects.clone(),
             source: SemanticStatePublicationSource::StructuralResponseEnvelope,
             declaration,
             topology_digest: Digest::from_bytes(*self.preparation.mesh.canonical_digest.bytes()),
@@ -555,7 +557,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             task,
             self.preparation.inventory_limits,
         )?);
-        self.phase = StudyPhase::Complete;
+        self.phase = StudyPhase::ReadyForPublication;
         Ok(())
     }
 

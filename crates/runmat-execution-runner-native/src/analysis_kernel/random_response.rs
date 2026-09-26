@@ -111,6 +111,7 @@ pub(super) fn execute_assembly(
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -172,6 +173,12 @@ pub(super) fn execute_assembly(
             projected_output_resource_facts(
                 structural_random_response_receipt_payload_bytes_upper_bound(),
             )?,
+            runmat_analysis_execution::structural_state_profiles_output_facts(
+                decoded.workload.model(),
+                decoded.workload.procedure_step()?,
+                &[SemanticStatePublicationSource::StructuralRandomStatistics],
+                request.scope().topology_digest(),
+            )?,
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -186,16 +193,29 @@ pub(super) fn execute_assembly(
     let result = StructuralRandomResponseSolverResult::new(&decoded.workload, request)?;
     let receipt =
         StructuralRandomResponseNumericalReceipt::new(invocation.host.workload.identity, &result)?;
+    let payload = result.canonical_bytes()?;
+    let profiles = runmat_analysis_execution::structural_state_publication_profiles(
+        decoded.workload.model(),
+        decoded.workload.procedure_step()?,
+        receipt.source_result(),
+        Digest::sha256(&payload),
+        runmat_analysis_execution::StructuralStateProfileResult::RandomResponse(&result),
+    )?;
     Ok(vec![
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::SolverResult,
             receipt.source_result().digest(),
-            result.canonical_bytes()?,
+            payload,
         ),
         AnalysisKernelOutput::whole(
             AnalysisNumericalObjectKind::NumericalReceipt,
             receipt.identity().digest(),
             receipt.canonical_bytes()?,
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+            profiles.identity(),
+            profiles.canonical_bytes()?,
         ),
     ])
 }
@@ -263,3 +283,4 @@ fn decode_physical_inputs(
         resource_plan,
     })
 }
+use runmat_execution::Digest;

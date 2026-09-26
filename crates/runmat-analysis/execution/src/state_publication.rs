@@ -4,7 +4,9 @@ use runmat_analysis_core::StateOutput;
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, CanonicalSemanticState,
     SemanticStatePublicationRequest, SemanticStatePublicationSource, SolverResultIdentity,
+    StatePublicationProfiles,
 };
+use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::cache::CacheImport;
@@ -21,6 +23,7 @@ use crate::{
 pub struct SemanticStatePublicationPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_result: PreparedAnalysisObjects,
+    pub source_profiles: PreparedAnalysisObjects,
     pub source: SemanticStatePublicationSource,
     pub declaration: StateOutput,
     pub topology_digest: Digest,
@@ -34,6 +37,7 @@ pub struct PreparedSemanticStatePublication {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+    pub resource_plan: FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -123,8 +127,9 @@ pub fn prepare_semantic_state_publication(
     let inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (preparation.source_result, ValueRefKind::ResultObject),
+        (preparation.source_profiles, ValueRefKind::ResultObject),
     ];
-    let workload_inputs = inputs
+    let mut workload_inputs: Vec<AnalysisWorkloadInput> = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
@@ -135,10 +140,30 @@ pub fn prepare_semantic_state_publication(
             reference_kind: *reference_kind,
         })
         .collect();
-    let inputs = inputs
+    let mut inputs = inputs
         .into_iter()
         .map(|(input, _)| input)
         .collect::<Vec<_>>();
+    let catalog = StatePublicationProfiles::from_canonical_bytes(&inputs[2].payload())?;
+    let resource_plan =
+        crate::build_prepared_state_publication_resource_plan(&request, &catalog, &inputs)?;
+    let plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    workload_inputs.push(AnalysisWorkloadInput {
+        kind: plan_objects.manifest.kind,
+        logical_identity: plan_objects.manifest.logical_identity,
+        payload_digest: plan_objects.manifest.payload_digest,
+        manifest_digest: plan_objects.root.digest,
+        manifest_encoded_length: plan_objects.root.encoded_length,
+        reference_kind: ValueRefKind::DriverObject,
+    });
+    inputs.push(plan_objects);
     let required_capabilities = BTreeSet::from([AnalysisCapabilityRequirement::Host {
         abi: ANALYSIS_HOST_ABI.into(),
     }]);
@@ -158,6 +183,7 @@ pub fn prepare_semantic_state_publication(
         host,
         program,
         inputs,
+        resource_plan,
     })
 }
 

@@ -1,5 +1,6 @@
 use super::*;
 mod profile_rejection;
+mod publication_admission;
 use crate::analysis_kernel::NativeAnalysisKernel;
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
@@ -100,6 +101,7 @@ fn native_thermal_serial_transport_import_and_terminal_state_round_trip() {
         let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: task.host,
             source_result: imported.objects,
+            source_profiles: imported.state_publication_profile_objects,
             source: SemanticStatePublicationSource::ThermalPrimaryField,
             declaration: workload.model.sequence.steps[0].state_outputs[0].clone(),
             topology_digest,

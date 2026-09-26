@@ -2,11 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use runmat_analysis_execution::{
-    AnalysisHostWorkload, CompletedStructuralSequence, PreparedAnalysisProgram,
-    PreparedStructuralLinearProgram, PreparedStructuralSolveWave, PreparedStructuralStateWave,
+    AnalysisHostWorkload, CompletedStructuralSequence, PlannedResourceUsageAttempt,
+    PreparedAnalysisProgram, PreparedStructuralSolveWave, PreparedStructuralStateWave,
     StructuralSequenceCoordinator, StructuralSequenceNode, StructuralSequencePreparation,
 };
 use runmat_analysis_fea::execution::AnalysisTaskIdentity;
+use runmat_analysis_fea::planning::resource::FeaResourcePlan;
 use runmat_execution::resource::ResourceRequest;
 use runmat_execution::task::RetryPolicy;
 use runmat_execution::TaskId;
@@ -15,9 +16,9 @@ use runmat_execution_runner::AttemptSuccess;
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, protocol, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
-        RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt, protocol,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
+        PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver,
@@ -87,10 +88,15 @@ async fn execute_with_pool(
                 solve_execution.attempts,
             )
             .map_err(protocol)?;
-        let state_responses =
+        let state_execution =
             execute_state_wave(pool, &state_wave, &policy, &mut completed_nodes).await?;
         coordinator
-            .complete_state_wave(pool, state_wave, state_responses)
+            .complete_metered_state_wave(
+                pool,
+                state_wave,
+                state_execution.responses,
+                state_execution.planned_attempts,
+            )
             .map_err(protocol)?;
     }
     coordinator.finish().map_err(protocol)
@@ -120,7 +126,7 @@ async fn execute_solve_wave(
         dependencies: &task.dependencies,
         host: &task.prepared.host,
         program: &task.prepared.program,
-        structural: Some(&task.prepared),
+        resource_plan: &task.prepared.resource_plan,
     });
     execute_wave(pool, tasks, policy, completed_nodes).await
 }
@@ -130,17 +136,15 @@ async fn execute_state_wave(
     wave: &PreparedStructuralStateWave,
     policy: &StructuralSequenceExecutionPolicy,
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
-) -> NativeExecutionResult<BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>> {
+) -> NativeExecutionResult<ExecutedWave> {
     let tasks = wave.tasks.iter().map(|task| TaskView {
         node: &task.node,
         dependencies: &task.dependencies,
         host: &task.prepared.host,
         program: &task.prepared.program,
-        structural: None,
+        resource_plan: &task.prepared.resource_plan,
     });
-    Ok(execute_wave(pool, tasks, policy, completed_nodes)
-        .await?
-        .responses)
+    execute_wave(pool, tasks, policy, completed_nodes).await
 }
 
 async fn execute_wave<'a>(
@@ -150,7 +154,7 @@ async fn execute_wave<'a>(
     completed_nodes: &mut BTreeMap<StructuralSequenceNode, (AnalysisTaskIdentity, TaskId)>,
 ) -> NativeExecutionResult<ExecutedWave> {
     let mut prepared_tasks = Vec::new();
-    let mut admitted_nodes = Vec::new();
+    let mut admitted_tasks = Vec::new();
     for task in tasks {
         let dependency_records = task
             .dependencies
@@ -171,19 +175,19 @@ async fn execute_wave<'a>(
             })
             .collect();
         if completed_nodes.contains_key(task.node)
-            || admitted_nodes
+            || admitted_tasks
                 .iter()
-                .any(|node: &StructuralSequenceNode| node == task.node)
+                .any(|(node, _): &(StructuralSequenceNode, &FeaResourcePlan)| node == task.node)
         {
             return Err(NativeExecutionError::Protocol(
                 "sequence node was submitted more than once".into(),
             ));
         }
-        admitted_nodes.push(task.node.clone());
+        admitted_tasks.push((task.node.clone(), task.resource_plan));
         prepared_tasks.push(PreparedAnalysisTask {
             host: task.host,
             program: task.program,
-            resource_plan: task.structural.map(|prepared| &prepared.resource_plan),
+            resource_plan: Some(task.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies,
         });
@@ -200,7 +204,9 @@ async fn execute_wave<'a>(
     .await?;
     let mut by_node = BTreeMap::new();
     let mut attempts = BTreeMap::new();
-    for (node, response) in admitted_nodes.into_iter().zip(responses) {
+    let mut planned_attempts = BTreeMap::new();
+    for ((node, resource_plan), response) in admitted_tasks.into_iter().zip(responses) {
+        let planned_attempt = planned_resource_attempt(resource_plan, &response)?;
         if by_node.insert(node.clone(), response.response).is_some() {
             return Err(NativeExecutionError::Protocol(
                 "sequence wave returned a duplicate node".into(),
@@ -209,17 +215,20 @@ async fn execute_wave<'a>(
         if let Some(attempt) = response.attempt {
             attempts.insert(node.clone(), attempt);
         }
+        planned_attempts.insert(node.clone(), planned_attempt);
         completed_nodes.insert(node, (response.identity, response.task_id));
     }
     Ok(ExecutedWave {
         responses: by_node,
         attempts,
+        planned_attempts,
     })
 }
 
 struct ExecutedWave {
     responses: BTreeMap<StructuralSequenceNode, ProgramExecutionResponse>,
     attempts: BTreeMap<StructuralSequenceNode, AttemptSuccess>,
+    planned_attempts: BTreeMap<StructuralSequenceNode, PlannedResourceUsageAttempt>,
 }
 
 struct TaskView<'a> {
@@ -227,7 +236,7 @@ struct TaskView<'a> {
     dependencies: &'a [StructuralSequenceNode],
     host: &'a AnalysisHostWorkload,
     program: &'a PreparedAnalysisProgram,
-    structural: Option<&'a PreparedStructuralLinearProgram>,
+    resource_plan: &'a FeaResourcePlan,
 }
 
 #[cfg(test)]

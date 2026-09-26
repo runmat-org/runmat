@@ -301,12 +301,32 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
             &accuracy,
         )
         .unwrap();
+    let envelope = coordinator.prepare_envelope_state().unwrap();
+    envelope.program.write_to(&mut store).unwrap();
+    let completed = execute_serial_analysis(
+        &envelope.program.request,
+        &mut store,
+        &NativeAnalysisKernel,
+        256,
+        limits,
+    )
+    .unwrap();
+    coordinator
+        .complete_envelope_state(
+            &store,
+            AnalysisHostResponse::completed(&envelope.host, &completed)
+                .unwrap()
+                .program_response(),
+            &envelope,
+        )
+        .unwrap();
     let mut attempts = direction_plans
         .iter()
         .enumerate()
         .map(|(ordinal, plan)| planned_attempt(plan, ordinal))
         .collect::<Vec<_>>();
     attempts.push(planned_attempt(&assembly.resource_plan, attempts.len()));
+    attempts.push(planned_attempt(&envelope.resource_plan, attempts.len()));
     let graph = PlannedResourceUsageGraph::new(attempts, 1).unwrap();
     let resource_usage = prepare_planned_resource_graph_usage(
         &assembly.resource_plan,
@@ -340,28 +360,9 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
             &publication,
         )
         .unwrap();
-    let envelope = coordinator.prepare_envelope_state().unwrap();
-    envelope.program.write_to(&mut store).unwrap();
-    let completed = execute_serial_analysis(
-        &envelope.program.request,
-        &mut store,
-        &NativeAnalysisKernel,
-        256,
-        limits,
-    )
-    .unwrap();
-    coordinator
-        .complete_envelope_state(
-            &store,
-            AnalysisHostResponse::completed(&envelope.host, &completed)
-                .unwrap()
-                .program_response(),
-            &envelope,
-        )
-        .unwrap();
     assert!(coordinator.is_complete());
     let usage = coordinator.resource_usage().unwrap();
-    assert_eq!(usage.evidence.attempts.len(), direction_plans.len() + 1);
+    assert_eq!(usage.evidence.attempts.len(), direction_plans.len() + 2);
     assert_eq!(usage.evidence.primary_plan, assembly.resource_plan.identity);
     assert!(usage.evidence.overruns.is_empty());
     let publication = &coordinator.publication().unwrap().result;

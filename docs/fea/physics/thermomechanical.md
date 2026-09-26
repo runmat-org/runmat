@@ -678,9 +678,10 @@ and shared output admission enforces the report envelope. Evaluator collections 
 from checked counts and sorted in place. These are requested-heap admission estimates, not a
 measured process-memory ceiling.
 
-Measured solve and accuracy attempts are retained in publication usage. Extending usage preserves
-all previously measured phase plans, including observation work. Semantic-state and publication
-tasks still lack corresponding FEA phase plans, so this is not complete study-graph qualification.
+Measured solve, accuracy and semantic-state attempts can be retained in publication usage.
+Extending usage preserves all previously measured phase plans, including observation work.
+Final result-publication tasks still lack their own FEA phase plans, so this is not complete
+study-graph qualification.
 Publication's own final interval must ultimately live in workflow-completion accounting, not in
 the prebuilt source-usage object consumed by that same publication attempt.
 
@@ -689,19 +690,24 @@ publication sources. Thermal sizing reads the result manifest and terminal field
 temperature partitions; structural sizing borrows the producing worker's existing typed result.
 The projections use the shared canonical profiler and are checked against actual state encoding
 for primary displacement, linearization, modal basis, response envelope, random statistics and
-Tet4/Tet10 thermal states. Primary field selection is shared with actual publication. These facts
-bound canonical output construction only: they do not yet provide publication-task scheduler
-admission, source-decoding residency, state validation scratch or complete attempt usage.
+Tet4/Tet10 thermal states. Primary field selection is shared with actual publication. The shared
+state-publication plan now reserves retained input transport, decoded source residency, a separate
+source-validation workspace, owned state materialization, and encoded output transport.
+These are conservative codec-based admission estimates, not measured whole-process memory.
 Structural planners must not decode full results on the driver merely to obtain these profiles.
 
-Thermal producer tasks now also emit a separate `StatePublicationProfiles` artifact. Its bounded,
+All six supported source families emit a separate `StatePublicationProfiles` artifact. Its bounded,
 sorted catalog binds each exact authored publication request and encoding profile to the producer,
 topology, semantic result and source payload digest. Thermal import checks the complete output
 inventory, then independently reprojects the catalog from metadata only; hashes alone are not
-treated as proof of a claimed size. Resource estimation revision 28 reserves this third output
-from the actual declaration inventory before solving. Existing numerical receipts and numerical
-result identities are unchanged. Structural producers still need equivalent catalog transport,
-and publication tasks still need explicit resource plans and measured usage integration.
+treated as proof of a claimed size. Structural importers independently reproject from the typed
+result they already import. Resource estimation revision 29 reserves each producer catalog from
+the actual declaration inventory. The publication worker rederives its resource plan and compares
+the catalog entry with the actual source profile before constructing a state. Native schedulers
+admit those plans and retain actual publication attempts; durable closure reconstruction explicitly
+records an unmetered import rather than inventing scheduler usage. Existing numerical receipts
+and numerical result identities are unchanged. This does not qualify interrupted solves, complete
+workflow accounting, or a broader production formulation envelope.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

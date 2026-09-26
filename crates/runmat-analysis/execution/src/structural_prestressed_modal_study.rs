@@ -252,6 +252,7 @@ impl StructuralPrestressedModalStudyCoordinator {
         let prepared = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: modal.host.clone(),
             source_result: modal.objects.clone(),
+            source_profiles: modal.state_publication_profile_objects.clone(),
             source: SemanticStatePublicationSource::ModalBasis,
             declaration: self
                 .bound_modal_workload

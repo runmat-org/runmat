@@ -2,16 +2,16 @@ use std::sync::Arc;
 
 use runmat_analysis_execution::{
     AnalysisHostWorkload, ImportedSemanticState, ImportedStructuralLinearResult,
-    ImportedStructuralModalResult, PreparedAnalysisProgram,
+    ImportedStructuralModalResult, PlannedResourceUsageAttempt, PreparedAnalysisProgram,
     StructuralPrestressedFrequencyStudyPreparation,
     StructuralPrestressedModalFrequencyStudyCoordinator,
 };
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask, LocalAnalysisTaskPool,
-        PreparedAnalysisTask, RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, ExecutedAnalysisTask,
+        LocalAnalysisTaskPool, PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     NativeExecutionConfig, NativeExecutionError, NativeExecutionResult, NativeProgramSession,
     RemotePoolDriver, StructuralFrequencyExecutionPreparation, StructuralSequenceExecutionPolicy,
@@ -22,6 +22,7 @@ pub struct CompletedStructuralPrestressedModalFrequencyStudy {
     pub prestress_state: ImportedSemanticState,
     pub modal: ImportedStructuralModalResult,
     pub basis_state: ImportedSemanticState,
+    pub state_publication_usage: Vec<PlannedResourceUsageAttempt>,
     pub resolved_workload: runmat_analysis_fea::execution::StructuralFrequencyWorkload,
     pub frequency: crate::CompletedStructuralFrequencyStudy,
 }
@@ -73,7 +74,7 @@ async fn execute_with_pool(
         pool,
         &preload.host,
         &preload.program,
-        Some(&preload.resource_plan),
+        &preload.resource_plan,
         &policy,
         Vec::new(),
         "preload",
@@ -94,12 +95,13 @@ async fn execute_with_pool(
         pool,
         &prestress.host,
         &prestress.program,
-        None,
+        &prestress.resource_plan,
         &policy,
         vec![preload_dependency],
         "prestress-state publication",
     )
     .await?;
+    let prestress_usage = planned_resource_attempt(&prestress.resource_plan, &executed_prestress)?;
     let prestress_dependency = dependency(&executed_prestress);
     coordinator
         .complete_prestress_state(pool, executed_prestress.response, &prestress)
@@ -115,7 +117,7 @@ async fn execute_with_pool(
         pool,
         &modal.host,
         &modal.program,
-        Some(&modal.resource_plan),
+        &modal.resource_plan,
         &policy,
         vec![prestress_dependency],
         "prestressed-modal solve",
@@ -136,12 +138,13 @@ async fn execute_with_pool(
         pool,
         &basis.host,
         &basis.program,
-        None,
+        &basis.resource_plan,
         &policy,
         vec![modal_dependency],
         "modal-basis publication",
     )
     .await?;
+    let basis_usage = planned_resource_attempt(&basis.resource_plan, &executed_basis)?;
     let basis_dependency = dependency(&executed_basis);
     coordinator
         .complete_basis_state(pool, executed_basis.response, &basis)
@@ -198,6 +201,7 @@ async fn execute_with_pool(
             .basis_state()
             .cloned()
             .ok_or_else(|| protocol("published modal-basis state is absent"))?,
+        state_publication_usage: vec![prestress_usage, basis_usage],
         resolved_workload,
         frequency,
     })
@@ -207,7 +211,7 @@ async fn execute_one<'a>(
     pool: &mut impl AnalysisTaskPool,
     host: &'a AnalysisHostWorkload,
     program: &'a PreparedAnalysisProgram,
-    resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
+    resource_plan: &'a runmat_analysis_fea::planning::resource::FeaResourcePlan,
     policy: &StructuralSequenceExecutionPolicy,
     dependencies: Vec<AnalysisTaskDependency>,
     phase: &str,
@@ -217,7 +221,7 @@ async fn execute_one<'a>(
         vec![PreparedAnalysisTask {
             host,
             program,
-            resource_plan,
+            resource_plan: Some(resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies,
         }],

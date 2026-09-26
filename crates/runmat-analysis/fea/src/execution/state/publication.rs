@@ -84,7 +84,6 @@ impl CanonicalSemanticState {
         result: &StructuralModalResponseSpectrumSolverResult,
     ) -> AnalysisExecutionResult<Self> {
         request.validate()?;
-        result.validate()?;
         if request.source != SemanticStatePublicationSource::StructuralResponseEnvelope
             || result.assembly().scope().topology_digest() != request.topology_digest
         {
@@ -109,7 +108,6 @@ impl CanonicalSemanticState {
         result: &StructuralRandomResponseSolverResult,
     ) -> AnalysisExecutionResult<Self> {
         request.validate()?;
-        result.validate()?;
         if request.source != SemanticStatePublicationSource::StructuralRandomStatistics
             || result.assembly().scope().topology_digest() != request.topology_digest
         {

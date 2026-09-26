@@ -23,7 +23,10 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let state_inputs = vec![publication, solved.solver_result.clone()];
+    let state_inputs = admitted_inputs(
+        vec![publication, solved.solver_result.clone()],
+        runmat_analysis_fea::execution::SemanticStatePublicationProfileSource::StructuralPrimaryFields(&solved.result.run.fields),
+    );
     let state_host = test_host_for_inputs(
         host,
         AnalysisWorkKind::PublishState,
@@ -50,6 +53,41 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         state.topology_digest,
         solved.prepared.inputs[1].manifest.logical_identity
     );
+    let mut wrong_topology =
+        SemanticStatePublicationRequest::from_canonical_bytes(&state_inputs[0].payload()).unwrap();
+    wrong_topology.topology_digest = Digest::sha256(b"substituted-state-topology");
+    let bytes = wrong_topology.canonical_bytes().unwrap();
+    let request = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StatePublicationRequest,
+        Digest::sha256(&bytes),
+        &bytes,
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let wrong_inputs = admitted_inputs(
+        vec![request, solved.solver_result.clone()],
+        runmat_analysis_fea::execution::SemanticStatePublicationProfileSource::StructuralPrimaryFields(&solved.result.run.fields),
+    );
+    let wrong_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::PublishState,
+        &wrong_inputs,
+        vec![AnalysisNumericalObjectKind::SemanticState],
+        None,
+    );
+    assert!(matches!(
+        NativeAnalysisKernel.execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::PublishState,
+            host: &wrong_host,
+            inputs: &wrong_inputs,
+        }),
+        Err(AnalysisBridgeError::Identity(
+            "structural state publication topology differs from its solver result"
+        ))
+    ));
 
     let linearization_declaration = solved.solve.model.sequence.steps[0]
         .state_outputs
@@ -75,7 +113,10 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let inputs = vec![request, solved.solver_result.clone()];
+    let inputs = admitted_inputs(
+        vec![request, solved.solver_result.clone()],
+        runmat_analysis_fea::execution::SemanticStatePublicationProfileSource::StructuralLinearization(solved.result.linearization.as_ref().unwrap()),
+    );
     let publication_host = test_host_for_inputs(
         host,
         AnalysisWorkKind::PublishState,
@@ -209,8 +250,7 @@ fn rejects_structural_bytes_for_thermal_publication(solved: &SolvedPipeline) {
             host: &host,
             inputs: &inputs,
         })
-        .err()
-        .expect("structural bytes must not masquerade as a thermal result");
+        .expect_err("structural bytes must not masquerade as a thermal result");
     assert!(
         error.to_string().contains("prefix") || error.to_string().contains("contract"),
         "{error}"
@@ -272,8 +312,15 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
         )
         .unwrap(),
     ];
+    let manifest = runmat_analysis_execution::decode_prepared_thermal_manifest(&inputs[1]).unwrap();
+    let inputs = admitted_inputs(
+        inputs,
+        runmat_analysis_fea::execution::SemanticStatePublicationProfileSource::Thermal(&manifest),
+    );
+    let mut source_host = solved.prepared.host.clone();
+    source_host.workload.step = result.producer;
     let host = test_host_for_inputs(
-        &solved.prepared.host,
+        &source_host,
         AnalysisWorkKind::PublishState,
         &inputs,
         vec![AnalysisNumericalObjectKind::SemanticState],
@@ -293,4 +340,49 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
         CanonicalSemanticState::from_canonical_bytes(output[0].whole_payload().unwrap()).unwrap(),
         expected
     );
+}
+
+fn admitted_inputs(
+    mut inputs: Vec<runmat_analysis_execution::PreparedAnalysisObjects>,
+    source: runmat_analysis_fea::execution::SemanticStatePublicationProfileSource<'_>,
+) -> Vec<runmat_analysis_execution::PreparedAnalysisObjects> {
+    use runmat_analysis_fea::execution::{StatePublicationProfileEntry, StatePublicationProfiles};
+    let request =
+        SemanticStatePublicationRequest::from_canonical_bytes(&inputs[0].payload()).unwrap();
+    let profile = request.encoding_profile(source).unwrap();
+    let catalog = StatePublicationProfiles::new(
+        request.producer,
+        request.source_result,
+        request.topology_digest,
+        inputs[1].manifest.payload_digest,
+        vec![StatePublicationProfileEntry::new(request.clone(), profile).unwrap()],
+    )
+    .unwrap();
+    inputs.push(
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
+            catalog.identity(),
+            &catalog.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::ResultValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    );
+    let plan = runmat_analysis_execution::build_prepared_state_publication_resource_plan(
+        &request, &catalog, &inputs,
+    )
+    .unwrap();
+    inputs.push(
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            plan.identity.digest(),
+            &plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    );
+    inputs
 }

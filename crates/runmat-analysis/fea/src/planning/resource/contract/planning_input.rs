@@ -6,7 +6,8 @@ impl FeaResourcePlanningInput {
             // Accuracy is scoped to the semantic numerical result, not a mesh operation.
             FeaResourceDemand::AccuracyEvaluation(demand) => demand.source_result.digest(),
             FeaResourceDemand::ThermalSolve(demand) => demand.topology_digest,
-            FeaResourceDemand::StructuralLinearPipeline(demand) => demand.topology_digest,
+            FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
+            FeaResourceDemand::StructuralLinearPipeline(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralBuckling(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralFrequencyEntry(demand)
@@ -45,7 +46,10 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
-            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.observations),
+            FeaResourceDemand::SemanticStatePublication(_) => None,
+            FeaResourceDemand::StructuralLinearPipeline(demand) => {
+                Some(&demand.operator.observations)
+            }
             FeaResourceDemand::StructuralModalExtraction(demand) => {
                 Some(&demand.operator.observations)
             }
@@ -84,7 +88,8 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
-            FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
+            FeaResourceDemand::SemanticStatePublication(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralBuckling(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
@@ -128,7 +133,8 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
-            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
+            FeaResourceDemand::SemanticStatePublication(_) => None,
+            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
@@ -157,7 +163,8 @@ impl FeaResourcePlanningInput {
         match &mut self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
-            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
+            FeaResourceDemand::SemanticStatePublication(_) => None,
+            FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {

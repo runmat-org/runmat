@@ -370,6 +370,11 @@ fn execute_with_group_size(
             prepared_inputs(),
             prepared_output(result_payload),
             prepared_output(structural_random_response_receipt_payload_bytes_upper_bound()),
+            prepared_output(crate::execution::structural_state_publication_profiles_encoding_profile(
+                workload.model(), workload.procedure_step().unwrap(),
+                &[crate::execution::SemanticStatePublicationSource::StructuralRandomStatistics],
+                assembly.scope().topology_digest(),
+            ).unwrap().encoded_bytes_upper_bound),
             prepared_output_set(),
         )
         .unwrap();

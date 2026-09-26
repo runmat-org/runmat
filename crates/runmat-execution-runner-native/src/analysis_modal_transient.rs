@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     analysis_task_pool::{
-        configure_local_analysis, execute_analysis_task_batch, AnalysisTaskBatchPolicy,
-        AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool, PreparedAnalysisTask,
-        RemoteAnalysisTaskPool,
+        configure_local_analysis, execute_analysis_task_batch, planned_resource_attempt,
+        AnalysisTaskBatchPolicy, AnalysisTaskDependency, AnalysisTaskPool, LocalAnalysisTaskPool,
+        PreparedAnalysisTask, RemoteAnalysisTaskPool,
     },
     analysis_transient::{
         execute_structural_transient_with_pool, CompletedStructuralTransientSequence,
@@ -14,14 +14,16 @@ use crate::{
     RemotePoolDriver, StructuralSequenceExecutionPolicy,
 };
 use runmat_analysis_execution::{
-    ImportedSemanticState, ImportedStructuralModalResult, StructuralModalTransientStudyCoordinator,
-    StructuralModalTransientStudyPreparation, StructuralTransientRecoveryClosure,
+    ImportedSemanticState, ImportedStructuralModalResult, PlannedResourceUsageAttempt,
+    StructuralModalTransientStudyCoordinator, StructuralModalTransientStudyPreparation,
+    StructuralTransientRecoveryClosure,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompletedStructuralModalTransientStudy {
     pub modal: ImportedStructuralModalResult,
     pub basis_state: ImportedSemanticState,
+    pub state_publication_usage: PlannedResourceUsageAttempt,
     pub transient: CompletedStructuralTransientSequence,
 }
 
@@ -106,7 +108,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &state.host,
             program: &state.program,
-            resource_plan: None,
+            resource_plan: Some(&state.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![modal_dependency],
         }],
@@ -115,6 +117,7 @@ async fn execute_with_pool(
     .await?
     .try_into()
     .map_err(|_| protocol("modal-state publication returned an invalid task inventory"))?;
+    let state_publication_usage = planned_resource_attempt(&state.resource_plan, &executed_state)?;
     coordinator
         .complete_state(pool, executed_state.response, &state)
         .map_err(protocol)?;
@@ -143,6 +146,7 @@ async fn execute_with_pool(
             .semantic_state()
             .cloned()
             .ok_or_else(|| protocol("published modal state is absent"))?,
+        state_publication_usage,
         transient,
     })
 }

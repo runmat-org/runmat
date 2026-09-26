@@ -263,6 +263,8 @@ pub struct PreparedStructuralRandomResponseAssemblyTask {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedStructuralRandomResponseResult {
+    pub state_publication_profiles: runmat_analysis_fea::execution::StatePublicationProfiles,
+    pub state_publication_profile_objects: PreparedAnalysisObjects,
     pub identity: SolverResultIdentity,
     pub result: StructuralRandomResponseSolverResult,
     pub result_objects: PreparedAnalysisObjects,
@@ -366,6 +368,10 @@ pub fn prepare_structural_random_response_assembly(
             projected_output_resource_facts(
                 structural_random_response_receipt_payload_bytes_upper_bound(),
             )?,
+            crate::structural_state_profiles_output_facts(
+                preparation.workload.model(), preparation.workload.procedure_step()?,
+                &[runmat_analysis_fea::execution::SemanticStatePublicationSource::StructuralRandomStatistics], request.scope().topology_digest(),
+            )?,
             projected_output_set_resource_facts(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -396,6 +402,7 @@ pub fn prepare_structural_random_response_assembly(
         vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
         preparation.artifact_access,
     )?;
@@ -420,9 +427,10 @@ pub fn import_structural_random_response_result(
     response.validate_against(&prepared.program.request)?;
     let retained_response = response.clone();
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
-    let [result_output, receipt_output] = output_set.manifest.outputs.as_slice() else {
+    let [result_output, receipt_output, profiles_output] = output_set.manifest.outputs.as_slice()
+    else {
         return Err(AnalysisBridgeError::Invalid(
-            "random-response fan-in must return one result and one receipt".into(),
+            "random-response fan-in must return result, receipt and publication profiles".into(),
         ));
     };
     let identity = SolverResultIdentity::new(
@@ -467,10 +475,33 @@ pub fn import_structural_random_response_result(
             "random-response receipt root differs from its canonical identity",
         ));
     }
+    let state_publication_profile_objects = import_analysis_objects(
+        source,
+        &profiles_output.root,
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        profiles_output.logical_identity,
+        profiles_output.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
+    let state_publication_profiles = crate::structural_state_profiles::validate_profiles(
+        &state_publication_profile_objects,
+        crate::structural_state_publication_profiles(
+            prepared.workload.model(),
+            prepared.workload.procedure_step()?,
+            identity,
+            result_objects.manifest.payload_digest,
+            crate::StructuralStateProfileResult::RandomResponse(&result),
+        )?,
+    )?;
     let mut expected = result_objects
         .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
     expected.extend(
         receipt_objects
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
+    expected.extend(
+        state_publication_profile_objects
             .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
     );
     crate::object::retain_unique_references(&mut expected);
@@ -481,6 +512,8 @@ pub fn import_structural_random_response_result(
         ));
     }
     Ok(ImportedStructuralRandomResponseResult {
+        state_publication_profiles,
+        state_publication_profile_objects,
         identity,
         result,
         result_objects,
