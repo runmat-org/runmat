@@ -41,10 +41,7 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
     let requested_outputs = function.abi.fixed_outputs.len();
-    let mut runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
-    .with_program_revision(Some(assembly.program.clone()));
+    let mut runtime = standalone_runtime(&assembly.program);
     let ports = runtime
         .service_ports()
         .clone()
@@ -181,3 +178,28 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Initialize language policy from the verified program, independent of the
+/// launching process's configuration or an embedding caller's active context.
+fn standalone_runtime(
+    program: &runmat_execution::ProgramRevision,
+) -> runmat_runtime::context::RuntimeContext {
+    use runmat_execution::LanguageCompatibilityMode;
+    use runmat_runtime::context::{RuntimeContext, RuntimeLanguageMode};
+
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_program_revision(Some(program.clone()));
+    let mode = match program.compatibility_mode() {
+        LanguageCompatibilityMode::RunMat => RuntimeLanguageMode::RunMat,
+        LanguageCompatibilityMode::Matlab => RuntimeLanguageMode::Matlab,
+        LanguageCompatibilityMode::Strict => RuntimeLanguageMode::Strict,
+    };
+    runtime.set_language_mode(mode);
+    runtime.set_runmat_extensions_enabled(matches!(mode, RuntimeLanguageMode::RunMat));
+    runtime
+}
+
+#[cfg(test)]
+mod tests;
