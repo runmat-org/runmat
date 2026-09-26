@@ -294,11 +294,13 @@ integrity identity vectors and shared-codec estimates for owned metadata plus on
 canonical identity encoding. Sequential semantic/audit encodings and integrity rehashes are not
 counted as four simultaneous buffers. Map serialization preserves ordered key/value pairs while
 streaming them without a temporary entry array. These are conservative estimates, not exact
-allocator or RSS limits. Canonical mesh validation and explicit-topology identity generation have
-separate scratch requirements not admitted by this compiler estimate. Selection currently traverses
-three times (typed validation/counting, profiling, owned construction); explicit identity generation
-repeats on those traversals, including while already-emitted owned properties are live.
-Whole-producer admission remains open.
+allocator or RSS limits. Explicit-topology validation and canonical identity scratch are profiled
+before encoding; their peak estimate and the retained element-identity cache are admitted before
+construction. Borrowed topology contracts preserve the established canonical bytes without cloning
+connectivity or attachments. Selection currently traverses three times (typed validation/counting,
+profiling, owned construction), reusing identities generated once for the same immutable structural
+model. Canonical solver-mesh validation still has separate scratch requirements not admitted by
+this compiler estimate. Whole-producer admission remains open.
 
 Property owner/section matching streams candidates without per-element candidate arrays, while
 retaining exact coverage counts and missing/duplicate-section rejection. Semantic/audit identity

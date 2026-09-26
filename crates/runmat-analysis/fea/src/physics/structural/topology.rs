@@ -1,19 +1,19 @@
 use std::collections::BTreeSet;
 
 use runmat_analysis_core::{StructuralElementKind, StructuralModel};
-use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 pub(crate) mod explicit_surface;
+mod identity;
 pub(crate) mod node_space;
 pub(crate) mod target;
 
-const EXPLICIT_TOPOLOGY_PREFIX: &[u8] = b"runmat-fea-explicit-structural-topology/v1\0";
-const EXPLICIT_TOPOLOGY_LIMITS: CanonicalLimits =
-    CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 64);
+pub(crate) use identity::{
+    explicit_element_identity, explicit_identity_resource_bytes, explicit_node_identity,
+    explicit_topology_digest,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
@@ -65,144 +65,6 @@ impl CanonicalStructuralTopologyIdentity {
             && self.discretization_digest().bytes() != &[0; 32]
             && self.discretization_digest() != Digest::sha256([])
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ExplicitStructuralTopologyContract<'a> {
-    nodes: Vec<ExplicitStructuralNodeContract>,
-    elements: Vec<ExplicitStructuralElementContract<'a>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ExplicitStructuralNodeContract {
-    node_id: u32,
-    coordinates_m: [u64; 3],
-    solid_attachment: Option<runmat_analysis_core::ConformalSolidAttachment>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-struct ExplicitStructuralElementContract<'a> {
-    element_id: &'a str,
-    region_id: &'a str,
-    node_ids: Vec<u32>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub(crate) enum ExplicitStructuralTopologyError {
-    #[error("explicit structural node id {node_id} is duplicated")]
-    DuplicateNode { node_id: u32 },
-    #[error("explicit structural node {node_id} has non-finite coordinates")]
-    NonFiniteNode { node_id: u32 },
-    #[error("explicit structural element id `{element_id}` is duplicated")]
-    DuplicateElement { element_id: String },
-    #[error("explicit structural element `{element_id}` references absent node {node_id}")]
-    MissingElementNode { element_id: String, node_id: u32 },
-    #[error("explicit structural topology identity encoding failed: {0}")]
-    Identity(String),
-}
-
-pub(crate) fn explicit_topology_digest(
-    structural: &StructuralModel,
-) -> Result<Digest, ExplicitStructuralTopologyError> {
-    let mut node_ids = BTreeSet::new();
-    let nodes = structural
-        .nodes
-        .iter()
-        .map(|node| {
-            if !node_ids.insert(node.node_id) {
-                return Err(ExplicitStructuralTopologyError::DuplicateNode {
-                    node_id: node.node_id,
-                });
-            }
-            if node.coordinates_m.iter().any(|value| !value.is_finite()) {
-                return Err(ExplicitStructuralTopologyError::NonFiniteNode {
-                    node_id: node.node_id,
-                });
-            }
-            Ok(ExplicitStructuralNodeContract {
-                node_id: node.node_id,
-                coordinates_m: node.coordinates_m.map(f64::to_bits),
-                solid_attachment: node.solid_attachment.as_ref().cloned(),
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let mut element_ids = BTreeSet::new();
-    let elements = structural
-        .elements
-        .iter()
-        .map(|element| {
-            if !element_ids.insert(element.element_id.as_str()) {
-                return Err(ExplicitStructuralTopologyError::DuplicateElement {
-                    element_id: element.element_id.clone(),
-                });
-            }
-            let node_ids_for_element = match &element.kind {
-                StructuralElementKind::Beam(beam) => beam.node_ids.to_vec(),
-                StructuralElementKind::Shell(shell) => shell.node_ids.to_vec(),
-            };
-            if let Some(node_id) = node_ids_for_element
-                .iter()
-                .find(|node_id| !node_ids.contains(node_id))
-            {
-                return Err(ExplicitStructuralTopologyError::MissingElementNode {
-                    element_id: element.element_id.clone(),
-                    node_id: *node_id,
-                });
-            }
-            Ok(ExplicitStructuralElementContract {
-                element_id: &element.element_id,
-                region_id: &element.region_id,
-                node_ids: node_ids_for_element,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let encoded = encode_contract(
-        EXPLICIT_TOPOLOGY_PREFIX,
-        "explicit-structural-topology",
-        &ExplicitStructuralTopologyContract { nodes, elements },
-        EXPLICIT_TOPOLOGY_LIMITS,
-    )
-    .map_err(|error| ExplicitStructuralTopologyError::Identity(error.to_string()))?;
-    Ok(Digest::sha256(encoded))
-}
-
-pub(crate) fn explicit_node_identity(
-    structural_topology_digest: Digest,
-    node_id: u32,
-    coordinates_m: [f64; 3],
-) -> Result<StableDigest, ExplicitStructuralTopologyError> {
-    encode_contract(
-        EXPLICIT_TOPOLOGY_PREFIX,
-        "explicit-structural-node",
-        &(
-            structural_topology_digest,
-            node_id,
-            coordinates_m.map(f64::to_bits),
-        ),
-        EXPLICIT_TOPOLOGY_LIMITS,
-    )
-    .map(|encoded| StableDigest::from_bytes(*Digest::sha256(encoded).bytes()))
-    .map_err(|error| ExplicitStructuralTopologyError::Identity(error.to_string()))
-}
-
-pub(crate) fn explicit_element_identity(
-    structural_topology_digest: Digest,
-    element_id: &str,
-    region_id: &str,
-    kind: &StructuralElementKind,
-) -> Result<StableDigest, ExplicitStructuralTopologyError> {
-    let node_ids = match kind {
-        StructuralElementKind::Beam(beam) => beam.node_ids.to_vec(),
-        StructuralElementKind::Shell(shell) => shell.node_ids.to_vec(),
-    };
-    encode_contract(
-        EXPLICIT_TOPOLOGY_PREFIX,
-        "explicit-structural-element",
-        &(structural_topology_digest, element_id, region_id, node_ids),
-        EXPLICIT_TOPOLOGY_LIMITS,
-    )
-    .map(|encoded| StableDigest::from_bytes(*Digest::sha256(encoded).bytes()))
-    .map_err(|error| ExplicitStructuralTopologyError::Identity(error.to_string()))
 }
 
 pub(crate) fn explicit_target_node_indices(

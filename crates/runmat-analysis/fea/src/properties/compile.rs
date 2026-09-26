@@ -8,8 +8,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact, SolverVolumeElement};
 use thiserror::Error;
 
-use super::{selection::SelectedProperty, CompiledPropertyMap};
-use crate::physics::structural::topology::{explicit_element_identity, explicit_topology_digest};
+use super::{
+    preparation::explicit::PreparedExplicitTopology, selection::SelectedProperty,
+    CompiledPropertyMap,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PropertyCompilationError {
@@ -172,12 +174,22 @@ pub(super) fn visit<'a>(
     model: &'a AnalysisModel,
     mesh: Option<&'a SolverMeshArtifact>,
     materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    explicit: Option<&PreparedExplicitTopology<'a>>,
     visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
 ) -> Result<Option<Digest>, PropertyCompilationError> {
+    match (model.structural.as_ref(), explicit) {
+        (None, None) => {}
+        (Some(structural), Some(prepared)) if std::ptr::eq(structural, prepared.structural()) => {}
+        _ => {
+            return Err(PropertyCompilationError::InvalidExplicitTopology(
+                "prepared explicit identities do not belong to this structural model".into(),
+            ));
+        }
+    }
     if let Some(mesh) = mesh {
         visit_solids(model, mesh, materials, visitor)?;
     }
-    visit_explicit(model, materials, visitor)
+    visit_explicit(model, materials, explicit, visitor)
 }
 
 fn visit_solids<'a>(
@@ -216,13 +228,14 @@ fn visit_solids<'a>(
 fn visit_explicit<'a>(
     model: &'a AnalysisModel,
     materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    explicit: Option<&PreparedExplicitTopology<'a>>,
     visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
 ) -> Result<Option<Digest>, PropertyCompilationError> {
-    let Some(structural) = model.structural.as_ref() else {
+    let Some(explicit) = explicit else {
         return Ok(None);
     };
-    let topology_digest = explicit_topology_digest(structural)
-        .map_err(|error| PropertyCompilationError::InvalidExplicitTopology(error.to_string()))?;
+    let structural = explicit.structural();
+    let topology_digest = explicit.topology_digest();
     let beams = assignments_for(model, materials, |target| {
         matches!(target, PropertyRegionTarget::Beam(_))
     })?;
@@ -232,14 +245,11 @@ fn visit_explicit<'a>(
     let mut matched_beams = BTreeSet::new();
     let mut matched_shells = BTreeSet::new();
 
-    for element in &structural.elements {
-        let identity = explicit_element_identity(
-            topology_digest,
-            &element.element_id,
-            &element.region_id,
-            &element.kind,
-        )
-        .map_err(|error| PropertyCompilationError::InvalidExplicitTopology(error.to_string()))?;
+    for (element, &identity) in structural
+        .elements
+        .iter()
+        .zip(explicit.element_identities())
+    {
         match &element.kind {
             StructuralElementKind::Beam(beam) => {
                 let matching = beams.iter().filter(|(_, assignment, _)| {

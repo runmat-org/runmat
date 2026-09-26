@@ -1,11 +1,9 @@
-//! Property selection and owned-materialization admission. Mesh validation and explicit-topology
-//! identity generation have separate scratch requirements, not covered here. Explicit identity
-//! generation currently repeats during each traversal, including owned materialization.
+//! Property selection, explicit identities and owned-materialization admission. Canonical mesh
+//! validation remains a separate scratch phase; explicit identities are admitted and cached once.
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, MaterialModel};
 use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
-use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::{
     ser::{SerializeSeq, SerializeTuple},
@@ -20,13 +18,16 @@ use super::{
     CompiledPropertyMap, CompiledShellProperty, PropertyCompilationError,
 };
 
+pub(super) mod explicit;
+use explicit::PreparedExplicitTopology;
+
 /// A validated borrowed input plus its admission evidence. Owned material/section/audit payloads
 /// cannot be constructed through this path until `prepare` succeeds at the supplied ceiling.
 pub(crate) struct PreparedProperties<'a> {
     model: &'a AnalysisModel,
     mesh: Option<&'a SolverMeshArtifact>,
     materials: BTreeMap<&'a str, &'a MaterialModel>,
-    topology_digest: Option<Digest>,
+    explicit: Option<PreparedExplicitTopology<'a>>,
     entry_count: usize,
     #[cfg(test)]
     pub(crate) selected_metadata_bytes: u64,
@@ -45,41 +46,74 @@ impl<'a> PreparedProperties<'a> {
         let selection = selection_scratch(model)?;
         require_fits(selection, maximum)?;
         validate_mesh(model, mesh)?;
+        let explicit = model
+            .structural
+            .as_ref()
+            .map(|structural| {
+                PreparedExplicitTopology::prepare(structural, maximum - selection).map_err(
+                    |error| match error {
+                        PropertyCompilationError::ResourceCeiling { required, .. } => {
+                            match add(selection, required) {
+                                Ok(required) => {
+                                    PropertyCompilationError::ResourceCeiling { required, maximum }
+                                }
+                                Err(error) => error,
+                            }
+                        }
+                        error => error,
+                    },
+                )
+            })
+            .transpose()?;
+        let selection = add(
+            selection,
+            explicit
+                .as_ref()
+                .map_or(0, |prepared| prepared.estimated_resident_bytes),
+        )?;
         let materials = material_inventory(model)?;
         let mut typed_bytes = std::mem::size_of::<CompiledPropertyMap>() as u64;
         let mut entry_count = 0_usize;
         // This pass preserves typed ownership errors before the serializer invokes the same
         // visitor. No owned constitutive, section, or audit metadata has been cloned.
-        let topology_digest = visit(model, mesh, &materials, &mut |selected| {
-            entry_count = entry_count.checked_add(1).ok_or_else(overflow)?;
-            let entry_bytes = match selected {
-                SelectedProperty::Solid { .. } => map_entry_bytes::<CompiledElementMaterial>()?,
-                SelectedProperty::Beam { .. } => map_entry_bytes::<CompiledBeamProperty>()?,
-                SelectedProperty::Shell { .. } => map_entry_bytes::<CompiledShellProperty>()?,
-                SelectedProperty::Laminate { section, .. } => add(
-                    map_entry_bytes::<CompiledShellProperty>()?,
-                    scale(
-                        section.plies.len(),
-                        std::mem::size_of::<CompiledLaminatePly>() as u64,
+        visit(
+            model,
+            mesh,
+            &materials,
+            explicit.as_ref(),
+            &mut |selected| {
+                entry_count = entry_count.checked_add(1).ok_or_else(overflow)?;
+                let entry_bytes = match selected {
+                    SelectedProperty::Solid { .. } => map_entry_bytes::<CompiledElementMaterial>()?,
+                    SelectedProperty::Beam { .. } => map_entry_bytes::<CompiledBeamProperty>()?,
+                    SelectedProperty::Shell { .. } => map_entry_bytes::<CompiledShellProperty>()?,
+                    SelectedProperty::Laminate { section, .. } => add(
+                        map_entry_bytes::<CompiledShellProperty>()?,
+                        scale(
+                            section.plies.len(),
+                            std::mem::size_of::<CompiledLaminatePly>() as u64,
+                        )?,
                     )?,
-                )?,
-            };
-            typed_bytes = add(
-                typed_bytes,
-                add(
-                    entry_bytes,
-                    (std::mem::size_of::<CompiledPropertyAudit>()
-                        + 2 * std::mem::size_of::<StableDigest>()) as u64,
-                )?,
-            )?;
-            Ok(())
-        })?;
+                };
+                typed_bytes = add(
+                    typed_bytes,
+                    add(
+                        entry_bytes,
+                        (std::mem::size_of::<CompiledPropertyAudit>()
+                            + 2 * std::mem::size_of::<StableDigest>())
+                            as u64,
+                    )?,
+                )?;
+                Ok(())
+            },
+        )?;
         require_fits(add(selection, typed_bytes)?, maximum)?;
         let metadata = serialized_materialization_resident_bytes_estimate(
             &Metadata {
                 model,
                 mesh,
                 materials: &materials,
+                explicit: explicit.as_ref(),
             },
             // Expanded selected occurrences are not bounded by the authored workload byte cap.
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
@@ -95,7 +129,7 @@ impl<'a> PreparedProperties<'a> {
             model,
             mesh,
             materials,
-            topology_digest,
+            explicit,
             entry_count,
             #[cfg(test)]
             selected_metadata_bytes: metadata,
@@ -109,15 +143,22 @@ impl<'a> PreparedProperties<'a> {
             .audit
             .try_reserve_exact(self.entry_count)
             .map_err(|error| PropertyCompilationError::Resource(error.to_string()))?;
-        visit(self.model, self.mesh, &self.materials, &mut |selected| {
-            selected.materialize(&mut output)
-        })?;
+        visit(
+            self.model,
+            self.mesh,
+            &self.materials,
+            self.explicit.as_ref(),
+            &mut |selected| selected.materialize(&mut output),
+        )?;
         CompiledPropertyMap::new(
             CompiledPropertySource {
                 geometry_id: self.model.geometry_id.clone(),
                 geometry_revision: self.model.geometry_revision,
                 mesh_digest: self.mesh.map(|mesh| mesh.canonical_digest),
-                explicit_topology_digest: self.topology_digest,
+                explicit_topology_digest: self
+                    .explicit
+                    .as_ref()
+                    .map(|prepared| prepared.topology_digest()),
             },
             output.solids,
             output.beams,
@@ -132,6 +173,7 @@ struct Metadata<'a> {
     model: &'a AnalysisModel,
     mesh: Option<&'a SolverMeshArtifact>,
     materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    explicit: Option<&'a PreparedExplicitTopology<'a>>,
 }
 impl Serialize for Metadata<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
@@ -150,6 +192,7 @@ impl Serialize for SelectedMetadata<'_> {
             self.0.model,
             self.0.mesh,
             self.0.materials,
+            self.0.explicit,
             &mut |selected| {
                 sequence
                     .serialize_element(&selected)

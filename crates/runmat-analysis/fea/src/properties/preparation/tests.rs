@@ -283,8 +283,11 @@ fn invalid_last_laminate_ply_emits_no_selected_owner() {
             model.materials.last_mut().unwrap().elasticity = None;
         }
         let materials = material_inventory(&model).unwrap();
+        let explicit =
+            PreparedExplicitTopology::prepare(model.structural.as_ref().unwrap(), u64::MAX)
+                .unwrap();
         let mut emitted = 0;
-        let result = visit(&model, None, &materials, &mut |_| {
+        let result = visit(&model, None, &materials, Some(&explicit), &mut |_| {
             emitted += 1;
             Ok(())
         });
@@ -309,4 +312,121 @@ fn invalid_last_laminate_ply_emits_no_selected_owner() {
             Err(actual) if actual == expected
         ));
     }
+}
+
+#[test]
+fn explicit_cache_exact_ceiling_preserves_identity_shape_and_bytes() {
+    use crate::physics::structural::topology::{
+        explicit_element_identity, explicit_identity_resource_bytes, explicit_topology_digest,
+    };
+    for fixture in [
+        FixtureId::StructuralBeamCantileverEndMomentReference,
+        FixtureId::StructuralShellPlateMomentReference,
+    ] {
+        let model = fixture_model(fixture);
+        let structural = model.structural.as_ref().unwrap();
+        let prepared = PreparedExplicitTopology::prepare(structural, u64::MAX).unwrap();
+        let required = prepared.estimated_resident_bytes;
+        assert_eq!(
+            required,
+            explicit_identity_resource_bytes(structural).unwrap()
+                + (structural.elements.len() * std::mem::size_of::<StableDigest>()) as u64
+        );
+        assert!(matches!(
+            PreparedExplicitTopology::prepare(structural, required - 1),
+            Err(PropertyCompilationError::ResourceCeiling { required: actual, maximum })
+                if actual == required && maximum == required - 1
+        ));
+        let accepted = PreparedExplicitTopology::prepare(structural, required).unwrap();
+        assert!(std::ptr::eq(accepted.structural(), structural));
+        assert_eq!(
+            accepted.topology_digest(),
+            explicit_topology_digest(structural).unwrap()
+        );
+        assert_eq!(
+            accepted.element_identities().len(),
+            structural.elements.len()
+        );
+        assert_eq!(accepted.element_identities(), prepared.element_identities());
+        for (element, identity) in structural
+            .elements
+            .iter()
+            .zip(accepted.element_identities())
+        {
+            assert_eq!(
+                *identity,
+                explicit_element_identity(
+                    accepted.topology_digest(),
+                    &element.element_id,
+                    &element.region_id,
+                    &element.kind,
+                )
+                .unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn explicit_budget_rejects_before_invalid_coordinate_validation_and_includes_selection() {
+    let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    model.structural.as_mut().unwrap().nodes[0].coordinates_m[0] = f64::NAN;
+    let structural = model.structural.as_ref().unwrap();
+    let explicit_required = match PreparedExplicitTopology::prepare(structural, 0) {
+        Err(PropertyCompilationError::ResourceCeiling {
+            required,
+            maximum: 0,
+        }) => required,
+        _ => panic!("explicit identity admission must precede coordinate validation"),
+    };
+    assert!(explicit_required > 0);
+    assert!(matches!(
+        PreparedExplicitTopology::prepare(structural, u64::MAX),
+        Err(PropertyCompilationError::InvalidExplicitTopology(_))
+    ));
+    let selection = selection_scratch(&model).unwrap();
+    let maximum = selection + explicit_required - 1;
+    assert!(matches!(
+        PreparedProperties::prepare(&model, None, maximum),
+        Err(PropertyCompilationError::ResourceCeiling { required, maximum: actual_maximum })
+            if required == selection + explicit_required && actual_maximum == maximum
+    ));
+}
+
+#[test]
+fn changed_topology_gets_fresh_cache_and_cannot_use_another_models_identities() {
+    let model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+    let initial = PreparedProperties::prepare(&model, None, u64::MAX).unwrap();
+    let initial_explicit = initial.explicit.as_ref().unwrap();
+    let initial_digest = initial_explicit.topology_digest();
+    let initial_identities = initial_explicit.element_identities().to_vec();
+    let mut changed = model.clone();
+    changed.structural.as_mut().unwrap().nodes[0].coordinates_m[0] += 0.25;
+    let materials = material_inventory(&changed).unwrap();
+    let mut emitted = 0;
+    assert!(matches!(
+        visit(
+            &changed,
+            None,
+            &materials,
+            Some(initial_explicit),
+            &mut |_| {
+                emitted += 1;
+                Ok(())
+            }
+        ),
+        Err(PropertyCompilationError::InvalidExplicitTopology(_))
+    ));
+    assert_eq!(emitted, 0);
+    let fresh = PreparedProperties::prepare(&changed, None, u64::MAX).unwrap();
+    let fresh_explicit = fresh.explicit.as_ref().unwrap();
+    assert_ne!(fresh_explicit.topology_digest(), initial_digest);
+    assert_ne!(fresh_explicit.element_identities(), initial_identities);
+    let fresh_digest = fresh_explicit.topology_digest();
+    let compiled = fresh.materialize().unwrap();
+    assert_eq!(
+        compiled.identity.explicit_topology_digest,
+        Some(fresh_digest)
+    );
+    super::super::identity::tests::assert_legacy_identity(&compiled);
 }
