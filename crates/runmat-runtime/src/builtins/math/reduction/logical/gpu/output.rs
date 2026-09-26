@@ -40,19 +40,21 @@ impl ReductionOutputs {
             logical: runmat_accelerate_api::handle_is_logical(&output),
             alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
         };
-        let valid = gpu_helpers::expected_handle_numeric_element_type(&output).is_ok()
-            && !protected
+        let valid =
+            gpu_helpers::expected_handle_numeric_element_type(&output).is_ok_and(|element| {
+                gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
+            }) && !protected
                 .iter()
                 .any(|input| gpu_helpers::same_gpu_handle(&output, input))
-            && gpu_helpers::binary_gpu_output_matches(
-                &output,
-                &self.source,
-                self.current(),
-                provider,
-                &contract,
-            );
+                && gpu_helpers::binary_gpu_output_matches(
+                    &output,
+                    &self.source,
+                    self.current(),
+                    provider,
+                    &contract,
+                );
         if !valid {
-            gpu_helpers::free_unprotected_exact_owner(&output, &protected);
+            gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
             return Err(config.error(
                 config.internal,
                 "provider returned an invalid or aliased logical reduction result",

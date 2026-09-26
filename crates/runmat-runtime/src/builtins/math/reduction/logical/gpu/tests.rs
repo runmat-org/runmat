@@ -8,7 +8,10 @@ use runmat_accelerate_api::{
 };
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex, OnceLock,
+    },
     task::{Context, Poll},
 };
 
@@ -18,12 +21,15 @@ enum Behavior {
     WrongShape,
     AliasIntermediate,
     PendingDownload,
+    UnknownDevice,
+    MissingStorage,
 }
 
 struct ReductionProvider {
     inner: InProcessProvider,
     behavior: Behavior,
     created: Mutex<Vec<GpuTensorHandle>>,
+    calls: AtomicUsize,
 }
 
 impl ReductionProvider {
@@ -32,6 +38,7 @@ impl ReductionProvider {
             inner: InProcessProvider::new(),
             behavior,
             created: Mutex::new(Vec::new()),
+            calls: AtomicUsize::new(0),
         }
     }
     fn result(
@@ -39,6 +46,7 @@ impl ReductionProvider {
         input: &GpuTensorHandle,
         axis: Option<usize>,
     ) -> anyhow::Result<GpuTensorHandle> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         if matches!(self.behavior, Behavior::AliasInput)
             || (matches!(self.behavior, Behavior::AliasIntermediate) && axis == Some(1))
         {
@@ -54,11 +62,16 @@ impl ReductionProvider {
             vec![1, 1]
         };
         let data = vec![1.0; shape.iter().product()];
-        let output = self.inner.upload(&HostTensorView {
+        let mut output = self.inner.upload(&HostTensorView {
             data: &data,
             shape: &shape,
         })?;
         self.created.lock().unwrap().push(output.clone());
+        match self.behavior {
+            Behavior::UnknownDevice => output.device_id = u32::MAX - 7,
+            Behavior::MissingStorage => output.descriptor.storage = None,
+            _ => {}
+        }
         Ok(output)
     }
 }
@@ -84,6 +97,17 @@ impl AccelProvider for ReductionProvider {
         }
     }
     fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+        // This provider created the deliberately malformed handle, so it can
+        // release its own allocation despite the bad returned device metadata.
+        if matches!(self.behavior, Behavior::UnknownDevice) && handle.device_id != self.device_id()
+        {
+            let created = self.created.lock().unwrap();
+            let original = created
+                .iter()
+                .find(|value| value.buffer_id == handle.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown malformed allocation"))?;
+            return self.inner.free(original);
+        }
         self.inner.free(handle)
     }
     fn reduce_all<'a>(
@@ -123,6 +147,8 @@ fn provider(behavior: Behavior) -> &'static ReductionProvider {
     static SHAPE: OnceLock<ReductionProvider> = OnceLock::new();
     static INTERMEDIATE: OnceLock<ReductionProvider> = OnceLock::new();
     static PENDING: OnceLock<ReductionProvider> = OnceLock::new();
+    static UNKNOWN: OnceLock<ReductionProvider> = OnceLock::new();
+    static MISSING: OnceLock<ReductionProvider> = OnceLock::new();
     match behavior {
         Behavior::AliasInput => ALIAS.get_or_init(|| ReductionProvider::new(behavior)),
         Behavior::WrongShape => SHAPE.get_or_init(|| ReductionProvider::new(behavior)),
@@ -130,6 +156,8 @@ fn provider(behavior: Behavior) -> &'static ReductionProvider {
             INTERMEDIATE.get_or_init(|| ReductionProvider::new(behavior))
         }
         Behavior::PendingDownload => PENDING.get_or_init(|| ReductionProvider::new(behavior)),
+        Behavior::UnknownDevice => UNKNOWN.get_or_init(|| ReductionProvider::new(behavior)),
+        Behavior::MissingStorage => MISSING.get_or_init(|| ReductionProvider::new(behavior)),
     }
 }
 
@@ -138,6 +166,46 @@ fn configs() -> [&'static LogicalReductionConfig; 2] {
         &crate::builtins::math::reduction::all::CONFIG,
         &crate::builtins::math::reduction::any::CONFIG,
     ]
+}
+
+#[test]
+fn malformed_owner_or_missing_storage_is_freed_before_next_dimension_hook() {
+    let _state = test_support::accel_test_lock();
+    for behavior in [Behavior::UnknownDevice, Behavior::MissingStorage] {
+        let provider = provider(behavior);
+        let _provider = ThreadProviderGuard::set(Some(provider));
+        for config in configs() {
+            provider.created.lock().unwrap().clear();
+            provider.calls.store(0, Ordering::SeqCst);
+            let input = provider
+                .upload(&HostTensorView {
+                    data: &[1.0; 4],
+                    shape: &[2, 2],
+                })
+                .unwrap();
+            let error = block_on(reduce(
+                config,
+                input.clone(),
+                ReductionSpec::Dimensions(vec![1, 2]),
+                ReductionNaN::Include,
+            ))
+            .unwrap_err();
+            assert_eq!(error.identifier(), config.internal.identifier);
+            assert_eq!(
+                provider.calls.load(Ordering::SeqCst),
+                1,
+                "malformed first result must not reach the next hook"
+            );
+            assert!(block_on(provider.inner.download(&input)).is_ok());
+            let created = provider.created.lock().unwrap();
+            assert_eq!(created.len(), 1);
+            assert!(
+                block_on(provider.inner.download(&created[0])).is_err(),
+                "invoked provider must release output even with unknown device metadata"
+            );
+            provider.free(&input).unwrap();
+        }
+    }
 }
 
 #[test]
