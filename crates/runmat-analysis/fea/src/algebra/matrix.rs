@@ -103,6 +103,7 @@ pub enum RealSparseMatrixError {
     ValueCountMismatch { expected: usize, actual: usize },
     DenseShapeMismatch { expected: usize, actual: usize },
     NonFiniteValue { entry: usize },
+    StorageAllocation { elements: usize },
     ShapeMismatch,
 }
 
@@ -489,9 +490,20 @@ impl RealSparseAssembler {
             return Err(error);
         }
         let row_count = self.rows.len();
-        let mut offsets = Vec::with_capacity(self.rows.len() + 1);
-        let mut columns = Vec::new();
-        let mut values = Vec::new();
+        let offset_count = row_count
+            .checked_add(1)
+            .ok_or(SparsePatternError::DimensionOverflow)?;
+        // Count after cancellation, before allocating final storage. Reserving once avoids
+        // geometric vector growth while the sparse builders are still live. Allocator
+        // rounding/metadata is not included in this logical payload count.
+        let entry_count = self.rows.iter().try_fold(0_usize, |count, row| {
+            count
+                .checked_add(row.values().filter(|value| **value != 0.0).count())
+                .ok_or(SparsePatternError::DimensionOverflow)
+        })?;
+        let mut offsets = reserve_payload(offset_count)?;
+        let mut columns = reserve_payload(entry_count)?;
+        let mut values = reserve_payload(entry_count)?;
         offsets.push(0_u64);
         for row in self.rows {
             for (column, value) in row {
@@ -522,6 +534,14 @@ impl RealSparseAssembler {
     }
 }
 
+fn reserve_payload<T>(elements: usize) -> Result<Vec<T>, RealSparseMatrixError> {
+    let mut values = Vec::new();
+    values
+        .try_reserve_exact(elements)
+        .map_err(|_| RealSparseMatrixError::StorageAllocation { elements })?;
+    Ok(values)
+}
+
 impl From<SparsePatternError> for RealSparseMatrixError {
     fn from(value: SparsePatternError) -> Self {
         Self::Pattern(value)
@@ -529,65 +549,4 @@ impl From<SparsePatternError> for RealSparseMatrixError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn value_identity_is_separate_from_pattern_identity() {
-        let first = RealSparseMatrix::diagonal(
-            vec![1.0, 2.0],
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let changed_values = RealSparseMatrix::diagonal(
-            vec![1.0, 3.0],
-            OperatorRole::Stiffness,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-        let changed_metadata = RealSparseMatrix::diagonal(
-            vec![1.0, 2.0],
-            OperatorRole::Mass,
-            MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
-        )
-        .unwrap();
-
-        assert_eq!(
-            first.pattern_identity().unwrap(),
-            changed_values.pattern_identity().unwrap()
-        );
-        assert_ne!(
-            first.values_identity().unwrap(),
-            changed_values.values_identity().unwrap()
-        );
-        assert_ne!(
-            first.values_identity().unwrap(),
-            changed_metadata.values_identity().unwrap()
-        );
-
-        let changed_provenance = first.clone().with_contribution(ContributionProvenance {
-            domain: ContributionDomain::TimeIntegration,
-            contribution_id: ContributionId("sample-1".to_string()),
-        });
-        assert_ne!(
-            first.values_identity().unwrap(),
-            changed_provenance.values_identity().unwrap()
-        );
-        assert_eq!(
-            first.numerical_identity().unwrap(),
-            changed_provenance.numerical_identity().unwrap()
-        );
-    }
-
-    #[test]
-    fn assembler_reports_invalid_admission_without_panicking() {
-        let mut assembler =
-            RealSparseAssembler::square(1, OperatorRole::Stiffness, MatrixProperties::GENERAL);
-        assembler.add(1, 0, 1.0);
-        assert_eq!(
-            assembler.finish(),
-            Err(RealSparseMatrixError::ShapeMismatch)
-        );
-    }
-}
+mod tests;

@@ -22,6 +22,7 @@ pub struct ThermalOperatorResourceFacts {
     support: SparsePattern,
     admission: SolverAdmissionResourcePolicy,
     csr_payload_bytes: ByteCount,
+    support_payload_bytes: ByteCount,
 }
 
 impl ThermalOperatorResourceFacts {
@@ -74,6 +75,7 @@ impl ThermalOperatorResourceFacts {
             support,
             admission,
             csr_payload_bytes: ByteCount(csr_payload_bytes),
+            support_payload_bytes: ByteCount(pattern_bytes(rows, entries)?),
         })
     }
 
@@ -87,7 +89,7 @@ impl ThermalOperatorResourceFacts {
         &self.admission
     }
     /// Logical row-offset, column-index and value lengths, not allocation capacities.
-    /// Retained symbolic support and sparse-builder storage are additional allocations.
+    /// Sparse-builder storage is an additional allocation.
     pub fn csr_payload_bytes_upper_bound(&self) -> ByteCount {
         self.csr_payload_bytes
     }
@@ -101,6 +103,7 @@ impl ThermalOperatorResourceFacts {
         self.csr_payload_bytes
             .0
             .checked_add(self.admission.resident_bytes_upper_bound.0)
+            .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))
             .and_then(|bytes| bytes.checked_add(history.retained_field_bytes.0))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
@@ -141,11 +144,21 @@ impl ThermalOperatorResourceFacts {
 }
 
 fn csr_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
+    pattern_bytes(rows, entries)?
+        .checked_add(
+            entries
+                .checked_mul(8)
+                .ok_or(ResourcePlanningError::Overflow("thermal CSR values"))?,
+        )
+        .ok_or(ResourcePlanningError::Overflow("thermal CSR payload"))
+}
+
+fn pattern_bytes(rows: u64, entries: u64) -> Result<u64, ResourcePlanningError> {
     rows.checked_add(1)
         .and_then(|count| count.checked_mul(8))
         .and_then(|offsets| {
             entries
-                .checked_mul(16)
+                .checked_mul(8)
                 .and_then(|values| offsets.checked_add(values))
         })
         .ok_or(ResourcePlanningError::Overflow("thermal CSR payload"))

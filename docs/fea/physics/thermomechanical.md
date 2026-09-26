@@ -158,10 +158,13 @@ and boundary connectivity before assembly. Every assembled conductivity/capacity
 system matrix must fit that support. The solver uses the existing shared coercivity-work envelope
 and checks the exact prepared-system certificate against its reserved work, without assuming that
 a symbolic factorization of a support superset bounds every subset's reordered fill. Preflight
-reserves eight full-support CSR payloads plus diagonal damping, shared proof workspace, and the
-retained field values. This covers the counted simultaneous logical matrix payloads (including a
-possible accelerator prepared-system clone), not spare vector capacity, retained symbolic support,
-or provider-owned storage. Sparse assembly builders, numerical
+reserves eight full-support CSR payloads plus diagonal damping, retained symbolic support, shared
+proof workspace, and the retained field values. Shared sparse finalization counts nonzero entries
+after cancellation and reserves its output buffers once with fallible allocation, avoiding geometric
+growth during builder-to-CSR conversion. This covers the counted simultaneous logical matrix
+payloads (including a possible accelerator prepared-system clone), not spare capacities in other
+construction paths, allocator rounding, or
+provider-owned storage. Sparse assembly builders, numerical
 vectors, model/projection/evidence metadata, observations, and transport are still outside this
 partial reservation. Passing it is not whole-process memory admission or GPU qualification.
 

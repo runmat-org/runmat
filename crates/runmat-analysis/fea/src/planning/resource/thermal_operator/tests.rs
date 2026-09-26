@@ -124,6 +124,15 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
     let history =
         ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap()).unwrap();
     let required = facts.numerical_reservation_bytes(&history).unwrap().0;
+    let rows = facts.support().rows() as u64;
+    let entries = facts.support().column_indices().len() as u64;
+    assert_eq!(
+        required,
+        facts.csr_payload_bytes_upper_bound().0
+            + facts.solver_admission().resident_bytes_upper_bound.0
+            + history.retained_field_bytes.0
+            + 8 * (rows + 1 + entries)
+    );
     assert!(required > history.retained_field_bytes.0);
     workload.model.sequence.steps[0]
         .accuracy
