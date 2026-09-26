@@ -508,6 +508,9 @@ fn build_stairs_plot(
         .with_style(appearance.color, appearance.line_width)
         .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -629,6 +632,9 @@ fn build_stairs_gpu_plot(
             .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
     plot.set_marker_gpu_vertices(marker_gpu);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 

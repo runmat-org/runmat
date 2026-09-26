@@ -10,6 +10,10 @@ use crate::BuiltinResult;
 
 use super::plotting_error;
 
+#[cfg(test)]
+#[path = "style/visibility.rs"]
+mod visibility_tests;
+
 #[derive(Clone, Copy, Debug)]
 pub struct BarStyleDefaults {
     pub face_color: Vec4,
@@ -130,6 +134,8 @@ pub struct LineAppearance {
     pub line_style: LineStyle,
     pub marker: Option<MarkerAppearance>,
     pub handle_visibility: String,
+    /// None retains the target builder's default; Some(true) is an explicit override.
+    pub visible: Option<bool>,
 }
 
 impl Default for LineAppearance {
@@ -140,6 +146,7 @@ impl Default for LineAppearance {
             line_style: LineStyle::Solid,
             marker: None,
             handle_visibility: "on".to_string(),
+            visible: None,
         }
     }
 }
@@ -315,6 +322,7 @@ struct LineStyleOptions {
     line_style_order: Option<Vec<LineStyle>>,
     label: Option<String>,
     handle_visibility: Option<String>,
+    visible: Option<bool>,
 }
 
 impl LineStyleOptions {
@@ -354,6 +362,9 @@ impl LineStyleOptions {
         if other.handle_visibility.is_some() {
             self.handle_visibility = other.handle_visibility;
         }
+        if other.visible.is_some() {
+            self.visible = other.visible;
+        }
     }
 
     fn resolve(&self) -> LineAppearance {
@@ -380,6 +391,7 @@ impl LineStyleOptions {
         if let Some(handle_visibility) = &self.handle_visibility {
             appearance.handle_visibility = handle_visibility.clone();
         }
+        appearance.visible = self.visible;
         appearance
     }
 }
@@ -597,6 +609,12 @@ fn parse_name_value_pairs(
                     return Err(ctx_err(opts, "LineWidth must be finite and positive"));
                 }
                 options.line_width = Some(width as f32);
+            }
+            "visible" => {
+                options.visible =
+                    Some(value_as_bool(&pair[1]).ok_or_else(|| {
+                        ctx_err(opts, "Visible must be on/off or a logical scalar")
+                    })?);
             }
             "color" => {
                 options.color = Some(parse_color_value(opts, &pair[1])?);
@@ -882,6 +900,7 @@ fn looks_like_option_name_for(opts: &LineStyleParseOptions, token: &str) -> bool
             | "linestyleorder"
             | "displayname"
             | "label"
+            | "visible"
     ) || (opts.accepts_handle_visibility && token.trim().eq_ignore_ascii_case("handlevisibility"))
 }
 
@@ -902,6 +921,7 @@ pub fn looks_like_generic_line_option_name(token: &str) -> bool {
             | "linestyleorder"
             | "displayname"
             | "label"
+            | "visible"
     )
 }
 

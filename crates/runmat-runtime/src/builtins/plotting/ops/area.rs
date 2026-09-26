@@ -658,6 +658,9 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                         .clone()
                         .unwrap_or_else(|| format!("Series {}", idx + 1)),
                 );
+                if let Some(visible) = parsed.visible {
+                    plot.set_visible(visible);
+                }
                 let plot_index = figure.add_area_plot_on_axes(plot, axes);
                 plot_handles_slot.borrow_mut().push((axes, plot_index));
             }
@@ -826,12 +829,16 @@ fn build_area_gpu_plots(
                 .clone()
                 .unwrap_or_else(|| format!("Series {}", idx + 1)),
         );
+        if let Some(visible) = parsed.visible {
+            plot.set_visible(visible);
+        }
         plots.push(plot);
     }
     Ok(plots)
 }
 
 struct ParsedAreaStyle {
+    visible: Option<bool>,
     color: Option<glam::Vec4>,
     label: Option<String>,
     base_value: f64,
@@ -859,6 +866,7 @@ fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     let explicit_color = area_color_was_explicit(&filtered);
     Ok(ParsedAreaStyle {
+        visible: parsed.appearance.visible,
         color: explicit_color.then_some(parsed.appearance.color),
         label: parsed.label,
         base_value,

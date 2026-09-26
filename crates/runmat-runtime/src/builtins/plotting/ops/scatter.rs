@@ -548,7 +548,7 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     } else {
         None
     };
-    let plot = match plot {
+    let mut plot = match plot {
         Some(plot) => plot,
         None => {
             let x_tensor = x_input
@@ -568,6 +568,9 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
                 .map_err(map_scatter_invalid_argument)?
         }
     };
+    if let Some(visible) = style_args.style.appearance.visible {
+        plot.set_visible(visible);
+    }
     let opts = PlotRenderOptions {
         title: "Scatter Plot",
         x_label: "X",

@@ -629,14 +629,18 @@ pub(super) fn build_line3_plot_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::new(x, y, z)
+    let mut plot = Line3Plot::new(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
@@ -647,14 +651,18 @@ pub(super) fn build_line3_plot_from_numeric_data_for_builtin(
     label: &str,
     appearance: &LineAppearance,
 ) -> crate::BuiltinResult<Line3Plot> {
-    Ok(Line3Plot::from_numeric_data(x, y, z)
+    let mut plot = Line3Plot::from_numeric_data(x, y, z)
         .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?
         .with_style(
             appearance.color,
             appearance.line_width,
             appearance.line_style,
         )
-        .with_label(label))
+        .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 fn build_line3_plot_from_numeric_data(
@@ -732,14 +740,18 @@ async fn build_line3_gpu_plot_async(
         scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
     };
     let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
-    Ok(runmat_plot::plots::Line3Plot::from_gpu_xyz(
+    let mut plot = runmat_plot::plots::Line3Plot::from_gpu_xyz(
         inputs,
         appearance.color,
         appearance.line_width,
         appearance.line_style,
         bounds,
     )
-    .with_label(label))
+    .with_label(label);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
+    Ok(plot)
 }
 
 #[cfg(test)]

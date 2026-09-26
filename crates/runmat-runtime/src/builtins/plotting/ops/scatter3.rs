@@ -663,7 +663,10 @@ pub async fn scatter3_builtin(
         {
             if !resolved_style.requires_cpu {
                 match build_scatter3_gpu_plot(x_gpu, y_gpu, z_gpu, &resolved_style) {
-                    Ok(plot) => {
+                    Ok(mut plot) => {
+                        if let Some(visible) = style_args.style.appearance.visible {
+                            plot.set_visible(visible);
+                        }
                         let plot_index = figure.add_scatter3_plot_on_axes(plot, axes);
                         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                         return Ok(());
@@ -689,8 +692,11 @@ pub async fn scatter3_builtin(
         let (x_data, y_data, z_data) =
             numeric_plot_data_triplet(x_tensor, y_tensor, z_tensor, BUILTIN_NAME)
                 .map_err(map_scatter3_invalid_argument)?;
-        let scatter = build_scatter3_plot_numeric(x_data, y_data, z_data, &mut resolved_style)
+        let mut scatter = build_scatter3_plot_numeric(x_data, y_data, z_data, &mut resolved_style)
             .map_err(map_scatter3_invalid_argument)?;
+        if let Some(visible) = style_args.style.appearance.visible {
+            scatter.set_visible(visible);
+        }
         let plot_index = figure.add_scatter3_plot_on_axes(scatter, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())

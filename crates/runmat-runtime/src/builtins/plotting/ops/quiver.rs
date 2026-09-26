@@ -549,7 +549,7 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             materialize_quiver_components(x_tensor, y_tensor, u_tensor, v_tensor, BUILTIN_NAME)
                 .map_err(map_quiver_invalid_argument)?;
         let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let plot = QuiverPlot::from_numeric_data(x_vals, y_vals, u_vals, v_vals)
+        let mut plot = QuiverPlot::from_numeric_data(x_vals, y_vals, u_vals, v_vals)
             .map_err(|e| plotting_error(BUILTIN_NAME, format!("quiver: {e}")))?
             .with_style(
                 parsed.color,
@@ -558,6 +558,9 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 parsed.head_size,
             )
             .with_label(label);
+        if let Some(visible) = parsed.visible {
+            plot.set_visible(visible);
+        }
         let plot_index = figure.add_quiver_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -705,6 +708,9 @@ fn build_quiver_gpu_plot(
     plot.y = Vec::new();
     plot.u = Vec::new();
     plot.v = Vec::new();
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -857,6 +863,7 @@ fn host_bounds(values: impl Iterator<Item = f64>) -> (f32, f32) {
 }
 
 struct ParsedQuiverStyle {
+    visible: Option<bool>,
     color: glam::Vec4,
     line_width: f32,
     label: Option<String>,
@@ -897,6 +904,7 @@ fn parse_quiver_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiverS
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     Ok(ParsedQuiverStyle {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         label: parsed.label,

@@ -567,6 +567,9 @@ fn build_stem_plot(
         marker.filled = true;
         plot.set_marker(Some(marker));
     }
+    if let Some(visible) = parsed.appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -718,6 +721,9 @@ fn build_stem_gpu_plot(
         })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
+    }
+    if let Some(visible) = parsed.appearance.visible {
+        plot.set_visible(visible);
     }
     Ok(plot)
 }

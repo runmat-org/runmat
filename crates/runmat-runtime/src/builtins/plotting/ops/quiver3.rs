@@ -596,7 +596,7 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let axes = target_axes.unwrap_or(axes);
         let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
-        let plot = QuiverPlot::from_numeric_data3d(
+        let mut plot = QuiverPlot::from_numeric_data3d(
             x_vals.clone(),
             y_vals.clone(),
             z_vals.clone(),
@@ -612,6 +612,9 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             parsed.head_size,
         )
         .with_label(label);
+        if let Some(visible) = parsed.visible {
+            plot.set_visible(visible);
+        }
         let plot_index = figure.add_quiver_plot_on_axes(plot, axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
@@ -633,6 +636,7 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 
 #[derive(Clone)]
 struct ParsedQuiver3Style {
+    visible: Option<bool>,
     color: Vec4,
     line_width: f32,
     label: Option<String>,
@@ -677,6 +681,7 @@ fn parse_quiver3_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiver
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     Ok(ParsedQuiver3Style {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         label: parsed.label,

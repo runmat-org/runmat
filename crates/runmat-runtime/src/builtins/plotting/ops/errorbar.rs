@@ -774,6 +774,9 @@ fn build_errorbar_series(
     if let Some(marker) = parsed.marker.clone() {
         plot.set_marker(Some(marker));
     }
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -905,10 +908,14 @@ fn build_errorbar_gpu_plot(
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     }
+    if let Some(visible) = parsed.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
 struct ParsedErrorBarStyle {
+    visible: Option<bool>,
     color: glam::Vec4,
     line_width: f32,
     line_style: runmat_plot::plots::LineStyle,
@@ -957,6 +964,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     let marker = marker_metadata_from_appearance(&parsed.appearance);
     Ok(ParsedErrorBarStyle {
+        visible: parsed.appearance.visible,
         color: parsed.appearance.color,
         line_width: parsed.appearance.line_width,
         line_style: parsed.appearance.line_style,

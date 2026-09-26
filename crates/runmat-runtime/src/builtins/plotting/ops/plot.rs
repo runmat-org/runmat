@@ -633,6 +633,9 @@ pub(super) fn build_line_plot_for_builtin(
             appearance.line_style,
         );
     apply_marker_metadata(&mut plot, appearance, point_count);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -663,6 +666,9 @@ pub(super) fn build_line_plot_from_numeric_data_for_builtin(
             appearance.line_style,
         );
     apply_marker_metadata(&mut plot, appearance, point_count);
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
@@ -978,6 +984,9 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
     plot = plot
         .with_label(label)
         .with_handle_visibility(appearance.handle_visibility.clone());
+    if let Some(visible) = appearance.visible {
+        plot.set_visible(visible);
+    }
     Ok(plot)
 }
 
