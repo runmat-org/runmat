@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "uiputfile";
 
@@ -205,7 +205,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "`uiputfile` is a host UI/filesystem interaction. GPU-resident textual arguments are gathered before dispatching to the provider.",
+    notes:
+        "Host text is validated before dialog dispatch; numeric resident values are invalid text.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::uiputfile")]
@@ -257,17 +258,6 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
     uiputfile_error(&UIPUTFILE_ERROR_HOST, detail)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(format!("{NAME}: {}", err.message()))
-        .with_builtin(NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 #[runtime_builtin(
     name = "uiputfile",
     category = "io/repl_fs",
@@ -280,45 +270,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
 async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    if args.iter().any(value_contains_resident_numeric) {
-        return Err(invalid_argument(
-            "filter, title, and defaultName must be text; provider-resident numeric values are invalid"
-                .to_string(),
-        ));
+    if crate::output_count::current_output_count().is_some_and(|count| count > 3) {
+        return Err(too_many_outputs());
     }
-    let gathered = gather_arguments(&args).await?;
-    let options = parse_options(&gathered)?;
+    let options = parse_options(&args)?;
     let selection = runmat_filesystem::select_file_save_async(&options.request)
         .await
         .map_err(|err| host_error(err.to_string()))?;
     outputs_for_selection(selection, &options)
-}
-
-fn value_contains_resident_numeric(value: &Value) -> bool {
-    match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(value) => value.data.iter().any(value_contains_resident_numeric),
-        Value::Struct(value) => value.fields.values().any(value_contains_resident_numeric),
-        Value::Object(value) => value
-            .properties
-            .values()
-            .any(value_contains_resident_numeric),
-        Value::Closure(value) => value.captures.iter().any(value_contains_resident_numeric),
-        Value::OutputList(values) => values.iter().any(value_contains_resident_numeric),
-        _ => false,
-    }
-}
-
-async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
 }
 
 fn parse_options(args: &[Value]) -> BuiltinResult<UiputfileOptions> {
@@ -367,9 +326,6 @@ fn outputs_for_selection(
     };
 
     if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count > 3 {
-            return Err(too_many_outputs());
-        }
         return Ok(crate::output_count::output_list_with_padding(
             out_count, outputs,
         ));
@@ -478,6 +434,36 @@ mod tests {
         });
         let _guard = runmat_filesystem::replace_host_dialog_provider(Some(provider));
         body(request);
+    }
+
+    #[test]
+    fn validates_arguments_and_output_count_before_dialog_or_provider_access() {
+        with_dialog_provider(None, |request| {
+            let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            });
+            let error = call(vec![resident], Some(1)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:uiputfile:InvalidArgument"));
+            assert!(request.lock().unwrap().is_none());
+            let error = call(vec![], Some(4)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:uiputfile:TooManyOutputs"));
+            assert!(request.lock().unwrap().is_none());
+            let pages = Value::CharArray(
+                runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+            );
+            assert_eq!(
+                call(vec![pages], Some(1)).unwrap_err().identifier(),
+                Some("RunMat:uiputfile:InvalidArgument")
+            );
+            assert!(request.lock().unwrap().is_none());
+            assert!(
+                matches!(call(vec![], Some(0)).unwrap(), Value::OutputList(values) if values.is_empty())
+            );
+            assert!(request.lock().unwrap().is_some());
+        });
     }
 
     #[test]

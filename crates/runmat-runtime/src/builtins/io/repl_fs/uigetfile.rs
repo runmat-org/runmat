@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "uigetfile";
 
@@ -253,7 +253,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "`uigetfile` is a host UI/filesystem interaction. GPU-resident textual arguments are gathered before dispatching to the provider.",
+    notes:
+        "Host text is validated before dialog dispatch; numeric resident values are invalid text.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::repl_fs::uigetfile")]
@@ -305,17 +306,6 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
     uigetfile_error(&UIGETFILE_ERROR_HOST, detail)
 }
 
-fn map_control_flow(err: RuntimeError) -> RuntimeError {
-    let identifier = err.identifier().map(str::to_string);
-    let mut builder = build_runtime_error(format!("{NAME}: {}", err.message()))
-        .with_builtin(NAME)
-        .with_source(err);
-    if let Some(identifier) = identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
 #[runtime_builtin(
     name = "uigetfile",
     category = "io/repl_fs",
@@ -328,24 +318,14 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builtin_path = "crate::builtins::io::repl_fs::uigetfile"
 )]
 async fn uigetfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let gathered = gather_arguments(&args).await?;
-    let options = parse_options(&gathered)?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 3) {
+        return Err(too_many_outputs());
+    }
+    let options = parse_options(&args)?;
     let selection = runmat_filesystem::select_file_open_async(&options.request)
         .await
         .map_err(|err| host_error(err.to_string()))?;
     outputs_for_selection(selection, &options)
-}
-
-async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
-    let mut gathered = Vec::with_capacity(args.len());
-    for value in args {
-        gathered.push(
-            gather_if_needed_async(value)
-                .await
-                .map_err(map_control_flow)?,
-        );
-    }
-    Ok(gathered)
 }
 
 fn parse_options(args: &[Value]) -> BuiltinResult<UigetfileOptions> {
@@ -426,9 +406,6 @@ fn outputs_for_selection(
     };
 
     if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count > 3 {
-            return Err(too_many_outputs());
-        }
         return Ok(crate::output_count::output_list_with_padding(
             out_count, outputs,
         ));
@@ -567,11 +544,74 @@ mod tests {
     }
 
     #[test]
+    fn validates_arguments_and_output_count_before_dialog_or_provider_access() {
+        with_dialog_provider(None, |request| {
+            let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![1, 1],
+                device_id: u32::MAX,
+                buffer_id: u64::MAX,
+                descriptor: Default::default(),
+            });
+            let error = call(vec![resident], Some(1)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:uigetfile:InvalidArgument"));
+            assert!(request.lock().unwrap().is_none());
+            let error = call(vec![], Some(4)).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:uigetfile:TooManyOutputs"));
+            assert!(request.lock().unwrap().is_none());
+            let pages = Value::CharArray(
+                runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+            );
+            assert_eq!(
+                call(vec![pages], Some(1)).unwrap_err().identifier(),
+                Some("RunMat:uigetfile:InvalidArgument")
+            );
+            assert!(request.lock().unwrap().is_none());
+            assert!(
+                matches!(call(vec![], Some(0)).unwrap(), Value::OutputList(values) if values.is_empty())
+            );
+            assert!(request.lock().unwrap().is_some());
+        });
+    }
+
+    #[test]
     fn cancel_returns_zero_outputs() {
         with_dialog_provider(None, |_| {
             let outputs = output_list(call(vec![], Some(2)).expect("uigetfile"));
             assert_eq!(outputs, vec![Value::Num(0.0), Value::Num(0.0)]);
         });
+    }
+
+    #[test]
+    fn multiselect_controls_preserve_exact_integer_truth_values() {
+        use runmat_value::IntValue;
+        for control in [
+            IntValue::I8(i8::MIN),
+            IntValue::I16(i16::MIN),
+            IntValue::I32(i32::MIN),
+            IntValue::I64(i64::MIN),
+            IntValue::U8(u8::MAX),
+            IntValue::U16(u16::MAX),
+            IntValue::U32(u32::MAX),
+            IntValue::U64(u64::MAX),
+        ] {
+            assert!(parse_multiselect(&Value::Int(control)).unwrap());
+        }
+        for control in [
+            IntValue::I8(0),
+            IntValue::I16(0),
+            IntValue::I32(0),
+            IntValue::I64(0),
+            IntValue::U8(0),
+            IntValue::U16(0),
+            IntValue::U32(0),
+            IntValue::U64(0),
+        ] {
+            assert!(!parse_multiselect(&Value::Int(control)).unwrap());
+        }
+        assert!(parse_multiselect(&Value::Bool(true)).unwrap());
+        assert!(!parse_multiselect(&Value::Num(0.0)).unwrap());
+        assert!(parse_multiselect(&Value::Num(f64::NAN)).is_err());
+        assert!(parse_multiselect(&Value::Num(f64::INFINITY)).is_err());
     }
 
     #[test]
