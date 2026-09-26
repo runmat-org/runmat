@@ -707,6 +707,12 @@ where
         (Value::String(a_s), Value::String(b_s)) => {
             stack.push(Value::Num(if a_s == b_s { 1.0 } else { 0.0 }))
         }
+        _ if rel_binary_use_builtin(&a, &b) => {
+            // The scalar fast path below accepts only real Num/Int values.
+            // Logical, complex, resident, and other representations retain
+            // the canonical comparison builtin's conversion and output rules.
+            stack.push(call_builtin("eq", a, b).await?);
+        }
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -873,6 +879,9 @@ where
         (Value::String(a_s), Value::String(b_s)) => {
             stack.push(Value::Num(if a_s != b_s { 1.0 } else { 0.0 }))
         }
+        _ if rel_binary_use_builtin(&a, &b) => {
+            stack.push(call_builtin("ne", a, b).await?);
+        }
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -945,6 +954,50 @@ mod tests {
             )
             .expect("typed complex integer tensor"),
         )
+    }
+
+    #[test]
+    fn equality_real_scalar_fast_path_preserves_exact_wide_integers() {
+        let wide = (1_u64 << 53) + 1;
+        for (left, right, expected) in [
+            (
+                Value::Int(IntValue::U64(wide)),
+                Value::Num((wide - 1) as f64),
+                false,
+            ),
+            (
+                Value::Int(IntValue::U64(u64::MAX)),
+                Value::Int(IntValue::I64(-1)),
+                false,
+            ),
+            (
+                Value::Int(IntValue::I64(255)),
+                Value::Int(IntValue::U64(255)),
+                true,
+            ),
+            (Value::Num(f64::NAN), Value::Num(f64::NAN), false),
+        ] {
+            for (a, b) in [(left.clone(), right.clone()), (right, left)] {
+                let mut eq_stack = vec![a.clone(), b.clone()];
+                block_on(equal(
+                    &mut eq_stack,
+                    unreachable_call_method,
+                    unreachable_call_builtin,
+                    unreachable_logical_truth,
+                ))
+                .unwrap();
+                assert_eq!(eq_stack, vec![Value::Num(f64::from(u8::from(expected)))]);
+                let mut ne_stack = vec![a, b];
+                block_on(not_equal(
+                    &mut ne_stack,
+                    unreachable_call_method,
+                    unreachable_call_builtin,
+                    unreachable_logical_truth,
+                ))
+                .unwrap();
+                assert_eq!(ne_stack, vec![Value::Num(f64::from(u8::from(!expected)))]);
+            }
+        }
     }
 
     #[test]

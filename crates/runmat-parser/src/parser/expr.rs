@@ -206,7 +206,10 @@ impl Parser {
                 _ => return Ok(node),
             };
             self.pos += 1;
-            let rhs = self.parse_pow()?;
+            // Prefix signs are valid on an exponent without parentheses.
+            // Unary parsing delegates unsigned operands back to parse_pow,
+            // preserving right association and the precedence of -2^2.
+            let rhs = self.parse_unary()?;
             Ok(self.make_binary(node, op, rhs))
         } else {
             Ok(node)

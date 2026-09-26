@@ -36,6 +36,59 @@ fn logical_operators_and_short_circuit() {
 }
 
 #[test]
+fn scalar_equality_operators_use_canonical_logical_and_complex_semantics() {
+    for (left, right, expected) in [
+        ("true", "true", true),
+        ("false", "true", false),
+        ("true", "1", true),
+        ("false", "0", true),
+        ("true", "uint64(9007199254740993)", false),
+        ("i*i", "-1", true),
+        ("j*j", "-1", true),
+        ("1+2i", "1+2i", true),
+        ("1+2i", "1+3i", false),
+        ("i", "1", false),
+        ("complex(1,0)", "true", true),
+        ("complex(NaN,0)", "complex(NaN,0)", false),
+    ] {
+        for (lhs, rhs) in [(left, right), (right, left)] {
+            let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b);");
+            let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            assert_eq!(logical_truth(&vars[2]), expected, "{source}");
+            assert_eq!(
+                vars[2], vars[3],
+                "eq operator/builtin representation parity: {source}"
+            );
+            assert_eq!(logical_truth(&vars[4]), !expected, "{source}");
+            assert_eq!(
+                vars[4], vars[5],
+                "ne operator/builtin representation parity: {source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn equality_array_operator_values_match_builtin_without_losing_integer_precision() {
+    for (left, right) in [
+        ("[0 1]", "true"),
+        ("logical([0 1])", "true"),
+        ("complex([1 2],[0 1])", "1"),
+        (
+            "uint64([9007199254740993 18446744073709551615])",
+            "uint64([9007199254740992 18446744073709551615])",
+        ),
+    ] {
+        for (lhs, rhs) in [(left, right), (right, left)] {
+            let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b); eq_agrees = isequal(operator_eq,builtin_eq); ne_agrees = isequal(operator_ne,builtin_ne);");
+            let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            assert!(logical_truth(&vars[6]), "eq value parity: {source}");
+            assert!(logical_truth(&vars[7]), "ne value parity: {source}");
+        }
+    }
+}
+
+#[test]
 fn elementwise_and_accepts_all_integer_classes_through_vm_dispatch() {
     for constructor in [
         "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64",
