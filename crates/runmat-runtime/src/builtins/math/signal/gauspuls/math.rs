@@ -129,7 +129,10 @@ pub(crate) fn gauspuls_components_tensor(
     ))
 }
 
-fn ensure_exact_integer_tensor_boundary(tensor: &Tensor, role: &str) -> Result<(), String> {
+pub(super) fn ensure_exact_integer_tensor_boundary(
+    tensor: &Tensor,
+    role: &str,
+) -> Result<(), String> {
     let Some(storage) = tensor.integer_storage() else {
         return Ok(());
     };

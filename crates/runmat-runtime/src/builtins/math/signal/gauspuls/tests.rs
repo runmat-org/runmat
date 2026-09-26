@@ -1,9 +1,31 @@
 use super::*;
 use futures::executor::block_on;
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     builtin_function_by_name, BuiltinIntegerOutputClassRule, GAUSPULS_INTEGER_CAPABILITIES,
 };
 use runmat_value::{CharArray, IntValue, IntegerStorage, NumericStorage};
+
+#[test]
+fn discarded_samples_still_validate_representation_and_exactness() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    for value in [
+        Value::Complex(1.0, 2.0),
+        Value::String("unknown-mode".into()),
+        Value::Struct(runmat_value::StructValue::new()),
+        Value::Int(IntValue::U64(u64::MAX)),
+    ] {
+        let error = call(value, vec![]).unwrap_err();
+        assert_eq!(error.identifier(), GAUSPULS_ERROR_INVALID_INPUT.identifier);
+    }
+    let handle = GpuTensorHandle::new(vec![1, 1], u32::MAX, u64::MAX);
+    assert!(call(Value::GpuTensor(handle), vec![]).is_err());
+    assert_eq!(
+        call(Value::Num(0.0), vec![]).unwrap(),
+        Value::OutputList(vec![])
+    );
+}
 
 fn call(t: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     block_on(gauspuls_builtin(t, rest))

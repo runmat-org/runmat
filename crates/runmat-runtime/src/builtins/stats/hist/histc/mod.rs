@@ -21,7 +21,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 use shape::*;
 const NAME: &str = "histc";
-const MAX_DIMENSION_ARGUMENT: usize = 32;
+const MAX_DIMENSION_ARGUMENT: usize = runmat_builtins::HISTC_MAX_DIMENSION;
 #[runtime_builtin(
     name = "histc",
     descriptor(runmat_builtins::HISTC_DESCRIPTOR),

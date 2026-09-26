@@ -36,7 +36,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     }
     let explicit = request.arguments.len() >= 3;
     let dim = request.literals.numeric_at(2).and_then(|d| {
-        if d.is_finite() && d.fract() == 0.0 && (1.0..=32.0).contains(&d) {
+        if d.is_finite()
+            && d.fract() == 0.0
+            && (1.0..=super::HISTC_MAX_DIMENSION as f64).contains(&d)
+        {
             Some(d as usize - 1)
         } else {
             diagnostics.push(argument_error(
@@ -70,25 +73,29 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         .first()
         .and_then(|v| known_shape(&v.shape));
     let edges = request.arguments.get(1).and_then(|v| known_shape(&v.shape));
-    let counts = match (&input, &edges) {
-        (Some(x), Some(e)) if !explicit || dim.is_some() => {
+    let edge_count = edges.as_ref().and_then(|shape| checked_count(shape));
+    let edge_rows = edges.as_ref().and_then(|shape| {
+        if vector(shape) {
+            checked_count(shape)
+        } else {
+            shape.first().copied()
+        }
+    });
+    let counts = match (&input, &edges, edge_rows) {
+        (Some(x), Some(e), Some(edge_rows)) if !explicit || dim.is_some() => {
             if !explicit && vector(x) {
                 shape(e)
             } else {
                 let axis = dim.unwrap_or_else(|| x.iter().position(|d| *d != 1).unwrap_or(0));
                 let mut result = x.clone();
                 result.resize(result.len().max(axis + 1), 1);
-                result[axis] = if vector(e) {
-                    e.iter().product()
-                } else {
-                    e.first().copied().unwrap_or(1)
-                };
+                result[axis] = edge_rows;
                 shape(&result)
             }
         }
         _ => ShapeFact::Unknown,
     };
-    let indices = match edges.as_ref().map(|s| s.iter().product::<usize>()) {
+    let indices = match edge_count {
         Some(0) => shape(&[0, 0]),
         Some(_) => request
             .arguments
@@ -135,6 +142,11 @@ fn known_shape(shape: &ShapeFact) -> Option<Vec<usize>> {
 }
 fn vector(shape: &[usize]) -> bool {
     shape.iter().filter(|d| **d != 1).count() <= 1
+}
+fn checked_count(shape: &[usize]) -> Option<usize> {
+    shape
+        .iter()
+        .try_fold(1usize, |count, dimension| count.checked_mul(*dimension))
 }
 fn shape(dims: &[usize]) -> ShapeFact {
     ShapeFact::from(dims.iter().copied().map(Some).collect::<Vec<_>>())

@@ -1,4 +1,6 @@
 use crate::*;
+/// Allocation/rank admission limit of the legacy histogram implementation.
+pub const HISTC_MAX_DIMENSION: usize = 32;
 const OUTPUT_N: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "bincounts",
     ty: BuiltinParamType::NumericArray,

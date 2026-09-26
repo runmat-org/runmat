@@ -3,16 +3,10 @@ use super::parameters::*;
 use super::*;
 
 pub(super) async fn gauspuls_value(t: Value, params: GauspulsParams) -> BuiltinResult<Value> {
-    match t {
-        Value::GpuTensor(handle) => gauspuls_gpu(handle, params).await,
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            Err(gauspuls_error(&GAUSPULS_ERROR_INVALID_INPUT))
-        }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(gauspuls_error(&GAUSPULS_ERROR_INVALID_INPUT))
-        }
-        other => gauspuls_real(other, params),
-    }
+    let tensor = sample_tensor(t).await?;
+    gauspuls_tensor(tensor, params)
+        .map(tensor_into_value)
+        .map_err(map_gauspuls_tensor_error)
 }
 
 pub(super) async fn gauspuls_with_output_count(
@@ -21,6 +15,9 @@ pub(super) async fn gauspuls_with_output_count(
     out_count: usize,
 ) -> BuiltinResult<Value> {
     if out_count == 0 {
+        let tensor = sample_tensor(t).await?;
+        super::math::ensure_exact_integer_tensor_boundary(&tensor, "sample time")
+            .map_err(map_gauspuls_tensor_error)?;
         return Ok(Value::OutputList(Vec::new()));
     }
     if out_count <= 1 {
@@ -69,33 +66,8 @@ pub(super) async fn gauspuls_mode(mode: String, rest: Vec<Value>) -> BuiltinResu
     Ok(value)
 }
 
-pub(super) async fn gauspuls_gpu(
-    handle: GpuTensorHandle,
-    params: GauspulsParams,
-) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|source| {
-            gauspuls_error_with_source(&GAUSPULS_ERROR_INTERNAL, "gpu gather failed", source)
-        })?;
-    gauspuls_tensor(tensor, params)
-        .map(tensor_into_value)
-        .map_err(map_gauspuls_tensor_error)
-}
-
-pub(super) fn gauspuls_real(value: Value, params: GauspulsParams) -> BuiltinResult<Value> {
-    let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, value)
-        .map_err(|err| gauspuls_error_with_detail(&GAUSPULS_ERROR_INVALID_INPUT, err))?;
-    gauspuls_tensor(tensor, params)
-        .map(tensor_into_value)
-        .map_err(map_gauspuls_tensor_error)
-}
-
-pub(super) async fn gauspuls_components_value(
-    value: Value,
-    params: GauspulsParams,
-) -> BuiltinResult<(Value, Value, Value)> {
-    let tensor = match value {
+async fn sample_tensor(value: Value) -> BuiltinResult<Tensor> {
+    match value {
         Value::GpuTensor(handle) => {
             gpu_helpers::gather_tensor_async(&handle)
                 .await
@@ -105,17 +77,22 @@ pub(super) async fn gauspuls_components_value(
                         "gpu gather failed",
                         source,
                     )
-                })?
+                })
         }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => {
-            return Err(gauspuls_error(&GAUSPULS_ERROR_INVALID_INPUT));
-        }
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            return Err(gauspuls_error(&GAUSPULS_ERROR_INVALID_INPUT));
-        }
+        Value::Complex(_, _)
+        | Value::ComplexTensor(_)
+        | Value::String(_)
+        | Value::StringArray(_)
+        | Value::CharArray(_) => Err(gauspuls_error(&GAUSPULS_ERROR_INVALID_INPUT)),
         other => tensor::value_into_tensor_for(BUILTIN_NAME, other)
-            .map_err(|err| gauspuls_error_with_detail(&GAUSPULS_ERROR_INVALID_INPUT, err))?,
-    };
+            .map_err(|err| gauspuls_error_with_detail(&GAUSPULS_ERROR_INVALID_INPUT, err)),
+    }
+}
+pub(super) async fn gauspuls_components_value(
+    value: Value,
+    params: GauspulsParams,
+) -> BuiltinResult<(Value, Value, Value)> {
+    let tensor = sample_tensor(value).await?;
     let (in_phase, quadrature, envelope) =
         gauspuls_components_tensor(tensor, params).map_err(map_gauspuls_tensor_error)?;
     Ok((

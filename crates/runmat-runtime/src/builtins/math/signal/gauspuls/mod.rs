@@ -14,7 +14,6 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use error::*;
 pub(crate) use math::{default_params, gauspuls_scalar, validate_params, GauspulsParams};
 use math::{gauspuls_components_tensor, gauspuls_cutoff, gauspuls_tensor, validate_tpe};
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinErrorDescriptor, GAUSPULS_ERROR_ARG_COUNT, GAUSPULS_ERROR_INTERNAL,
     GAUSPULS_ERROR_INVALID_INPUT, GAUSPULS_ERROR_INVALID_PARAMETER,
