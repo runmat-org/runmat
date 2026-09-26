@@ -1,5 +1,5 @@
 //! The option parser has already admitted controls before dense data preparation.
-use super::{arguments::ReductionSpec, gpu, host, LogicalReductionConfig};
+use super::{arguments::ReductionSpec, gpu, host, route, LogicalReductionConfig};
 use crate::builtins::common::spec::ReductionNaN;
 use crate::context::preparation::{execute_current_invocation, BuiltinPreparationAdmission};
 use crate::BuiltinResult;
@@ -16,6 +16,9 @@ pub(super) async fn execute(
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
+    if route::select(config.kind, nan_mode) == route::LogicalReductionRoute::HostExact {
+        return host::reduce(config, Value::Tensor(tensor), spec, nan_mode).await;
+    }
     execute_current_invocation(
         BuiltinPreparationAdmission {
             binding: BuiltinBindingIdentity {

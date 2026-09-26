@@ -3,6 +3,7 @@ mod gpu;
 pub(super) mod host;
 mod shape;
 mod preparation;
+mod route;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{

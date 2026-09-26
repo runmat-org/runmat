@@ -9,7 +9,7 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_builtins::LogicalReductionKind;
 use runmat_value::{LogicalArray, Value};
 
-use super::{arguments::ReductionSpec, host, shape, LogicalReductionConfig};
+use super::{arguments::ReductionSpec, host, route, shape, LogicalReductionConfig};
 
 mod output;
 #[cfg(test)]
@@ -21,7 +21,7 @@ pub(super) async fn reduce(
     spec: ReductionSpec,
     nan_mode: ReductionNaN,
 ) -> BuiltinResult<Value> {
-    if config.kind == LogicalReductionKind::Any && nan_mode == ReductionNaN::Omit {
+    if route::select(config.kind, nan_mode) == route::LogicalReductionRoute::HostExact {
         return fallback(config, handle, spec, nan_mode).await;
     }
     let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
