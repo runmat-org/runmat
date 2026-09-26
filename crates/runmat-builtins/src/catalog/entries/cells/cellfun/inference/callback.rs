@@ -140,6 +140,25 @@ fn cell_element(value: &ValueFact) -> ValueFact {
     }
 }
 
+fn shorthand_output(request: &CallRequest) -> Option<ValueFact> {
+    let name = request
+        .literals
+        .literal_args
+        .first()
+        .and_then(crate::catalog::inference::literal_text)?;
+    let shorthand = CellfunShorthand::parse(&name)?;
+    if shorthand.returns_logical() {
+        Some(ValueFact::scalar(ValueKindFact::Logical))
+    } else {
+        Some(ValueFact::scalar(ValueKindFact::Numeric(
+            runmat_types::NumericFact {
+                class: runmat_types::NumericClass::Double,
+                domain: runmat_types::NumericDomain::Real,
+            },
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,24 +185,5 @@ mod tests {
         assert_eq!(actual.residency, ResidencyFact::Host);
         assert_eq!(actual.storage, StorageFact::Sparse);
         assert_eq!(actual.numeric().unwrap().class, NumericClass::UInt64);
-    }
-}
-
-fn shorthand_output(request: &CallRequest) -> Option<ValueFact> {
-    let name = request
-        .literals
-        .literal_args
-        .first()
-        .and_then(crate::catalog::inference::literal_text)?;
-    let shorthand = CellfunShorthand::parse(&name)?;
-    if shorthand.returns_logical() {
-        Some(ValueFact::scalar(ValueKindFact::Logical))
-    } else {
-        Some(ValueFact::scalar(ValueKindFact::Numeric(
-            runmat_types::NumericFact {
-                class: runmat_types::NumericClass::Double,
-                domain: runmat_types::NumericDomain::Real,
-            },
-        )))
     }
 }
