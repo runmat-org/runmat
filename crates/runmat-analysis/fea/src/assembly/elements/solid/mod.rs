@@ -17,6 +17,7 @@ pub use tetrahedron10::{
 };
 pub use tetrahedron10_mass::consistent_mass_matrix as tetrahedron10_consistent_mass_matrix;
 pub use tetrahedron10_stiffness::global_stiffness_matrix as tetrahedron10_global_stiffness_matrix;
+pub(crate) use tetrahedron10_stiffness::is_affine as tetrahedron10_is_affine;
 pub use tetrahedron4::{
     consistent_mass_matrix as tetrahedron4_consistent_mass_matrix, elasticity_matrix,
     geometric_stiffness_matrix as tetrahedron4_geometric_stiffness_matrix, global_stiffness_matrix,

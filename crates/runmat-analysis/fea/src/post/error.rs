@@ -13,6 +13,8 @@ pub enum StructuralFieldRecoveryError {
     ElementValueCountMismatch { expected: usize, actual: usize },
     #[error("physical thermoelastic recovery requires a host strain-energy-density field")]
     MissingThermoelasticEnergyDensity,
+    #[error("solid thermal recovery quadrature did not converge for element {element_id}")]
+    UnconvergedThermalQuadrature { element_id: String },
     #[error("solid recovery element {element_id} references absent node {node_index}")]
     InvalidNodeIndex {
         element_id: String,

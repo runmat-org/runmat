@@ -3,8 +3,8 @@
 use runmat_meshing_core::TETRAHEDRON_MIDSIDE_EDGE_CORNERS;
 
 use crate::topology::quadrature::{
-    GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT, GAUSS_LEGENDRE_TWELVE_UNIT,
-    TETRAHEDRON_FOUR_POINT_RULE,
+    tensor_tetrahedron_rule, GAUSS_LEGENDRE_EIGHT_UNIT, GAUSS_LEGENDRE_SIXTEEN_UNIT,
+    GAUSS_LEGENDRE_TWELVE_UNIT, TETRAHEDRON_FOUR_POINT_RULE,
 };
 
 use super::{
@@ -63,28 +63,14 @@ fn integrate_curved(
     rule: &[(f64, f64)],
 ) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
     let mut stiffness = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
-    for &(r, r_weight) in rule {
-        let remaining_r = 1.0 - r;
-        for &(s, s_weight) in rule {
-            let remaining_s = 1.0 - s;
-            for &(t, t_weight) in rule {
-                let barycentric = [
-                    remaining_r * remaining_s * (1.0 - t),
-                    r,
-                    remaining_r * s,
-                    remaining_r * remaining_s * t,
-                ];
-                let reference_weight =
-                    r_weight * s_weight * t_weight * remaining_r * remaining_r * remaining_s;
-                add_point(
-                    &mut stiffness,
-                    geometry,
-                    elasticity,
-                    barycentric,
-                    reference_weight,
-                )?;
-            }
-        }
+    for (barycentric, reference_weight) in tensor_tetrahedron_rule(rule) {
+        add_point(
+            &mut stiffness,
+            geometry,
+            elasticity,
+            barycentric,
+            reference_weight,
+        )?;
     }
     Ok(stiffness)
 }
@@ -104,7 +90,7 @@ fn converged(previous: &Tetrahedron10Matrix30, next: &Tetrahedron10Matrix30) -> 
             .all(|(left, right)| (left - right).abs() <= 1.0e-8 * scale)
 }
 
-fn is_affine(geometry: Tetrahedron10ElementGeometry) -> bool {
+pub(crate) fn is_affine(geometry: Tetrahedron10ElementGeometry) -> bool {
     TETRAHEDRON_MIDSIDE_EDGE_CORNERS
         .iter()
         .enumerate()

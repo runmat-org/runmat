@@ -16,6 +16,10 @@ pub struct SolidRecoveryElementSummary {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SolvedThermalRecoveryQuadrature {
+    /// Complete local nodal solution, retained for higher-order energy integration.
+    pub nodal_temperature_k: Vec<f64>,
+    pub expansion_coefficient_per_k: f64,
+    pub reference_temperature_k: f64,
     /// Interpolated retained nodal solution in the shared four-point recovery rule's order.
     pub temperature_k: [f64; 4],
     /// Material-owned isotropic thermal strain α(T − Tref) at those same points.

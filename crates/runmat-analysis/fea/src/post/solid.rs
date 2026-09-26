@@ -14,6 +14,7 @@ use super::error::StructuralFieldRecoveryError;
 const COMPONENT_COUNT: usize = 6;
 
 mod stress;
+mod thermal_integrals;
 use stress::{recover_element_stress, thermal_eigenstrain_at};
 
 #[derive(Debug, PartialEq)]
@@ -87,49 +88,56 @@ fn recover_solid_fields_checked(
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let volume = recovered.integration_weight_m3.iter().sum::<f64>();
-        if !volume.is_finite() || volume <= 0.0 {
-            return Err(StructuralFieldRecoveryError::NonFiniteResult {
-                element_id: element.element_id.clone(),
+        let (element_strain, element_stress, energy) = if let Some(thermal) =
+            &element.solved_thermal_quadrature
+        {
+            thermal_integrals::integrate(element, thermal, displacement)?
+        } else {
+            let volume = recovered.integration_weight_m3.iter().sum::<f64>();
+            if !volume.is_finite() || volume <= 0.0 {
+                return Err(StructuralFieldRecoveryError::NonFiniteResult {
+                    element_id: element.element_id.clone(),
+                });
+            }
+            let element_strain = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+                recovered
+                    .strain
+                    .iter()
+                    .zip(recovered.integration_weight_m3)
+                    .map(|(value, weight)| value[component] * weight)
+                    .sum::<f64>()
+                    / volume
             });
-        }
-        let element_strain = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
-            recovered
+            let element_stress = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
+                point_stress
+                    .iter()
+                    .zip(recovered.integration_weight_m3)
+                    .map(|(value, weight)| value[component] * weight)
+                    .sum::<f64>()
+                    / volume
+            });
+            let energy = recovered
                 .strain
                 .iter()
+                .zip(&point_stress)
                 .zip(recovered.integration_weight_m3)
-                .map(|(value, weight)| value[component] * weight)
+                .enumerate()
+                .map(|(point, ((point_strain, point_stress), weight))| {
+                    let eigenstrain = thermal_eigenstrain_at(element, point);
+                    0.5 * weight
+                        * point_strain
+                            .iter()
+                            .enumerate()
+                            .zip(point_stress)
+                            .map(|((component, strain), stress)| {
+                                (strain - if component < 3 { eigenstrain } else { 0.0 }) * stress
+                            })
+                            .sum::<f64>()
+                })
                 .sum::<f64>()
-                / volume
-        });
-        let element_stress = std::array::from_fn::<_, COMPONENT_COUNT, _>(|component| {
-            point_stress
-                .iter()
-                .zip(recovered.integration_weight_m3)
-                .map(|(value, weight)| value[component] * weight)
-                .sum::<f64>()
-                / volume
-        });
-        let energy = recovered
-            .strain
-            .iter()
-            .zip(&point_stress)
-            .zip(recovered.integration_weight_m3)
-            .enumerate()
-            .map(|(point, ((point_strain, point_stress), weight))| {
-                let eigenstrain = thermal_eigenstrain_at(element, point);
-                0.5 * weight
-                    * point_strain
-                        .iter()
-                        .enumerate()
-                        .zip(point_stress)
-                        .map(|((component, strain), stress)| {
-                            (strain - if component < 3 { eigenstrain } else { 0.0 }) * stress
-                        })
-                        .sum::<f64>()
-            })
-            .sum::<f64>()
-            / volume;
+                / volume;
+            (element_strain, element_stress, energy)
+        };
         if !energy.is_finite()
             || element_strain.iter().any(|value| !value.is_finite())
             || element_stress.iter().any(|value| !value.is_finite())

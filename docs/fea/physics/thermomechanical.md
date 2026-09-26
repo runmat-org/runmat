@@ -111,8 +111,12 @@ and energy from retained solutions—not reconstructing lost data.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
-Tet4/Tet10 load and linear-temperature recovery references. General quadratic-temperature or
-curved-Tet10 energy quadrature, spatial convergence, temperature-dependent constitutive iteration,
+Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature
+energy and an analytic curved-Tet10 map with thermal and mechanical strain are checked against
+exact simplex moments. Volume averages use retained nodal temperatures, independently of the four
+reported recovery samples. Curved thermal recovery compares 8-, 12-, and, when needed, 16-point
+Gauss rules per Duffy coordinate and rejects unresolved integrals; this comparison is not a
+certified error bound or general curved-element qualification. Spatial convergence, temperature-dependent constitutive iteration,
 cross-mesh projection, portable execution/persistence, and downstream thermal-prestress procedures
 are not qualified by these tests. Production admission remains closed.
 

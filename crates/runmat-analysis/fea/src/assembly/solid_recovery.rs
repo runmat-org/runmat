@@ -172,6 +172,13 @@ fn solved_thermal_quadrature(
         eigenstrain[point] = strain;
     }
     Ok(SolvedThermalRecoveryQuadrature {
+        nodal_temperature_k: element
+            .node_ids
+            .iter()
+            .map(|node_id| nodal_temperature_k[node_indices[node_id]])
+            .collect(),
+        expansion_coefficient_per_k: thermal.expansion_coefficient_per_k,
+        reference_temperature_k: thermal.reference_temperature_k,
         temperature_k,
         eigenstrain,
     })
