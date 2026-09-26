@@ -82,3 +82,16 @@ fn distinguishes_files_from_missing_folders() {
         runmat_builtins::RMPATH_ERROR_NOT_FOLDER.identifier
     );
 }
+
+#[test]
+fn rejects_multiple_outputs_before_path_mutation() {
+    let _guard = PathGuard::new();
+    let previous = crate::builtins::common::path_state::current_path_string();
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = super::run(vec![Value::from("missing")]).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:rmpath:TooManyOutputs"));
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        previous
+    );
+}

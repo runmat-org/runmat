@@ -39,12 +39,40 @@ fn rejects_invalid_scalar_text_shapes() {
 #[test]
 fn rejects_numeric_columns_and_higher_dimensions() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
-    for shape in [vec![2, 1], vec![1, 1, 1]] {
+    for shape in [vec![2, 1], vec![1, 1, 2]] {
         let tensor = Tensor::new(vec![65.0; shape.iter().product()], shape).expect("tensor");
         let error = call(vec![Value::Tensor(tensor)]).expect_err("invalid root");
         assert_eq!(
             error.identifier(),
             runmat_builtins::GENPATH_ERROR_FOLDER_TYPE.identifier
+        );
+    }
+}
+
+#[test]
+fn rejects_multiple_outputs_before_root_resolution() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    let error = call(vec![Value::from("missing")]).unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:genpath:TooManyOutputs"));
+}
+
+#[test]
+fn accepts_trailing_singleton_text_and_numeric_roots() {
+    let directory = tempdir().unwrap();
+    let text = directory.path().to_string_lossy().into_owned();
+    let chars: Vec<char> = text.chars().collect();
+    let shape = vec![1, chars.len(), 1];
+    let character = CharArray::new_with_shape(chars.clone(), shape.clone()).unwrap();
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    let numeric = Tensor::new(
+        chars.into_iter().map(|c| u32::from(c) as f64).collect(),
+        shape,
+    )
+    .unwrap();
+    for value in [Value::CharArray(character), Value::Tensor(numeric)] {
+        assert_eq!(
+            super::support::text(call(vec![value]).unwrap()),
+            super::support::canonical(directory.path())
         );
     }
 }

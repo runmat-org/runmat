@@ -51,3 +51,13 @@ fn accepts_path_lists_string_arrays_character_rows_and_cells() {
     super::run(vec![Value::StringArray(array), Value::Cell(cell)]).expect("rmpath");
     assert!(crate::builtins::common::path_state::current_path_segments().is_empty());
 }
+#[test]
+fn discarded_output_still_removes_path() {
+    let _guard = super::super::super::path_mutation::test_support::PathGuard::new();
+    let directory = tempfile::tempdir().unwrap();
+    let path = super::super::super::path_mutation::test_support::canonical(directory.path());
+    crate::builtins::common::path_state::set_path_string(&path);
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    super::run(vec![runmat_value::Value::String(path)]).unwrap();
+    assert!(crate::builtins::common::path_state::current_path_string().is_empty());
+}

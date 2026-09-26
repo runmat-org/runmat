@@ -48,7 +48,7 @@ fn preflight(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::String(_) => Ok(()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(()),
-        Value::CharArray(chars) if chars.shape.len() <= 2 && chars.rows == 1 => Ok(()),
+        Value::CharArray(chars) if is_row(&chars.shape) => Ok(()),
         Value::Tensor(tensor) if is_row(&tensor.shape) => require_numeric_extension(),
         Value::GpuTensor(handle) if is_row(&handle.shape) => require_numeric_extension(),
         _ => Err(super::errors::descriptor(
@@ -86,7 +86,8 @@ fn numeric_text(tensor: &Tensor) -> crate::BuiltinResult<String> {
 }
 
 fn is_row(shape: &[usize]) -> bool {
-    shape.len() <= 2 && shape.first().copied().unwrap_or(1) == 1
+    crate::builtins::common::shape::effective_rank(shape) <= 2
+        && shape.first().copied().unwrap_or(1) == 1
 }
 
 fn require_numeric_extension() -> crate::BuiltinResult<()> {

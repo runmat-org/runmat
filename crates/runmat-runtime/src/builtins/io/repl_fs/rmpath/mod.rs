@@ -2,7 +2,6 @@ mod arguments;
 mod errors;
 mod execute;
 mod operation;
-pub(crate) mod specification;
 
 #[cfg(test)]
 mod tests;

@@ -56,3 +56,14 @@ fn mutation_updates_runtime_search_directories() {
         .iter()
         .any(|entry| entry.to_string_lossy() == path));
 }
+#[test]
+fn discarded_output_still_updates_path() {
+    let _lock = super::super::super::REPL_FS_TEST_LOCK.lock().unwrap();
+    let _guard = super::support::PathGuard::new();
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    super::support::call(vec![runmat_value::Value::from("discarded-output-path")]).unwrap();
+    assert_eq!(
+        crate::builtins::common::path_state::current_path_string(),
+        "discarded-output-path"
+    );
+}

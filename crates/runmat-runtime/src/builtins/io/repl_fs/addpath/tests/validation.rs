@@ -80,3 +80,20 @@ fn distinguishes_files_and_the_reserved_path_definition_name() {
         runmat_builtins::ADDPATH_ERROR_PATHDEF.identifier
     );
 }
+#[test]
+fn invalid_later_numeric_codes_reject_before_first_resident_read() {
+    let _guard = PathGuard::new();
+    let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: 0,
+        buffer_id: 9_343_111,
+        descriptor: Default::default(),
+    });
+    let invalid = Value::Tensor(runmat_value::Tensor::new(vec![65.5], vec![1, 1]).unwrap());
+    let error = super::run(vec![resident, invalid]).unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::ADDPATH_ERROR_ARGUMENT_TYPE.identifier
+    );
+}

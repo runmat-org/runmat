@@ -20,59 +20,65 @@ pub(in crate::builtins::io::repl_fs) async fn decode(
     builtin: &'static str,
     policy: NumericPolicy,
 ) -> Result<Vec<String>, DecodeError> {
-    for value in &values {
-        preflight(value, builtin, policy)?;
+    let mut admitted = Vec::new();
+    for value in values {
+        admit(value, builtin, policy, &mut admitted)?;
     }
     let mut output = Vec::new();
-    for value in values {
-        collect(value, &mut output).await?;
+    for value in admitted {
+        match value {
+            AdmittedToken::Text(text) => output.push(text),
+            AdmittedToken::Resident(value) => {
+                let gathered = crate::gather_if_needed_async(&value)
+                    .await
+                    .map_err(DecodeError::Provider)?;
+                let Value::Tensor(tensor) = gathered else {
+                    return Err(DecodeError::InvalidInput);
+                };
+                output.push(decode_numeric_row(&tensor)?);
+            }
+        }
     }
     Ok(output)
 }
 
-fn preflight(
-    value: &Value,
-    builtin: &'static str,
-    policy: NumericPolicy,
-) -> Result<(), DecodeError> {
-    match value {
-        Value::Tensor(_) | Value::GpuTensor(_) => match policy {
-            NumericPolicy::Reject => Err(DecodeError::InvalidInput),
-            NumericPolicy::RunMatExtension(extension) => {
-                crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
-                    .map_err(DecodeError::Compatibility)
-            }
-        },
-        Value::Cell(cell) => cell
-            .data
-            .iter()
-            .try_for_each(|value| preflight(value, builtin, policy)),
-        Value::String(_) | Value::StringArray(_) => Ok(()),
-        Value::CharArray(chars) if chars.shape.len() <= 2 => Ok(()),
-        Value::CharArray(_) => Err(DecodeError::InvalidInput),
-        _ => Err(DecodeError::InvalidInput),
-    }
+enum AdmittedToken {
+    Text(String),
+    Resident(Value),
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn collect(value: Value, output: &mut Vec<String>) -> Result<(), DecodeError> {
+fn admit(
+    value: Value,
+    builtin: &'static str,
+    policy: NumericPolicy,
+    output: &mut Vec<AdmittedToken>,
+) -> Result<(), DecodeError> {
     match value {
-        Value::String(text) => output.push(text),
-        Value::StringArray(StringArray { data, .. }) => output.extend(data),
-        Value::CharArray(chars) => collect_char_rows(chars, output),
-        Value::Tensor(tensor) => output.push(decode_numeric_row(&tensor)?),
-        value @ Value::GpuTensor(_) => {
-            let gathered = crate::gather_if_needed_async(&value)
-                .await
-                .map_err(DecodeError::Provider)?;
-            let Value::Tensor(tensor) = gathered else {
+        Value::String(text) => output.push(AdmittedToken::Text(text)),
+        Value::StringArray(StringArray { data, .. }) => {
+            output.extend(data.into_iter().map(AdmittedToken::Text))
+        }
+        Value::CharArray(chars)
+            if crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+        {
+            collect_char_rows(chars, output)
+        }
+        Value::Tensor(tensor) => {
+            admit_numeric(builtin, policy)?;
+            output.push(AdmittedToken::Text(decode_numeric_row(&tensor)?));
+        }
+        Value::GpuTensor(ref handle) => {
+            admit_numeric(builtin, policy)?;
+            if crate::builtins::common::shape::effective_rank(&handle.shape) > 2
+                || handle.shape.first().copied().unwrap_or(1) > 1
+            {
                 return Err(DecodeError::InvalidInput);
-            };
-            output.push(decode_numeric_row(&tensor)?);
+            }
+            output.push(AdmittedToken::Resident(value));
         }
         Value::Cell(cell) => {
-            for value in &cell.data {
-                collect(value.clone(), output).await?;
+            for value in cell.iter_column_major() {
+                admit(value.clone(), builtin, policy, output)?;
             }
         }
         _ => return Err(DecodeError::InvalidInput),
@@ -80,16 +86,26 @@ async fn collect(value: Value, output: &mut Vec<String>) -> Result<(), DecodeErr
     Ok(())
 }
 
-fn collect_char_rows(chars: CharArray, output: &mut Vec<String>) {
+fn admit_numeric(builtin: &'static str, policy: NumericPolicy) -> Result<(), DecodeError> {
+    match policy {
+        NumericPolicy::Reject => Err(DecodeError::InvalidInput),
+        NumericPolicy::RunMatExtension(extension) => {
+            crate::compatibility::ensure_builtin_extension_enabled(extension, builtin)
+                .map_err(DecodeError::Compatibility)
+        }
+    }
+}
+
+fn collect_char_rows(chars: CharArray, output: &mut Vec<AdmittedToken>) {
     for row in 0..chars.rows {
         let start = row * chars.cols;
         let text: String = chars.data[start..start + chars.cols].iter().collect();
-        output.push(text.trim_end().to_owned());
+        output.push(AdmittedToken::Text(text.trim_end().to_owned()));
     }
 }
 
 fn decode_numeric_row(tensor: &Tensor) -> Result<String, DecodeError> {
-    if tensor.shape.len() > 2 || tensor.rows() > 1 {
+    if crate::builtins::common::shape::effective_rank(&tensor.shape) > 2 || tensor.rows() > 1 {
         return Err(DecodeError::InvalidInput);
     }
     tensor_char_codes_to_string(tensor).ok_or(DecodeError::InvalidInput)

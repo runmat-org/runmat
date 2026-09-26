@@ -97,7 +97,15 @@ error!(
     "genpath: unable to read resident character codes"
 );
 
-const ERRORS: [BuiltinErrorDescriptor; 7] = [
+error!(
+    GENPATH_ERROR_TOO_MANY_OUTPUTS,
+    "RM.GENPATH.TOO_MANY_OUTPUTS",
+    "RunMat:genpath:TooManyOutputs",
+    "More than one output is requested.",
+    "genpath: too many output arguments"
+);
+const ERRORS: [BuiltinErrorDescriptor; 8] = [
+    GENPATH_ERROR_TOO_MANY_OUTPUTS,
     GENPATH_ERROR_FOLDER_TYPE,
     GENPATH_ERROR_EXCLUDES_TYPE,
     GENPATH_ERROR_TOO_MANY_INPUTS,

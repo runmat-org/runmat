@@ -4,7 +4,6 @@ mod execute;
 mod input;
 mod output;
 mod root;
-pub(crate) mod specification;
 mod traversal;
 
 #[cfg(test)]

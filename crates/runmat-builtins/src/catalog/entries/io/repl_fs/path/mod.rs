@@ -73,7 +73,14 @@ pub const PATH_ERROR_PROVIDER_FAILED: BuiltinErrorDescriptor = BuiltinErrorDescr
     when: "An admitted resident numeric character-code row cannot be gathered from its owner.",
     message: "path: unable to read resident character codes",
 };
-const ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const PATH_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PATH.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:path:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "path: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 4] = [
+    PATH_ERROR_TOO_MANY_OUTPUTS,
     PATH_ERROR_INVALID_INPUT,
     PATH_ERROR_TOO_MANY_INPUTS,
     PATH_ERROR_PROVIDER_FAILED,
