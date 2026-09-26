@@ -121,7 +121,10 @@ pub(super) fn diagnostics(
     ];
     metadata.verify_physical_diagnostics(&thermal)?;
     let mut diagnostics = Vec::from(thermal);
-    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    let assignments = material_assignment_diagnostics(&model.material_assignments);
+    metadata.verify_assignment_diagnostics(&assignments)?;
+    diagnostics.extend(assignments);
+    metadata.verify_solver_diagnostics(&last_solve.diagnostics)?;
     diagnostics.extend(last_solve.diagnostics.clone());
     Ok(diagnostics)
 }

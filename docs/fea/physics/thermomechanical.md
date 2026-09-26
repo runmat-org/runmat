@@ -405,8 +405,14 @@ projection and reporting share one wire schema and message templates. Finite flo
 and the concrete digest formatter supplies its 71-byte representation. This traversal creates no
 dummy numerical arrays or retained message strings. Actual initial evidence and physical messages
 are checked against their projected encoded and resident estimates. These are size checks, not
-independent semantic validation. Material-assignment and solver diagnostics, backend evidence,
-validation scratch, and overlapping transport construction remain separate open admission work.
+independent semantic validation. Material-assignment conflict diagnostics now share their borrowed
+selection, message templates, and wire schema with preassembly profiling; matching assignments
+produce no diagnostic. Successful shared PCG diagnostics are bounded across CPU, admission fallback,
+accelerator, Jacobi, and ILU0 alternatives. Thermal checks the last successful solve's list before
+cloning it for output and reserves two lists for previous/current solve or final-report overlap.
+Arbitrary provider failure strings are not part of this bound: thermal rejects nonconverged solves.
+Backend evidence, validation scratch, and overlapping transport construction remain separate open
+admission work.
 
 Post-solve thermal preparation now profiles actual manifest metadata and hypothetical field
 partition shapes through the same serializers used for retained fields. No dummy numerical arrays

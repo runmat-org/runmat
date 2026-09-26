@@ -1,4 +1,6 @@
-use runmat_analysis_core::{AnalysisModel, EvidenceConfidence, MaterialAssignment};
+use runmat_analysis_core::AnalysisModel;
+
+pub(crate) use super::material_assignment::diagnostics as material_assignment_diagnostics;
 
 use crate::{
     assembly,
@@ -101,45 +103,6 @@ fn beam_operator_symmetry_residual(summary: &assembly::AssemblySummary) -> f64 {
         }
     }
     max_residual / max_entry.max(1.0)
-}
-
-pub(crate) fn material_assignment_diagnostics(
-    assignments: &[MaterialAssignment],
-) -> Vec<FeaDiagnostic> {
-    let mut out = Vec::new();
-    for assignment in assignments {
-        if assignment.expected_material_id == assignment.assigned_material_id {
-            continue;
-        }
-
-        let (code, severity) = match assignment.confidence {
-            EvidenceConfidence::Verified => (
-                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_VERIFIED",
-                FeaDiagnosticSeverity::Error,
-            ),
-            EvidenceConfidence::Probable => (
-                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_PROBABLE",
-                FeaDiagnosticSeverity::Warning,
-            ),
-            EvidenceConfidence::Inferred => (
-                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED",
-                FeaDiagnosticSeverity::Warning,
-            ),
-        };
-
-        out.push(FeaDiagnostic {
-            code: code.to_string(),
-            severity,
-            message: format!(
-                "region={} expected_material={} assigned_material={} confidence={:?}",
-                assignment.target_label(),
-                assignment.expected_material_id,
-                assignment.assigned_material_id,
-                assignment.confidence
-            ),
-        });
-    }
-    out
 }
 
 pub(crate) fn thermo_mechanical_diagnostic(

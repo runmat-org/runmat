@@ -24,6 +24,57 @@ fn workload() -> ThermalWorkload {
 }
 
 #[test]
+fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
+    use runmat_analysis_core::EvidenceConfidence;
+    let mut workload = workload();
+    let step = workload.model.sequence.steps[0].clone();
+    let base = ThermalMetadataResourceFacts::derive(&workload.model, &step).unwrap();
+    let mut alternate = workload.model.materials[0].clone();
+    alternate.material_id = "expected".repeat(512);
+    workload.model.material_assignments[0].expected_material_id = alternate.material_id.clone();
+    workload.model.material_assignments[0].confidence = EvidenceConfidence::Probable;
+    workload.model.materials.push(alternate);
+    let facts = ThermalMetadataResourceFacts::derive(&workload.model, &step).unwrap();
+    assert!(facts.reservation_bytes().unwrap().0 > base.reservation_bytes().unwrap().0);
+    let diagnostics = crate::diagnostics::builders::material_assignment_diagnostics(
+        &workload.model.material_assignments,
+    );
+    facts.verify_assignment_diagnostics(&diagnostics).unwrap();
+    assert!(base.verify_assignment_diagnostics(&diagnostics).is_err());
+    let oversized_solver_diagnostic = crate::diagnostics::FeaDiagnostic {
+        code: "FEA_SOLVER_METHOD".into(),
+        severity: crate::diagnostics::FeaDiagnosticSeverity::Info,
+        message: "x".repeat(facts.solver_diagnostics.encoded_bytes_upper_bound as usize + 1),
+    };
+    assert!(facts
+        .verify_solver_diagnostics(&[oversized_solver_diagnostic])
+        .is_err());
+    let mut overflowing = facts;
+    overflowing
+        .solver_diagnostics
+        .materialization_resident_bytes_estimate = u64::MAX;
+    assert!(overflowing.reservation_bytes().is_err());
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let schedule = workload.solve_schedule().unwrap();
+        let preassembly =
+            ThermalPreassemblyResourceFacts::derive(&workload.model, &step, &mesh, &schedule)
+                .unwrap();
+        assert_eq!(
+            preassembly.metadata.assignment_diagnostics,
+            facts.assignment_diagnostics
+        );
+        let mut bounded = step.clone();
+        bounded.accuracy.resources.maximum_resident_bytes =
+            preassembly.reservation_bytes().unwrap().0 - 1;
+        assert!(matches!(
+            ThermalPreassemblyResourceFacts::derive(&workload.model, &bounded, &mesh, &schedule),
+            Err(ResourcePlanningError::AccuracyCeiling { .. })
+        ));
+    }
+}
+
+#[test]
 fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
     let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
     let mut workload = workload();

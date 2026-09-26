@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 
 mod admission;
+mod diagnostics;
 mod settings;
+pub(crate) use diagnostics::successful_diagnostics_profile;
+use diagnostics::SuccessfulDiagnostic;
 use settings::iteration_limit;
 pub(crate) use settings::ScopedLinearSolveSettings;
 
@@ -320,12 +323,7 @@ fn solve_operator_system_with_apply(
     }
     let mut initial_diagnostics = Vec::new();
     if accelerator_fallback {
-        initial_diagnostics.push(FeaDiagnostic {
-            code: "FEA_ACCELERATOR_ADMISSION_FALLBACK".to_string(),
-            severity: FeaDiagnosticSeverity::Warning,
-            message: "native sparse execution was rejected before provider allocation; using the cpu_reference solver"
-                .to_string(),
-        });
+        initial_diagnostics.push(SuccessfulDiagnostic::AdmissionFallback.diagnostic());
     }
     let max_iters = iteration_limit(operator, 64);
     let preconditioner = match build_spd_preconditioner(&prepared, preconditioner_kind) {
@@ -382,14 +380,7 @@ fn solve_operator_system_with_apply(
     let b_norm = dot(b, b)?.sqrt();
 
     let mut diagnostics = initial_diagnostics;
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_SOLVER_METHOD".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "solver=pcg preconditioner={} matrix_free=true",
-            preconditioner.kind().as_str()
-        ),
-    });
+    diagnostics.push(SuccessfulDiagnostic::CpuMethod(preconditioner.kind()).diagnostic());
 
     let initial_residual_norm = dot(&r, &r)?.sqrt();
     let reference_norm = if b_norm > 0.0 {
@@ -508,14 +499,8 @@ pub(crate) fn linear_result_from_accelerator_output(
     let provider_evidence = output.evidence.provider();
     let host_sync_count = provider_evidence.host_synchronizations.saturating_add(1);
     let device_apply_k_count = u32::try_from(provider_evidence.spmv_dispatches).unwrap_or(u32::MAX);
-    let mut diagnostics = vec![FeaDiagnostic {
-        code: "FEA_SOLVER_METHOD".to_string(),
-        severity: FeaDiagnosticSeverity::Info,
-        message: format!(
-            "solver=pcg preconditioner={} matrix_free=false backend=accelerator_native_sparse",
-            preconditioner_kind.as_str()
-        ),
-    }];
+    let mut diagnostics =
+        vec![SuccessfulDiagnostic::AcceleratorMethod(preconditioner_kind).diagnostic()];
     if !output.converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_ACCELERATOR_TOLERANCE_NOT_SATISFIED".to_string(),

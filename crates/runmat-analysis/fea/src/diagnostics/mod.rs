@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub(crate) mod builders;
+pub(crate) mod material_assignment;
 pub(crate) mod thermal;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,10 +21,10 @@ pub struct FeaDiagnostic {
 
 #[derive(Serialize)]
 #[serde(rename = "FeaDiagnostic")]
-struct DiagnosticSerialization<'a, T: Serialize> {
-    code: &'a str,
-    severity: FeaDiagnosticSeverity,
-    message: T,
+pub(crate) struct DiagnosticSerialization<'a, T: Serialize> {
+    pub(crate) code: &'a str,
+    pub(crate) severity: FeaDiagnosticSeverity,
+    pub(crate) message: T,
 }
 
 impl Serialize for FeaDiagnostic {
