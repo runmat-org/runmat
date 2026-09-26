@@ -18,10 +18,7 @@ pub(crate) fn integer_type_code(element_type: IntegerElementType) -> u32 {
 }
 
 fn integer_word_count(element_type: IntegerElementType, len: usize) -> Result<usize> {
-    let lanes = match element_type {
-        IntegerElementType::I64 | IntegerElementType::U64 => 2,
-        _ => 1,
-    };
+    let lanes = crate::backend::wgpu_storage::integer_words_per_element(element_type);
     len.checked_mul(lanes)
         .ok_or_else(|| anyhow!("integer gpuArray word count overflow"))
 }

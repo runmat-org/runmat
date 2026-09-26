@@ -5,6 +5,8 @@ use runmat_accelerate_api::{
     HostIntegerDataView, HostIntegerTensorView, HostTensorView, ProviderWorkload,
 };
 
+mod accounting;
+
 fn query(
     entry: &BuiltinCatalogEntry,
     input_type: ProviderElementType,

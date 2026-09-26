@@ -105,5 +105,13 @@ pub(super) fn validate(
     complete_query.outputs = vec![output];
     let mut snapshot = dense_capability_snapshot(provider, 3, &[]);
     append(&mut snapshot);
-    Some(dense_feasibility(&snapshot, &complete_query))
+    Some(if wgpu {
+        dense_feasibility_with_bytes(
+            &snapshot,
+            &complete_query,
+            crate::backend::wgpu_storage::checked_allocation_bytes,
+        )
+    } else {
+        dense_feasibility(&snapshot, &complete_query)
+    })
 }

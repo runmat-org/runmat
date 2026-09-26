@@ -165,7 +165,7 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 3, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 4, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     snapshot
@@ -243,6 +243,14 @@ pub(crate) fn dense_feasibility(
     snapshot: &ProviderCapabilitySnapshot,
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    dense_feasibility_with_bytes(snapshot, query, ProviderRepresentation::checked_byte_len)
+}
+
+fn dense_feasibility_with_bytes(
+    snapshot: &ProviderCapabilitySnapshot,
+    query: &ProviderFeasibilityQuery,
+    allocation_bytes: impl Fn(&ProviderRepresentation) -> Option<u64>,
+) -> ProviderFeasibility {
     if !snapshot.supports_operation(&query.operation, query.family) {
         return ProviderFeasibility::rejected(
             ProviderRejectionCode::UnsupportedOperation,
@@ -282,7 +290,7 @@ pub(crate) fn dense_feasibility(
                 "provider.rank.unsupported",
             );
         }
-        let Some(bytes) = representation.checked_byte_len() else {
+        let Some(bytes) = allocation_bytes(representation) else {
             return ProviderFeasibility::rejected(
                 ProviderRejectionCode::InvalidShape,
                 "provider.shape.overflow",
@@ -306,7 +314,7 @@ pub(crate) fn dense_feasibility(
         );
     }
     let output_bytes = query.outputs.iter().try_fold(0_u64, |total, output| {
-        total.checked_add(output.checked_byte_len()?)
+        total.checked_add(allocation_bytes(output)?)
     });
     ProviderFeasibility::supported(ProviderResourceEstimate {
         transient_bytes: Some(total_bytes),
