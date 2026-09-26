@@ -76,7 +76,53 @@ test("protocol CLI refuses to execute an available lane without its product arti
     }
 });
 
+test("run accepts one artifact manifest as a file path, not an array", () => {
+    const directory = mkdtempSync(join(tmpdir(), "runmat-example-run-manifest-cli-"));
+    try {
+        const exported = join(directory, "export.json");
+        const inventory = join(directory, "inventory.json");
+        const plan = join(directory, "plan.json");
+        const manifest = join(directory, "invalid-manifest.json");
+        writeFileSync(exported, JSON.stringify({ schema_version: 1, builtins: [{
+            key: "fixture", authority: "catalog", category: "test",
+            examples: [{ id: "fixture", input: "disp(1)", compatibility: "RunMat", harness: "Native", verification: "Succeeds" }]
+        }] }));
+        writeFileSync(manifest, "{}");
+        run(["inventory", "--export", exported, "--source-revision", revision, "--source-state", "clean", "--output", inventory], 0);
+        run(["plan", "--inventory", inventory, "--output", plan], 0);
+        const result = run(["run", "--inventory", inventory, "--plan", plan, "--lane", "native-host", "--result-out", join(directory, "result.json"), "--artifact-manifest", manifest], 1);
+        assert.match(result.stderr, /Unsupported builtin example artifact manifest schema/u);
+        assert.doesNotMatch(result.stderr, /Received an instance of Array/u);
+    } finally {
+        rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test("protocol CLI rejects repeated singleton arguments before file access", () => {
+    for (const [command, flag] of [
+        ["run", "--artifact-manifest"], ["run", "--inventory"],
+        ["run", "--plan"], ["run", "--lane"], ["run", "--shard-index"],
+        ["probe", "--artifact-manifest"], ["inventory", "--output"],
+        ["plan", "--inventory"], ["matrix", "--plan"],
+        ["reconcile", "--inventory"], ["artifacts", "--root"]
+    ]) {
+        const result = run([command, flag, "first", flag, "second"], 1);
+        assert.match(result.stderr, new RegExp(`${flag} may only be specified once for ${command}`, "u"));
+        assert.doesNotMatch(result.stderr, /ENOENT/u);
+    }
+});
+
+test("reconcile retains repeatable manifests and inventory retains repeatable builtin scopes", () => {
+    const reconcile = run(["reconcile", "--artifact-manifest", "first", "--artifact-manifest", "second", "--product-probe", "first", "--product-probe", "second", "--result", "first", "--result", "second"], 1);
+    assert.match(reconcile.stderr, /--inventory is required/u);
+    assert.doesNotMatch(reconcile.stderr, /may only be specified once/u);
+    const inventory = run(["inventory", "--builtin", "first", "--builtin", "second"], 1);
+    assert.match(inventory.stderr, /--output is required/u);
+    assert.doesNotMatch(inventory.stderr, /may only be specified once/u);
+});
+
 function run(args, expectedStatus) {
     const completed = spawnSync(process.execPath, [entrypoint, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, TMPDIR: "/private/tmp" } });
     assert.equal(completed.status, expectedStatus, `${completed.stdout}\n${completed.stderr}`);
+    return completed;
 }

@@ -18,7 +18,7 @@ export const PROTOCOL_COMMANDS = Object.freeze(["artifacts", "probe", "inventory
 export async function runProtocolCli(argv) {
     const [command, ...rest] = argv;
     if (!PROTOCOL_COMMANDS.includes(command)) throw new Error(`Unknown builtin example verifier command: ${command}`);
-    const options = parseOptions(rest);
+    const options = parseOptions(rest, command);
     if (command === "artifacts") return artifactsCommand(options);
     if (command === "probe") return probeCommand(options);
     if (command === "inventory") return inventoryCommand(options);
@@ -224,16 +224,24 @@ function exportDocuments(root) {
     return JSON.parse(execFileSync(command, args, { cwd: root, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }));
 }
 
-function parseOptions(args) {
+function parseOptions(args, command) {
+    const repeatable = new Set({
+        artifacts: ["file", "entrypoint"],
+        inventory: ["builtin"],
+        reconcile: ["result", "artifact-manifest", "product-probe"]
+    }[command] ?? []);
     const options = { positionals: [] };
     for (let index = 0; index < args.length; index += 1) {
         const arg = args[index];
         if (!arg.startsWith("--")) { options.positionals.push(arg); continue; }
         const name = arg.slice(2);
+        if (Object.hasOwn(options, name) && !repeatable.has(name)) {
+            throw new Error(`${arg} may only be specified once for ${command}`);
+        }
         if (name === "closure") { options[name] = true; continue; }
         const value = args[++index];
         if (value === undefined || value.startsWith("--")) throw new Error(`${arg} requires a value`);
-        if (name === "result" || name === "artifact-manifest" || name === "product-probe" || name === "file" || name === "entrypoint" || name === "builtin") options[name] = [...arrayOption(options[name]), value];
+        if (repeatable.has(name)) options[name] = [...arrayOption(options[name]), value];
         else options[name] = value;
     }
     return options;
