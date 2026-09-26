@@ -125,6 +125,14 @@ fn source_record_string_lengths_and_overflow_are_accounted() {
     assert_eq!(
         after.reservation_bytes().unwrap().0 - before.reservation_bytes().unwrap().0,
         2 * (3 + 3) * 4096
+            + after
+                .serialization
+                .unwrap()
+                .materialization_resident_bytes_estimate
+            - before
+                .serialization
+                .unwrap()
+                .materialization_resident_bytes_estimate
     );
     assert!(ThermalSourceEvidenceResourceFacts::from_counts(u64::MAX, 1, 2).is_err());
     assert!(ThermalSourceEvidenceResourceFacts::from_counts(1, u64::MAX, 1).is_err());
@@ -186,6 +194,9 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
         let source = facts(&workload);
         assert_eq!(source.records_per_sample.0, 2);
         let result = workload.execute(&mesh).unwrap();
+        source
+            .verify(&result.run.spatial_projection_evidence)
+            .unwrap();
         assert_eq!(
             result.run.spatial_projection_evidence.len() as u64,
             source.retained_records.0
@@ -220,4 +231,26 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
             .maximum_resident_bytes = total;
         workload.execute(&mesh).unwrap();
     }
+}
+
+#[test]
+fn source_serialization_detects_inventory_and_metadata_growth() {
+    let workload = workload();
+    let source = facts(&workload);
+    let result = workload
+        .execute(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet4))
+        .unwrap();
+    let mut evidence = result.run.spatial_projection_evidence;
+    source.verify(&evidence).unwrap();
+    evidence[0].excitation_id.push_str(&"x".repeat(8192));
+    assert!(source.verify(&evidence).is_err());
+    evidence.clear();
+    assert!(source.verify(&evidence).is_err());
+    assert!(
+        source
+            .serialization
+            .unwrap()
+            .materialization_resident_bytes_estimate
+            > 0
+    );
 }

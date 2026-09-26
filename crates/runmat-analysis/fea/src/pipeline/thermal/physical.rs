@@ -192,6 +192,7 @@ pub(super) fn run(
         outcome.recovered.storage_rates,
         fea_thermal_energy_storage_rate_field_id,
     );
+    facts.sources.verify(&outcome.source_evidence)?;
     let mut run = FeaRunResult {
         identity,
         requested_backend: backend,

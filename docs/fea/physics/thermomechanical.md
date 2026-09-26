@@ -479,6 +479,16 @@ copies. Tet4/Tet10 tests compare projected and actual catalogs and reject duplic
 identities and insufficient resident ceilings. This still excludes the manifest's other run/source
 metadata and full transport-object/chunk lifetime composition; complete admission remains open.
 
+Thermal source evidence now separately reserves canonical serialization materialization in addition
+to retained Rust records and identifier strings. A borrowed history traversal uses the actual
+spatial-evidence serializer, shared active-action selection, authored IDs and projection requirements,
+and all scheduled samples (including the initial assembly). Static and every time-approach shape
+are covered without allocating a dummy record history. Successful execution checks the actual
+evidence count and profile against admission. Tet4/Tet10 volume/flux tests cover the complete
+history and resident ceiling; metadata growth and missing records are rejected. This closes the
+source-history serialization component, not the remaining full manifest wrapper/array metadata
+or transport lifetime bound.
+
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
 counts and total-byte arithmetic before changing retained content. Canonical chunks still restart

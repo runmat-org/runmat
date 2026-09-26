@@ -1,5 +1,8 @@
 //! Retained thermal projection evidence plus simultaneous assembly/copy records.
 use runmat_analysis_core::{AnalysisModel, ExcitationAction, ProcedureStep};
+use runmat_canonical_codec::SerializedCanonicalProfile;
+
+mod profile;
 
 use super::{ByteCount, Count, ResourcePlanningError};
 use crate::{
@@ -13,6 +16,7 @@ pub struct ThermalSourceEvidenceResourceFacts {
     pub retained_records: Count,
     pub record_bytes_per_sample: ByteCount,
     pub simultaneous_record_bytes: ByteCount,
+    pub serialization: Option<SerializedCanonicalProfile>,
 }
 
 impl ThermalSourceEvidenceResourceFacts {
@@ -63,7 +67,16 @@ impl ThermalSourceEvidenceResourceFacts {
                         "thermal source records per sample",
                     ))?;
         }
-        Self::from_counts(records, record_bytes, schedule.sample_count() as u64)
+        let mut facts = Self::from_counts(records, record_bytes, schedule.sample_count() as u64)?;
+        if records != 0 {
+            facts.serialization = Some(profile::derive(
+                model,
+                step,
+                schedule,
+                facts.retained_records,
+            )?);
+        }
+        Ok(facts)
     }
 
     fn from_counts(records: u64, bytes: u64, samples: u64) -> Result<Self, ResourcePlanningError> {
@@ -97,11 +110,28 @@ impl ThermalSourceEvidenceResourceFacts {
             retained_records: Count(retained),
             record_bytes_per_sample: ByteCount(bytes),
             simultaneous_record_bytes: ByteCount(simultaneous),
+            serialization: None,
         })
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
-        Ok(self.simultaneous_record_bytes)
+        self.simultaneous_record_bytes
+            .0
+            .checked_add(
+                self.serialization
+                    .map_or(0, |profile| profile.materialization_resident_bytes_estimate),
+            )
+            .map(ByteCount)
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal source serialization",
+            ))
+    }
+
+    pub(crate) fn verify(
+        &self,
+        evidence: &[SpatialProjectionEvidence],
+    ) -> Result<(), ResourcePlanningError> {
+        profile::verify(self, evidence)
     }
 }
 

@@ -2,6 +2,8 @@ use runmat_analysis_core::{PhysicalQuantityKind, ProjectionRequirement, SignalSa
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
+mod serialization;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpatialIntegrationRule {
@@ -12,7 +14,7 @@ pub enum SpatialIntegrationRule {
     ReferencePointGeneralized,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpatialProjectionEvidence {
     pub excitation_id: String,
