@@ -4,6 +4,26 @@ use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn gathered_labels_do_not_release_borrowed_provider_inputs() {
+    test_support::with_test_provider(|provider| {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[1., 2.],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        confusionmat(
+            Value::GpuTensor(handle.clone()),
+            Value::GpuTensor(handle.clone()),
+            vec![],
+            2,
+        );
+        assert!(block_on(provider.download(&handle)).is_ok());
+    });
+}
+
+#[test]
 fn discarded_outputs_still_validate_labels_and_options() {
     with_outputs(0, || {
         assert!(block_on(confusionmat_builtin(

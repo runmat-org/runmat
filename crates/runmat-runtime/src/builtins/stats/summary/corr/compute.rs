@@ -8,8 +8,17 @@ pub(super) fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
             "corr: X and Y must have the same number of observations",
         ));
     }
-    let mut rho_data = Vec::with_capacity(left_cols * right_cols);
-    let mut p_data = Vec::with_capacity(left_cols * right_cols);
+    let result_len = left_cols
+        .checked_mul(right_cols)
+        .ok_or_else(|| corr_error("corr: result dimensions exceed platform limits"))?;
+    let mut rho_data = Vec::new();
+    let mut p_data = Vec::new();
+    rho_data
+        .try_reserve_exact(result_len)
+        .map_err(|_| corr_internal("corr: cannot allocate coefficient output"))?;
+    p_data
+        .try_reserve_exact(result_len)
+        .map_err(|_| corr_internal("corr: cannot allocate p-value output"))?;
     let complete_mask = match args.rows {
         RowsMode::Complete => Some(complete_rows(
             &args.left, right, left_rows, left_cols, right_cols,

@@ -4,6 +4,13 @@ use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn empty_observation_matrix_checks_result_dimension_overflow() {
+    let input = tensor(vec![], vec![0, usize::MAX]);
+    let error = block_on(corr_builtin(input, vec![])).unwrap_err();
+    assert!(error.message.contains("platform limits"));
+}
+
+#[test]
 fn rejects_extra_observation_pages_but_accepts_trailing_singletons() {
     let error = block_on(corr_builtin(tensor(vec![1.; 8], vec![2, 2, 2]), vec![])).unwrap_err();
     assert!(error.to_string().contains("two-dimensional"));

@@ -1,5 +1,26 @@
 use super::*;
 use runmat_types::*;
+
+#[test]
+fn unknown_order_keyword_does_not_claim_logical_order() {
+    let mut request = request(ValueKindFact::Logical, 2);
+    request.arguments.push(ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    ));
+    request
+        .arguments
+        .push(ValueFact::unknown(DynamicReason::RuntimeValue));
+    let result = super::inference::infer(&request, &CONFUSIONMAT_CATALOG_ENTRY);
+    assert!(matches!(result.outputs[1].kind, ValueKindFact::Unknown));
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::Shaped {
+            dims: vec![DimensionFact::Unknown, DimensionFact::Unknown]
+        }
+    );
+}
 fn request(kind: ValueKindFact, count: usize) -> CallRequest {
     let value = ValueFact::proven(kind, ShapeFact::Scalar, StorageFact::Scalar);
     CallRequest {
