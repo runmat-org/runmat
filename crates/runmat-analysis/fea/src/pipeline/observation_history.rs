@@ -200,7 +200,7 @@ fn coordinate_rank(coordinate: RecoveredFieldSample) -> u8 {
 
 pub(crate) struct HistoryFieldSeries<'a> {
     pub quantity: ObservationQuantity,
-    pub source_field_id: &'static str,
+    pub source_field_id: &'a str,
     pub location: FieldLocation,
     pub entity_domain: RecoveredFieldEntityDomain,
     pub value_shape: ObservationValueShape,

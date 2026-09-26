@@ -25,10 +25,6 @@ use crate::{
     },
 };
 
-const THERMAL_TEMPERATURE_HISTORY_SOURCE: &str = "thermal.temperature";
-const THERMAL_TEMPERATURE_GRADIENT_HISTORY_SOURCE: &str = "thermal.temperature_gradient";
-const THERMAL_HEAT_FLUX_HISTORY_SOURCE: &str = "thermal.heat_flux";
-
 mod diagnostics;
 mod snapshots;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
@@ -205,44 +201,31 @@ pub(super) fn run(
             .copied()
             .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
             .collect::<Vec<_>>();
+        let definitions = crate::physics::thermal::history_fields::definitions()
+            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
+        let series = definitions
+            .iter()
+            .zip([
+                temperature_snapshots.as_slice(),
+                temperature_gradient_snapshots.as_slice(),
+                heat_flux_snapshots.as_slice(),
+            ])
+            .map(|(definition, snapshots)| HistoryFieldSeries {
+                quantity: definition.quantity(),
+                source_field_id: definition.field_id(),
+                location: definition.location(),
+                entity_domain: definition.entity_domain(),
+                value_shape: definition.value_shape().clone(),
+                numeric_representation: definition.numeric_representation(),
+                snapshots,
+            })
+            .collect::<Vec<_>>();
         let evaluated_histories = evaluate_field_histories(
             thermal_step,
             HistoryTopology::Solid(&initial_assembly.projection),
             &coordinates,
             None,
-            &[
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::Temperature,
-                    source_field_id: THERMAL_TEMPERATURE_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Node,
-                    entity_domain:
-                        crate::results::field::RecoveredFieldEntityDomain::StructuralNodes,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Scalar,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &temperature_snapshots,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::TemperatureGradient,
-                    source_field_id: THERMAL_TEMPERATURE_GRADIENT_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Element,
-                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &temperature_gradient_snapshots,
-                },
-                HistoryFieldSeries {
-                    quantity: runmat_analysis_core::ObservationQuantity::HeatFlux,
-                    source_field_id: THERMAL_HEAT_FLUX_HISTORY_SOURCE,
-                    location: runmat_analysis_core::FieldLocation::Element,
-                    entity_domain: crate::results::field::RecoveredFieldEntityDomain::SolidElements,
-                    value_shape: runmat_analysis_core::ObservationValueShape::Vector3,
-                    numeric_representation:
-                        crate::results::field::RecoveredFieldNumericRepresentation::Real,
-                    snapshots: &heat_flux_snapshots,
-                },
-            ],
+            &series,
         )
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
         run.observation_histories = evaluated_histories.histories;

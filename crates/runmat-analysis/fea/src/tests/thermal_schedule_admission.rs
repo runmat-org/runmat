@@ -109,3 +109,93 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
         Err(crate::FeaRunError::Resource(_))
     ));
 }
+
+#[test]
+fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
+    use crate::planning::resource::{
+        ThermalObservationResourceFacts, ThermalOperatorResourceFacts,
+    };
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut workload = workload();
+        for request in &mut workload.model.sequence.steps[0].observations {
+            if let runmat_analysis_core::ObservationRequest::History(spec) = request {
+                spec.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+            }
+        }
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let step = &workload.model.sequence.steps[0];
+        let observations = ThermalObservationResourceFacts::derive(&mesh, step).unwrap();
+        let shared = observations.shared.as_ref().unwrap();
+        assert_eq!(shared.retained_sample_count.0, 8);
+        assert_eq!(
+            observations.catalog_copy_bytes.0,
+            (mesh.topology.nodes.len() + 6 * mesh.topology.volume_elements.len()) as u64 * 8
+        );
+        let result = workload.execute(&mesh).unwrap();
+        let retained_samples: usize = result
+            .run
+            .observation_histories
+            .iter()
+            .map(|history| history.samples().len())
+            .sum();
+        assert_eq!(retained_samples as u64, shared.retained_sample_count.0);
+        let history =
+            ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap())
+                .unwrap();
+        let operators = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+        let numerical = operators.numerical_reservation_bytes(&history).unwrap();
+        let total = numerical.0 + observations.reservation_bytes().unwrap().0;
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = total - 1;
+        let error = workload.execute(&mesh).unwrap_err();
+        assert!(
+            matches!(error, crate::FeaRunError::Resource(
+            crate::planning::resource::ResourcePlanningError::AccuracyCeiling { required, maximum, .. }
+        ) if required == total && maximum == total - 1),
+            "{error}"
+        );
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = total;
+        workload.execute(&mesh).unwrap();
+        let mut overflowing = observations;
+        overflowing.catalog_copy_bytes = crate::planning::resource::ByteCount(u64::MAX);
+        assert!(overflowing.reservation_bytes().is_err());
+    }
+}
+
+#[test]
+fn thermal_observation_preflight_rejects_unavailable_sources_and_events() {
+    use crate::planning::resource::ThermalObservationResourceFacts;
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut workload = workload();
+    let step = &mut workload.model.sequence.steps[0];
+    if let runmat_analysis_core::ObservationRequest::History(spec) = &mut step.observations[0] {
+        spec.quantity = runmat_analysis_core::ObservationQuantity::Displacement;
+        spec.value_shape = spec.quantity.canonical_value_shape();
+    }
+    assert!(ThermalObservationResourceFacts::derive(&mesh, step).is_err());
+    step.observations.clear();
+    assert_eq!(
+        ThermalObservationResourceFacts::derive(&mesh, step)
+            .unwrap()
+            .reservation_bytes()
+            .unwrap()
+            .0,
+        0
+    );
+    step.observations.push(nodal_history_observation(
+        "event",
+        runmat_analysis_core::ObservationQuantity::Temperature,
+        runmat_analysis_core::SamplingPolicy::Event(
+            runmat_analysis_core::ObservationEvent::Solver(
+                runmat_analysis_core::SolverObservationEvent::ConvergenceFailure,
+            ),
+        ),
+    ));
+    let error = ThermalObservationResourceFacts::derive(&mesh, step).unwrap_err();
+    assert!(error.to_string().contains("no event detector"));
+}

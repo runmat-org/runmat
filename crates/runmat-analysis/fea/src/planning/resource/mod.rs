@@ -20,6 +20,8 @@ mod solve_policy;
 mod structural_facts;
 mod symbolic;
 mod thermal_history;
+mod thermal_observations;
+pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
 pub use thermal_operator::ThermalOperatorResourceFacts;
 mod thermal_state;

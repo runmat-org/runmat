@@ -93,6 +93,10 @@ fn execute_validated_model(
     history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
     let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)?;
     operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
+    crate::planning::resource::ThermalObservationResourceFacts::derive(mesh, step)?.require_fits(
+        operators.numerical_reservation_bytes(&history)?,
+        step.accuracy.resources.maximum_resident_bytes,
+    )?;
     physical::run(model, backend, options, mesh, step, &schedule, &operators)
 }
 

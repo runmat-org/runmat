@@ -177,6 +177,14 @@ including constrained diagonals absent from the original operator. Effective-pat
 its actual unique entries before fallible reservation; thermal support copies use fallible index
 allocation. General matrix clones and dynamic model/property/evidence metadata, observations,
 and transport still require complete allocation accounting.
+
+Thermal history observation preflight resolves the same shared field-definition inventory used
+at runtime. It reserves shared stored-history/reduction costs, the larger of the monolithic and
+partition evaluation peaks, and the evaluator's copied temperature/gradient/flux catalog payload
+(`8 * (nodes + 6 * elements)`). This is added to numerical reservation under the same authored
+resident ceiling before assembly. Unsupported source quantities and event histories without a
+thermal event detector fail during preflight. Counts remain planner estimates/logical payloads;
+dynamic plan/catalog metadata and transport are not thereby fully admitted.
 Passing this partial reservation is not whole-process memory admission or GPU qualification.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
