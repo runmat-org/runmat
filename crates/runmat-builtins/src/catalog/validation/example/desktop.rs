@@ -7,6 +7,9 @@ use std::collections::BTreeSet;
 
 use super::{push, resource, BuiltinCatalogValidationError};
 
+#[cfg(test)]
+mod document_tests;
+
 const MAX_INTERACTIONS: usize = 128;
 const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_FILTERS: usize = 64;
@@ -39,6 +42,29 @@ fn validate_interaction(
     errors: &mut Vec<BuiltinCatalogValidationError>,
 ) {
     match interaction {
+        BuiltinDesktopHostInteraction::Document(value) => match value {
+            crate::BuiltinDocumentExpectation::OpenFile { relative_path }
+            | crate::BuiltinDocumentExpectation::Navigate { relative_path, .. } => {
+                validate_path(builtin, relative_path, errors);
+                if !workspace.files.contains(relative_path) {
+                    push(
+                        errors,
+                        builtin,
+                        "desktop document must name a declared file",
+                    );
+                }
+            }
+            crate::BuiltinDocumentExpectation::OpenVariable { name } => {
+                validate_required_text(builtin, name, "desktop variable name", errors);
+                if !valid_variable_name(name) {
+                    push(
+                        errors,
+                        builtin,
+                        "desktop variable must be a language identifier",
+                    );
+                }
+            }
+        },
         BuiltinDesktopHostInteraction::OpenFileDialog(value) => {
             validate_text(builtin, value.request.title, "desktop dialog title", errors);
             validate_optional_path(builtin, value.request.default_path, errors);
@@ -179,6 +205,14 @@ fn validate_interaction(
             }
         }
     }
+}
+
+fn valid_variable_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|value| value.is_ascii_alphabetic())
+        && chars.all(|value| value.is_ascii_alphanumeric() || value == '_')
 }
 
 struct DesktopWorkspacePaths<'a> {

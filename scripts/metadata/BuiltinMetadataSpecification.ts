@@ -151,6 +151,11 @@ export type BuiltinDialogFilterExpectation = {
 };
 
 export type BuiltinDesktopHostInteraction =
+  | { Document:
+      | { OpenFile: { relative_path: string } }
+      | { OpenVariable: { name: string } }
+      | { Navigate: { relative_path: string; line: number; column: number; selection: "Caret" | "Select" } }
+    }
   | { OpenFileDialog: {
       request: { title: string | null; default_path: string | null; filters: BuiltinDialogFilterExpectation[]; multiselect: boolean };
       outcome: { Selection: { paths: string[]; filter_index: number | null } } | "Cancel" | { Error: string };
