@@ -1,9 +1,7 @@
-use std::collections::BTreeSet;
-
 use runmat_analysis_core::{
-    AnalysisField, AnalysisFieldValues, AnalysisModel, ProcedureStepId, ReferenceStatePolicy,
-    StateCompleteness, StateId, StateKind, StateOutput, StatePersistence, StateSource,
-    StateTransition, StateTransitionMethod, StateUse, TopologyTransitionPolicy,
+    AnalysisField, AnalysisModel, ProcedureStepId, ReferenceStatePolicy, StateCompleteness,
+    StateId, StateKind, StateOutput, StatePersistence, StateSource, StateTransition,
+    StateTransitionMethod, StateUse, TopologyTransitionPolicy,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -17,6 +15,11 @@ use super::{
 const STATE_PREFIX: &[u8] = b"runmat-analysis-semantic-state/v1\0";
 const STATE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
+
+mod field_validation;
+mod thermal;
+use field_validation::{structural_state_field_ids, validate_portable_fields};
+pub use thermal::CanonicalThermalStatePayload;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +40,7 @@ pub struct SemanticStatePublicationRequest {
 #[serde(rename_all = "snake_case")]
 pub enum SemanticStatePublicationSource {
     StructuralPrimaryFields,
+    ThermalPrimaryField,
     StructuralLinearization,
     ModalBasis,
     StructuralResponseEnvelope,
@@ -73,6 +77,9 @@ impl SemanticStatePublicationRequest {
                 (
                     SemanticStatePublicationSource::StructuralPrimaryFields,
                     StateKind::StructuralPrimary
+                ) | (
+                    SemanticStatePublicationSource::ThermalPrimaryField,
+                    StateKind::Thermal
                 ) | (
                     SemanticStatePublicationSource::StructuralLinearization,
                     StateKind::GeometricStiffness
@@ -139,6 +146,9 @@ pub struct CanonicalSemanticState {
 pub enum CanonicalSemanticStatePayload {
     Fields {
         fields: Vec<AnalysisField>,
+    },
+    Thermal {
+        state: Box<CanonicalThermalStatePayload>,
     },
     StructuralFrequency {
         publication: Box<super::StructuralFrequencyPublicationManifest>,
@@ -352,7 +362,8 @@ impl CanonicalSemanticState {
             CanonicalSemanticStatePayload::Fields { fields } => {
                 if matches!(
                     self.kind,
-                    StateKind::ModalBasis
+                    StateKind::Thermal
+                        | StateKind::ModalBasis
                         | StateKind::StructuralComplex
                         | StateKind::StructuralResponseEnvelope
                         | StateKind::StructuralRandomStatistics
@@ -364,6 +375,14 @@ impl CanonicalSemanticState {
                     ));
                 }
                 validate_portable_fields(fields)?;
+            }
+            CanonicalSemanticStatePayload::Thermal { state } => {
+                if self.kind != StateKind::Thermal {
+                    return Err(AnalysisExecutionError::Invalid(
+                        "thermal semantic-state payload requires thermal state kind".into(),
+                    ));
+                }
+                state.validate()?;
             }
             CanonicalSemanticStatePayload::StructuralFrequency { publication } => {
                 if self.kind != StateKind::StructuralComplex {
@@ -483,6 +502,7 @@ impl CanonicalSemanticStatePayload {
     pub fn fields(&self) -> Option<&[AnalysisField]> {
         match self {
             Self::Fields { fields } => Some(fields),
+            Self::Thermal { state } => Some(std::slice::from_ref(&state.temperature)),
             Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
@@ -491,10 +511,18 @@ impl CanonicalSemanticStatePayload {
         }
     }
 
+    pub fn thermal(&self) -> Option<&CanonicalThermalStatePayload> {
+        match self {
+            Self::Thermal { state } => Some(state),
+            _ => None,
+        }
+    }
+
     pub fn structural_frequency(&self) -> Option<&super::StructuralFrequencyPublicationManifest> {
         match self {
             Self::StructuralFrequency { publication } => Some(publication.as_ref()),
             Self::Fields { .. }
+            | Self::Thermal { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
             | Self::StructuralResponseEnvelope { .. }
@@ -505,6 +533,7 @@ impl CanonicalSemanticStatePayload {
     pub fn modal_basis(&self) -> Option<&crate::pipeline::modal_basis::ModalBasisArtifact> {
         match self {
             Self::Fields { .. }
+            | Self::Thermal { .. }
             | Self::StructuralFrequency { .. }
             | Self::StructuralLinearization { .. }
             | Self::StructuralResponseEnvelope { .. }
@@ -519,6 +548,7 @@ impl CanonicalSemanticStatePayload {
         match self {
             Self::StructuralLinearization { linearization } => Some(linearization.as_ref()),
             Self::Fields { .. }
+            | Self::Thermal { .. }
             | Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralResponseEnvelope { .. }
@@ -530,6 +560,7 @@ impl CanonicalSemanticStatePayload {
         match self {
             Self::StructuralResponseEnvelope { envelope } => Some(envelope.as_ref()),
             Self::Fields { .. }
+            | Self::Thermal { .. }
             | Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
@@ -541,47 +572,12 @@ impl CanonicalSemanticStatePayload {
         match self {
             Self::StructuralRandomStatistics { statistics } => Some(statistics.as_ref()),
             Self::Fields { .. }
+            | Self::Thermal { .. }
             | Self::StructuralFrequency { .. }
             | Self::ModalBasis { .. }
             | Self::StructuralLinearization { .. }
             | Self::StructuralResponseEnvelope { .. } => None,
         }
-    }
-}
-
-fn validate_portable_fields(fields: &[AnalysisField]) -> AnalysisExecutionResult<()> {
-    let mut field_ids = BTreeSet::new();
-    for field in fields {
-        let AnalysisFieldValues::HostF64(values) = &field.values else {
-            return Err(AnalysisExecutionError::Invalid(
-                "portable semantic state cannot contain a device-local field reference".into(),
-            ));
-        };
-        let expected = field
-            .shape
-            .iter()
-            .try_fold(1_usize, |count, extent| count.checked_mul(*extent));
-        if field.field_id.trim().is_empty()
-            || !field_ids.insert(field.field_id.as_str())
-            || expected != Some(values.len())
-            || values.is_empty()
-            || values.iter().any(|value| !value.is_finite())
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "semantic state fields must be unique, finite, non-empty host arrays with exact shapes"
-                    .into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn structural_state_field_ids(kind: StateKind) -> AnalysisExecutionResult<&'static [&'static str]> {
-    match kind {
-        StateKind::StructuralPrimary => Ok(&[crate::contracts::FEA_FIELD_STRUCTURAL_DISPLACEMENT]),
-        _ => Err(AnalysisExecutionError::Invalid(
-            "structural linear execution can publish only structural-primary state".into(),
-        )),
     }
 }
 

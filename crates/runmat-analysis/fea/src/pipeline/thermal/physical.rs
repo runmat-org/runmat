@@ -1,6 +1,5 @@
 use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, CoupledPhysicsFamily, IndependentDomain, PhysicsFamily,
-    SignalSampleApproach,
+    AnalysisModel, CoupledPhysicsFamily, IndependentDomain, PhysicsFamily, SignalSampleApproach,
 };
 
 use crate::{
@@ -35,6 +34,9 @@ use crate::{
 const THERMAL_TEMPERATURE_HISTORY_SOURCE: &str = "thermal.temperature";
 const THERMAL_TEMPERATURE_GRADIENT_HISTORY_SOURCE: &str = "thermal.temperature_gradient";
 const THERMAL_HEAT_FLUX_HISTORY_SOURCE: &str = "thermal.heat_flux";
+
+mod snapshots;
+use snapshots::{scalar_snapshots, vector_snapshots};
 
 pub(super) fn run(
     model: &AnalysisModel,
@@ -269,6 +271,7 @@ pub(super) fn run(
     run.validate_solver_formulation()?;
     Ok(FeaThermalRunResult {
         run,
+        topology_digest: runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes()),
         time_points_s,
         temperature_snapshots,
         temperature_gradient_snapshots,
@@ -279,7 +282,6 @@ pub(super) fn run(
         initial_state: initial.evidence,
     })
 }
-
 struct ProcedureOutcome {
     time_points_s: Vec<f64>,
     recovered: RecoveredSnapshots,
@@ -572,28 +574,6 @@ fn push_recovered_snapshot(
         None => vec![0.0; assembly.projection.elements.len()],
     });
     Ok(())
-}
-
-fn scalar_snapshots(values: Vec<Vec<f64>>, field_id: fn(usize) -> String) -> Vec<AnalysisField> {
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, values)| {
-            let len = values.len();
-            AnalysisField::host_f64(field_id(index), vec![len], values)
-        })
-        .collect()
-}
-
-fn vector_snapshots(values: Vec<Vec<f64>>, field_id: fn(usize) -> String) -> Vec<AnalysisField> {
-    values
-        .into_iter()
-        .enumerate()
-        .map(|(index, values)| {
-            let count = values.len() / 3;
-            AnalysisField::host_f64(field_id(index), vec![count, 3], values)
-        })
-        .collect()
 }
 
 struct ThermalDiagnosticsInput<'a> {
