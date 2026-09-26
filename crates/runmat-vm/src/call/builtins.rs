@@ -983,7 +983,10 @@ fn remap_emit_label(label: &mut crate::bytecode::EmitLabel, slot_remap: &HashMap
 
 fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
     match instr {
-        Instr::LoadVar(slot) | Instr::LoadVarForIndexAssignment(slot) | Instr::StoreVar(slot) => {
+        Instr::LoadVar(slot)
+        | Instr::LoadVarForIndexAssignment(slot)
+        | Instr::LoadVarForStructAssignment(slot)
+        | Instr::StoreVar(slot) => {
             remap_slot(slot, slot_remap);
         }
         Instr::CallFevalMultiUsingOutputSlot(_, slot)

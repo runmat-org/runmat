@@ -2842,47 +2842,89 @@ fn structure_growth_fixture() -> runmat_native_codegen::NativeAssembly {
 }
 
 fn member_assignment_fixture() -> runmat_native_codegen::NativeAssembly {
+    member_assignment_fixture_with_root(true, false)
+}
+
+fn member_assignment_fixture_with_root(
+    initialize: bool,
+    nested: bool,
+) -> runmat_native_codegen::NativeAssembly {
     let span = Span { start: 0, end: 4 };
-    let place = MirPlace::Member(
-        Box::new(MirPlace::Local(MirLocalId(0))),
-        runmat_types::MemberName("answer".into()),
-    );
+    let base = if nested {
+        MirPlace::Member(
+            Box::new(MirPlace::Local(MirLocalId(0))),
+            runmat_types::MemberName("child".into()),
+        )
+    } else {
+        MirPlace::Local(MirLocalId(0))
+    };
+    let place = MirPlace::Member(Box::new(base), runmat_types::MemberName("answer".into()));
+    let mut statements = Vec::new();
+    if initialize {
+        statements.push(MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::StructLiteral {
+                    fields: vec![(
+                        runmat_types::MemberName("answer".into()),
+                        MirOperand::Constant(MirConstant::Number("1".into())),
+                    )],
+                },
+            },
+            span,
+        });
+    }
+    statements.extend([
+        MirStmt {
+            kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
+                place: place.clone(),
+                kind: runmat_types::PlaceMutationKind::MemberAssign,
+                creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
+                shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
+            }),
+            span,
+        },
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place,
+                value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
+            },
+            span,
+        },
+    ]);
     lower_body(
         "member_assignment",
         1,
-        vec![
-            MirStmt {
-                kind: MirStmtKind::Assign {
-                    place: MirPlace::Local(MirLocalId(0)),
-                    value: MirRvalue::StructLiteral {
-                        fields: vec![(
-                            runmat_types::MemberName("answer".into()),
-                            MirOperand::Constant(MirConstant::Number("1".into())),
-                        )],
-                    },
-                },
-                span,
-            },
-            MirStmt {
-                kind: MirStmtKind::PlaceMutation(MirPlaceMutation {
-                    place: place.clone(),
-                    kind: runmat_types::PlaceMutationKind::MemberAssign,
-                    creation_policy: runmat_types::AssignmentCreationPolicy::CreateStructFieldPath,
-                    shape_policy: runmat_types::AssignmentShapePolicy::MatlabCompatible,
-                }),
-                span,
-            },
-            MirStmt {
-                kind: MirStmtKind::Assign {
-                    place,
-                    value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("42".into()))),
-                },
-                span,
-            },
-        ],
+        statements,
         MirOperand::Local(MirLocalId(0)),
         span,
     )
+}
+
+#[test]
+fn generic_native_member_assignment_creates_unassigned_roots_and_nested_paths() {
+    for (initialize, nested) in [(false, false), (false, true), (true, true)] {
+        let executor =
+            compile_executor(member_assignment_fixture_with_root(initialize, nested)).unwrap();
+        let output = executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap()
+            .outputs
+            .pop()
+            .unwrap();
+        let Value::Struct(root) = output else {
+            panic!("expected initialized structure")
+        };
+        let structure = if nested {
+            let Some(Value::Struct(child)) = root.fields.get("child") else {
+                panic!("expected initialized nested structure")
+            };
+            child
+        } else {
+            &root
+        };
+        assert_eq!(structure.fields.get("answer"), Some(&Value::Num(42.0)));
+    }
 }
 
 fn multi_assignment_fixture() -> runmat_native_codegen::NativeAssembly {

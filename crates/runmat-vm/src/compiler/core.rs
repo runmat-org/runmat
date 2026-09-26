@@ -2234,7 +2234,7 @@ impl Compiler {
             }
             _ => {
                 let slot = self.mir_place_slot(base)?;
-                self.emit(Instr::LoadVar(slot));
+                self.emit(Instr::LoadVarForStructAssignment(slot));
                 Ok(())
             }
         }
@@ -4495,9 +4495,10 @@ impl Compiler {
 
     pub fn emit(&mut self, instr: Instr) -> usize {
         match &instr {
-            Instr::LoadVar(id) | Instr::LoadVarForIndexAssignment(id) | Instr::StoreVar(id) => {
-                self.ensure_var(*id)
-            }
+            Instr::LoadVar(id)
+            | Instr::LoadVarForIndexAssignment(id)
+            | Instr::LoadVarForStructAssignment(id)
+            | Instr::StoreVar(id) => self.ensure_var(*id),
             _ => {}
         }
         let pc = self.instructions.len();

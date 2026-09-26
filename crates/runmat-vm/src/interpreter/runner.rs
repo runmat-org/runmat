@@ -1063,6 +1063,7 @@ async fn run_interpreter_inner(
             | Instr::LoadLocal(_)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
+            | Instr::LoadVarForStructAssignment(_)
             | Instr::StoreVar(_)
             | Instr::StoreLocal(_)
             | Instr::Swap

@@ -697,6 +697,8 @@ pub enum Instr {
         var_index: usize,
         label: EmitLabel,
     },
+    /// Read an assignment root, creating an empty structure only when unassigned.
+    LoadVarForStructAssignment(usize),
 }
 
 impl Instr {
@@ -719,6 +721,7 @@ impl Instr {
             | Instr::CreateExternalBoundFunctionHandle(_, _)
             | Instr::LoadVar(_)
             | Instr::LoadVarForIndexAssignment(_)
+            | Instr::LoadVarForStructAssignment(_)
             | Instr::LoadLocal(_) => effect(0, 1),
             Instr::StoreVar(_)
             | Instr::StoreLocal(_)

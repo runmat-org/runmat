@@ -1,6 +1,32 @@
 use super::*;
+use runmat_value::Value;
 
 impl HostState {
+    pub(in crate::execute) fn assignment_root(
+        &self,
+        slot: usize,
+        create_struct: bool,
+    ) -> NativeExecutorResult<Value> {
+        if self
+            .missing_input_locals
+            .iter()
+            .any(|local| local.0 as usize == slot)
+        {
+            return Err(runmat_runtime::runtime_error::semantic_error(
+                "NotEnoughInputs",
+                "Not enough input arguments.",
+            )
+            .into());
+        }
+        let reference = self.locals.get(slot).copied().ok_or_else(|| {
+            NativeExecutorError::Host("assignment root local is out of bounds".into())
+        })?;
+        if reference.is_null() && create_struct {
+            return Ok(Value::Struct(runmat_value::StructValue::new()));
+        }
+        self.arena.get(reference).cloned()
+    }
+
     pub fn set_local(&mut self, slot: usize, value: NativeValueRef) -> NativeExecutorResult<()> {
         let local = self
             .locals

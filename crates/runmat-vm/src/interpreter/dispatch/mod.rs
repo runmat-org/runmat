@@ -884,7 +884,7 @@ pub async fn dispatch_instruction(
                 DispatchDecision::FallThrough,
             )))
         }
-        Instr::LoadVarForIndexAssignment(index) => {
+        Instr::LoadVarForIndexAssignment(index) | Instr::LoadVarForStructAssignment(index) => {
             if let Some(alias) = global_aliases.get(index) {
                 if let Some(global_value) = crate::runtime::globals::get_global_value(alias) {
                     if *index >= vars.len() {
@@ -907,6 +907,14 @@ pub async fn dispatch_instruction(
                 var_names.get(index),
             ) {
                 if slot_name == *var_name {
+                    if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
+                        let empty = Value::Struct(runmat_value::StructValue::new());
+                        debug::trace_load_var(*pc, *index, &empty);
+                        stack.push(empty);
+                        return Ok(Some(DispatchHandled::Generic(
+                            DispatchDecision::FallThrough,
+                        )));
+                    }
                     let empty = Tensor::new(Vec::new(), vec![0, 0]).map_err(|err| {
                         crate::interpreter::errors::mex(
                             "IndexAssignmentBaseInit",
