@@ -64,6 +64,42 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
         vec![AnalysisNumericalObjectKind::AccuracyReport],
         Some(1),
     );
+    let mut exact_ceiling = plan.input.clone();
+    exact_ceiling.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
+    runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling.clone()).unwrap();
+    exact_ceiling.accuracy_ceiling.maximum_resident_bytes -= 1;
+    assert!(runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling).is_err());
+
+    let mut altered_input = plan.input.clone();
+    altered_input.worker.fixed_memory_bytes.0 += 1;
+    let altered_plan =
+        runmat_analysis_fea::planning::resource::build_resource_plan(altered_input).unwrap();
+    let mut altered_inputs = accuracy_inputs.clone();
+    altered_inputs[3] = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        altered_plan.identity.digest(),
+        &altered_plan.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let altered_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::EvaluateAccuracy,
+        &altered_inputs,
+        vec![AnalysisNumericalObjectKind::AccuracyReport],
+        Some(1),
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::EvaluateAccuracy,
+            host: &altered_host,
+            inputs: &altered_inputs,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("accuracy resource plan differs"));
     let accuracy_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),

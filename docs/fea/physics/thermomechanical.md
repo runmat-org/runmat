@@ -669,9 +669,20 @@ thermal plan, allocation and semantic result identity before preparing shared re
 evidence. The caller must retain the scheduler's response/accounting association: an accounting
 record alone contains no task identity and cannot prove task lineage. CPU and memory usage here
 represent reserved resources over the measured interval, not sampled utilization or peak RSS.
-The shared result-publication path binds this solve evidence to the thermal accuracy report.
-Accuracy, semantic-state and publication tasks do not yet have corresponding FEA phase plans;
-this is explicitly solve-only evidence, not complete study-graph resource qualification.
+The shared result-publication path binds this evidence to the thermal accuracy report. Accuracy
+evaluation now has its own source-bound resource phase (estimation revision 27), shared across
+thermal and structural receipt sources. A borrowed shape projection counts criteria, matching
+evidence, pre-deduplication assumptions and canonical report construction before evaluation; it
+does not compare tolerances or generate the report on the driver. The worker rederives the plan,
+and shared output admission enforces the report envelope. Evaluator collections are preallocated
+from checked counts and sorted in place. These are requested-heap admission estimates, not a
+measured process-memory ceiling.
+
+Measured solve and accuracy attempts are retained in publication usage. Extending usage preserves
+all previously measured phase plans, including observation work. Semantic-state and publication
+tasks still lack corresponding FEA phase plans, so this is not complete study-graph qualification.
+Publication's own final interval must ultimately live in workflow-completion accounting, not in
+the prebuilt source-usage object consumed by that same publication attempt.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

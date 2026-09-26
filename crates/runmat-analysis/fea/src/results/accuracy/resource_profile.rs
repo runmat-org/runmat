@@ -21,7 +21,7 @@ pub struct AccuracyEvaluationResourceProfile {
 /// than selecting a governing value. Thus this traversal performs no accuracy decision.
 ///
 /// The shared canonical profiler accounts value-tree/string/encoding overlap. Additional typed
-/// collection staging covers contribution storage and matching/sort scratch. Caller-owned input
+/// collection staging covers contribution storage and preallocated matching/assumption lists. Caller-owned input
 /// objects and transport output construction are accounted separately by the phase planner.
 pub fn accuracy_evaluation_resource_profile(
     request: &AccuracyEvaluationRequest,
@@ -34,10 +34,23 @@ pub fn accuracy_evaluation_resource_profile(
         .map_err(|error| AccuracyEvaluationError::IdentityEncoding(error.to_string()))?;
     let contributions = bytes::<AccuracyContribution>(request.plan.criteria.len())?;
     let matching = bytes::<&AccuracyEvidence>(evidence.len())?;
-    // Iterator collection can grow its pointer buffer before sorting; reserve two buffers for
-    // that staging and another for stable-sort scratch. The retained canonical shape below
-    // separately includes all assumption strings and their undeduplicated list metadata.
-    let typed = add(contributions, add(add(matching, matching)?, matching)?)?;
+    // Evaluation preallocates matching pointers and pre-deduplication assumptions, then sorts
+    // them in place. Count retained String slots and clones explicitly, without relying on
+    // incidental slack in the shared canonical materialization estimate.
+    let mut assumptions = 0_u64;
+    for criterion in &request.plan.criteria {
+        for item in evidence.iter().filter(|item| {
+            item.target == criterion.target
+                && item.contribution == criterion.contribution
+                && item.kind == criterion.evidence
+        }) {
+            assumptions = add(assumptions, bytes::<String>(item.assumptions.len())?)?;
+            for assumption in &item.assumptions {
+                assumptions = add(assumptions, bytes::<u8>(assumption.len())?)?;
+            }
+        }
+    }
+    let typed = add(contributions, add(matching, assumptions)?)?;
     // Output identity recomputation and final serialization are sequential, not repeated
     // simultaneous copies. Include both input-validation and output-encoding workspaces so
     // their overlap remains admitted even if validation is moved into the output handoff.
