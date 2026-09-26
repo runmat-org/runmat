@@ -57,7 +57,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.sources.reservation_bytes().unwrap().0
                 + grown.observations.reservation_bytes().unwrap().0
                 + grown.realization.reservation_bytes().unwrap().0
-                + grown.property_materialization_bytes.0
+                + grown.property_compilation_bytes.0
         );
         workload.model.sequence.steps[0]
             .accuracy
@@ -121,7 +121,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
             &schedule,
         )
         .unwrap();
-        assert!(facts.property_materialization_bytes.0 > base.property_materialization_bytes.0);
+        assert!(facts.property_compilation_bytes.0 > base.property_compilation_bytes.0);
         assert_eq!(
             facts.properties.solid_materials().len(),
             mesh.topology.volume_elements.len()
@@ -130,7 +130,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = required - facts.property_materialization_bytes.0;
+            .maximum_resident_bytes = required - 1;
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
         );

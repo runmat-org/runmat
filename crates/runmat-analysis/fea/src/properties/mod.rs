@@ -3,7 +3,11 @@
 mod compile;
 mod contract;
 mod identity;
+mod preparation;
 mod realize;
+mod selection;
+
+pub(crate) use preparation::PreparedProperties;
 
 pub use compile::{
     compile_property_map, compile_solid_property_map, compile_structural_property_map,

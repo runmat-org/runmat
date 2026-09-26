@@ -10,7 +10,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 pub struct ThermalPreassemblyResourceFacts {
     pub(crate) properties: crate::properties::CompiledPropertyMap,
-    pub property_materialization_bytes: ByteCount,
+    /// Compiler selection, owned properties and concurrent canonical identity scratch estimate.
+    pub property_compilation_bytes: ByteCount,
     pub history: ThermalHistoryResourceFacts,
     pub operators: ThermalOperatorResourceFacts,
     pub sources: ThermalSourceEvidenceResourceFacts,
@@ -47,59 +48,97 @@ impl ThermalPreassemblyResourceFacts {
         )?;
         let operators = ThermalOperatorResourceFacts::derive(mesh)?;
         operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
-        // Compile ownership once. The map is reused by every time sample; only signal-driven
-        // loads and boundary coefficients are assembled again. Compilation scratch itself is
-        // not bounded by this post-compilation retained-map estimate.
-        let properties = crate::properties::compile_thermal_property_map(model, Some(mesh))
+        let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
+        let observations = ThermalObservationResourceFacts::derive(mesh, step)?;
+        let realization = ThermalRealizationResourceFacts::derive(model, step)?;
+        let base = component_bytes(
+            &history,
+            &operators,
+            &sources,
+            &observations,
+            &realization,
+            model_materialization_bytes,
+        )?;
+        let maximum = step.accuracy.resources.maximum_resident_bytes;
+        require_ceiling(base, maximum)?;
+        // Admit actual selected metadata before owned constitutive/section/audit cloning.
+        // The compiler owns selection for both the profile and materialization passes.
+        let prepared =
+            crate::properties::PreparedProperties::prepare(model, Some(mesh), maximum - base)
+                .map_err(|error| match error {
+                    crate::properties::PropertyCompilationError::ResourceCeiling {
+                        required,
+                        ..
+                    } => match base.checked_add(required) {
+                        Some(required) => ResourcePlanningError::AccuracyCeiling {
+                            resource: "thermal preassembly components",
+                            required,
+                            maximum,
+                        },
+                        None => ResourcePlanningError::Overflow("thermal property compilation"),
+                    },
+                    error => ResourcePlanningError::Invalid(error.to_string()),
+                })?;
+        let property_compilation_bytes = ByteCount(prepared.estimated_resident_bytes);
+        let properties = prepared
+            .materialize()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
-        let property_materialization_bytes = ByteCount(
-            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
-                // This is an already-validated expanded map, not a workload payload: one
-                // authored material can occur on millions of elements. Do not incorrectly
-                // impose the smaller workload encoding limit on that expansion. Arithmetic
-                // remains checked and the resulting residency meets the authored ceiling below.
-                &properties,
-                runmat_canonical_codec::CanonicalLimits::new(
-                    usize::MAX,
-                    usize::MAX,
-                    usize::MAX,
-                    64,
-                ),
-            )
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
-        );
+        properties
+            .validate_thermal_solid_capabilities()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         Ok(Self {
             properties,
-            property_materialization_bytes,
+            property_compilation_bytes,
             history,
             operators,
-            sources: ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?,
-            observations: ThermalObservationResourceFacts::derive(mesh, step)?,
-            realization: ThermalRealizationResourceFacts::derive(model, step)?,
+            sources,
+            observations,
+            realization,
             model_materialization_bytes,
         })
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
-        let observations = self.observations.reservation_bytes()?.0;
-        let realization = self.realization.reservation_bytes()?.0;
-        self.operators
-            .numerical_reservation_bytes(&self.history)?
-            .0
-            .checked_add(self.sources.reservation_bytes()?.0)
-            .and_then(|bytes| bytes.checked_add(self.model_materialization_bytes.0))
-            .and_then(|bytes| bytes.checked_add(observations))
-            .and_then(|bytes| bytes.checked_add(realization))
-            .and_then(|bytes| bytes.checked_add(self.property_materialization_bytes.0))
-            .map(ByteCount)
-            .ok_or(ResourcePlanningError::Overflow(
-                "thermal preassembly reservation",
-            ))
+        component_bytes(
+            &self.history,
+            &self.operators,
+            &self.sources,
+            &self.observations,
+            &self.realization,
+            self.model_materialization_bytes,
+        )?
+        .checked_add(self.property_compilation_bytes.0)
+        .map(ByteCount)
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal preassembly reservation",
+        ))
     }
 
     pub(crate) fn require_fits(&self, maximum: u64) -> Result<(), ResourcePlanningError> {
         require_ceiling(self.reservation_bytes()?.0, maximum)
     }
+}
+
+fn component_bytes(
+    history: &ThermalHistoryResourceFacts,
+    operators: &ThermalOperatorResourceFacts,
+    sources: &ThermalSourceEvidenceResourceFacts,
+    observations: &ThermalObservationResourceFacts,
+    realization: &ThermalRealizationResourceFacts,
+    model: ByteCount,
+) -> Result<u64, ResourcePlanningError> {
+    let observations = observations.reservation_bytes()?.0;
+    let realization = realization.reservation_bytes()?.0;
+    operators
+        .numerical_reservation_bytes(history)?
+        .0
+        .checked_add(sources.reservation_bytes()?.0)
+        .and_then(|bytes| bytes.checked_add(model.0))
+        .and_then(|bytes| bytes.checked_add(observations))
+        .and_then(|bytes| bytes.checked_add(realization))
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal preassembly components",
+        ))
 }
 
 fn require_ceiling(required: u64, maximum: u64) -> Result<(), ResourcePlanningError> {

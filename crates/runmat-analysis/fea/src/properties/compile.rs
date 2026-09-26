@@ -5,19 +5,11 @@ use runmat_analysis_core::{
     PropertyRegionTarget, ShellSectionModel, StructuralElementKind,
 };
 use runmat_execution::Digest;
-use runmat_meshing_core::{
-    CanonicalMeshingContract, SolverMeshArtifact, SolverVolumeElement, StableDigest,
-};
+use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact, SolverVolumeElement};
 use thiserror::Error;
 
+use super::{selection::SelectedProperty, CompiledPropertyMap};
 use crate::physics::structural::topology::{explicit_element_identity, explicit_topology_digest};
-use crate::properties::contract::CompiledPropertySource;
-
-use super::{
-    CompiledBeamProperty, CompiledElementMaterial, CompiledLaminatePly, CompiledPropertyAudit,
-    CompiledPropertyAuditOwner, CompiledPropertyMap, CompiledShellProperty,
-    CompiledShellPropertyOwner,
-};
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum PropertyCompilationError {
@@ -79,9 +71,13 @@ pub enum PropertyCompilationError {
     },
     #[error("compiled property identity encoding failed: {0}")]
     Identity(String),
+    #[error("compiled property resources require {required} bytes, exceeding the {maximum} byte ceiling")]
+    ResourceCeiling { required: u64, maximum: u64 },
+    #[error("compiled property resource planning failed: {0}")]
+    Resource(String),
 }
 
-type Assignment<'a> = (usize, &'a MaterialAssignment, &'a MaterialModel);
+pub(super) type Assignment<'a> = (usize, &'a MaterialAssignment, &'a MaterialModel);
 
 pub fn compile_solid_property_map(
     model: &AnalysisModel,
@@ -150,6 +146,13 @@ pub fn compile_property_map(
     model: &AnalysisModel,
     mesh: Option<&SolverMeshArtifact>,
 ) -> Result<CompiledPropertyMap, PropertyCompilationError> {
+    super::preparation::PreparedProperties::prepare(model, mesh, u64::MAX)?.materialize()
+}
+
+pub(super) fn validate_mesh(
+    model: &AnalysisModel,
+    mesh: Option<&SolverMeshArtifact>,
+) -> Result<(), PropertyCompilationError> {
     if let Some(mesh) = mesh {
         mesh.validate_canonical()
             .map_err(|error| PropertyCompilationError::InvalidMesh(error.to_string()))?;
@@ -160,42 +163,33 @@ pub fn compile_property_map(
             });
         }
     }
-    let materials = material_inventory(model)?;
-    let mut audit = Vec::new();
-    let solid_materials = if let Some(mesh) = mesh {
-        compile_solids(model, mesh, &materials, &mut audit)?
-    } else {
-        BTreeMap::new()
-    };
-    let (explicit_topology_digest, beam_properties, shell_properties) =
-        compile_explicit(model, &materials, &mut audit)?;
-
-    CompiledPropertyMap::new(
-        CompiledPropertySource {
-            geometry_id: model.geometry_id.clone(),
-            geometry_revision: model.geometry_revision,
-            mesh_digest: mesh.map(|mesh| mesh.canonical_digest),
-            explicit_topology_digest,
-        },
-        solid_materials,
-        beam_properties,
-        shell_properties,
-        audit,
-    )
-    .map_err(PropertyCompilationError::Identity)
+    Ok(())
 }
 
-fn compile_solids(
-    model: &AnalysisModel,
-    mesh: &SolverMeshArtifact,
-    materials: &BTreeMap<&str, &MaterialModel>,
-    audit: &mut Vec<CompiledPropertyAudit>,
-) -> Result<BTreeMap<StableDigest, CompiledElementMaterial>, PropertyCompilationError> {
+/// Resolve ownership once per traversal for both profiling and owned materialization.
+/// Selection emits borrowed metadata only; the caller owns allocation and admission policy.
+pub(super) fn visit<'a>(
+    model: &'a AnalysisModel,
+    mesh: Option<&'a SolverMeshArtifact>,
+    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
+) -> Result<Option<Digest>, PropertyCompilationError> {
+    if let Some(mesh) = mesh {
+        visit_solids(model, mesh, materials, visitor)?;
+    }
+    visit_explicit(model, materials, visitor)
+}
+
+fn visit_solids<'a>(
+    model: &'a AnalysisModel,
+    mesh: &'a SolverMeshArtifact,
+    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
+) -> Result<(), PropertyCompilationError> {
     let assignments = assignments_for(model, materials, |target| {
         matches!(target, PropertyRegionTarget::Solid(_))
     })?;
     let mut matched = BTreeSet::new();
-    let mut compiled = BTreeMap::new();
     for element in &mesh.topology.volume_elements {
         let matching = assignments
             .iter()
@@ -207,37 +201,25 @@ fn compile_solids(
             matching,
         )?;
         matched.insert(*assignment_index);
-        compiled.insert(
-            element.stable_identity,
-            CompiledElementMaterial {
-                element_id: element.element_id,
-                element_identity: element.stable_identity,
-                material: (*material).clone(),
-            },
-        );
-        audit.push(audit_entry(
-            element.stable_identity,
-            *assignment_index,
+        visitor(SelectedProperty::Solid {
+            element_id: element.element_id,
+            identity: element.stable_identity,
+            material,
+            assignment_index: *assignment_index,
             assignment,
-        )?);
+        })?;
     }
     reject_unmatched("solid", &assignments, &matched)?;
-    Ok(compiled)
+    Ok(())
 }
 
-type ExplicitMaps = (
-    Option<Digest>,
-    BTreeMap<StableDigest, CompiledBeamProperty>,
-    BTreeMap<StableDigest, CompiledShellProperty>,
-);
-
-fn compile_explicit(
-    model: &AnalysisModel,
-    materials: &BTreeMap<&str, &MaterialModel>,
-    audit: &mut Vec<CompiledPropertyAudit>,
-) -> Result<ExplicitMaps, PropertyCompilationError> {
+fn visit_explicit<'a>(
+    model: &'a AnalysisModel,
+    materials: &'a BTreeMap<&'a str, &'a MaterialModel>,
+    visitor: &mut impl FnMut(SelectedProperty<'a>) -> Result<(), PropertyCompilationError>,
+) -> Result<Option<Digest>, PropertyCompilationError> {
     let Some(structural) = model.structural.as_ref() else {
-        return Ok((None, BTreeMap::new(), BTreeMap::new()));
+        return Ok(None);
     };
     let topology_digest = explicit_topology_digest(structural)
         .map_err(|error| PropertyCompilationError::InvalidExplicitTopology(error.to_string()))?;
@@ -249,8 +231,6 @@ fn compile_explicit(
     })?;
     let mut matched_beams = BTreeSet::new();
     let mut matched_shells = BTreeSet::new();
-    let mut beam_properties = BTreeMap::new();
-    let mut shell_properties = BTreeMap::new();
 
     for element in &structural.elements {
         let identity = explicit_element_identity(
@@ -293,17 +273,15 @@ fn compile_explicit(
                     });
                 };
                 matched_beams.insert(*assignment_index);
-                beam_properties.insert(
+                visitor(SelectedProperty::Beam {
+                    element_id: &element.element_id,
                     identity,
-                    CompiledBeamProperty {
-                        element_id: element.element_id.clone(),
-                        element_identity: identity,
-                        material: (*material).clone(),
-                        section: section.clone(),
-                        reference_axis: beam.reference_axis,
-                    },
-                );
-                audit.push(audit_entry(identity, *assignment_index, assignment)?);
+                    material,
+                    assignment_index: *assignment_index,
+                    assignment,
+                    section,
+                    reference_axis: beam.reference_axis,
+                })?;
             }
             StructuralElementKind::Shell(shell) => {
                 let mut sections = structural
@@ -321,7 +299,7 @@ fn compile_explicit(
                 let matching = shells.iter().filter(|(_, assignment, _)| {
                     explicit_scope_matches(assignment.target.scope(), &element.region_id)
                 });
-                let owner = match section {
+                match section {
                     ShellSectionModel::Homogeneous(section) => {
                         let (assignment_index, assignment, material) = require_one(
                             "shell",
@@ -339,11 +317,15 @@ fn compile_explicit(
                             ],
                         )?;
                         matched_shells.insert(*assignment_index);
-                        audit.push(audit_entry(identity, *assignment_index, assignment)?);
-                        CompiledShellPropertyOwner::Homogeneous {
-                            material: Box::new((*material).clone()),
-                            section: section.clone(),
-                        }
+                        visitor(SelectedProperty::Shell {
+                            element_id: &element.element_id,
+                            identity,
+                            material,
+                            assignment_index: *assignment_index,
+                            assignment,
+                            section,
+                            reference_axis: shell.reference_axis,
+                        })?;
                     }
                     ShellSectionModel::Laminate(section) => {
                         let assignment_count = matching.count();
@@ -353,66 +335,41 @@ fn compile_explicit(
                                 assignment_count,
                             });
                         }
-                        let plies = section
-                            .plies
-                            .iter()
-                            .map(|definition| {
-                                let material = materials
-                                    .get(definition.material_id.as_str())
-                                    .copied()
-                                    .ok_or_else(|| {
-                                        PropertyCompilationError::UnknownPlyMaterial {
-                                            section_id: section.section_id.clone(),
-                                            material_id: definition.material_id.clone(),
-                                        }
-                                    })?;
-                                require_capabilities(
-                                    "laminate ply",
-                                    &element.element_id,
-                                    material,
-                                    &[
-                                        MaterialCapability::LaminaElasticity,
-                                        MaterialCapability::MassDensity,
-                                    ],
-                                )?;
-                                Ok(CompiledLaminatePly {
-                                    definition: definition.clone(),
-                                    material: material.clone(),
-                                })
-                            })
-                            .collect::<Result<Vec<_>, _>>()?;
-                        audit.push(CompiledPropertyAudit {
-                            element_identity: identity,
-                            owner: CompiledPropertyAuditOwner::Laminate {
-                                section_id: section.section_id.clone(),
-                                ordered_ply_material_ids: section
-                                    .plies
-                                    .iter()
-                                    .map(|ply| ply.material_id.clone())
-                                    .collect(),
-                            },
-                        });
-                        CompiledShellPropertyOwner::Laminate {
-                            section: section.clone(),
-                            plies,
+                        // Validate the complete ply list before exposing an owner to either
+                        // sink. Profiling and materialization therefore share every check.
+                        for definition in &section.plies {
+                            let material = materials
+                                .get(definition.material_id.as_str())
+                                .copied()
+                                .ok_or_else(|| PropertyCompilationError::UnknownPlyMaterial {
+                                    section_id: section.section_id.clone(),
+                                    material_id: definition.material_id.clone(),
+                                })?;
+                            require_capabilities(
+                                "laminate ply",
+                                &element.element_id,
+                                material,
+                                &[
+                                    MaterialCapability::LaminaElasticity,
+                                    MaterialCapability::MassDensity,
+                                ],
+                            )?;
                         }
+                        visitor(SelectedProperty::Laminate {
+                            element_id: &element.element_id,
+                            identity,
+                            section,
+                            reference_axis: shell.reference_axis,
+                            materials,
+                        })?;
                     }
-                };
-                shell_properties.insert(
-                    identity,
-                    CompiledShellProperty {
-                        element_id: element.element_id.clone(),
-                        element_identity: identity,
-                        reference_axis: shell.reference_axis,
-                        owner,
-                    },
-                );
+                }
             }
         }
     }
     reject_unmatched("beam", &beams, &matched_beams)?;
     reject_unmatched("shell", &shells, &matched_shells)?;
-    Ok((Some(topology_digest), beam_properties, shell_properties))
+    Ok(Some(topology_digest))
 }
 
 fn require_capabilities(
@@ -436,7 +393,7 @@ fn require_capabilities(
     Ok(())
 }
 
-fn material_inventory(
+pub(super) fn material_inventory(
     model: &AnalysisModel,
 ) -> Result<BTreeMap<&str, &MaterialModel>, PropertyCompilationError> {
     let mut materials = BTreeMap::new();
@@ -476,12 +433,12 @@ fn assignments_for<'a>(
         .collect()
 }
 
-fn require_one<'a>(
+fn require_one<'a, 'b>(
     role: &'static str,
     element_id: impl FnOnce() -> String,
     region_id: &str,
-    mut matching: impl Iterator<Item = &'a Assignment<'a>>,
-) -> Result<&'a Assignment<'a>, PropertyCompilationError> {
+    mut matching: impl Iterator<Item = &'b Assignment<'a>>,
+) -> Result<&'b Assignment<'a>, PropertyCompilationError> {
     let first = matching.next();
     let remaining = matching.count();
     if remaining == 0 {
@@ -513,24 +470,6 @@ fn reject_unmatched(
         });
     }
     Ok(())
-}
-
-fn audit_entry(
-    identity: StableDigest,
-    assignment_index: usize,
-    assignment: &MaterialAssignment,
-) -> Result<CompiledPropertyAudit, PropertyCompilationError> {
-    Ok(CompiledPropertyAudit {
-        element_identity: identity,
-        owner: CompiledPropertyAuditOwner::MaterialAssignment {
-            assignment_index: u64::try_from(assignment_index).map_err(|_| {
-                PropertyCompilationError::Identity("assignment index exceeds u64".into())
-            })?,
-            expected_material_id: assignment.expected_material_id.clone(),
-            assigned_material_id: assignment.assigned_material_id.clone(),
-            confidence: assignment.confidence,
-        },
-    })
 }
 
 fn solid_scope_matches(scope: &PropertyRegionScope, element: &SolverVolumeElement) -> bool {
