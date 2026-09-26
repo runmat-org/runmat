@@ -46,6 +46,11 @@ export interface RunMatFilesystemProvider {
   removeDir?(path: string): RunMatMaybePromise<void>;
   removeDirAll?(path: string): RunMatMaybePromise<void>;
   rename?(from: string, to: string): RunMatMaybePromise<void>;
+  /** Replace a compatible destination in one provider-owned rename.
+   * Reject unsupported/type/nonempty-directory cases before mutation.
+   * Never emulate this by deleting the destination and then calling rename.
+   */
+  renameReplace?(from: string, to: string): RunMatMaybePromise<void>;
   setReadonly?(path: string, readonly: boolean): RunMatMaybePromise<void>;
   selectFileOpen?(
     request: RunMatOpenFileDialogRequest,
