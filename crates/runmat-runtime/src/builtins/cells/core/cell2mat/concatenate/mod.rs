@@ -4,7 +4,10 @@ mod destination;
 mod logical;
 mod numeric;
 
-use runmat_value::{ComplexTensor, IntegerComplexStorage, LogicalArray, Tensor, Value};
+use runmat_value::{
+    ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage, LogicalArray, Tensor,
+    Value,
+};
 
 use super::error::{cell2mat_error_with_message, CELL2MAT_ERROR_INTERNAL};
 use super::input::{self, CellEntry, ElementKind};
@@ -34,9 +37,28 @@ fn numeric(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinResult<Value> {
 }
 
 fn complex(entries: &[CellEntry], plan: &AssemblyPlan) -> BuiltinResult<Value> {
-    let mut data = vec![(0.0, 0.0); plan.output_len];
+    let prototype = entries
+        .iter()
+        .find_map(|entry| match &entry.data {
+            input::EntryData::Complex(storage) => Some(storage),
+            _ => None,
+        })
+        .ok_or_else(|| internal("complex contents have no storage".into()))?;
+    let mut data = match prototype {
+        ComplexStorage::F64(_) => {
+            ComplexStorage::F64(vec![ComplexElement(0.0, 0.0); plan.output_len].into())
+        }
+        ComplexStorage::F32(_) => {
+            ComplexStorage::F32(vec![ComplexElement(0.0, 0.0); plan.output_len].into())
+        }
+        ComplexStorage::Integer(_) => {
+            return Err(internal(
+                "integer complex contents reached floating assembly".into(),
+            ))
+        }
+    };
     complex::copy_floating(entries, plan, &mut data)?;
-    ComplexTensor::new(data, plan.output_shape.clone())
+    ComplexTensor::from_complex_storage(data, plan.output_shape.clone())
         .map(Value::ComplexTensor)
         .map_err(|error| internal(error.to_string()))
 }

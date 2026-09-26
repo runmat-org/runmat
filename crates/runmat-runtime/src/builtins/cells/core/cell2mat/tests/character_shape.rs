@@ -1,6 +1,14 @@
 use super::*;
 use runmat_value::{CharArray, Tensor};
 
+#[test]
+fn nd_character_contents_are_rejected_without_truncating_shape() {
+    let chars = CharArray::new_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2]).unwrap();
+    let cell = crate::make_cell(vec![Value::CharArray(chars)], 1, 1).unwrap();
+    let error = run(cell).unwrap_err();
+    assert!(error.to_string().contains("2-D character array"));
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn char_cell() {

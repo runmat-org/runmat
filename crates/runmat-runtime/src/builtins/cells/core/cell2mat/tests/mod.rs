@@ -1,6 +1,7 @@
 mod basic;
 mod character_shape;
 mod complex_integer;
+mod complex_floating;
 mod integer;
 mod providers;
 

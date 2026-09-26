@@ -1,4 +1,6 @@
-use runmat_value::{IntegerStorage, LogicalArray, NumericStorage, Value};
+use runmat_value::{
+    ComplexElement, ComplexStorage, IntegerStorage, LogicalArray, NumericStorage, Value,
+};
 
 use super::{CellEntry, ElementKind, EntryData};
 use crate::builtins::cells::core::cell2mat::error::{
@@ -32,7 +34,9 @@ pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
         Value::Complex(real, imaginary) => CellEntry {
             kind: ElementKind::Complex,
             shape: vec![1, 1],
-            data: EntryData::Complex(vec![(real, imaginary)]),
+            data: EntryData::Complex(ComplexStorage::F64(
+                vec![ComplexElement(real, imaginary)].into(),
+            )),
         },
         Value::ComplexTensor(tensor) => {
             let shape = normalized_shape(tensor.shape.clone());
@@ -46,13 +50,13 @@ pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
                 CellEntry {
                     kind: ElementKind::Complex,
                     shape,
-                    data: EntryData::Complex(tensor.materialize_f64()),
+                    data: EntryData::Complex(tensor.into_complex_storage()),
                 }
             }
         }
         Value::CharArray(array) => CellEntry {
             kind: ElementKind::Character,
-            shape: vec![array.rows, array.cols],
+            shape: array.shape().to_vec(),
             data: EntryData::Character(array.data),
         },
         Value::Cell(_) => return Err(invalid("nested cell arrays are not supported")),
