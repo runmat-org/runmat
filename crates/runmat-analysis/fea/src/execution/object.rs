@@ -132,6 +132,16 @@ pub struct AnalysisObjectManifest {
 }
 
 impl AnalysisObjectManifest {
+    /// Requested Rust storage for the borrowed identity sort buffer, excluding allocator overhead.
+    pub fn validation_scratch_bytes(partition_count: usize) -> AnalysisExecutionResult<u64> {
+        partition_count
+            .checked_mul(std::mem::size_of::<&Digest>())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or(AnalysisExecutionError::Limit(
+                "manifest validation scratch overflow",
+            ))
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         if self.schema_version != 1
             || self.chunks.is_empty()
@@ -166,18 +176,24 @@ impl AnalysisObjectManifest {
         let mut expected_partition_ordinal = 0_u32;
         let mut expected_first_chunk = 0_u32;
         let mut partition_bytes = 0_u64;
-        let mut partition_identities = std::collections::BTreeSet::new();
+        Self::validation_scratch_bytes(self.partitions.len())?;
+        let mut partition_identities = Vec::new();
+        partition_identities
+            .try_reserve_exact(self.partitions.len())
+            .map_err(|_| {
+                AnalysisExecutionError::Limit("cannot reserve manifest validation scratch")
+            })?;
         for partition in &self.partitions {
             if partition.ordinal != expected_partition_ordinal
                 || partition.first_chunk_ordinal != expected_first_chunk
                 || partition.encoded_length == 0
                 || partition.chunk_count == 0
-                || !partition_identities.insert(partition.logical_identity)
             {
                 return Err(AnalysisExecutionError::Invalid(
                     "payload partitions must be non-empty, unique, contiguous, and ordered".into(),
                 ));
             }
+            partition_identities.push(&partition.logical_identity);
             let end = partition
                 .first_chunk_ordinal
                 .checked_add(partition.chunk_count)
@@ -205,6 +221,15 @@ impl AnalysisObjectManifest {
                 .checked_add(1)
                 .ok_or(AnalysisExecutionError::Limit("partition ordinal overflow"))?;
             expected_first_chunk = end;
+        }
+        partition_identities.sort_unstable();
+        if partition_identities
+            .windows(2)
+            .any(|pair| pair[0] == pair[1])
+        {
+            return Err(AnalysisExecutionError::Invalid(
+                "payload partitions must be non-empty, unique, contiguous, and ordered".into(),
+            ));
         }
         if expected_first_chunk as usize != self.chunks.len()
             || partition_bytes != self.encoded_length

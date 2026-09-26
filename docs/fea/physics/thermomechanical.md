@@ -530,6 +530,16 @@ strings. This is post-solve wire admission, not pre-solve transport or complete 
 admission: builder uniqueness trees, artifact inventory validation and object-conversion overlap
 still require explicit memory accounting.
 
+Bulk numerical-manifest and shared artifact-inventory uniqueness validation now uses one fallibly
+reserved vector of borrowed keys and in-place unstable sorting instead of tree nodes. The respective
+owners expose checked requested-slot byte counts; transport projection includes the manifest's
+validation component. Canonical ordering and accepted inventories are unchanged. Artifact validation
+also preserves earlier error precedence; for a manifest with multiple simultaneous defects, the
+reported defect may change. These components exclude error strings, allocator overhead and RSS.
+The isolated manifest-validation test measures 8, 512 and 32,768 requested heap bytes for
+1, 64 and 4,096 partitions on the tested 64-bit host, exactly matching the reserved reference slots.
+Incremental builder uniqueness storage and object-conversion overlap remain separate admission work.
+
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
 counts and total-byte arithmetic before changing retained content. Canonical chunks still restart

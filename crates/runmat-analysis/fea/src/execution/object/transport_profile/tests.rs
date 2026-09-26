@@ -26,6 +26,10 @@ fn projection_counts_each_partition_and_bounds_actual_root_wire() {
         let actual = builder.finish().unwrap();
         assert_eq!(profile.partition_count, 3);
         assert_eq!(
+            profile.manifest_validation_scratch_bytes,
+            AnalysisObjectManifest::validation_scratch_bytes(3).unwrap()
+        );
+        assert_eq!(
             profile.chunk_count_upper_bound as usize,
             actual.chunks.len()
         );

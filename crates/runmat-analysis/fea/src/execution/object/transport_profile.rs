@@ -10,6 +10,8 @@ pub struct AnalysisTransportProfile {
     pub chunk_count_upper_bound: u64,
     pub payload_bytes_upper_bound: u64,
     pub largest_chunk_bytes_upper_bound: u64,
+    /// Requested borrowed-key slots used by manifest validation, not canonical encoding scratch.
+    pub manifest_validation_scratch_bytes: u64,
     pub root: SerializedCanonicalProfile,
     pub total_bytes_upper_bound: u64,
 }
@@ -116,6 +118,9 @@ impl AnalysisTransportProfiler {
             chunk_count_upper_bound: self.chunks,
             payload_bytes_upper_bound: self.payload_bytes,
             largest_chunk_bytes_upper_bound: self.largest_chunk,
+            manifest_validation_scratch_bytes: AnalysisObjectManifest::validation_scratch_bytes(
+                self.partitions as usize,
+            )?,
             total_bytes_upper_bound: self
                 .payload_bytes
                 .checked_add(root.encoded_bytes_upper_bound)

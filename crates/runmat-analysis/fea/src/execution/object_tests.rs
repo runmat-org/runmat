@@ -100,3 +100,54 @@ fn valid_hashes_do_not_admit_noncanonical_chunk_lengths() {
     object.manifest.validate().unwrap();
     assert!(object.revalidate(4).is_err());
 }
+
+#[test]
+fn manifest_validation_uses_checked_borrowed_slots_without_reordering() {
+    let original = prepared(4).manifest;
+    let mut manifest = original.clone();
+    // Logical identities need not be sorted in canonical semantic order.
+    manifest.partitions[0].logical_identity = Digest::from_bytes([255; 32]);
+    manifest.partitions[1].logical_identity = Digest::from_bytes([0; 32]);
+    let before = manifest.clone();
+    manifest.validate().unwrap();
+    assert_eq!(manifest, before);
+    assert_eq!(
+        AnalysisObjectManifest::validation_scratch_bytes(0).unwrap(),
+        0
+    );
+    assert_eq!(
+        AnalysisObjectManifest::validation_scratch_bytes(2).unwrap(),
+        (2 * std::mem::size_of::<&Digest>()) as u64
+    );
+    assert!(AnalysisObjectManifest::validation_scratch_bytes(usize::MAX).is_err());
+    manifest.partitions[1].logical_identity = manifest.partitions[0].logical_identity;
+    assert!(matches!(
+        manifest.validate(),
+        Err(AnalysisExecutionError::Invalid(_))
+    ));
+}
+
+#[test]
+fn manifest_validation_rejects_nonadjacent_duplicate_identities() {
+    let mut builder = AnalysisPayloadBuilder::new(
+        AnalysisNumericalObjectKind::SolverResult,
+        Digest::sha256(b"result"),
+        4,
+    )
+    .unwrap();
+    for id in [3, 1, 2] {
+        builder
+            .push(AnalysisPayloadPartition {
+                logical_identity: Digest::from_bytes([id; 32]),
+                payload: b"data",
+            })
+            .unwrap();
+    }
+    let mut manifest = builder.finish().unwrap().manifest;
+    manifest.validate().unwrap();
+    manifest.partitions[2].logical_identity = manifest.partitions[0].logical_identity;
+    assert!(matches!(
+        manifest.validate(),
+        Err(AnalysisExecutionError::Invalid(_))
+    ));
+}
