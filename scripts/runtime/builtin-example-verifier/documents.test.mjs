@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectCases } from "./documents.mjs";
+import { collectCases, matchesVerification } from "./documents.mjs";
 
 function collect(verification, category = "general") {
     return collectCases([{
@@ -40,4 +40,15 @@ test("empty Figure assertions preserve the original program", () => {
 test("expected errors are not rewritten as assertion code", () => {
     const result = collect({ ExpectedError: { identifier: "RunMat:test:Expected" } });
     assert.equal(result.input, "x = 1;\n");
+});
+
+test("Figure oracle requires its minimum distinct rendered count", () => {
+    const example = collect({ Figure: { minimum_figures: 2, assertions: "" } });
+    const matches = (result, image = "figure.png") => matchesVerification(example, result, "", "", false, image);
+    assert.equal(matches({ renderedFigureCount: 1 }), false);
+    assert.equal(matches({ renderedFigureCount: 2 }), true);
+    assert.equal(matches({ figureVerified: true }), false);
+    assert.equal(matches({ renderedFigureCount: 2, figureImageError: "failed" }), false);
+    assert.equal(matches({ renderedFigureCount: 2 }, ""), false);
+    assert.equal(matches({ renderedFigureCount: 2, figureVerified: true }, ""), true);
 });

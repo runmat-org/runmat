@@ -1,5 +1,9 @@
+import { createFigureObserver, captureFigureEvidence } from "./figure-evidence.mjs";
+
 export function createRunnerHtml(timeoutMs, concurrency, logIntervalMs, enableGpu = true) {
     const workerSource = [
+        createFigureObserver.toString(),
+        captureFigureEvidence.toString(),
         "self.onmessage = async (event) => {",
         "  const testCase = event.data;",
         "  const wasmModuleUrl = testCase.wasmModuleUrl;",
@@ -170,6 +174,8 @@ export function createRunnerHtml(timeoutMs, concurrency, logIntervalMs, enableGp
         "  let errorIdentifier = \"\";",
         "  let figurePngBase64 = \"\";",
         "  let figureImageError = \"\";",
+        "  let renderedFigureCount = 0;",
+        "  const figures = createFigureObserver();",
         "  let plotSurfaceId = null;",
         "  const normalizeErrorText = (errorValue) => {",
         "    if (typeof errorValue === \"string\") return errorValue;",
@@ -219,6 +225,10 @@ export function createRunnerHtml(timeoutMs, concurrency, logIntervalMs, enableGp
         "    const module = await import(wasmModuleUrl);",
         "    if (typeof module.default === \"function\") {",
         "      await module.default();",
+        "    }",
+        "    if (testCase.verification?.Figure) {",
+        "      if (typeof module.onFigureEvent !== \"function\") throw new Error(\"Figure lifecycle observation is unavailable\");",
+        "      module.onFigureEvent(figures.observe);",
         "    }",
         "    const fsProvider = createInMemoryFsProvider();",
         "    fsProvider.createDirAll(\"/tmp\");",
@@ -279,14 +289,13 @@ export function createRunnerHtml(timeoutMs, concurrency, logIntervalMs, enableGp
         "      }",
         "      if (testCase.isPlotExample === true) {",
         "        try {",
-        "          if (typeof module.renderFigureImage === \"function\") {",
+        "          {",
         "            const handle = typeof module.currentFigureHandle === \"function\" ? await Promise.resolve(module.currentFigureHandle()) : undefined;",
         "            const numericHandle = typeof handle === \"number\" && Number.isFinite(handle) ? handle : undefined;",
-        "            if (typeof plotSurfaceId === \"number\" && Number.isFinite(plotSurfaceId) && typeof numericHandle === \"number\" && typeof module.presentFigureOnSurface === \"function\") {",
-        "              try { await Promise.resolve(module.presentFigureOnSurface(plotSurfaceId, numericHandle)); } catch (_presentErr) {}",
-        "            }",
-        "            const pngBytes = await Promise.resolve(module.renderFigureImage(numericHandle, 1280, 720));",
-        "            const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes || []);",
+        "            const handles = testCase.verification?.Figure ? figures.snapshot() : (numericHandle === undefined ? [] : [numericHandle]);",
+        "            const captured = await captureFigureEvidence(module, handles, plotSurfaceId);",
+        "            renderedFigureCount = captured.renderedFigureCount;",
+        "            const bytes = captured.image;",
         "            if (bytes.length > 0) {",
         "              let binary = \"\";",
         "              const chunkSize = 0x8000;",
@@ -318,7 +327,7 @@ export function createRunnerHtml(timeoutMs, concurrency, logIntervalMs, enableGp
         "  } catch (err) {",
         "    errorText = err instanceof Error ? err.message : String(err);",
         "  }",
-        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, errorIdentifier, figurePngBase64, figureImageError });",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, errorIdentifier, figurePngBase64, figureImageError, renderedFigureCount });",
         "};"
     ].join("\n");
     return `<!doctype html>

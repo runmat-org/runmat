@@ -188,7 +188,12 @@ export function matchesVerification(testCase, result, normalizedExpected, normal
                 && result?.errorIdentifier === identifier;
         }
         if ("Figure" in verification) {
-            return !hasExecutionError && (Boolean(imagePath) || result?.figureVerified === true);
+            const minimum = verification.Figure.minimum_figures;
+            return !hasExecutionError && !result?.figureImageError
+                && Number.isSafeInteger(minimum) && minimum > 0
+                && Number.isSafeInteger(result?.renderedFigureCount)
+                && result.renderedFigureCount >= minimum
+                && (Boolean(imagePath) || result?.figureVerified === true);
         }
     }
     return testCase.hasExpectedOutput ? normalizedExpected === normalizedActual : !hasExecutionError;

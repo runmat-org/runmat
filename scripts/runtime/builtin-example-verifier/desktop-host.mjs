@@ -60,7 +60,11 @@ async function runDesktopHostCase(binary, root, testCase, timeoutMs) {
             valueText: result.valueText,
             errorText: result.errorText,
             errorIdentifier: result.errorIdentifier,
-            figureVerified: result.interactions.figurePresentationsMatched
+            figureVerified: result.interactions.figurePresentationsMatched,
+            // The current protocol counts presentations, not distinct handles.
+            // Repeated presentations establish only one figure's existence.
+            renderedFigureCount: result.interactions.figurePresentationsMatched
+                && result.interactions.observedFigureCount > 0 ? 1 : 0
         };
     } catch (error) {
         return failure(testCase.id, `Desktop host adapter: ${error instanceof Error ? error.message : String(error)}`, "");
