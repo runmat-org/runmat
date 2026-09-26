@@ -1,4 +1,3 @@
-pub(crate) mod specification;
 #[cfg(test)]
 mod tests;
 use runmat_macros::runtime_builtin;
@@ -9,6 +8,11 @@ use runmat_value::{CharArray, Value};
     builtin_path = "crate::builtins::io::repl_fs::path_syntax::pathsep"
 )]
 async fn pathsep_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PATHSEP_DESCRIPTOR,
+        &runmat_builtins::PATHSEP_ERROR_TOO_MANY_OUTPUTS,
+        "pathsep",
+    )?;
     if !args.is_empty() {
         return Err(super::error::catalog(
             &runmat_builtins::PATHSEP_ERROR_ARITY,

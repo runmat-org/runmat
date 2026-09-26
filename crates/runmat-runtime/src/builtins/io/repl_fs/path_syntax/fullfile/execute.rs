@@ -5,6 +5,11 @@ use crate::BuiltinResult;
 const IDENTITY: &str = "fullfile";
 
 pub(super) async fn run(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::FULLFILE_DESCRIPTOR,
+        &runmat_builtins::FULLFILE_ERROR_TOO_MANY_OUTPUTS,
+        IDENTITY,
+    )?;
     if args.is_empty() {
         return Err(super::super::error::catalog(
             &runmat_builtins::FULLFILE_ERROR_NOT_ENOUGH_INPUTS,
