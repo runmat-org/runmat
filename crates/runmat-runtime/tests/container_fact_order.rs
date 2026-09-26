@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_builtins::{catalog::inference::infer_catalog_call, STRUCT_CATALOG_ENTRY};
+use runmat_builtins::{infer_catalog_call, STRUCT_CATALOG_ENTRY};
 use runmat_runtime::{call_builtin_async_with_outputs, value_fact::value_fact};
 use runmat_types::{CallRequest, LiteralContext, LiteralValue, OutputSelection, ValueKindFact};
 use runmat_value::{CellArray, IntValue, Value};
