@@ -4290,10 +4290,7 @@ where
         let mut reg = registry();
         let handle = target.unwrap_or(reg.current);
         let axes_indices = (0..axes_count).collect::<Vec<_>>();
-        {
-            let state = get_state_mut(&mut reg, handle);
-            state.figure.set_subplot_grid(axes_count, 1);
-        }
+        clear_axes::configure_grid(&mut reg, handle, axes_count, 1);
         clear_axes::clear_registered_axes(&mut reg, handle, &axes_indices);
         {
             let state = get_state_mut(&mut reg, handle);
@@ -5548,8 +5545,8 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     }
     let mut reg = registry();
     let handle = reg.current;
+    clear_axes::configure_grid(&mut reg, handle, rows, cols);
     let state = get_state_mut(&mut reg, handle);
-    state.figure.set_subplot_grid(rows, cols);
     state.active_axes = index;
     state.figure.set_active_axes_index(index);
     Ok(())

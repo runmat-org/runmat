@@ -51,6 +51,35 @@ pub(super) fn clear_registered_axes(
     });
 }
 
+/// Grid expansion can reclaim former overlay axes. Compact their plot data
+/// while the original index map still exists, then replace their metadata.
+pub(super) fn configure_grid(
+    reg: &mut PlotRegistry,
+    handle: FigureHandle,
+    rows: usize,
+    cols: usize,
+) {
+    let state = get_state_mut(reg, handle);
+    let grid_axes = rows.saturating_mul(cols);
+    let reclaimed: Vec<_> = state
+        .figure
+        .axes_metadata
+        .iter()
+        .enumerate()
+        .filter_map(|(index, meta)| {
+            (index < grid_axes && meta.overlay_parent.is_some()).then_some(index)
+        })
+        .collect();
+    if !reclaimed.is_empty() {
+        clear_registered_axes(reg, handle, &reclaimed);
+        reg.plot_children.retain(|_, child| !matches!(child,
+            PlotChildHandleState::ColorBar(bar) if bar.figure == handle && reclaimed.contains(&bar.axes_index)));
+    }
+    get_state_mut(reg, handle)
+        .figure
+        .set_subplot_grid(rows, cols);
+}
+
 fn remap_indices(child: &mut PlotChildHandleState, mapping: &[Option<usize>]) -> bool {
     let remap = |index: &mut usize| {
         let Some(Some(next)) = mapping.get(*index) else {

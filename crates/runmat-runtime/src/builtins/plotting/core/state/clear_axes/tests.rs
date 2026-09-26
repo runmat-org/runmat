@@ -8,6 +8,32 @@ fn line(y: f64) -> LinePlot {
 }
 
 #[test]
+fn grid_reclaims_overlay_before_indices_are_compacted() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    reset_plot_state();
+    let mut figure = Figure::new();
+    let overlay = figure.ensure_overlay_axes(0);
+    let removed_index = figure.add_line_plot_on_axes(line(10.), overlay);
+    let survivor_index = figure.add_line_plot_on_axes(line(20.), 0);
+    let handle = import_figure(figure);
+    let removed = register_line_handle(handle, overlay, removed_index);
+    let survivor = register_line_handle(handle, 0, survivor_index);
+    let bar = ensure_colorbar_for_axes(handle, overlay).unwrap();
+    configure_subplot(1, 2, 1).unwrap();
+    assert!(plot_child_handle_snapshot(removed).is_err());
+    assert!(plot_child_handle_snapshot(bar).is_err());
+    assert_eq!(
+        plot_child_handle_snapshot(survivor).unwrap().plot_index(),
+        Some(0)
+    );
+    assert_eq!(
+        axes_metadata_snapshot(handle, 1).unwrap().overlay_parent,
+        None
+    );
+    assert_eq!(current_axes_state().active_index, 1);
+}
+
+#[test]
 fn targeted_clear_rebases_other_axes_handles_without_selection_drift() {
     let _guard = crate::builtins::plotting::tests::lock_plot_registry();
     reset_plot_state();
