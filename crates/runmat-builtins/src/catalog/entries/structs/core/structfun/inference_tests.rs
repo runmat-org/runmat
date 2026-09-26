@@ -12,6 +12,39 @@ fn numeric(class: NumericClass) -> ValueFact {
         domain: NumericDomain::Real,
     }))
 }
+
+#[test]
+fn error_handler_capabilities_survive_an_unknown_primary_callback() {
+    let mut handler = callable("unused");
+    let ValueKindFact::Callable(fact) = &mut handler.kind else {
+        unreachable!()
+    };
+    fact.identity = None;
+    fact.capabilities
+        .0
+        .insert(runmat_types::CapabilityRequirement::Network);
+    fact.outputs = vec![numeric(NumericClass::Double)];
+    fact.outputs_complete = true;
+    let result = infer(
+        vec![
+            ValueFact::unknown(runmat_types::DynamicReason::UnresolvedCallable),
+            structure(&[("a", numeric(NumericClass::UInt64))]),
+            ValueFact::scalar(ValueKindFact::String),
+            handler,
+        ],
+        LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("ErrorHandler".into()),
+            LiteralValue::Unknown,
+        ]),
+        RequestedOutputCount::One,
+    );
+    assert!(result
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Network));
+}
 fn callable(name: &str) -> ValueFact {
     ValueFact::scalar(ValueKindFact::Callable(CallableFact {
         identity: Some(CallableIdentity::Builtin(BuiltinId(name.into()))),

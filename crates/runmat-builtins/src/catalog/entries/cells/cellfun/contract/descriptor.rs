@@ -103,7 +103,7 @@ const SIGNATURES: &[BuiltinSignatureDescriptor] = &[
 
 pub const CELLFUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
+    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: ERRORS,
 };

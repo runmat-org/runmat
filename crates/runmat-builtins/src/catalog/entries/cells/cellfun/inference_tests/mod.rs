@@ -12,6 +12,71 @@ fn numeric(class: NumericClass) -> ValueFact {
     }))
 }
 
+#[test]
+fn error_handler_capabilities_and_result_classes_are_not_lost() {
+    let mut handler = builtin("unused");
+    let ValueKindFact::Callable(fact) = &mut handler.kind else {
+        unreachable!()
+    };
+    fact.identity = None;
+    fact.capabilities
+        .0
+        .insert(runmat_types::CapabilityRequirement::Network);
+    fact.outputs = vec![numeric(NumericClass::Double)];
+    fact.outputs_complete = true;
+    let result = infer(
+        vec![
+            builtin("abs"),
+            cell(numeric(NumericClass::UInt64), &[1, 2]),
+            ValueFact::scalar(ValueKindFact::String),
+            handler,
+        ],
+        LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("ErrorHandler".into()),
+            LiteralValue::Unknown,
+        ]),
+    );
+    assert!(result
+        .capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Network));
+    assert_ne!(
+        result.outputs[0].numeric().map(|n| n.class),
+        Some(NumericClass::UInt64)
+    );
+}
+
+#[test]
+fn multiple_callback_outputs_keep_separate_facts() {
+    let mut callback = builtin("unused");
+    let ValueKindFact::Callable(fact) = &mut callback.kind else {
+        unreachable!()
+    };
+    fact.identity = None;
+    fact.outputs = vec![
+        numeric(NumericClass::UInt64),
+        ValueFact::scalar(ValueKindFact::Logical),
+    ];
+    fact.outputs_complete = true;
+    let result = infer_catalog_call(
+        builtin_catalog_entry_by_name("cellfun").unwrap(),
+        &CallRequest {
+            arguments: vec![callback, cell(numeric(NumericClass::UInt64), &[1, 2])],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(2)),
+        },
+    );
+    assert_eq!(result.outputs.len(), 2);
+    assert_eq!(
+        result.outputs[0].numeric().unwrap().class,
+        NumericClass::UInt64
+    );
+    assert_eq!(result.outputs[1].kind, ValueKindFact::Logical);
+    assert_eq!(result.outputs[1].shape.element_count(), Some(2));
+}
+
 fn cell(element: ValueFact, dims: &[usize]) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Cell(CellFact {

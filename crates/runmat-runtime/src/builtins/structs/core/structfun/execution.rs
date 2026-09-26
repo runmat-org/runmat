@@ -16,9 +16,6 @@ pub(super) async fn execute(
     let fields = Fields::parse(structure)?;
     let options = Options::parse(rest)?;
     let requested = current_requested_outputs();
-    if requested == 0 {
-        return Ok(Value::OutputList(Vec::new()));
-    }
     let mut collectors = (0..requested)
         .map(|_| Collector::new(options.uniform))
         .collect::<Vec<_>>();
@@ -42,6 +39,10 @@ pub(super) async fn execute(
                     .map_err(super::callback::CallbackFailure::into_runtime_error)?
             }
         };
+        if requested == 0 {
+            // Discarding results must not discard callback or handler effects.
+            continue;
+        }
         for (collector, result) in collectors
             .iter_mut()
             .zip(output::normalize(result, requested)?)

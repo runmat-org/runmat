@@ -98,3 +98,46 @@ fn unresolved_qualified_callback_reports_typed_external_identity() {
     );
     assert!(error.message().contains("ExternalName(QualifiedName"));
 }
+#[test]
+fn requested_output_count_is_forwarded_and_collected_independently() {
+    use std::sync::Arc;
+    for requested in [0, 2] {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = calls.clone();
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            move |_, arguments, outputs| {
+                assert_eq!(outputs, requested);
+                observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let Value::Num(value) = arguments[0] else {
+                    panic!("numeric");
+                };
+                Box::pin(async move {
+                    crate::sequence::ValueSequence::comma_separated(if requested == 0 {
+                        vec![]
+                    } else {
+                        vec![Value::Num(value), Value::Num(value + 10.)]
+                    })
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+                })
+            },
+        )));
+        let _outputs = crate::output_count::push_output_count(Some(requested));
+        let result = call(
+            Value::BoundFunctionHandle {
+                name: "multiple".into(),
+                function: 191,
+            },
+            vec![cell(vec![Value::Num(1.), Value::Num(2.)], &[1, 2])],
+        )
+        .unwrap();
+        let Value::OutputList(values) = result else {
+            panic!("output list");
+        };
+        assert_eq!(values.len(), requested);
+        if requested == 2 {
+            assert_eq!(tensor_values(values[0].clone()), vec![1., 2.]);
+            assert_eq!(tensor_values(values[1].clone()), vec![11., 12.]);
+        }
+        assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+}

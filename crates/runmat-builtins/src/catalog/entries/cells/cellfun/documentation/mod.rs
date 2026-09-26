@@ -20,7 +20,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "`UniformOutput` defaults to true. Each callback must return one scalar compatible with the collected result class. Set `'UniformOutput', false` when callbacks return arrays, strings, structures, resident values, or heterogeneous values; the outer result is then a cell array with the input shape.",
             "`ErrorHandler` receives a structure with `identifier`, `message`, `index`, and `indices`, followed by the cell contents and constant arguments for the failed position. Its return value is collected in place of the failed callback result.",
-            "Fixed-width integer results retain one exact common class. Logical and double results may promote according to the uniform collection contract, and real results may promote to a matching complex representation. Multiple callback outputs remain unsupported; the current runtime requests one result per cell.",
+            "Fixed-width integer results retain one exact common class. Logical and double results may promote according to the uniform collection contract, and real results may promote to a matching complex representation. Each requested output is collected independently. Discarding all outputs still invokes each callback with zero requested outputs, preserving its effects. Error handlers receive the same requested count.",
         ],
     },
     BuiltinDocumentationSection {

@@ -2,6 +2,34 @@ use super::*;
 use std::sync::Arc;
 
 #[test]
+fn discarded_outputs_still_invoke_each_callback_once() {
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |_, _, outputs| {
+            assert_eq!(outputs, 0);
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async {
+                crate::sequence::ValueSequence::comma_separated(Vec::new())
+                    .map_err(crate::sequence::sequence_error_to_runtime)
+            })
+        },
+    )));
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    let result = call(
+        Value::BoundFunctionHandle {
+            name: "effect_only".into(),
+            function: 92,
+        },
+        numbers(),
+        Vec::new(),
+    )
+    .unwrap();
+    assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+    assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
 fn passes_requested_output_count_to_bound_callbacks() {
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_, arguments, outputs| {
