@@ -5,14 +5,16 @@ use crate::planning::resource::{
     FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
 };
 use crate::results::accuracy::{AccuracyArtifact, AccuracyArtifactIdentity};
-use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
+use crate::results::observation::{
+    ObservationPublicationCatalog, ObservationPublicationCatalogIdentity,
+};
 
 use super::{
     AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
     PublicationRequestIdentity, SolverResultIdentity, StepIdentity,
 };
 
-const PUBLICATION_REQUEST_PREFIX: &[u8] = b"runmat-analysis-publication-request/v1\0";
+const PUBLICATION_REQUEST_PREFIX: &[u8] = b"runmat-analysis-publication-request/v2\0";
 const PUBLICATION_REQUEST_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -23,7 +25,7 @@ pub struct ResultPublicationRequest {
     identity: PublicationRequestIdentity,
     pub producer: StepIdentity,
     pub source_result: SolverResultIdentity,
-    pub source_observations: Option<ObservationArtifactIdentity>,
+    pub source_observations: Option<ObservationPublicationCatalogIdentity>,
     pub accuracy_request: AccuracyEvaluationRequestIdentity,
     pub source_accuracy: AccuracyArtifactIdentity,
     pub source_resource_plan: FeaResourcePlanIdentity,
@@ -37,7 +39,7 @@ struct ResultPublicationRequestWire {
     identity: PublicationRequestIdentity,
     producer: StepIdentity,
     source_result: SolverResultIdentity,
-    source_observations: Option<ObservationArtifactIdentity>,
+    source_observations: Option<ObservationPublicationCatalogIdentity>,
     accuracy_request: AccuracyEvaluationRequestIdentity,
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
@@ -67,7 +69,7 @@ impl TryFrom<ResultPublicationRequestWire> for ResultPublicationRequest {
 impl ResultPublicationRequest {
     pub fn new(
         accuracy: &AccuracyArtifact,
-        observations: Option<&ObservationArtifactManifest>,
+        observations: Option<&ObservationPublicationCatalog>,
         resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<Self> {
         accuracy
@@ -75,18 +77,17 @@ impl ResultPublicationRequest {
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         let observation_identity = match observations {
             Some(observations) => {
-                observations
-                    .validate()
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                if observations.producer != accuracy.producer
-                    || observations.source.solver_result() != Some(accuracy.source_result)
-                    || Some(observations.identity) != accuracy.source_observations
-                {
+                observations.validate_source_result(
+                    accuracy.producer,
+                    accuracy.source_kind,
+                    accuracy.source_result,
+                )?;
+                if Some(observations.identity()) != accuracy.source_observations {
                     return Err(AnalysisExecutionError::Identity(
                         "publication observations differ from the accuracy source",
                     ));
                 }
-                Some(observations.identity)
+                Some(observations.identity())
             }
             None if accuracy.source_observations.is_none() => None,
             None => {
@@ -119,7 +120,7 @@ impl ResultPublicationRequest {
             ),
         )?;
         let request = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity,
             producer: accuracy.producer,
             source_result: accuracy.source_result,
@@ -150,7 +151,7 @@ impl ResultPublicationRequest {
                 self.source_resource_usage,
             ),
         )?;
-        if self.schema_version != 1 || self.identity != expected {
+        if self.schema_version != 2 || self.identity != expected {
             return Err(AnalysisExecutionError::Identity(
                 "result publication request identity does not converge",
             ));

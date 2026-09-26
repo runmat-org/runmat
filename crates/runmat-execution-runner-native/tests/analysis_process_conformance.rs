@@ -1974,7 +1974,9 @@ fn capabilities() -> BTreeSet<Capability> {
 fn inventory() -> ResourceInventory {
     ResourceInventory {
         cpu_millicores: 1_000,
-        memory_bytes: 256 * 1024 * 1024,
+        // Tet10 thermal history finalization reserves about 625 MiB, including
+        // canonical decoding and output construction. Keep admission bounds intact.
+        memory_bytes: 1024 * 1024 * 1024,
         scratch_bytes: 256 * 1024 * 1024,
         accelerators: Vec::new(),
         capabilities: capabilities(),

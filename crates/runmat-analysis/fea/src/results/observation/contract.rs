@@ -13,18 +13,19 @@ use super::distributed::{
     ObservationPartitionCombination, ObservationPartitionEvidence,
     ObservationPartitionEvidenceIdentity,
 };
-use super::ObservationAccelerationSummary;
-use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
-use crate::execution::{
-    FieldRecoveryRequestIdentity, FieldRecoverySource, ObservationEvaluationRequestIdentity,
-    StepIdentity,
+use super::{
+    ObservationAccelerationSummary, ObservationFieldSelectionIdentity, ObservationFieldSource,
 };
+use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
+use crate::execution::{ObservationEvaluationRequestIdentity, StepIdentity};
 use crate::results::field::{
-    RecoveredFieldArtifactIdentity, RecoveredFieldDefinitionIdentity, RecoveredFieldEntityDomain,
-    RecoveredFieldSample,
+    RecoveredFieldDefinitionIdentity, RecoveredFieldEntityDomain, RecoveredFieldSample,
 };
 
 pub(super) const OBSERVATION_PREFIX: &[u8] = b"runmat-fea-observation/v1\0";
+// Artifact provenance was replaced, not made backward compatible. Plan/sample codecs remain
+// unchanged because their numerical contracts did not change.
+const OBSERVATION_ARTIFACT_PREFIX: &[u8] = b"runmat-fea-observation-artifact/v2\0";
 pub(super) const OBSERVATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
@@ -506,9 +507,8 @@ pub struct ObservationArtifact {
     identity: ObservationArtifactIdentity,
     pub evaluation_request: ObservationEvaluationRequestIdentity,
     pub producer: StepIdentity,
-    pub field_recovery_request: FieldRecoveryRequestIdentity,
-    pub source_fields: RecoveredFieldArtifactIdentity,
-    pub source: FieldRecoverySource,
+    pub source_selection: ObservationFieldSelectionIdentity,
+    pub source: ObservationFieldSource,
     pub topology_digest: Digest,
     pub plan_identity: ResolvedObservationPlanIdentity,
     results: Vec<ObservationResult>,
@@ -535,9 +535,8 @@ pub struct ObservationArtifactManifest {
     pub identity: ObservationArtifactIdentity,
     pub evaluation_request: ObservationEvaluationRequestIdentity,
     pub producer: StepIdentity,
-    pub field_recovery_request: FieldRecoveryRequestIdentity,
-    pub source_fields: RecoveredFieldArtifactIdentity,
-    pub source: FieldRecoverySource,
+    pub source_selection: ObservationFieldSelectionIdentity,
+    pub source: ObservationFieldSource,
     pub topology_digest: Digest,
     pub plan_identity: ResolvedObservationPlanIdentity,
     pub results: Vec<ObservationArtifactEntry>,
@@ -550,9 +549,8 @@ struct ObservationArtifactManifestWire {
     identity: ObservationArtifactIdentity,
     evaluation_request: ObservationEvaluationRequestIdentity,
     producer: StepIdentity,
-    field_recovery_request: FieldRecoveryRequestIdentity,
-    source_fields: RecoveredFieldArtifactIdentity,
-    source: FieldRecoverySource,
+    source_selection: ObservationFieldSelectionIdentity,
+    source: ObservationFieldSource,
     topology_digest: Digest,
     plan_identity: ResolvedObservationPlanIdentity,
     results: Vec<ObservationArtifactEntry>,
@@ -567,8 +565,7 @@ impl TryFrom<ObservationArtifactManifestWire> for ObservationArtifactManifest {
             identity: wire.identity,
             evaluation_request: wire.evaluation_request,
             producer: wire.producer,
-            field_recovery_request: wire.field_recovery_request,
-            source_fields: wire.source_fields,
+            source_selection: wire.source_selection,
             source: wire.source,
             topology_digest: wire.topology_digest,
             plan_identity: wire.plan_identity,
@@ -581,7 +578,10 @@ impl TryFrom<ObservationArtifactManifestWire> for ObservationArtifactManifest {
 
 impl ObservationArtifactManifest {
     pub fn validate(&self) -> Result<(), ObservationError> {
-        if self.schema_version != 1 || self.results.is_empty() {
+        if self.schema_version != 2
+            || self.results.is_empty()
+            || self.topology_digest != self.source.observation_topology_digest()
+        {
             return Err(ObservationError::Invalid(
                 "observation manifest requires a supported schema and results".into(),
             ));
@@ -619,7 +619,7 @@ impl ObservationArtifactManifest {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
         self.validate()?;
         Ok(encode_contract(
-            OBSERVATION_PREFIX,
+            OBSERVATION_ARTIFACT_PREFIX,
             "observation-artifact-manifest",
             self,
             OBSERVATION_LIMITS,
@@ -628,7 +628,7 @@ impl ObservationArtifactManifest {
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ObservationError> {
         let manifest: Self = decode_contract(
-            OBSERVATION_PREFIX,
+            OBSERVATION_ARTIFACT_PREFIX,
             "observation-artifact-manifest",
             bytes,
             OBSERVATION_LIMITS,
@@ -645,9 +645,8 @@ struct ObservationArtifactWire {
     identity: ObservationArtifactIdentity,
     evaluation_request: ObservationEvaluationRequestIdentity,
     producer: StepIdentity,
-    field_recovery_request: FieldRecoveryRequestIdentity,
-    source_fields: RecoveredFieldArtifactIdentity,
-    source: FieldRecoverySource,
+    source_selection: ObservationFieldSelectionIdentity,
+    source: ObservationFieldSource,
     topology_digest: Digest,
     plan_identity: ResolvedObservationPlanIdentity,
     results: Vec<ObservationResult>,
@@ -662,8 +661,7 @@ impl TryFrom<ObservationArtifactWire> for ObservationArtifact {
             identity: wire.identity,
             evaluation_request: wire.evaluation_request,
             producer: wire.producer,
-            field_recovery_request: wire.field_recovery_request,
-            source_fields: wire.source_fields,
+            source_selection: wire.source_selection,
             source: wire.source,
             topology_digest: wire.topology_digest,
             plan_identity: wire.plan_identity,
@@ -677,9 +675,8 @@ impl TryFrom<ObservationArtifactWire> for ObservationArtifact {
 pub struct ObservationArtifactInput {
     pub evaluation_request: ObservationEvaluationRequestIdentity,
     pub producer: StepIdentity,
-    pub field_recovery_request: FieldRecoveryRequestIdentity,
-    pub source_fields: RecoveredFieldArtifactIdentity,
-    pub source: FieldRecoverySource,
+    pub source_selection: ObservationFieldSelectionIdentity,
+    pub source: ObservationFieldSource,
     pub topology_digest: Digest,
     pub plan_identity: ResolvedObservationPlanIdentity,
     pub results: Vec<ObservationResult>,
@@ -688,12 +685,11 @@ pub struct ObservationArtifactInput {
 impl ObservationArtifact {
     pub fn new(input: ObservationArtifactInput) -> Result<Self, ObservationError> {
         let mut artifact = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: ObservationArtifactIdentity(Digest::sha256([])),
             evaluation_request: input.evaluation_request,
             producer: input.producer,
-            field_recovery_request: input.field_recovery_request,
-            source_fields: input.source_fields,
+            source_selection: input.source_selection,
             source: input.source,
             topology_digest: input.topology_digest,
             plan_identity: input.plan_identity,
@@ -718,8 +714,7 @@ impl ObservationArtifact {
             identity: self.identity,
             evaluation_request: self.evaluation_request,
             producer: self.producer,
-            field_recovery_request: self.field_recovery_request,
-            source_fields: self.source_fields,
+            source_selection: self.source_selection,
             source: self.source,
             topology_digest: self.topology_digest,
             plan_identity: self.plan_identity,
@@ -767,8 +762,7 @@ impl ObservationArtifact {
             identity: manifest.identity,
             evaluation_request: manifest.evaluation_request,
             producer: manifest.producer,
-            field_recovery_request: manifest.field_recovery_request,
-            source_fields: manifest.source_fields,
+            source_selection: manifest.source_selection,
             source: manifest.source,
             topology_digest: manifest.topology_digest,
             plan_identity: manifest.plan_identity,
@@ -779,7 +773,10 @@ impl ObservationArtifact {
     }
 
     pub fn validate(&self) -> Result<(), ObservationError> {
-        if self.schema_version != 1 || self.results.is_empty() {
+        if self.schema_version != 2
+            || self.results.is_empty()
+            || self.topology_digest != self.source.observation_topology_digest()
+        {
             return Err(ObservationError::Invalid(
                 "observation artifact requires a supported schema and results".into(),
             ));
@@ -809,7 +806,7 @@ impl ObservationArtifact {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
         self.validate()?;
         Ok(encode_contract(
-            OBSERVATION_PREFIX,
+            OBSERVATION_ARTIFACT_PREFIX,
             "observation-artifact",
             self,
             OBSERVATION_LIMITS,
@@ -818,7 +815,7 @@ impl ObservationArtifact {
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ObservationError> {
         let artifact = decode_contract(
-            OBSERVATION_PREFIX,
+            OBSERVATION_ARTIFACT_PREFIX,
             "observation-artifact",
             bytes,
             OBSERVATION_LIMITS,
@@ -832,8 +829,7 @@ impl ObservationArtifact {
             identity: self.identity,
             evaluation_request: self.evaluation_request,
             producer: self.producer,
-            field_recovery_request: self.field_recovery_request,
-            source_fields: self.source_fields,
+            source_selection: self.source_selection,
             source: self.source,
             topology_digest: self.topology_digest,
             plan_identity: self.plan_identity,
@@ -868,14 +864,13 @@ fn derive_artifact_identity(
     manifest: &ObservationArtifactManifest,
 ) -> Result<ObservationArtifactIdentity, ObservationError> {
     let bytes = encode_contract(
-        OBSERVATION_PREFIX,
+        OBSERVATION_ARTIFACT_PREFIX,
         "observation-artifact-identity",
         &(
             manifest.schema_version,
             manifest.evaluation_request,
             manifest.producer,
-            manifest.field_recovery_request,
-            manifest.source_fields,
+            manifest.source_selection,
             manifest.source,
             manifest.topology_digest,
             manifest.plan_identity,

@@ -1,8 +1,6 @@
 //! Bind thermal numerical content to the shared field identity contract, one field at a time.
 use super::{AnalysisExecutionError, AnalysisExecutionResult, FeaThermalRunResult};
-use crate::results::field::{
-    RecoveredField, RecoveredFieldDefinition, RecoveredFieldIdentity, RecoveredFieldSample,
-};
+use crate::results::field::{RecoveredField, RecoveredFieldDefinition, RecoveredFieldIdentity};
 
 /// Called only after complete-result validation proves aligned history lengths and shapes.
 /// Array order is temperature, gradient, flux, storage-rate density, matching the typed catalog.
@@ -40,7 +38,10 @@ pub(super) fn retained_field_identities(
                 .map_err(invalid)?;
                 RecoveredField::identity_for(
                     &definition,
-                    RecoveredFieldSample::TimeSeconds(*time),
+                    crate::physics::thermal::history_fields::sample(
+                        result.time_points_s.len(),
+                        *time,
+                    ),
                     storage,
                 )
                 .map_err(invalid)

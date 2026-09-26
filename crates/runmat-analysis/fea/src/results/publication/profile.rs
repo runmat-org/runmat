@@ -9,7 +9,7 @@ struct Receipt<'a> {
     request: PublicationRequestIdentity,
     producer: StepIdentity,
     source_result: SolverResultIdentity,
-    source_observations: Option<ObservationArtifactIdentity>,
+    source_observations: Option<ObservationPublicationCatalogIdentity>,
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -87,7 +87,7 @@ pub fn published_result_encoding_profile(
     )?;
     Ok(profile_serialized(
         &Receipt {
-            schema_version: 1,
+            schema_version: 2,
             identity,
             request: request.identity(),
             producer: request.producer,

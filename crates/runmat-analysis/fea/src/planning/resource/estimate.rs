@@ -140,6 +140,15 @@ pub fn build_resource_plan(
             FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand),
         ) => build_observation_history_resource_plan(input.clone(), demand),
         (
+            FeaResourcePhase::ObservationHistoryFinalization(request),
+            FeaResourceDemand::ObservationHistoryFinalization(demand),
+        ) if *request == demand.request => {
+            post_process::build_observation_history_finalization_resource_plan(
+                input.clone(),
+                demand,
+            )
+        }
+        (
             FeaResourcePhase::StructuralObservationAssembly(_),
             FeaResourceDemand::StructuralObservationAssembly(demand),
         ) => build_observation_assembly_resource_plan(input.clone(), demand),

@@ -121,6 +121,17 @@ impl PreparedThermalSolve<'_> {
     }
 
     pub fn execute(self) -> Result<FeaThermalRunResult, FeaRunError> {
+        let step = self.step;
+        let mesh = self.mesh;
+        let mut result = self.execute_primary_fields()?;
+        super::inline_history::evaluate(&mut result, step, mesh)?;
+        Ok(result)
+    }
+
+    /// Execute numerical fields only. Authored observations still govern sample scheduling and
+    /// admission; their evaluation belongs to the shared published-field task chain.
+    /// The authored model and producer identity are never rewritten to defer observations.
+    pub fn execute_primary_fields(self) -> Result<FeaThermalRunResult, FeaRunError> {
         physical::run(
             self.model,
             self.backend,

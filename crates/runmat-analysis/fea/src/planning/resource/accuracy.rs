@@ -24,6 +24,17 @@ pub fn build_accuracy_resource_plan(
         profile.output_encoded_bytes_upper_bound,
         "accuracy evaluation",
     )?;
+    // Source verification may reconstruct mesh projections and authored observation plans.
+    // Reserve that transient workspace separately from resident decoded transport inputs.
+    let context_workspace = facts
+        .inputs
+        .decoded_resident_bytes_admission_budget
+        .0
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(profile.workspace_bytes_upper_bound))
+        .ok_or(ResourcePlanningError::Overflow(
+            "accuracy source verification workspace",
+        ))?;
     build_resource_plan(FeaResourcePlanningInput {
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::AccuracyEvaluation(request.identity()),
@@ -39,7 +50,7 @@ pub fn build_accuracy_resource_plan(
                     .map_err(|_| ResourcePlanningError::Overflow("accuracy evidence"))?,
             ),
             inputs: facts.inputs,
-            evaluator_workspace_bytes_upper_bound: ByteCount(profile.workspace_bytes_upper_bound),
+            evaluator_workspace_bytes_upper_bound: ByteCount(context_workspace),
             output: facts.output,
         }),
         output_set: Some(facts.output_set),

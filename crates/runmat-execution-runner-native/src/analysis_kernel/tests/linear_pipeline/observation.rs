@@ -3,8 +3,7 @@ use super::*;
 pub(super) fn execute(
     solved: &SolvedPipeline,
     recovered: &RecoveredPipeline,
-) -> ObservationArtifactManifest {
-    let step = solved.prepared.host.workload.step;
+) -> runmat_analysis_fea::results::observation::ObservationPublicationCatalog {
     let definitions = recovered
         .artifact
         .fields()
@@ -22,21 +21,34 @@ pub(super) fn execute(
             runmat_analysis_fea::results::observation::ObservationLimits::default(),
         )
         .unwrap();
-    let field_selection = RecoveredFieldSelection::new(
+    let recovery_request =
+        FieldRecoveryRequest::from_canonical_bytes(&recovered.inputs[0].payload()).unwrap();
+    let field_selection =
+        runmat_analysis_fea::results::observation::ObservationFieldSelection::structural(
+            &recovery_request,
+            &recovered.artifact.manifest().unwrap(),
+            recovered
+                .artifact
+                .fields()
+                .iter()
+                .map(RecoveredField::identity)
+                .collect(),
+        )
+        .unwrap();
+    let source_request =
+        ObservationEvaluationRequest::new(field_selection, observation_plan).unwrap();
+    let catalog = runmat_analysis_fea::results::observation::ObservationFieldCatalog::structural(
+        recovery_request,
         recovered.artifact.manifest().unwrap(),
-        recovered
-            .artifact
-            .fields()
-            .iter()
-            .map(RecoveredField::identity)
-            .collect(),
     )
     .unwrap();
-    let source_request = ObservationEvaluationRequest::new(
-        step,
-        &field_selection,
-        solved.constraint_plan.topology,
-        observation_plan,
+    let catalog_objects = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ObservationFieldCatalog,
+        catalog.identity(),
+        &catalog.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
     )
     .unwrap();
     let reference_catalog = RecoveredFieldCatalog::new_for_topology(
@@ -89,13 +101,26 @@ pub(super) fn execute(
     .unwrap();
     let mut contribution_objects = Vec::new();
     for partition in &partition_plan.partitions {
-        let source_fields = runmat_analysis_fea::results::observation::prepare_structural_observation_field_partition(
+        let required_indices = runmat_analysis_fea::results::observation::structural_observation_partition_source_indices(
             &source_request.plan,
             &partition_plan,
             partition,
             &solved.solve.model,
             Some(&solver_mesh),
-            source_field,
+        )
+        .unwrap();
+        // Workers consume published canonical blocks, not newly sliced field identities.
+        let source_fields = runmat_analysis_fea::results::field::RecoveredFieldPartitionSet::new(
+            runmat_analysis_fea::results::field::canonical_field_partitions(source_field)
+                .unwrap()
+                .into_iter()
+                .filter(|block| {
+                    block
+                        .source_indices
+                        .iter()
+                        .any(|index| required_indices.binary_search(index).is_ok())
+                })
+                .collect(),
         )
         .unwrap();
         let partition_request = ObservationPartitionEvaluationRequest::new(
@@ -129,6 +154,7 @@ pub(super) fn execute(
             source_request_objects.clone(),
             plan_objects.clone(),
             field_partition_objects,
+            catalog_objects.clone(),
             recovered.inputs[1].clone(),
             recovered.inputs[3].clone(),
         ];
@@ -167,6 +193,28 @@ pub(super) fn execute(
             AnalysisWorkKind::EvaluateObservationPartition,
             &inputs,
             &resource_plan,
+        );
+        let mut missing_catalog = inputs.clone();
+        missing_catalog.retain(|input| {
+            input.manifest.kind != AnalysisNumericalObjectKind::ObservationFieldCatalog
+        });
+        let missing_catalog_host = test_host_for_inputs(
+            &recovered.host,
+            AnalysisWorkKind::EvaluateObservationPartition,
+            &missing_catalog,
+            vec![AnalysisNumericalObjectKind::ObservationPartitionContribution],
+            None,
+        );
+        assert!(
+            NativeAnalysisKernel
+                .execute(AnalysisKernelInvocation {
+                    output_policy: output_policy(),
+                    kind: AnalysisWorkKind::EvaluateObservationPartition,
+                    host: &missing_catalog_host,
+                    inputs: &missing_catalog,
+                })
+                .is_err(),
+            "a valid selection is not a substitute for its producing catalog"
         );
         let outputs = NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
@@ -310,7 +358,7 @@ pub(super) fn execute(
         })
         .unwrap();
     let artifact_objects = prepare_kernel_output(&assembly_outputs[0]);
-    let manifest = ObservationArtifactManifest::from_canonical_bytes(
+    let manifest = runmat_analysis_fea::results::observation::ObservationArtifactManifest::from_canonical_bytes(
         &artifact_objects
             .partition_payload(artifact_objects.manifest.logical_identity)
             .unwrap(),
@@ -321,7 +369,27 @@ pub(super) fn execute(
         manifest.results[0].result,
         reference_result.logical_identity
     );
-    manifest
+    runmat_analysis_fea::results::observation::ObservationPublicationCatalog::new(
+        source_request.producer,
+        source_request.plan.clone(),
+        catalog,
+        &solved.solve.model.sequence.steps[0],
+        vec![
+            runmat_analysis_fea::results::observation::ObservationPublicationEntry::Sample(
+                Box::new(
+                    runmat_analysis_fea::results::observation::ObservationSamplePublication {
+                        request: source_request,
+                        manifest,
+                    },
+                ),
+            ),
+        ],
+        runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
+            model: &solved.solve.model,
+            mesh: Some(&solver_mesh),
+        },
+    )
+    .unwrap()
 }
 
 fn resource_plan_objects(

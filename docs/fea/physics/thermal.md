@@ -22,7 +22,27 @@ power; an average retains W/m³. Exact requested history times are inserted into
 The insulated uniform-heating reference uses `Q = rho * c_p`, giving a 1 K/s temperature rise
 and storage-rate density equal to Q for accepted time steps, independently of element volume.
 Both Tet4 and Tet10 history outputs are checked against that analytic value. This does not qualify
-the unfinished public thermal executor or portable thermal result publication.
+the unfinished public thermal executor or production qualification.
+
+### Native coordination boundary
+
+The native library has an experimental single-step thermal coordinator for steady or
+backward-Euler Tet4/Tet10 studies. It schedules the solve, shared observation partitions and
+reductions, retained-history checkpoints/finalization, accuracy evaluation, every declared
+temperature state, and final publication. Local and remote task-pool entrypoints use the same
+coordinator. This is task placement, not a distributed thermal linear solve.
+
+Observations consume the published thermal fields; they do not rerun the solve. A final-time
+field retains its physical time coordinate. A complete history and a final field are separate
+publication obligations: publishing one frame cannot satisfy a history declaration. Accuracy
+validation binds the observation catalog to the original thermal workload and mesh.
+
+This library boundary does not yet enable `runmat fea run` for thermal studies. Runtime routing,
+a closed durable thermal result root/reimport, bounded driver imports and selected-input transport,
+checkpoint-prefix lineage for evicted samples, and restart remain open integration gates.
+Resource reservations are conservative admission bounds, not measured memory-use evidence.
+Convergence, energy balance, thermoelastic transfer and formulation-specific release evidence
+remain required before any production claim.
 
 ## What heat equation does RunMat assemble?
 

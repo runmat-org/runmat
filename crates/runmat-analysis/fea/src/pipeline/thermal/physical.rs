@@ -9,9 +9,6 @@ use crate::{
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
     physics::thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
-    pipeline::observation_history::{
-        evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
-    },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
         backend::{
@@ -185,7 +182,7 @@ pub(super) fn run(
         fea_thermal_energy_storage_rate_field_id,
     );
     facts.sources.verify(&outcome.source_evidence)?;
-    let mut run = FeaRunResult {
+    let run = FeaRunResult {
         identity,
         requested_backend: backend,
         execution_backend: ExecutionBackend::from_solver_backend(outcome.last_solve.solver_backend),
@@ -205,48 +202,6 @@ pub(super) fn run(
         series_reductions: Vec::new(),
         fields: Vec::new(),
     };
-    if thermal_step.observations.iter().any(|request| {
-        matches!(
-            request,
-            runmat_analysis_core::ObservationRequest::History(_)
-        )
-    }) {
-        let coordinates = time_points_s
-            .iter()
-            .copied()
-            .map(crate::results::field::RecoveredFieldSample::TimeSeconds)
-            .collect::<Vec<_>>();
-        let definitions = crate::physics::thermal::history_fields::definitions()
-            .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        let series = definitions
-            .iter()
-            .zip([
-                temperature_snapshots.as_slice(),
-                temperature_gradient_snapshots.as_slice(),
-                heat_flux_snapshots.as_slice(),
-                energy_storage_rate_snapshots.as_slice(),
-            ])
-            .map(|(definition, snapshots)| HistoryFieldSeries {
-                quantity: definition.quantity(),
-                source_field_id: definition.field_id(),
-                location: definition.location(),
-                entity_domain: definition.entity_domain(),
-                value_shape: definition.value_shape().clone(),
-                numeric_representation: definition.numeric_representation(),
-                snapshots,
-            })
-            .collect::<Vec<_>>();
-        let evaluated_histories = evaluate_field_histories(
-            thermal_step,
-            HistoryTopology::Solid(&initial_assembly.projection),
-            &coordinates,
-            None,
-            &series,
-        )
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-        run.observation_histories = evaluated_histories.histories;
-        run.series_reductions = evaluated_histories.series_reductions;
-    }
 
     run.validate_solver_formulation()?;
     let sequence = crate::execution::SequenceIdentity::from_solver_contract(&model.sequence)

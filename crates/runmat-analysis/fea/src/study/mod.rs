@@ -4,6 +4,8 @@ mod compilation;
 mod identity;
 mod planning;
 mod product;
+mod thermal_planning;
+mod thermal_product;
 
 pub use compilation::{
     compile_analysis_study, AnalysisStudyCompilationError, AnalysisStudyCompilationInput,
@@ -20,4 +22,11 @@ pub use planning::{
 pub use product::{
     build_structural_study_product, StructuralStudyProduct, StructuralStudyProductError,
     StructuralStudyProductInput,
+};
+pub use thermal_planning::{
+    plan_thermal_study, ThermalStudyPlanningError, ThermalStudyPlanningPolicy,
+};
+pub use thermal_product::{
+    build_thermal_study_product, ThermalStudyProduct, ThermalStudyProductError,
+    ThermalStudyProductInput,
 };

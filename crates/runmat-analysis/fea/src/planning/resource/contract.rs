@@ -11,10 +11,10 @@ use serde::{Deserialize, Serialize};
 use crate::execution::{
     AccuracyEvaluationRequestIdentity, AnalysisNumericalObjectKind, AnalysisWorkloadIdentity,
     FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
-    ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
-    ObservationPartitionReductionRequestIdentity, SolverResultIdentity,
-    StructuralBucklingWorkloadIdentity, StructuralFrequencyEntryRequestIdentity,
-    StructuralFrequencyResultAssemblyRequestIdentity,
+    ObservationHistoryCheckpointRequestIdentity, ObservationHistoryFinalizationRequestIdentity,
+    ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
+    SolverResultIdentity, StructuralBucklingWorkloadIdentity,
+    StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalResponseSpectrumAssemblyRequestIdentity,
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
     StructuralRandomResponseAssemblyRequestIdentity,
@@ -249,6 +249,7 @@ pub enum FeaResourcePhase {
     StructuralObservationPartition(ObservationPartitionEvaluationRequestIdentity),
     StructuralObservationReduction(ObservationPartitionReductionRequestIdentity),
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
+    ObservationHistoryFinalization(ObservationHistoryFinalizationRequestIdentity),
     StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
     StructuralTransientScopePreparation(Digest),
@@ -308,75 +309,12 @@ pub struct StructuralFrequencyOperatorResourceDemand {
     pub output: PreparedOutputResourceFacts,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
-pub enum ObservationPartitionPayloadLayout {
-    SelectedValues {
-        entity_count: Count,
-        component_count: Count,
-    },
-    WeightedAccumulator {
-        component_count: Count,
-    },
-    ExtremaCandidates {
-        candidate_count_upper_bound: Count,
-        component_count: Count,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ObservationPartitionResourceDemand {
-    pub topology_digest: Digest,
-    pub partition_entity_count: Count,
-    pub source_entity_count: Count,
-    pub source_partition_count: Count,
-    pub source_value_count: Count,
-    pub output_payload: ObservationPartitionPayloadLayout,
-    pub operation_count_upper_bound: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub evaluator_workspace_bytes_upper_bound: ByteCount,
-    pub output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ObservationReductionResourceDemand {
-    pub topology_digest: Digest,
-    pub contribution_count: Count,
-    pub contribution_encoded_bytes: ByteCount,
-    pub contribution_value_count: Count,
-    pub output_entity_count: Count,
-    pub output_value_count: Count,
-    pub accumulator_value_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub workspace_bytes_upper_bound: ByteCount,
-    pub output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ObservationHistoryCheckpointResourceDemand {
-    pub topology_digest: Digest,
-    pub predecessor_present: bool,
-    pub predecessor_sample_count: Count,
-    pub retained_sample_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub transition_workspace_bytes_upper_bound: ByteCount,
-    pub output: PreparedOutputResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ObservationAssemblyResourceDemand {
-    pub topology_digest: Digest,
-    pub result_count: Count,
-    pub result_encoded_bytes: ByteCount,
-    pub evidence_count: Count,
-    pub inputs: PreparedInputResourceFacts,
-    pub ordering_workspace_bytes_upper_bound: ByteCount,
-    pub output: PreparedOutputResourceFacts,
-}
+mod observation_demand;
+pub use observation_demand::{
+    ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
+    ObservationHistoryFinalizationResourceDemand, ObservationPartitionPayloadLayout,
+    ObservationPartitionResourceDemand, ObservationReductionResourceDemand,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
@@ -393,6 +331,7 @@ pub enum FeaResourceDemand {
     StructuralObservationPartition(ObservationPartitionResourceDemand),
     StructuralObservationReduction(ObservationReductionResourceDemand),
     StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
+    ObservationHistoryFinalization(ObservationHistoryFinalizationResourceDemand),
     StructuralObservationAssembly(ObservationAssemblyResourceDemand),
     StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
     StructuralTransientScopePreparation(StructuralTransientScopeResourceDemand),

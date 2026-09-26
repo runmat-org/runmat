@@ -83,7 +83,7 @@ use runmat_analysis_fea::results::field::{
 use runmat_analysis_fea::results::observation::{
     evaluate_structural_observation_partition,
     evaluate_structural_observation_partition_accelerated, reduce_observation_partitions,
-    ObservationArtifact, ObservationArtifactInput, ObservationArtifactManifest, ObservationLimits,
+    ObservationArtifact, ObservationArtifactInput, ObservationLimits,
     ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
     StructuralObservationAccelerationInput,
 };
@@ -98,6 +98,7 @@ mod buckling;
 mod buckling_tests;
 mod field_recovery;
 mod frequency;
+mod history_finalization;
 mod modal;
 mod observation;
 mod random_response;
@@ -136,6 +137,9 @@ impl AnalysisKernel for NativeAnalysisKernel {
             AnalysisWorkKind::PublishState => state_publication::execute(invocation),
             AnalysisWorkKind::CheckpointObservationHistory => {
                 observation::execute_observation_history_checkpoint(invocation)
+            }
+            AnalysisWorkKind::FinalizeObservationHistory => {
+                history_finalization::execute(invocation)
             }
             AnalysisWorkKind::SolveStructuralTransientBlock => {
                 execute_structural_transient_block(invocation)
@@ -541,10 +545,10 @@ fn execute_result_publication(
     let observations = observations
         .map(|objects| {
             let manifest_identity = objects.manifest.logical_identity;
-            let artifact = ObservationArtifactManifest::from_canonical_bytes(&objects.payload())
+            let artifact = runmat_analysis_fea::results::observation::ObservationPublicationCatalog::from_canonical_bytes(&objects.payload())
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            if artifact.identity.digest() != manifest_identity
-                || Some(artifact.identity) != request.source_observations
+            if artifact.identity().digest() != manifest_identity
+                || Some(artifact.identity()) != request.source_observations
             {
                 return Err(AnalysisBridgeError::Identity(
                     "publication observations differ from the admitted request",
@@ -583,7 +587,17 @@ fn execute_accuracy_evaluation(
     let observations =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    if invocation.inputs.len() != 3 + usize::from(observations.is_some())
+    let source_context: Vec<_> = invocation
+        .inputs
+        .iter()
+        .filter(|input| {
+            matches!(
+                input.manifest.kind,
+                AnalysisNumericalObjectKind::ThermalWorkload | AnalysisNumericalObjectKind::Mesh
+            )
+        })
+        .collect();
+    if invocation.inputs.len() != 3 + usize::from(observations.is_some()) + source_context.len()
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::AccuracyReport]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -601,22 +615,27 @@ fn execute_accuracy_evaluation(
             "accuracy inputs differ from the admitted evaluation request",
         ));
     }
-    if let Some(observations) = observations {
+    let observations = if let Some(observations) = observations {
         let manifest_identity = observations.manifest.logical_identity;
         let observations =
-            ObservationArtifactManifest::from_canonical_bytes(&observations.payload())
+            runmat_analysis_fea::results::observation::ObservationPublicationCatalog::from_canonical_bytes(&observations.payload())
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        if observations.identity.digest() != manifest_identity
-            || Some(observations.identity) != request.source_observations
-            || Some(observations.evaluation_request) != request.observation_request
-            || observations.producer != request.producer
-            || observations.source.solver_result() != Some(request.source_result)
+        observations.validate_source_result(
+            request.producer,
+            request.source_kind,
+            request.source_result,
+        )?;
+        if observations.identity().digest() != manifest_identity
+            || Some(observations.identity()) != request.source_observations
         {
             return Err(AnalysisBridgeError::Identity(
                 "accuracy observation artifact differs from its admitted source",
             ));
         }
-    }
+        Some(observations)
+    } else {
+        None
+    };
     let numerical_receipt =
         runmat_analysis_fea::execution::AccuracySourceReceipt::from_canonical_bytes(
             request.source_kind,
@@ -629,6 +648,12 @@ fn execute_accuracy_evaluation(
             "accuracy numerical receipt differs from its admitted source result",
         ));
     }
+    runmat_analysis_execution::validate_accuracy_source_context(
+        &request,
+        &numerical_receipt,
+        observations.as_ref(),
+        &source_context,
+    )?;
     let admitted_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())?;
     let expected_plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
         &request,

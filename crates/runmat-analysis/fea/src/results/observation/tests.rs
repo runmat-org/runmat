@@ -28,7 +28,7 @@ use crate::{
     results::field::{
         RecoveredField, RecoveredFieldArtifact, RecoveredFieldCatalog, RecoveredFieldDefinition,
         RecoveredFieldDerivation, RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
-        RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
+        RecoveredFieldNumericRepresentation, RecoveredFieldSample,
     },
     topology::AnalysisProjection,
 };
@@ -45,6 +45,94 @@ fn scalar_definition() -> RecoveredFieldDefinition {
         RecoveredFieldNumericRepresentation::Real,
     )
     .unwrap()
+}
+
+#[test]
+fn final_observation_selects_only_the_authored_terminal_time_without_relabeling() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let mut step = ProcedureStep::thermal_transient("terminal-field");
+    step.independent_domain = runmat_analysis_core::IndependentDomain::TimeSeconds {
+        origin: 2.0,
+        start: 2.0,
+        end: 8.0,
+        interval_count: 3,
+    };
+    step.observations = vec![ObservationRequest::Field(spec(
+        "terminal",
+        ObservationTarget::WholeModel,
+    ))];
+    let definition = scalar_definition();
+    let plan = resolve_observation_plan(
+        &step,
+        &projection,
+        std::slice::from_ref(&definition),
+        ObservationLimits::default(),
+    )
+    .unwrap();
+    let observation = &plan.observations[0];
+    for time in [2.0, 4.0, 6.0, 8.0, 10.0] {
+        assert_eq!(
+            resolved_observation_accepts_sample(
+                &plan,
+                observation,
+                RecoveredFieldSample::TimeSeconds(time),
+                None
+            )
+            .unwrap(),
+            time == 8.0
+        );
+    }
+    assert!(!resolved_observation_accepts_sample(
+        &plan,
+        observation,
+        RecoveredFieldSample::FrequencyHertz(8.0),
+        None
+    )
+    .unwrap());
+    assert!(resolved_observation_accepts_sample(
+        &plan,
+        observation,
+        RecoveredFieldSample::Final,
+        None
+    )
+    .unwrap());
+    let fields = |time| {
+        catalog_at_sample(
+            &projection,
+            &definition,
+            RecoveredFieldSample::TimeSeconds(time),
+            vec![projection.nodes.len()],
+            vec![293.15; projection.nodes.len()],
+        )
+    };
+    let final_fields = fields(8.0);
+    let results = evaluate_observations(&plan, &projection, &final_fields).unwrap();
+    assert_eq!(results[0].sample, RecoveredFieldSample::TimeSeconds(8.0));
+    assert!(evaluate_observations(&plan, &projection, &fields(6.0)).is_err());
+    let ambiguous = RecoveredFieldCatalog::new(
+        &projection,
+        [
+            RecoveredFieldSample::Final,
+            RecoveredFieldSample::TimeSeconds(8.0),
+        ]
+        .into_iter()
+        .map(|sample| {
+            RecoveredField::new(
+                definition.clone(),
+                sample,
+                runmat_analysis_core::AnalysisField::host_f64(
+                    definition.field_id(),
+                    vec![projection.nodes.len()],
+                    vec![293.15; projection.nodes.len()],
+                ),
+            )
+            .unwrap()
+        })
+        .collect(),
+    )
+    .unwrap();
+    assert!(evaluate_observations(&plan, &projection, &ambiguous).is_err());
 }
 
 fn complex_pressure_definition() -> RecoveredFieldDefinition {
@@ -1321,10 +1409,65 @@ fn series_extrema_and_envelope_retain_samples_entities_and_exact_ties() {
         RecoveredFieldSample::TimeSeconds(2.0)
     );
     result.validate_for(&plan, &history).unwrap();
+    result.validate_source(&plan, &history).unwrap();
 
     let mut substituted = result.clone();
     substituted.evidence.contributions[0].values[0] += 1.0;
     assert!(substituted.validate_for(&plan, &history).is_err());
+    assert!(substituted.validate_source(&plan, &history).is_err());
+}
+
+#[test]
+fn series_source_validation_does_not_recompute_payload() {
+    let (plan, history) = completed_scalar_series(
+        SeriesReduction::Mean {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::Canonical,
+        &[0.0, 1.0, 2.0],
+        &[1.0, 2.0, 3.0],
+    )
+    .unwrap();
+    let mut result =
+        reduce_observation_history(&plan, &history, ObservationExecutionPolicy::serial()).unwrap();
+    let SeriesReductionPayload::Values { field, .. } = &mut result.payload else {
+        unreachable!()
+    };
+    *field = runmat_analysis_core::AnalysisField::host_f64(
+        field.field_id.clone(),
+        field.shape.clone(),
+        vec![99.0],
+    );
+    let bytes = encode_contract(
+        b"runmat-fea-observation/v1\0",
+        "series-reduction-result-identity",
+        &(
+            result.schema_version,
+            result.source_history,
+            &result.observation_id,
+            result.operation,
+            result.extrema_ties,
+            &result.payload,
+        ),
+        CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64),
+    )
+    .unwrap();
+    result.identity =
+        serde_json::from_value(serde_json::to_value(Digest::sha256(bytes)).unwrap()).unwrap();
+    result.validate_source(&plan, &history).unwrap();
+    assert!(result.validate_for(&plan, &history).is_err());
+    let (_, foreign_history) = completed_scalar_series(
+        SeriesReduction::Mean {
+            weighting: SeriesWeighting::UniformSamples,
+        },
+        ExtremaTiePolicy::FirstCanonical,
+        RetentionPolicy::Canonical,
+        &[0.0, 1.0, 2.0],
+        &[1.0, 2.0, 4.0],
+    )
+    .unwrap();
+    assert!(result.validate_source(&plan, &foreign_history).is_err());
 }
 
 #[test]
@@ -1892,16 +2035,14 @@ fn observation_assembly_requires_the_exact_subset_scheduled_at_one_frequency() {
         vec![source_field.clone()],
     )
     .unwrap();
-    let selection =
-        RecoveredFieldSelection::new(artifact.manifest().unwrap(), vec![source_field.identity()])
-            .unwrap();
-    let source = crate::execution::ObservationEvaluationRequest::new(
-        producer,
-        &selection,
-        topology,
-        plan.clone(),
+    let selection = ObservationFieldSelection::structural(
+        &recovery,
+        &artifact.manifest().unwrap(),
+        vec![source_field.identity()],
     )
     .unwrap();
+    let source =
+        crate::execution::ObservationEvaluationRequest::new(selection, plan.clone()).unwrap();
     let first_result = evaluate_observation_sample(
         &plan,
         &ObservationId("first_frequency_set".into()),
@@ -2263,6 +2404,103 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].entities.len(), node_count);
     assert_eq!(results[0].field.shape, vec![node_count, 3]);
+    // The publication authority rederives the same explicit topology and authored targets.
+    let sequence = SequenceIdentity::from_solver_contract(&model.sequence).unwrap();
+    let producer = StepIdentity::from_solver_contract(sequence, step).unwrap();
+    let numerical_source = FieldRecoverySource::SolverResult(
+        SolverResultIdentity::from_step_result(
+            producer,
+            Digest::sha256("structural sample publication"),
+        )
+        .unwrap(),
+    );
+    let recovery_request = FieldRecoveryRequest::new(
+        producer,
+        numerical_source,
+        constraint_plan.topology,
+        crate::execution::FieldRecoveryPlan::default(),
+    )
+    .unwrap();
+    let recovered = RecoveredFieldArtifact::new(
+        recovery_request.identity(),
+        numerical_source,
+        plan.topology_digest,
+        RecoveredFieldEntityCounts {
+            structural_nodes: node_count,
+            solid_elements: 0,
+            solid_integration_points: 0,
+            beam_elements: beam_count,
+            shell_elements: shell_count,
+            connectors: 0,
+            constraint_groups: 0,
+        },
+        fields.fields().to_vec(),
+    )
+    .unwrap();
+    let recovered_manifest = recovered.manifest().unwrap();
+    let selection = ObservationFieldSelection::structural(
+        &recovery_request,
+        &recovered_manifest,
+        vec![fields.fields()[0].identity()],
+    )
+    .unwrap();
+    let source = ObservationFieldCatalog::structural(recovery_request, recovered_manifest).unwrap();
+    source
+        .validate_structural_plan(&plan, &model, None)
+        .unwrap();
+    let evaluation =
+        crate::execution::ObservationEvaluationRequest::new(selection, plan.clone()).unwrap();
+    let artifact = ObservationArtifact::new(ObservationArtifactInput {
+        evaluation_request: evaluation.identity(),
+        producer,
+        source_selection: evaluation.selection.identity(),
+        source: evaluation.selection.source(),
+        topology_digest: plan.topology_digest,
+        plan_identity: plan.identity,
+        results,
+    })
+    .unwrap();
+    let sample = ObservationSamplePublication::new(evaluation, &artifact).unwrap();
+    let publication = ObservationPublicationCatalog::new(
+        producer,
+        plan.clone(),
+        source.clone(),
+        step,
+        vec![ObservationPublicationEntry::Sample(Box::new(sample))],
+        crate::execution::ObservationHistorySourceContext::Structural {
+            model: &model,
+            mesh: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        ObservationPublicationCatalog::from_canonical_bytes(
+            &publication.canonical_bytes().unwrap()
+        )
+        .unwrap(),
+        publication
+    );
+    let mut forged = plan;
+    let ResolvedObservationTarget::Nodes { indices, .. } = &mut forged.observations[0].target
+    else {
+        unreachable!()
+    };
+    for index in indices {
+        *index += 1;
+    }
+    forged.identity = forged.derive_identity().unwrap();
+    forged.validate_identity().unwrap();
+    assert!(source
+        .validate_structural_plan(&forged, &model, None)
+        .is_err());
+    let mut foreign_model = model.clone();
+    foreign_model.sequence.steps[0]
+        .step_id
+        .0
+        .push_str("-foreign");
+    assert!(source
+        .validate_structural_plan(publication.plan(), &foreign_model, None)
+        .is_err());
 }
 
 fn solver_layers(

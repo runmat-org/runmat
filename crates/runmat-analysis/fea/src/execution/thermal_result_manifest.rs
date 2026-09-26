@@ -3,8 +3,7 @@ use super::state::CanonicalThermalStatePayload;
 use super::{thermal_result::ThermalResultMetadata, *};
 use crate::results::field::{
     reconstruct_recovered_field, RecoveredFieldArtifactEntry, RecoveredFieldDefinition,
-    RecoveredFieldPartition, RecoveredFieldSample, RecoveredFieldView,
-    RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+    RecoveredFieldPartition, RecoveredFieldView, RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
 };
 use crate::{FeaRunResult, FeaThermalRunResult, ThermalInitialStateEvidence};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -64,7 +63,10 @@ impl ThermalSolverResultManifest {
         for (ordinal, &time) in result.time_points_s.iter().enumerate() {
             let entry = |index: usize| -> AnalysisExecutionResult<_> {
                 let definition = definition(index, ordinal)?;
-                let sample = RecoveredFieldSample::TimeSeconds(time);
+                let sample = crate::physics::thermal::history_fields::sample(
+                    result.time_points_s.len(),
+                    time,
+                );
                 let field =
                     RecoveredFieldView::new(&definition, sample, &histories[index][ordinal])
                         .map_err(invalid)?;
@@ -177,7 +179,10 @@ impl ThermalSolverResultManifest {
             for (index, entry) in entries.iter().enumerate() {
                 if entry.definition != definition(index, ordinal)?
                     || entry.sample
-                        != RecoveredFieldSample::TimeSeconds(self.time_points_s[ordinal])
+                        != crate::physics::thermal::history_fields::sample(
+                            self.time_points_s.len(),
+                            self.time_points_s[ordinal],
+                        )
                 {
                     return Err(invalid(
                         "field definition or sample differs from thermal history",

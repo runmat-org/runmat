@@ -13,7 +13,9 @@ use runmat_analysis_fea::execution::{
 };
 use runmat_analysis_fea::planning::resource::ResourceUsageEvidence;
 use runmat_analysis_fea::results::field::RecoveredFieldArtifactManifest;
-use runmat_analysis_fea::results::observation::ObservationArtifactManifest;
+use runmat_analysis_fea::results::observation::{
+    ObservationArtifactManifest, ObservationFieldSource,
+};
 use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -147,11 +149,14 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
                     ObservationArtifactManifest::from_canonical_bytes(&catalog_objects.payload())
                         .map_err(protocol)?;
                 if manifest.identity.digest() != output.logical_identity
-                    || manifest.source_fields != recovered_fields.manifest.identity
-                    || manifest.source
-                        != FieldRecoverySource::StructuralFrequencyEntry(
-                            declared.source_entry.identity(),
-                        )
+                    || !matches!(manifest.source,
+                        ObservationFieldSource::StructuralRecovery {
+                            artifact, recovery_request, numerical_source, topology,
+                        } if artifact == recovered_fields.manifest.identity
+                            && recovery_request == recovered_fields.manifest.recovery_request
+                            && numerical_source == FieldRecoverySource::StructuralFrequencyEntry(declared.source_entry.identity())
+                            && topology.discretization_digest() == recovered_fields.manifest.topology_digest
+                    )
                     || manifest
                         .results
                         .iter()

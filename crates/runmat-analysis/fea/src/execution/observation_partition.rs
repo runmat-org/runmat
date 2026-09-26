@@ -88,6 +88,7 @@ impl ObservationPartitionEvaluationRequest {
         source_field
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        source.selection.validate_partitions(source_field)?;
         validate_event_attribution(source, partition_plan, source_field, event_attribution)?;
         if partition_plan
             .partitions
@@ -141,6 +142,7 @@ impl ObservationPartitionEvaluationRequest {
         source_field
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        source.selection.validate_partitions(source_field)?;
         validate_event_attribution(source, partition_plan, source_field, self.event_attribution)?;
         if self.producer != source.producer
             || self.source_request != source.identity()
@@ -401,7 +403,7 @@ mod tests {
             field::{
                 RecoveredField, RecoveredFieldArtifact, RecoveredFieldDefinition,
                 RecoveredFieldEntityCounts, RecoveredFieldEntityDomain,
-                RecoveredFieldNumericRepresentation, RecoveredFieldSample, RecoveredFieldSelection,
+                RecoveredFieldNumericRepresentation, RecoveredFieldSample,
             },
             observation::{
                 prepare_solid_observation_field_partition, resolve_observation_plan,
@@ -520,11 +522,13 @@ mod tests {
             vec![field.clone()],
         )
         .unwrap();
-        let selection =
-            RecoveredFieldSelection::new(artifact.manifest().unwrap(), vec![field.identity()])
-                .unwrap();
-        let request =
-            ObservationEvaluationRequest::new(producer, &selection, topology, plan).unwrap();
+        let selection = crate::results::observation::ObservationFieldSelection::structural(
+            &recovery,
+            &artifact.manifest().unwrap(),
+            vec![field.identity()],
+        )
+        .unwrap();
+        let request = ObservationEvaluationRequest::new(selection, plan).unwrap();
         let partition_plan = ObservationPartitionPlan::derive(
             &request.plan,
             &ObservationId("first_yield".into()),

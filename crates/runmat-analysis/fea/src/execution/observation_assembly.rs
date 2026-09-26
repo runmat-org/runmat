@@ -2,8 +2,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::results::observation::{
-    resolved_observation_accepts_sample, ObservationPartitionEvidenceIdentity, ObservationResult,
-    ObservationResultIdentity,
+    ObservationPartitionEvidenceIdentity, ObservationResult, ObservationResultIdentity,
 };
 
 use super::{
@@ -178,14 +177,7 @@ fn validate_results(
             "observation assembly mixes sample coordinates or event attribution",
         ));
     }
-    let mut expected = Vec::new();
-    for observation in &source.plan.observations {
-        if resolved_observation_accepts_sample(&source.plan, observation, sample, event_attribution)
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
-        {
-            expected.push(observation);
-        }
-    }
+    let expected = source.scheduled_observations(sample, event_attribution)?;
     if expected.len() != results.len() {
         return Err(AnalysisExecutionError::Identity(
             "observation assembly does not exactly cover the scheduled sample",

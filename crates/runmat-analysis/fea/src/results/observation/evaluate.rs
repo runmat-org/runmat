@@ -64,12 +64,35 @@ fn evaluate_observations_for_topology(
     plan.observations
         .iter()
         .map(|observation| {
+            let terminal_time = match plan.independent_domain {
+                runmat_analysis_core::IndependentDomain::TimeSeconds { end, .. } => {
+                    Some(RecoveredFieldSample::TimeSeconds(end))
+                }
+                _ => None,
+            };
+            let physical = terminal_time.filter(|sample| {
+                fields
+                    .get(observation.source_field_definition_identity, *sample)
+                    .is_some()
+            });
+            if physical.is_some()
+                && fields
+                    .get(
+                        observation.source_field_definition_identity,
+                        RecoveredFieldSample::Final,
+                    )
+                    .is_some()
+            {
+                return Err(ObservationError::Identity(
+                    "final observation has ambiguous terminal field coordinates",
+                ));
+            }
             evaluate_sample(
                 plan,
                 observation,
                 topology,
                 fields,
-                RecoveredFieldSample::Final,
+                physical.unwrap_or(RecoveredFieldSample::Final),
                 None,
             )
         })
@@ -195,7 +218,13 @@ pub fn resolved_observation_accepts_sample(
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<bool, ObservationError> {
     if observation.spec.sampling == SamplingPolicy::Final {
-        return Ok(event_attribution.is_none() && sample == RecoveredFieldSample::Final);
+        // A transient producer retains physical coordinates, including its terminal field.
+        // Select the authored endpoint without relabeling the field or changing provenance.
+        let terminal = sample == RecoveredFieldSample::Final
+            || matches!((&plan.independent_domain, sample),
+                (runmat_analysis_core::IndependentDomain::TimeSeconds { end, .. },
+                    RecoveredFieldSample::TimeSeconds(time)) if time == *end);
+        return Ok(event_attribution.is_none() && terminal);
     }
     Ok(
         sample_matches_history_policy(&observation.spec.sampling, sample, event_attribution)?

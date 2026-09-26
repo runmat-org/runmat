@@ -18,7 +18,7 @@ pub fn execute_thermal_solver_result_objects(
     require_inventory(&transport, limits)?;
     let output = crate::projected_transport_output_resource_facts(&transport)?;
     prepared.require_output_reservation(output.construction_resident_bytes_admission_budget)?;
-    let result = prepared.execute()?;
+    let result = prepared.execute_primary_fields()?;
     crate::prepare_thermal_solver_result_objects(&result, chunk_bytes, namespace, limits)
 }
 

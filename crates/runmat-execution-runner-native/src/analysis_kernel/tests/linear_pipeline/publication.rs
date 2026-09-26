@@ -1,7 +1,10 @@
 use super::*;
 use runmat_analysis_fea::execution::AccuracySourceKind;
 
-pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifactManifest) {
+pub(super) fn execute(
+    solved: &SolvedPipeline,
+    observations: &runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
+) {
     let host = &solved.prepared.host;
     let step = host.workload.step;
     let accuracy_request = AccuracyEvaluationRequest::new(
@@ -24,7 +27,7 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     .unwrap();
     let observation_artifact = runmat_analysis_execution::prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationCatalog,
-        observations.identity.digest(),
+        observations.identity().digest(),
         &observations.canonical_bytes().unwrap(),
         4096,
         ObjectNamespace::ResultValue,
@@ -216,7 +219,7 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     )
     .unwrap();
     assert_eq!(published.source_result, solved.source_result);
-    assert_eq!(published.source_observations, Some(observations.identity));
+    assert_eq!(published.source_observations, Some(observations.identity()));
     assert_eq!(published.source_accuracy, accuracy.identity());
 
     // Neither the source solve's valid plan nor a self-consistently rehashed publication

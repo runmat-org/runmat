@@ -26,6 +26,71 @@ fn workload() -> ThermalWorkload {
 }
 
 #[test]
+fn final_thermal_field_selection_is_validated_before_assembly() {
+    use crate::planning::resource::ThermalObservationResourceFacts;
+    use runmat_analysis_core::{
+        ExcitationTarget, ObservationRequest, ObservationTarget, RegionTarget, SamplingPolicy,
+    };
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let mut workload = workload();
+        let ObservationRequest::History(mut spec) =
+            workload.model.sequence.steps[0].observations[0].clone()
+        else {
+            unreachable!()
+        };
+        spec.sampling = SamplingPolicy::Final;
+        workload.model.sequence.steps[0].observations =
+            vec![ObservationRequest::Field(spec.clone())];
+        let facts =
+            ThermalObservationResourceFacts::derive(&mesh, &workload.model.sequence.steps[0])
+                .unwrap();
+        assert!(
+            facts.shared.is_none(),
+            "final fields are not inline histories"
+        );
+        workload.prepare(&mesh).unwrap();
+        spec.target = ObservationTarget::Spatial(ExcitationTarget::Region(RegionTarget::volume(
+            "absent-volume",
+        )));
+        workload.model.sequence.steps[0].observations = vec![ObservationRequest::Field(spec)];
+        assert!(
+            ThermalObservationResourceFacts::derive(&mesh, &workload.model.sequence.steps[0])
+                .is_err()
+        );
+        assert!(workload.prepare(&mesh).is_err());
+    }
+}
+
+#[test]
+fn deferred_thermal_observations_preserve_primary_fields_and_authored_identity() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let workload = workload();
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let primary = workload
+            .prepare(&mesh)
+            .unwrap()
+            .execute_primary_fields()
+            .unwrap();
+        assert!(primary.run.observation_histories.is_empty());
+        assert!(primary.run.series_reductions.is_empty());
+        assert_eq!(primary.source_workload, workload.identity().unwrap());
+        assert_eq!(
+            primary.time_points_s,
+            workload.solve_schedule().unwrap().points_s()
+        );
+        let inline = workload.execute(&mesh).unwrap();
+        assert_eq!(inline.run.observation_histories.len(), 2);
+        assert_eq!(primary.producer, inline.producer);
+        // This is execution-product parity, not an independent numerical reference.
+        assert_eq!(
+            crate::execution::ThermalSolverResultManifest::from_result(&primary).unwrap(),
+            crate::execution::ThermalSolverResultManifest::from_result(&inline).unwrap(),
+        );
+    }
+}
+
+#[test]
 fn preflight_inventory_matches_actual_retained_fields_and_expanded_solve() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut workload = workload();

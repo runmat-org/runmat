@@ -8,6 +8,14 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (
+                Self::ObservationHistoryFinalization(demand),
+                AnalysisNumericalObjectKind::History,
+            ) => Some(&demand.history_output),
+            (
+                Self::ObservationHistoryFinalization(demand),
+                AnalysisNumericalObjectKind::SeriesReductionResult,
+            ) => demand.series_output.as_ref(),
             (Self::ResultPublication(demand), AnalysisNumericalObjectKind::PublishedResult) => {
                 Some(&demand.output)
             }

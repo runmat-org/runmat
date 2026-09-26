@@ -11,9 +11,10 @@ use crate::{
     import_analysis_partition, AnalysisBridgeError, AnalysisBridgeResult, AnalysisPartitionImport,
 };
 
-/// Imports only canonical recovered-field storage blocks intersecting the sorted source indices
+/// Imports only canonical field storage blocks intersecting the sorted source indices
 /// required by one observation partition.
 pub(crate) struct RequiredFieldPartitionImport<'a> {
+    pub source_kind: AnalysisNumericalObjectKind,
     pub root: &'a ValueRef,
     pub source_logical_identity: runmat_execution::Digest,
     pub source_payload_digest: runmat_execution::Digest,
@@ -28,6 +29,7 @@ pub(crate) fn import_required_field_partitions(
     request: RequiredFieldPartitionImport<'_>,
 ) -> AnalysisBridgeResult<RecoveredFieldPartitionSet> {
     let RequiredFieldPartitionImport {
+        source_kind,
         root,
         source_logical_identity,
         source_payload_digest,
@@ -36,7 +38,10 @@ pub(crate) fn import_required_field_partitions(
         entry,
         required_indices,
     } = request;
-    if required_indices.is_empty()
+    if !matches!(
+        source_kind,
+        AnalysisNumericalObjectKind::Field | AnalysisNumericalObjectKind::SolverResult
+    ) || required_indices.is_empty()
         || required_indices
             .windows(2)
             .any(|indices| indices[0] >= indices[1])
@@ -62,7 +67,7 @@ pub(crate) fn import_required_field_partitions(
                 source,
                 AnalysisPartitionImport {
                     root,
-                    expected_kind: AnalysisNumericalObjectKind::Field,
+                    expected_kind: source_kind,
                     expected_logical_identity: source_logical_identity,
                     expected_payload_digest: source_payload_digest,
                     partition_identity: descriptor.partition.digest(),
@@ -128,6 +133,11 @@ mod tests {
 
     #[test]
     fn large_field_import_reads_only_the_intersecting_storage_block() {
+        check_large_partition_import(AnalysisNumericalObjectKind::Field);
+        check_large_partition_import(AnalysisNumericalObjectKind::SolverResult);
+    }
+
+    fn check_large_partition_import(source_kind: AnalysisNumericalObjectKind) {
         let entity_count = RECOVERED_FIELD_PARTITION_ENTITY_COUNT * 2 + 17;
         let definition = RecoveredFieldDefinition::new(
             "large.temperature",
@@ -174,7 +184,7 @@ mod tests {
             .collect::<Vec<_>>();
         let logical_identity = Digest::sha256("large-field-artifact");
         let prepared = prepare_partitioned_analysis_objects(
-            AnalysisNumericalObjectKind::Field,
+            source_kind,
             logical_identity,
             &payload_views,
             4096,
@@ -201,6 +211,7 @@ mod tests {
         let selected = import_required_field_partitions(
             &store,
             RequiredFieldPartitionImport {
+                source_kind,
                 root: &root,
                 source_logical_identity: prepared.manifest.logical_identity,
                 source_payload_digest: prepared.manifest.payload_digest,
@@ -243,6 +254,7 @@ mod tests {
         assert!(import_required_field_partitions(
             &store,
             RequiredFieldPartitionImport {
+                source_kind,
                 root: &root,
                 source_logical_identity: prepared.manifest.logical_identity,
                 source_payload_digest: prepared.manifest.payload_digest,
@@ -266,6 +278,7 @@ mod tests {
         assert!(import_required_field_partitions(
             &missing_store,
             RequiredFieldPartitionImport {
+                source_kind,
                 root: &root,
                 source_logical_identity: prepared.manifest.logical_identity,
                 source_payload_digest: prepared.manifest.payload_digest,

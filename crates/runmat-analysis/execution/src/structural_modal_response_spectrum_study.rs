@@ -400,6 +400,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             .as_ref()
             .ok_or_else(|| invalid("completed response-spectrum result is absent"))?;
         let task = prepare_accuracy(AccuracyPreparation {
+            source_context_inputs: Vec::new(),
             solve_host: self
                 .assembly_host
                 .as_ref()

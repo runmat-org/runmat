@@ -19,6 +19,7 @@ mod analysis_response_spectrum;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;
+mod analysis_thermal;
 mod analysis_transient;
 mod config;
 mod driver;
@@ -110,6 +111,9 @@ pub use analysis_response_spectrum::{
 pub use analysis_sequence::{
     execute_structural_sequence_locally, execute_structural_sequence_remotely,
     StructuralSequenceExecutionPolicy,
+};
+pub use analysis_thermal::{
+    execute_thermal_study_locally, execute_thermal_study_remotely, ThermalStudyExecutionPolicy,
 };
 pub use analysis_transient::{
     execute_structural_transient_locally, execute_structural_transient_remotely,

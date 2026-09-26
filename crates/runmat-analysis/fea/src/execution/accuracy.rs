@@ -2,14 +2,16 @@ use runmat_analysis_core::{AccuracyPlan, FormulationRequirement};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
+use crate::results::observation::{
+    ObservationPublicationCatalog, ObservationPublicationCatalogIdentity,
+};
 
 use super::{
     AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
-    ObservationEvaluationRequestIdentity, SolverResultIdentity, StepIdentity,
+    SolverResultIdentity, StepIdentity,
 };
 
-const ACCURACY_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-accuracy-evaluation/v1\0";
+const ACCURACY_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-accuracy-evaluation/v2\0";
 const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(16 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -22,6 +24,45 @@ pub enum AccuracySourceKind {
     StructuralRandomResponse,
 }
 
+impl ObservationPublicationCatalog {
+    /// Bind a publication catalog to the actual producing field authority, not a
+    /// single evaluation request (which cannot represent a multi-sample history).
+    pub fn validate_source_result(
+        &self,
+        producer: StepIdentity,
+        kind: AccuracySourceKind,
+        result: SolverResultIdentity,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        if self.producer() != producer {
+            return Err(AnalysisExecutionError::Identity(
+                "observation publication producer differs",
+            ));
+        }
+        match (kind, self.source().source()) {
+            (
+                AccuracySourceKind::Thermal,
+                crate::results::observation::ObservationFieldCatalogSource::Thermal { manifest },
+            ) if manifest.producer == producer && manifest.identity() == result => Ok(()),
+            (
+                AccuracySourceKind::StructuralLinear,
+                crate::results::observation::ObservationFieldCatalogSource::Structural {
+                    recovery_request,
+                    manifest,
+                },
+            ) if recovery_request.producer == producer
+                && recovery_request.source.solver_result() == Some(result)
+                && manifest.source == recovery_request.source =>
+            {
+                Ok(())
+            }
+            _ => Err(AnalysisExecutionError::Identity(
+                "observation publication differs from solver result or supported source family",
+            )),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "AccuracyEvaluationRequestWire")]
 pub struct AccuracyEvaluationRequest {
@@ -30,8 +71,7 @@ pub struct AccuracyEvaluationRequest {
     pub producer: StepIdentity,
     pub source_kind: AccuracySourceKind,
     pub source_result: SolverResultIdentity,
-    pub observation_request: Option<ObservationEvaluationRequestIdentity>,
-    pub source_observations: Option<ObservationArtifactIdentity>,
+    pub source_observations: Option<ObservationPublicationCatalogIdentity>,
     pub formulation_requirement: FormulationRequirement,
     pub plan: AccuracyPlan,
 }
@@ -44,8 +84,7 @@ struct AccuracyEvaluationRequestWire {
     producer: StepIdentity,
     source_kind: AccuracySourceKind,
     source_result: SolverResultIdentity,
-    observation_request: Option<ObservationEvaluationRequestIdentity>,
-    source_observations: Option<ObservationArtifactIdentity>,
+    source_observations: Option<ObservationPublicationCatalogIdentity>,
     formulation_requirement: FormulationRequirement,
     plan: AccuracyPlan,
 }
@@ -60,7 +99,6 @@ impl TryFrom<AccuracyEvaluationRequestWire> for AccuracyEvaluationRequest {
             producer: wire.producer,
             source_kind: wire.source_kind,
             source_result: wire.source_result,
-            observation_request: wire.observation_request,
             source_observations: wire.source_observations,
             formulation_requirement: wire.formulation_requirement,
             plan: wire.plan,
@@ -75,28 +113,16 @@ impl AccuracyEvaluationRequest {
         producer: StepIdentity,
         source_kind: AccuracySourceKind,
         source_result: SolverResultIdentity,
-        observations: Option<&ObservationArtifactManifest>,
+        observations: Option<&ObservationPublicationCatalog>,
         formulation_requirement: FormulationRequirement,
         plan: AccuracyPlan,
     ) -> AnalysisExecutionResult<Self> {
-        let (observation_request, source_observations) = match observations {
+        let source_observations = match observations {
             Some(observations) => {
-                observations
-                    .validate()
-                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                if observations.producer != producer
-                    || observations.source.solver_result() != Some(source_result)
-                {
-                    return Err(AnalysisExecutionError::Identity(
-                        "accuracy observations differ from their solver source",
-                    ));
-                }
-                (
-                    Some(observations.evaluation_request),
-                    Some(observations.identity),
-                )
+                observations.validate_source_result(producer, source_kind, source_result)?;
+                Some(observations.identity())
             }
-            None => (None, None),
+            None => None,
         };
         let identity = AccuracyEvaluationRequestIdentity::derive(
             "accuracy-evaluation-request",
@@ -104,19 +130,17 @@ impl AccuracyEvaluationRequest {
                 producer,
                 source_kind,
                 source_result,
-                observation_request,
                 source_observations,
                 formulation_requirement,
                 &plan,
             ),
         )?;
         let request = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity,
             producer,
             source_kind,
             source_result,
-            observation_request,
             source_observations,
             formulation_requirement,
             plan,
@@ -130,9 +154,7 @@ impl AccuracyEvaluationRequest {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1
-            || self.observation_request.is_some() != self.source_observations.is_some()
-        {
+        if self.schema_version != 2 {
             return Err(AnalysisExecutionError::Invalid(
                 "accuracy evaluation schema or observation binding is invalid".into(),
             ));
@@ -145,7 +167,6 @@ impl AccuracyEvaluationRequest {
                 self.producer,
                 self.source_kind,
                 self.source_result,
-                self.observation_request,
                 self.source_observations,
                 self.formulation_requirement,
                 &self.plan,

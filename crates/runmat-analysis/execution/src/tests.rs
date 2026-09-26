@@ -26,6 +26,8 @@ mod observation_history_checkpoint_tests;
 
 #[path = "tests/thermal_execution.rs"]
 mod thermal_execution_tests;
+#[path = "tests/thermal_observation.rs"]
+mod thermal_observation_tests;
 #[path = "tests/thermal_result_access.rs"]
 mod thermal_result_access_tests;
 
@@ -1920,15 +1922,15 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
 
     let sequence = SequenceIdentity::from_solver_contract(&solve.model.sequence).unwrap();
     let observation_accelerators = prepared.resource_plan.request.accelerators.clone();
-    assert!(prepare_structural_observation_fanout(
+    assert!(prepare_observation_fanout(
         &store,
-        StructuralObservationPreparation {
+        ObservationPreparation {
             source_host: field_prepared.host.clone(),
-            source_request: field_prepared.request.clone(),
-            source_fields: imported_fields.clone(),
-            source_workload: StructuralObservationWorkloadSource::Frequency(
-                prepared.inputs[0].clone(),
-            ),
+            source: ObservationPublishedSource::Structural {
+                recovery_request: field_prepared.request.clone(),
+                fields: imported_fields.clone()
+            },
+            source_workload: ObservationWorkloadSource::Frequency(prepared.inputs[0].clone(),),
             mesh: Some(prepared.inputs[1].clone()),
             accelerator_requests: observation_accelerators.clone(),
             sequence,
@@ -1942,15 +1944,15 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         None,
     )
     .is_err());
-    let skipped_fanout = prepare_structural_observation_fanout(
+    let skipped_fanout = prepare_observation_fanout(
         &store,
-        StructuralObservationPreparation {
+        ObservationPreparation {
             source_host: field_prepared.host.clone(),
-            source_request: field_prepared.request.clone(),
-            source_fields: imported_fields.clone(),
-            source_workload: StructuralObservationWorkloadSource::Linear(
-                prepared.inputs[0].clone(),
-            ),
+            source: ObservationPublishedSource::Structural {
+                recovery_request: field_prepared.request.clone(),
+                fields: imported_fields.clone(),
+            },
+            source_workload: ObservationWorkloadSource::Linear(prepared.inputs[0].clone()),
             mesh: Some(prepared.inputs[1].clone()),
             accelerator_requests: observation_accelerators.clone(),
             sequence,
@@ -1965,15 +1967,15 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert!(skipped_fanout.partitions.is_empty());
-    let observation_fanout = prepare_structural_observation_fanout(
+    let observation_fanout = prepare_observation_fanout(
         &store,
-        StructuralObservationPreparation {
+        ObservationPreparation {
             source_host: field_prepared.host.clone(),
-            source_request: field_prepared.request.clone(),
-            source_fields: imported_fields.clone(),
-            source_workload: StructuralObservationWorkloadSource::Linear(
-                prepared.inputs[0].clone(),
-            ),
+            source: ObservationPublishedSource::Structural {
+                recovery_request: field_prepared.request.clone(),
+                fields: imported_fields.clone(),
+            },
+            source_workload: ObservationWorkloadSource::Linear(prepared.inputs[0].clone()),
             mesh: Some(prepared.inputs[1].clone()),
             accelerator_requests: observation_accelerators.clone(),
             sequence,
@@ -2006,6 +2008,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             input.manifest.kind != AnalysisNumericalObjectKind::Field
                 && input.manifest.kind != AnalysisNumericalObjectKind::FieldSelection
         }));
+        assert_eq!(
+            partition
+                .inputs
+                .iter()
+                .filter(|input| {
+                    input.manifest.kind == AnalysisNumericalObjectKind::ObservationFieldCatalog
+                })
+                .count(),
+            1,
+            "observation tasks carry metadata authority without full field arrays"
+        );
         let roots = partition
             .program
             .request
@@ -2089,17 +2102,16 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                 .collect(),
         )
         .unwrap();
-        let reduction =
-            prepare_structural_observation_reduction(StructuralObservationReductionPreparation {
-                source_host: field_prepared.host.clone(),
-                source_request: distributed_source_request.clone(),
-                partition_plan,
-                contributions,
-                program_revision: revision(),
-                chunk_bytes: 4096,
-                inventory_limits: ObjectInventoryLimits::default(),
-            })
-            .unwrap();
+        let reduction = prepare_observation_reduction(ObservationReductionPreparation {
+            source_host: field_prepared.host.clone(),
+            source_request: distributed_source_request.clone(),
+            partition_plan,
+            contributions,
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        })
+        .unwrap();
         let dependencies = partition_dependencies
             .remove(&partition_plan_identity)
             .unwrap();
@@ -2179,25 +2191,23 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             runmat_analysis_fea::results::observation::ObservationArtifactInput {
                 evaluation_request: distributed_source_request.identity(),
                 producer: distributed_source_request.producer,
-                field_recovery_request: distributed_source_request.field_recovery_request,
-                source_fields: distributed_source_request.source_fields,
-                source: distributed_source_request.source,
+                source: distributed_source_request.selection.source(),
+                source_selection: distributed_source_request.selection.identity(),
                 topology_digest: distributed_source_request.plan.topology_digest,
                 plan_identity: distributed_source_request.plan.identity,
                 results: canonical_distributed_results,
             },
         )
         .unwrap();
-    let assembly =
-        prepare_structural_observation_assembly(StructuralObservationAssemblyPreparation {
-            source_host: field_prepared.host.clone(),
-            source_request: distributed_source_request.clone(),
-            results: distributed_results,
-            program_revision: revision(),
-            chunk_bytes: 4096,
-            inventory_limits: ObjectInventoryLimits::default(),
-        })
-        .unwrap();
+    let assembly = prepare_observation_assembly(ObservationAssemblyPreparation {
+        source_host: field_prepared.host.clone(),
+        source_request: distributed_source_request.clone(),
+        results: distributed_results,
+        program_revision: revision(),
+        chunk_bytes: 4096,
+        inventory_limits: ObjectInventoryLimits::default(),
+    })
+    .unwrap();
     assembly.program.write_to(&mut store).unwrap();
     let assembly_completed = execute_serial_analysis(
         &assembly.program.request,
@@ -2210,7 +2220,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let assembly_response = AnalysisHostResponse::completed(&assembly.host, &assembly_completed)
         .unwrap()
         .program_response();
-    let imported_distributed_observations = import_structural_observation_assembly(
+    let imported_distributed_observations = import_observation_assembly(
         &store,
         assembly_response,
         &assembly,
@@ -2244,7 +2254,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         .is_err()
     );
     let mut invalid_manifest = serde_json::to_value(&imported_observations.manifest).unwrap();
-    invalid_manifest["schema_version"] = serde_json::json!(2);
+    invalid_manifest["schema_version"] = serde_json::json!(u16::MAX);
     assert!(serde_json::from_value::<
         runmat_analysis_fea::results::observation::ObservationArtifactManifest,
     >(invalid_manifest)
@@ -2275,11 +2285,39 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert_eq!(imported_observation.observation_id.0, "whole_displacement");
 
+    let publication_catalog =
+        runmat_analysis_fea::results::observation::ObservationPublicationCatalog::new(
+            prepared.host.workload.step,
+            assembly.source_request.plan.clone(),
+            runmat_analysis_fea::results::observation::ObservationFieldCatalog::structural(
+                field_prepared.request.clone(),
+                recovered_artifact.manifest().unwrap(),
+            )
+            .unwrap(),
+            &producer_step,
+            vec![
+                runmat_analysis_fea::results::observation::ObservationPublicationEntry::Sample(
+                    Box::new(
+                        runmat_analysis_fea::results::observation::ObservationSamplePublication {
+                            request: assembly.source_request.clone(),
+                            manifest: imported_observations.manifest.clone(),
+                        },
+                    ),
+                ),
+            ],
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
+                model: &solve.model,
+                mesh: Some(&mesh),
+            },
+        )
+        .unwrap();
+
     let accuracy_prepared = prepare_accuracy(AccuracyPreparation {
         solve_host: prepared.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: completed.outputs[1].clone(),
-        source_observations: Some(imported_observations.clone()),
+        source_observations: Some(publication_catalog.clone()),
+        source_context_inputs: Vec::new(),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,
@@ -2324,7 +2362,8 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         solve_host: prepared.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: unrelated_receipt,
-        source_observations: Some(imported_observations.clone()),
+        source_observations: Some(publication_catalog.clone()),
+        source_context_inputs: Vec::new(),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,
@@ -2411,7 +2450,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
         source_resource_usage: overrun_usage.objects,
-        source_observations: Some(imported_observations.clone()),
+        source_observations: Some(publication_catalog.clone()),
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2421,7 +2460,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
         source_resource_usage: resource_usage.objects.clone(),
-        source_observations: Some(imported_observations.clone()),
+        source_observations: Some(publication_catalog.clone()),
         program_revision: revision(),
         chunk_bytes: 4096,
         inventory_limits: ObjectInventoryLimits::default(),
@@ -2430,7 +2469,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let alternate_publication_request =
         runmat_analysis_fea::execution::ResultPublicationRequest::new(
             &accuracy_artifact,
-            Some(&imported_observations.manifest),
+            Some(&publication_catalog),
             &alternate_resource_usage.evidence,
         )
         .unwrap();

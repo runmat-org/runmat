@@ -14,9 +14,9 @@ use super::accuracy::{
     AccuracyArtifact, AccuracyArtifactIdentity, AccuracyPublicationGate, AccuracyStatus,
     PublicationDecision,
 };
-use super::observation::ObservationArtifactIdentity;
+use super::observation::ObservationPublicationCatalogIdentity;
 
-const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v1\0";
+const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v2\0";
 const PUBLICATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -34,7 +34,7 @@ pub struct PublishedAnalysisResult {
     pub request: PublicationRequestIdentity,
     pub producer: StepIdentity,
     pub source_result: SolverResultIdentity,
-    pub source_observations: Option<ObservationArtifactIdentity>,
+    pub source_observations: Option<ObservationPublicationCatalogIdentity>,
     pub source_accuracy: AccuracyArtifactIdentity,
     pub source_resource_plan: FeaResourcePlanIdentity,
     pub source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -51,7 +51,7 @@ struct PublishedAnalysisResultWire {
     request: PublicationRequestIdentity,
     producer: StepIdentity,
     source_result: SolverResultIdentity,
-    source_observations: Option<ObservationArtifactIdentity>,
+    source_observations: Option<ObservationPublicationCatalogIdentity>,
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -101,7 +101,7 @@ impl PublishedAnalysisResult {
             request.source_resource_usage.digest(),
         )?;
         let result = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity,
             request: request.identity(),
             producer: request.producer,
@@ -131,7 +131,7 @@ impl PublishedAnalysisResult {
             self.source_resource_plan.digest(),
             self.source_resource_usage.digest(),
         )?;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.identity != expected
             || self.gate.decision != PublicationDecision::Allow
             || self.gate.status != self.accuracy_status

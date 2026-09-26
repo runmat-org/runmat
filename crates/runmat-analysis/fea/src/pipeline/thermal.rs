@@ -12,6 +12,7 @@ use crate::{
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
 };
 
+mod inline_history;
 mod physical;
 mod prepared;
 pub use prepared::PreparedThermalSolve;

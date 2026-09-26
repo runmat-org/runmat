@@ -6,6 +6,7 @@
 
 mod acceleration;
 mod acceleration_evidence;
+mod catalog;
 mod contract;
 mod distributed;
 mod distributed_numeric;
@@ -13,11 +14,24 @@ mod evaluate;
 mod extrema;
 mod history;
 mod partition;
+mod publication;
 mod publish;
+pub use publication::{
+    ObservationHistoryPublication, ObservationPublicationCatalog,
+    ObservationPublicationCatalogIdentity, ObservationPublicationEntry,
+    ObservationSamplePublication, SeriesReductionPublication,
+    SeriesReductionPublicationContribution,
+};
 mod resolve;
+mod source;
 mod topology;
 
+pub use source::{
+    ObservationFieldSelection, ObservationFieldSelectionIdentity, ObservationFieldSource,
+};
+
 pub(crate) use acceleration::governed_extrema_device_resident_bytes;
+pub use catalog::{ObservationFieldCatalog, ObservationFieldCatalogSource};
 
 pub use contract::{
     ObservationArtifact, ObservationArtifactEntry, ObservationArtifactIdentity,
@@ -29,10 +43,11 @@ pub use contract::{
 pub use distributed::{
     evaluate_solid_observation_partition, evaluate_structural_observation_partition,
     prepare_solid_observation_field_partition, prepare_structural_observation_field_partition,
-    reduce_observation_partitions, structural_observation_partition_source_indices,
-    ObservationPartitionCombination, ObservationPartitionContribution,
-    ObservationPartitionContributionIdentity, ObservationPartitionEvidence,
-    ObservationPartitionEvidenceIdentity, ObservationPartitionPayload,
+    reduce_observation_partitions, solid_observation_partition_source_indices,
+    structural_observation_partition_source_indices, ObservationPartitionCombination,
+    ObservationPartitionContribution, ObservationPartitionContributionIdentity,
+    ObservationPartitionEvidence, ObservationPartitionEvidenceIdentity,
+    ObservationPartitionPayload,
 };
 pub use evaluate::{
     evaluate_observation_event_sample, evaluate_observation_sample, evaluate_observations,

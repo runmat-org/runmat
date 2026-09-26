@@ -118,20 +118,30 @@ pub(super) fn execute_observation_partition(
         AnalysisNumericalObjectKind::ObservationPartitionPlan,
     )?;
     let fields = unique_input(&invocation, AnalysisNumericalObjectKind::FieldPartition)?;
+    let field_catalog = unique_input(
+        &invocation,
+        AnalysisNumericalObjectKind::ObservationFieldCatalog,
+    )?;
     let linear_workload =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::SolverInvocation)?;
     let frequency_workload = optional_unique_input(
         &invocation,
         AnalysisNumericalObjectKind::StructuralFrequencyWorkload,
     )?;
-    if linear_workload.is_some() == frequency_workload.is_some() {
+    let thermal_workload =
+        optional_unique_input(&invocation, AnalysisNumericalObjectKind::ThermalWorkload)?;
+    if usize::from(linear_workload.is_some())
+        + usize::from(frequency_workload.is_some())
+        + usize::from(thermal_workload.is_some())
+        != 1
+    {
         return Err(AnalysisBridgeError::Invalid(
-            "observation partition requires exactly one typed structural workload source".into(),
+            "observation partition requires exactly one typed workload source".into(),
         ));
     }
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
     let mesh = optional_unique_input(&invocation, AnalysisNumericalObjectKind::Mesh)?;
-    if invocation.inputs.len() != 6 + usize::from(mesh.is_some())
+    if invocation.inputs.len() != 7 + usize::from(mesh.is_some())
         || invocation.host.workload.outputs
             != vec![AnalysisNumericalObjectKind::ObservationPartitionContribution]
     {
@@ -146,6 +156,15 @@ pub(super) fn execute_observation_partition(
     let field_set_identity = fields.manifest.logical_identity;
     let source_request =
         ObservationEvaluationRequest::from_canonical_bytes(&source_request.payload())?;
+    let catalog =
+        runmat_analysis_fea::results::observation::ObservationFieldCatalog::from_canonical_bytes(
+            &field_catalog.payload(),
+        )?;
+    if catalog.identity() != field_catalog.manifest.logical_identity {
+        return Err(AnalysisBridgeError::Identity(
+            "observation source catalog identity differs from its input",
+        ));
+    }
     let request = ObservationPartitionEvaluationRequest::from_canonical_bytes(&request.payload())?;
     let partition_plan = ObservationPartitionPlan::from_canonical_bytes(&partition_plan.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
@@ -172,10 +191,51 @@ pub(super) fn execute_observation_partition(
             "observation partition inputs differ from their object identities",
         ));
     }
-    let (model, backend) = if let Some(workload) = linear_workload {
+    let mesh = mesh
+        .map(|mesh| {
+            SolverMeshArtifact::canonical_decode(&mesh.payload())
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+        })
+        .transpose()?;
+    let mut thermal_projection = None;
+    let (model, backend) = if let Some(workload_objects) = thermal_workload {
+        let workload = runmat_analysis_fea::execution::ThermalWorkload::from_canonical_bytes(
+            &workload_objects.payload(),
+        )?;
+        if workload.identity()?.digest() != workload_objects.manifest.logical_identity
+            || workload.backend != runmat_analysis_fea::ComputeBackend::Cpu
+        {
+            return Err(AnalysisBridgeError::Identity(
+                "thermal observation workload identity or CPU envelope differs",
+            ));
+        }
+        let mesh = mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+            "thermal observation requires its exact mesh",
+        ))?;
+        catalog.validate_thermal_selection(&source_request.selection, &workload, mesh)?;
+        catalog.validate_thermal_plan(&source_request.plan, &workload, mesh)?;
+        let expected_partitions = ObservationPartitionPlan::derive(
+            &source_request.plan,
+            &partition_plan.observation_id,
+            runmat_analysis_fea::results::observation::ObservationExecutionPolicy::serial(),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+        if partition_plan != expected_partitions {
+            return Err(AnalysisBridgeError::Identity(
+                "thermal observation partition policy differs from its workload",
+            ));
+        }
+        thermal_projection = Some(
+            runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
+        );
+        (workload.model, workload.backend)
+    } else if let Some(workload) = linear_workload {
+        catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralLinearWorkload::from_canonical_bytes(&workload.payload())?;
         (workload.model, workload.backend)
     } else {
+        catalog.validate_structural_selection(&source_request.selection)?;
         let workload = StructuralFrequencyWorkload::from_canonical_bytes(
             &frequency_workload
                 .expect("exclusive source checked")
@@ -183,12 +243,6 @@ pub(super) fn execute_observation_partition(
         )?;
         (workload.model().clone(), workload.backend())
     };
-    let mesh = mesh
-        .map(|mesh| {
-            SolverMeshArtifact::canonical_decode(&mesh.payload())
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
-        })
-        .transpose()?;
     let FeaResourceDemand::StructuralObservationPartition(_) = &resource_plan.input.demand else {
         return Err(AnalysisBridgeError::Identity(
             "observation partition requires its exact phase resource demand",
@@ -233,6 +287,16 @@ pub(super) fn execute_observation_partition(
         ));
     }
     let contribution = match resource_plan.request.accelerators.as_slice() {
+        [] if thermal_projection.is_some() => {
+            runmat_analysis_fea::results::observation::evaluate_solid_observation_partition(
+                &source_request.plan,
+                &partition_plan,
+                partition,
+                thermal_projection.as_ref().expect("thermal branch"),
+                &fields,
+                request.event_attribution,
+            )
+        }
         [] => evaluate_structural_observation_partition(
             &source_request.plan,
             &partition_plan,
@@ -480,9 +544,8 @@ pub(super) fn execute_observation_assembly(
     let artifact = ObservationArtifact::new(ObservationArtifactInput {
         evaluation_request: source_request.identity(),
         producer: source_request.producer,
-        field_recovery_request: source_request.field_recovery_request,
-        source_fields: source_request.source_fields,
-        source: source_request.source,
+        source: source_request.selection.source(),
+        source_selection: source_request.selection.identity(),
         topology_digest: source_request.plan.topology_digest,
         plan_identity: source_request.plan.identity,
         results,

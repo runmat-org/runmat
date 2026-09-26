@@ -92,6 +92,31 @@ pub(super) fn build_observation_history_resource_plan(
     )
 }
 
+pub(super) fn build_observation_history_finalization_resource_plan(
+    input: FeaResourcePlanningInput,
+    demand: &crate::planning::resource::ObservationHistoryFinalizationResourceDemand,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    if demand.retained_sample_count.0 == 0 || demand.retained_value_count.0 == 0 {
+        return Err(ResourcePlanningError::Invalid(
+            "history finalization requires nonempty retained samples and values".into(),
+        ));
+    }
+    let mut outputs = vec![&demand.history_output];
+    if let Some(output) = &demand.series_output {
+        outputs.push(output);
+    }
+    build_host_phase_resource_plan(
+        input,
+        HostPhaseAccounting::host_only(
+            demand.topology_digest,
+            &demand.inputs,
+            demand.workspace_bytes_upper_bound,
+            ByteCount(0),
+            &outputs,
+        ),
+    )
+}
+
 pub(super) fn build_observation_assembly_resource_plan(
     input: FeaResourcePlanningInput,
     demand: &ObservationAssemblyResourceDemand,

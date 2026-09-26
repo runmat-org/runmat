@@ -5,7 +5,9 @@ use runmat_analysis_fea::planning::resource::{
     record_resource_graph_usage, record_resource_usage, FeaResourcePhase, FeaResourcePlan,
     FeaResourcePlanIdentity, ResourceUsageAttempt, ResourceUsageEvidence,
 };
-use runmat_analysis_fea::results::observation::ObservationArtifactManifest;
+use runmat_analysis_fea::results::observation::{
+    ObservationPublicationCatalog, ObservationPublicationEntry,
+};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
@@ -302,10 +304,11 @@ pub fn validate_structural_resource_usage(
     Ok(())
 }
 
-/// Reconciles governed observation acceleration only against attempts admitted for accelerated
-/// observation-partition plans. Solve or unrelated phase reservations cannot satisfy this proof.
+/// Requires accounted history finalization and reconciles governed acceleration against exact
+/// accelerated observation-partition plans. Earlier CPU lineage and accuracy-attempt completeness
+/// remain the caller's task-graph responsibility; unrelated reservations cannot satisfy this proof.
 pub fn validate_observation_resource_usage(
-    observations: &ObservationArtifactManifest,
+    observations: &ObservationPublicationCatalog,
     usage: &ResourceUsageEvidence,
 ) -> AnalysisBridgeResult<()> {
     observations
@@ -314,6 +317,38 @@ pub fn validate_observation_resource_usage(
     usage
         .validate_identity()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    // Finalized history is an admitted phase, including for CPU execution. The
+    // terminal catalog names its request, so omitting that phase is detectable
+    // without inventing accounting for earlier checkpoint/partition lineage.
+    for entry in observations.entries() {
+        let ObservationPublicationEntry::History(history) = entry else {
+            continue;
+        };
+        let plans = usage
+            .plans
+            .iter()
+            .filter(|plan| {
+                plan.input.phase
+                    == FeaResourcePhase::ObservationHistoryFinalization(history.request.identity())
+            })
+            .collect::<Vec<_>>();
+        if plans.is_empty() {
+            return Err(AnalysisBridgeError::Identity(
+                "published history omits its admitted finalization phase",
+            ));
+        }
+        for plan in plans {
+            if !usage
+                .attempts
+                .iter()
+                .any(|attempt| attempt.plan == plan.identity)
+            {
+                return Err(AnalysisBridgeError::Identity(
+                    "published history finalization phase has no scheduler attempt",
+                ));
+            }
+        }
+    }
     let accelerated_plans = usage
         .plans
         .iter()
@@ -327,9 +362,16 @@ pub fn validate_observation_resource_usage(
         .collect::<BTreeMap<_, _>>();
 
     let mut claims = BTreeMap::new();
+    // Reconcile the entire publication once: individual samples cannot each account for
+    // reservations belonging to other samples in the same admitted task graph.
     for summary in observations
-        .results
+        .entries()
         .iter()
+        .filter_map(|entry| match entry {
+            ObservationPublicationEntry::Sample(sample) => Some(&sample.manifest),
+            ObservationPublicationEntry::History(_) => None,
+        })
+        .flat_map(|manifest| &manifest.results)
         .filter_map(|result| result.acceleration.as_ref())
     {
         for operation in &summary.operations {
@@ -348,6 +390,19 @@ pub fn validate_observation_resource_usage(
                 ));
             }
         }
+    }
+    if observations
+        .entries()
+        .iter()
+        .any(|entry| matches!(entry, ObservationPublicationEntry::History(_)))
+        && accelerated_plans
+            .keys()
+            .any(|identity| !claims.contains_key(identity))
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "history publication has no acceleration summary for its admitted observation phases"
+                .into(),
+        ));
     }
     let mut reservations = BTreeMap::new();
     for (identity, plan) in accelerated_plans {

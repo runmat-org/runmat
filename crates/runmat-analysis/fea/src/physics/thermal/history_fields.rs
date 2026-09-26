@@ -5,6 +5,19 @@ use crate::results::field::{
 };
 use runmat_analysis_core::{FieldLocation, ObservationQuantity, ObservationValueShape};
 
+/// A validated steady solve has one snapshot; transient schedules have at least two.
+/// Preserve the shared final-field coordinate instead of inventing a time domain for steady heat.
+pub(crate) fn sample(
+    sample_count: usize,
+    time: f64,
+) -> crate::results::field::RecoveredFieldSample {
+    if sample_count == 1 {
+        crate::results::field::RecoveredFieldSample::Final
+    } else {
+        crate::results::field::RecoveredFieldSample::TimeSeconds(time)
+    }
+}
+
 /// Same ordinal-derived field definition used by publication and preassembly profiling.
 pub(crate) fn snapshot_definition(
     index: usize,

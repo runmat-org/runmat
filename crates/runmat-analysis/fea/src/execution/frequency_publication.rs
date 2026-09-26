@@ -316,11 +316,12 @@ impl StructuralFrequencyPublicationManifest {
                 observations
                     .validate()
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-                if observations.source_fields != published.fields.identity
-                    || observations.source
-                        != FieldRecoverySource::StructuralFrequencyEntry(
-                            published.source_entry.identity(),
-                        )
+                if !matches!(observations.source,
+                    crate::results::observation::ObservationFieldSource::StructuralRecovery {
+                        recovery_request, artifact, numerical_source, ..
+                    } if artifact == published.fields.identity
+                        && recovery_request == published.fields.recovery_request
+                        && numerical_source == FieldRecoverySource::StructuralFrequencyEntry(published.source_entry.identity()))
                     || observations
                         .results
                         .iter()

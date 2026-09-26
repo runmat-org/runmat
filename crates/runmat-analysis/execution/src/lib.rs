@@ -1,6 +1,8 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
 mod accuracy_evaluation;
+mod accuracy_source_context;
+pub use accuracy_source_context::validate_accuracy_source_context;
 mod accuracy_resource;
 mod buckling_object_access;
 mod buckling_task;
@@ -23,6 +25,7 @@ mod observation_evaluation;
 mod observation_field_partitions;
 mod observation_history_access;
 mod observation_history_checkpoint;
+mod observation_history_finalization;
 mod observation_history_task;
 mod observation_partition;
 mod observation_source;
@@ -71,9 +74,14 @@ pub use thermal_plan::{
 mod structural_state_profiles;
 mod thermal_completion;
 mod thermal_state_profiles;
+mod thermal_study;
 pub use structural_state_profiles::{
     structural_state_profiles_output_facts, structural_state_publication_profiles,
     StructuralStateProfileResult,
+};
+pub use thermal_study::{
+    CompletedThermalObservations, CompletedThermalStudy, ThermalObservationTask,
+    ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
 };
 mod thermal_task;
 mod thermal_task_result;
@@ -172,11 +180,12 @@ pub use object::{
     PreparedAnalysisObjects,
 };
 pub use observation_assembly::{
-    import_structural_observation_assembly, prepare_structural_observation_assembly,
-    PreparedStructuralObservationAssembly, StructuralObservationAssemblyPreparation,
+    import_observation_assembly, prepare_observation_assembly, ObservationAssemblyPreparation,
+    PreparedObservationAssembly,
 };
 pub use observation_evaluation::{
-    import_observation_result, ImportedObservations, StructuralObservationPreparation,
+    import_observation_result, ImportedObservations, ObservationPreparation,
+    ObservationPublishedSource,
 };
 pub use observation_history_access::{
     decode_prepared_observation_history_checkpoint, import_observation_history,
@@ -190,6 +199,11 @@ pub use observation_history_checkpoint::{
     ObservationHistoryCheckpointPublisher, PublishedObservationHistory,
     PublishedObservationHistoryCheckpoint,
 };
+pub use observation_history_finalization::{
+    import_observation_history_finalization_task, prepare_observation_history_finalization_task,
+    ImportedObservationHistoryFinalization, ObservationHistoryFinalizationPreparation,
+    ObservationHistoryFinalizationSource, PreparedObservationHistoryFinalizationTask,
+};
 pub use observation_history_task::{
     import_observation_history_checkpoint_task, prepare_observation_history_checkpoint_task,
     ImportedObservationHistoryCheckpointTask, ObservationHistoryCheckpointPreparation,
@@ -197,12 +211,12 @@ pub use observation_history_task::{
 };
 pub use observation_partition::{
     import_observation_partition_contribution, import_reduced_observation,
-    prepare_structural_observation_fanout, prepare_structural_observation_reduction,
+    prepare_observation_fanout, prepare_observation_reduction,
     ImportedObservationPartitionContribution, ImportedReducedObservation,
-    PreparedStructuralObservationFanout, PreparedStructuralObservationPartition,
-    PreparedStructuralObservationReduction, StructuralObservationReductionPreparation,
+    ObservationReductionPreparation, PreparedObservationFanout, PreparedObservationPartition,
+    PreparedObservationReduction,
 };
-pub use observation_source::StructuralObservationWorkloadSource;
+pub use observation_source::ObservationWorkloadSource;
 pub use random_response_object_access::{
     decode_prepared_structural_random_response_assembly_request,
     decode_prepared_structural_random_response_interval_request,

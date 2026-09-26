@@ -73,6 +73,18 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
         source_kind: AccuracySourceKind::Thermal,
         source_numerical_receipt: receipt_objects.clone(),
         source_observations: None,
+        source_context_inputs: prepared
+            .inputs
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input.manifest.kind,
+                    AnalysisNumericalObjectKind::ThermalWorkload
+                        | AnalysisNumericalObjectKind::Mesh
+                )
+            })
+            .cloned()
+            .collect(),
         sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
         step: workload.model.sequence.steps[0].clone(),
         formulation_requirement: workload.formulation_requirement,
@@ -80,11 +92,32 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
         chunk_bytes: 1024,
         inventory_limits: limits,
     };
-    assert!(prepare_accuracy(request(prepared.host)).is_ok());
+    let accuracy = prepare_accuracy(request(prepared.host.clone())).unwrap();
+    let source_receipt = runmat_analysis_fea::execution::AccuracySourceReceipt::Thermal(receipt);
+    let source_inputs = request(prepared.host.clone()).source_context_inputs;
+    let check = |inputs: &[PreparedAnalysisObjects]| {
+        validate_accuracy_source_context(
+            &accuracy.request,
+            &source_receipt,
+            None,
+            &inputs.iter().collect::<Vec<_>>(),
+        )
+    };
+    assert!(check(&source_inputs).is_ok());
+    assert!(check(&[]).is_err());
+    assert!(check(&source_inputs[..1]).is_err());
+    assert!(check(&[source_inputs[0].clone(), source_inputs[0].clone()]).is_err());
     let other_mesh = task(
         workload.clone(),
         canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
     );
+    let substituted_mesh: Vec<_> = other_mesh
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan)
+        .cloned()
+        .collect();
+    assert!(check(&substituted_mesh).is_err());
     assert!(prepare_accuracy(request(other_mesh.host)).is_err());
     let mut other_workload = workload.clone();
     other_workload
@@ -93,7 +126,19 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
         .as_mut()
         .unwrap()
         .reference_temperature = Temperature::new(305.0);
-    assert!(prepare_accuracy(request(task(other_workload, mesh).host)).is_err());
+    let substituted = task(other_workload, mesh);
+    let substituted_inputs: Vec<_> = substituted
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan)
+        .cloned()
+        .collect();
+    // Both substituted objects are canonical and freshly hashed, but did not produce this receipt.
+    assert!(check(&substituted_inputs).is_err());
+    assert!(prepare_accuracy(request(substituted.host)).is_err());
+    let mut wrong_requirements = request(prepared.host);
+    wrong_requirements.formulation_requirement = FormulationRequirement::Production;
+    assert!(prepare_accuracy(wrong_requirements).is_err());
 }
 
 #[test]

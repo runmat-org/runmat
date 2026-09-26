@@ -14,9 +14,9 @@ use runmat_analysis_fea::planning::resource::{
 use runmat_analysis_fea::results::field::{RecoveredFieldPartitionSet, RecoveredFieldSample};
 use runmat_analysis_fea::results::observation::{
     classify_observation_partition_acceleration, resolved_observation_accepts_sample,
-    structural_observation_partition_source_indices, ObservationAccelerationEligibility,
-    ObservationEventAttribution, ObservationPartition, ObservationPartitionContribution,
-    ObservationPartitionPlan, ObservationResult,
+    solid_observation_partition_source_indices, structural_observation_partition_source_indices,
+    ObservationAccelerationEligibility, ObservationEventAttribution, ObservationPartition,
+    ObservationPartitionContribution, ObservationPartitionPlan, ObservationResult,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_execution::resource::AcceleratorRequest;
@@ -30,16 +30,16 @@ use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
     prepare_analysis_program, prepared_input_resource_facts, projected_output_resource_facts,
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisOutputRoot, AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, StructuralObservationPreparation, ANALYSIS_HOST_ABI,
+    AnalysisOutputRoot, AnalysisWorkloadInput, AnalysisWorkloadRequest, ObservationPreparation,
+    PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
-use super::observation_evaluation::{admit_structural_observation, AdmittedStructuralObservation};
+use super::observation_evaluation::{admit_observation, AdmittedObservation};
 use super::observation_field_partitions::{
     import_required_field_partitions, RequiredFieldPartitionImport,
 };
 
-pub struct PreparedStructuralObservationPartition {
+pub struct PreparedObservationPartition {
     pub source_request: ObservationEvaluationRequest,
     pub request: ObservationPartitionEvaluationRequest,
     pub partition_plan: ObservationPartitionPlan,
@@ -59,9 +59,9 @@ enum ObservationExecutionTarget {
     GovernedAccelerator { class: String },
 }
 
-pub struct PreparedStructuralObservationFanout {
+pub struct PreparedObservationFanout {
     pub source_request: ObservationEvaluationRequest,
-    pub partitions: Vec<PreparedStructuralObservationPartition>,
+    pub partitions: Vec<PreparedObservationPartition>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -71,7 +71,7 @@ pub struct ImportedObservationPartitionContribution {
     pub output: AnalysisOutputRoot,
 }
 
-pub struct StructuralObservationReductionPreparation {
+pub struct ObservationReductionPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: ObservationEvaluationRequest,
     pub partition_plan: ObservationPartitionPlan,
@@ -81,7 +81,7 @@ pub struct StructuralObservationReductionPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub struct PreparedStructuralObservationReduction {
+pub struct PreparedObservationReduction {
     pub source_request: ObservationEvaluationRequest,
     pub request: ObservationPartitionReductionRequest,
     pub partition_plan: ObservationPartitionPlan,
@@ -100,13 +100,13 @@ pub struct ImportedReducedObservation {
     pub(crate) producer: AnalysisWorkloadIdentity,
 }
 
-pub fn prepare_structural_observation_fanout(
+pub fn prepare_observation_fanout(
     source: &impl CacheImport,
-    preparation: StructuralObservationPreparation,
+    preparation: ObservationPreparation,
     sample: RecoveredFieldSample,
     event_attribution: Option<ObservationEventAttribution>,
-) -> AnalysisBridgeResult<PreparedStructuralObservationFanout> {
-    let admitted = admit_structural_observation(&preparation)?;
+) -> AnalysisBridgeResult<PreparedObservationFanout> {
+    let admitted = admit_observation(&preparation)?;
     if let Some(attribution) = event_attribution {
         attribution
             .validate()
@@ -135,15 +135,18 @@ pub fn prepare_structural_observation_fanout(
             admitted.workload.observation_execution(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        let field_entry = preparation
-            .source_fields
-            .manifest
-            .fields
+        let field_entry = admitted
+            .selection
+            .fields()
             .iter()
             .find(|entry| {
                 entry.definition.identity() == observation.source_field_definition_identity
                     && entry.sample == sample
-                    && admitted.selection.fields.contains(&entry.field)
+                    && admitted
+                        .selection
+                        .fields()
+                        .iter()
+                        .any(|field| field.field == entry.field)
             })
             .ok_or_else(|| {
                 AnalysisBridgeError::Invalid(
@@ -151,21 +154,39 @@ pub fn prepare_structural_observation_fanout(
                 )
             })?;
         for partition in &plan.partitions {
-            let required_indices = structural_observation_partition_source_indices(
-                &admitted.request.plan,
-                &plan,
-                partition,
-                admitted.workload.model(),
-                admitted.mesh.as_ref(),
-            )
+            let required_indices = if matches!(
+                &admitted.workload,
+                super::observation_source::AdmittedObservationWorkload::Thermal(_)
+            ) {
+                let mesh = admitted.mesh.as_ref().ok_or(AnalysisBridgeError::Identity(
+                    "thermal observation requires exact mesh",
+                ))?;
+                let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(mesh)
+                    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+                solid_observation_partition_source_indices(
+                    &admitted.request.plan,
+                    &plan,
+                    partition,
+                    &projection,
+                )
+            } else {
+                structural_observation_partition_source_indices(
+                    &admitted.request.plan,
+                    &plan,
+                    partition,
+                    admitted.workload.model(),
+                    admitted.mesh.as_ref(),
+                )
+            }
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
             let source_fields = import_required_field_partitions(
                 source,
                 RequiredFieldPartitionImport {
-                    root: &preparation.source_fields.output.root,
-                    source_logical_identity: preparation.source_fields.output.logical_identity,
-                    source_payload_digest: preparation.source_fields.output.payload_digest,
-                    access: &preparation.source_host.artifact_access,
+                    source_kind: preparation.source.output().kind,
+                    root: &preparation.source.output().root,
+                    source_logical_identity: preparation.source.output().logical_identity,
+                    source_payload_digest: preparation.source.output().payload_digest,
+                    access: preparation.source.access(&preparation.source_host),
                     limits: preparation.inventory_limits,
                     entry: field_entry,
                     required_indices: &required_indices,
@@ -189,7 +210,7 @@ pub fn prepare_structural_observation_fanout(
             )?);
         }
     }
-    Ok(PreparedStructuralObservationFanout {
+    Ok(PreparedObservationFanout {
         source_request: admitted.request,
         partitions: prepared,
     })
@@ -198,7 +219,7 @@ pub fn prepare_structural_observation_fanout(
 pub fn import_observation_partition_contribution(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralObservationPartition,
+    prepared: &PreparedObservationPartition,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedObservationPartitionContribution> {
     response.validate_against(&prepared.program.request)?;
@@ -290,9 +311,9 @@ fn validate_acceleration_binding(
     Ok(())
 }
 
-pub fn prepare_structural_observation_reduction(
-    preparation: StructuralObservationReductionPreparation,
-) -> AnalysisBridgeResult<PreparedStructuralObservationReduction> {
+pub fn prepare_observation_reduction(
+    preparation: ObservationReductionPreparation,
+) -> AnalysisBridgeResult<PreparedObservationReduction> {
     preparation.source_host.validate()?;
     preparation.source_request.validate()?;
     preparation
@@ -382,7 +403,7 @@ pub fn prepare_structural_observation_reduction(
         BTreeSet::new(),
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
-    Ok(PreparedStructuralObservationReduction {
+    Ok(PreparedObservationReduction {
         source_request: preparation.source_request,
         request,
         partition_plan: preparation.partition_plan,
@@ -398,7 +419,7 @@ pub fn prepare_structural_observation_reduction(
 pub fn import_reduced_observation(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralObservationReduction,
+    prepared: &PreparedObservationReduction,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedReducedObservation> {
     response.validate_against(&prepared.program.request)?;
@@ -455,13 +476,13 @@ pub fn import_reduced_observation(
 }
 
 fn prepare_partition_workload(
-    preparation: &StructuralObservationPreparation,
-    admitted: &AdmittedStructuralObservation,
+    preparation: &ObservationPreparation,
+    admitted: &AdmittedObservation,
     partition_plan: ObservationPartitionPlan,
     partition: ObservationPartition,
     source_fields: RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
-) -> AnalysisBridgeResult<PreparedStructuralObservationPartition> {
+) -> AnalysisBridgeResult<PreparedObservationPartition> {
     let execution_target = observation_execution_target(
         &preparation.source_host,
         admitted,
@@ -518,6 +539,7 @@ fn prepare_partition_workload(
         source_request_objects,
         plan_objects,
         field_objects,
+        admitted.field_catalog.clone(),
         preparation.source_workload.objects().clone(),
     ];
     if let Some(mesh) = &preparation.mesh {
@@ -581,7 +603,7 @@ fn prepare_partition_workload(
         },
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision.clone(), &inputs)?;
-    Ok(PreparedStructuralObservationPartition {
+    Ok(PreparedObservationPartition {
         source_request: admitted.request.clone(),
         request,
         partition_plan,
@@ -598,7 +620,7 @@ fn prepare_partition_workload(
 
 fn observation_execution_target(
     source_host: &AnalysisHostWorkload,
-    admitted: &AdmittedStructuralObservation,
+    admitted: &AdmittedObservation,
     partition_plan: &ObservationPartitionPlan,
     partition: &ObservationPartition,
     source_fields: &RecoveredFieldPartitionSet,

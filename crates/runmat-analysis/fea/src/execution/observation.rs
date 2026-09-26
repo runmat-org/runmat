@@ -1,18 +1,20 @@
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
-use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
-use crate::results::field::{
-    RecoveredFieldArtifactIdentity, RecoveredFieldSelection, RecoveredFieldSelectionIdentity,
+use crate::results::{
+    field::RecoveredFieldSample,
+    observation::{
+        resolved_observation_accepts_sample, ObservationEventAttribution,
+        ObservationFieldSelection, ResolvedObservation, ResolvedObservationPlan,
+    },
 };
-use crate::results::observation::ResolvedObservationPlan;
 
 use super::{
-    AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequestIdentity,
-    FieldRecoverySource, ObservationEvaluationRequestIdentity, StepIdentity,
+    AnalysisExecutionError, AnalysisExecutionResult, ObservationEvaluationRequestIdentity,
+    StepIdentity,
 };
 
-const OBSERVATION_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-observation-evaluation/v1\0";
+const OBSERVATION_EVALUATION_PREFIX: &[u8] = b"runmat-analysis-observation-evaluation/v2\0";
 const OBSERVATION_EVALUATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -22,11 +24,7 @@ pub struct ObservationEvaluationRequest {
     pub schema_version: u16,
     identity: ObservationEvaluationRequestIdentity,
     pub producer: StepIdentity,
-    pub field_recovery_request: FieldRecoveryRequestIdentity,
-    pub source_fields: RecoveredFieldArtifactIdentity,
-    pub source_selection: RecoveredFieldSelectionIdentity,
-    pub source: FieldRecoverySource,
-    pub topology: CanonicalStructuralTopologyIdentity,
+    pub selection: ObservationFieldSelection,
     pub plan: ResolvedObservationPlan,
 }
 
@@ -36,11 +34,7 @@ struct ObservationEvaluationRequestWire {
     schema_version: u16,
     identity: ObservationEvaluationRequestIdentity,
     producer: StepIdentity,
-    field_recovery_request: FieldRecoveryRequestIdentity,
-    source_fields: RecoveredFieldArtifactIdentity,
-    source_selection: RecoveredFieldSelectionIdentity,
-    source: FieldRecoverySource,
-    topology: CanonicalStructuralTopologyIdentity,
+    selection: ObservationFieldSelection,
     plan: ResolvedObservationPlan,
 }
 
@@ -52,11 +46,7 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
             schema_version: wire.schema_version,
             identity: wire.identity,
             producer: wire.producer,
-            field_recovery_request: wire.field_recovery_request,
-            source_fields: wire.source_fields,
-            source_selection: wire.source_selection,
-            source: wire.source,
-            topology: wire.topology,
+            selection: wire.selection,
             plan: wire.plan,
         };
         request.validate()?;
@@ -66,42 +56,26 @@ impl TryFrom<ObservationEvaluationRequestWire> for ObservationEvaluationRequest 
 
 impl ObservationEvaluationRequest {
     pub fn new(
-        producer: StepIdentity,
-        source: &RecoveredFieldSelection,
-        topology: CanonicalStructuralTopologyIdentity,
+        selection: ObservationFieldSelection,
         plan: ResolvedObservationPlan,
     ) -> AnalysisExecutionResult<Self> {
-        source
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        selection.validate()?;
         plan.validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if source.source.topology_digest != plan.topology_digest {
-            return Err(AnalysisExecutionError::Identity(
-                "observation plan topology differs from its recovered fields",
-            ));
-        }
+        let producer = selection.producer();
         let request = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: ObservationEvaluationRequestIdentity::derive(
                 "observation-evaluation-request",
                 &(
                     producer,
-                    source.source.recovery_request,
-                    source.source.identity,
-                    source.identity,
-                    source.source.source,
-                    topology,
+                    selection.identity(),
                     plan.identity,
                     plan.topology_digest,
                 ),
             )?,
             producer,
-            field_recovery_request: source.source.recovery_request,
-            source_fields: source.source.identity,
-            source_selection: source.identity,
-            source: source.source.source,
-            topology,
+            selection,
             plan,
         };
         request.validate()?;
@@ -112,11 +86,45 @@ impl ObservationEvaluationRequest {
         self.identity
     }
 
+    /// Exact authored-order coverage at a coordinate, bound to the selected source fields.
+    /// Event sampling requires the caller's actual attribution; metadata callers pass None.
+    pub(crate) fn scheduled_observations(
+        &self,
+        sample: RecoveredFieldSample,
+        event_attribution: Option<ObservationEventAttribution>,
+    ) -> AnalysisExecutionResult<Vec<&ResolvedObservation>> {
+        self.validate()?;
+        let mut scheduled = Vec::new();
+        for observation in &self.plan.observations {
+            if !resolved_observation_accepts_sample(
+                &self.plan,
+                observation,
+                sample,
+                event_attribution,
+            )
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?
+            {
+                continue;
+            }
+            if !self.selection.fields().iter().any(|field| {
+                field.definition.identity() == observation.source_field_definition_identity
+                    && field.sample == sample
+            }) {
+                return Err(AnalysisExecutionError::Identity(
+                    "scheduled observation coordinate or definition absent from selected source",
+                ));
+            }
+            scheduled.push(observation);
+        }
+        Ok(scheduled)
+    }
+
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        self.selection.validate()?;
         self.plan
             .validate_identity()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if self.schema_version != 1 || self.plan.observations.is_empty() {
+        if self.schema_version != 2 || self.plan.observations.is_empty() {
             return Err(AnalysisExecutionError::Invalid(
                 "observation evaluation requires a supported schema and nonempty plan".into(),
             ));
@@ -125,21 +133,26 @@ impl ObservationEvaluationRequest {
             "observation-evaluation-request",
             &(
                 self.producer,
-                self.field_recovery_request,
-                self.source_fields,
-                self.source_selection,
-                self.source,
-                self.topology,
+                self.selection.identity(),
                 self.plan.identity,
                 self.plan.topology_digest,
             ),
         )?;
-        if !self.topology.has_valid_identity()
-            || self.plan.topology_digest != self.topology.discretization_digest()
+        if self.producer != self.selection.producer()
+            || self.plan.topology_digest != self.selection.source().observation_topology_digest()
             || self.identity != expected
         {
             return Err(AnalysisExecutionError::Identity(
                 "observation evaluation request identity does not converge",
+            ));
+        }
+        if self.plan.observations.iter().any(|observation| {
+            !self.selection.fields().iter().any(|entry| {
+                entry.definition.identity() == observation.source_field_definition_identity
+            })
+        }) {
+            return Err(AnalysisExecutionError::Identity(
+                "observation plan field is absent from its source selection",
             ));
         }
         Ok(())

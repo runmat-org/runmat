@@ -5,17 +5,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use runmat_analysis_execution::{
-    extend_structural_resource_usage, import_accuracy, import_observation_partition_contribution,
-    import_published_result, import_reduced_observation, import_structural_linear_completion,
-    import_structural_observation_assembly, import_structural_recovered_fields, prepare_accuracy,
-    prepare_result_publication, prepare_structural_field_recovery,
-    prepare_structural_observation_assembly, prepare_structural_observation_fanout,
-    prepare_structural_observation_reduction, AccuracyPreparation, AnalysisHostWorkload,
-    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAnalysisProgram,
-    PreparedResourceUsage, PreparedStructuralLinearProgram, ResultPublicationPreparation,
-    StructuralFieldRecoveryPreparation, StructuralObservationAssemblyPreparation,
-    StructuralObservationPreparation, StructuralObservationReductionPreparation,
-    StructuralObservationWorkloadSource,
+    extend_structural_resource_usage, import_accuracy, import_observation_assembly,
+    import_observation_partition_contribution, import_published_result, import_reduced_observation,
+    import_structural_linear_completion, import_structural_recovered_fields, prepare_accuracy,
+    prepare_observation_assembly, prepare_observation_fanout, prepare_observation_reduction,
+    prepare_result_publication, prepare_structural_field_recovery, AccuracyPreparation,
+    AnalysisHostWorkload, ObservationAssemblyPreparation, ObservationPreparation,
+    ObservationReductionPreparation, ObservationWorkloadSource, PlannedResourceUsageAttempt,
+    PlannedResourceUsageGraph, PreparedAnalysisProgram, PreparedResourceUsage,
+    PreparedStructuralLinearProgram, ResultPublicationPreparation,
+    StructuralFieldRecoveryPreparation,
 };
 use runmat_analysis_fea::execution::{
     SequenceIdentity, StructuralLinearWorkload, DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -29,6 +28,7 @@ use runmat_execution_runner::{AttemptResourceAccounting, AttemptSuccess};
 use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeProgramSession, RemotePoolDriver,
 };
+use runmat_meshing_core::CanonicalMeshingContract;
 
 use super::{analysis_resources, analysis_submission, capabilities, wait_for_native_task};
 
@@ -123,13 +123,21 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     )
     .unwrap();
     let observation_graph_started = Instant::now();
-    let fanout = prepare_structural_observation_fanout(
+    let field_catalog =
+        runmat_analysis_fea::results::observation::ObservationFieldCatalog::structural(
+            fields.request.clone(),
+            imported_fields.manifest.clone(),
+        )
+        .unwrap();
+    let fanout = prepare_observation_fanout(
         driver.store(),
-        StructuralObservationPreparation {
+        ObservationPreparation {
             source_host: fields.host.clone(),
-            source_request: fields.request.clone(),
-            source_fields: imported_fields,
-            source_workload: StructuralObservationWorkloadSource::Linear(source_invocation.clone()),
+            source: runmat_analysis_execution::ObservationPublishedSource::Structural {
+                recovery_request: fields.request.clone(),
+                fields: imported_fields,
+            },
+            source_workload: ObservationWorkloadSource::Linear(source_invocation.clone()),
             mesh: mesh.clone(),
             accelerator_requests,
             sequence,
@@ -180,17 +188,16 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     }
     let mut reduced = Vec::new();
     for (_, (partition_plan, contributions)) in contribution_groups {
-        let reduction =
-            prepare_structural_observation_reduction(StructuralObservationReductionPreparation {
-                source_host: fields.host.clone(),
-                source_request: fanout.source_request.clone(),
-                partition_plan,
-                contributions,
-                program_revision: program_revision.clone(),
-                chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-                inventory_limits: limits,
-            })
-            .unwrap();
+        let reduction = prepare_observation_reduction(ObservationReductionPreparation {
+            source_host: fields.host.clone(),
+            source_request: fanout.source_request.clone(),
+            partition_plan,
+            contributions,
+            program_revision: program_revision.clone(),
+            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+            inventory_limits: limits,
+        })
+        .unwrap();
         let response = driver
             .execute(
                 &reduction.host,
@@ -207,16 +214,15 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
                 .unwrap(),
         );
     }
-    let observations =
-        prepare_structural_observation_assembly(StructuralObservationAssemblyPreparation {
-            source_host: fields.host.clone(),
-            source_request: fanout.source_request,
-            results: reduced,
-            program_revision: program_revision.clone(),
-            chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
-            inventory_limits: limits,
-        })
-        .unwrap();
+    let observations = prepare_observation_assembly(ObservationAssemblyPreparation {
+        source_host: fields.host.clone(),
+        source_request: fanout.source_request,
+        results: reduced,
+        program_revision: program_revision.clone(),
+        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+        inventory_limits: limits,
+    })
+    .unwrap();
     let observation_response = driver
         .execute(
             &observations.host,
@@ -228,7 +234,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         plan: observations.resource_plan.clone(),
         accounting: observation_response.resources,
     });
-    let imported_observations = import_structural_observation_assembly(
+    let imported_observations = import_observation_assembly(
         driver.store(),
         observation_response.response,
         &observations,
@@ -242,6 +248,31 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             .max(1),
     )
     .unwrap();
+    let decoded_mesh = mesh.as_ref().map(|objects| {
+        runmat_meshing_core::SolverMeshArtifact::canonical_decode(&objects.payload()).unwrap()
+    });
+    let publication_catalog =
+        runmat_analysis_fea::results::observation::ObservationPublicationCatalog::new(
+            solve.host.workload.step,
+            observations.source_request.plan.clone(),
+            field_catalog,
+            &step,
+            vec![
+                runmat_analysis_fea::results::observation::ObservationPublicationEntry::Sample(
+                    Box::new(
+                        runmat_analysis_fea::results::observation::ObservationSamplePublication {
+                            request: observations.source_request.clone(),
+                            manifest: imported_observations.manifest.clone(),
+                        },
+                    ),
+                ),
+            ],
+            runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
+                model: &workload.model,
+                mesh: decoded_mesh.as_ref(),
+            },
+        )
+        .unwrap();
     let expected_attempt_count =
         resource_usage.evidence.attempts.len() + observation_resources.attempts.len();
     let resource_usage = extend_structural_resource_usage(
@@ -262,7 +293,8 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         solve_host: solve.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt,
-        source_observations: Some(imported_observations.clone()),
+        source_observations: Some(publication_catalog.clone()),
+        source_context_inputs: Vec::new(),
         sequence,
         step,
         formulation_requirement: workload.formulation_requirement,
@@ -311,7 +343,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
         source_resource_usage: resource_usage.objects.clone(),
-        source_observations: Some(imported_observations),
+        source_observations: Some(publication_catalog),
         program_revision,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
         inventory_limits: limits,
@@ -605,6 +637,17 @@ impl PublicationChainDriver for RemoteDriver {
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
     ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
+            if let Some(plan) = resource_plan {
+                let inventory = super::inventory();
+                assert!(
+                    plan.request.memory_bytes <= inventory.memory_bytes
+                        && plan.request.scratch_bytes <= inventory.scratch_bytes,
+                    "remote conformance worker cannot admit {:?}: request {:?}, inventory {:?}",
+                    host.workload.kind,
+                    plan.request,
+                    inventory,
+                );
+            }
             for object in &program.objects {
                 self.pool
                     .register_execution_object(object.reference.clone(), object.bytes.clone())

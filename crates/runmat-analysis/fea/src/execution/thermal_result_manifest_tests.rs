@@ -202,3 +202,4 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         );
     }
 }
+use crate::results::field::RecoveredFieldSample;

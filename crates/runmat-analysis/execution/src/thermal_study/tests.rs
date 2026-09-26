@@ -1,0 +1,175 @@
+use super::*;
+use runmat_analysis_core::{
+    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
+};
+use runmat_analysis_fea::{
+    fixtures::{fixture_model, FixtureId},
+    properties::compile_property_map,
+    ComputeBackend,
+};
+use runmat_execution::ProgramEnvironment;
+use runmat_execution_artifact::object::ObjectInventoryLimits;
+use runmat_meshing_core::{
+    fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, StableDigest,
+};
+
+fn preparation() -> ThermalStudyPreparation {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.constraints.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    model.signals.clear();
+    // Explicit insulation retains the natural zero-flux equilibrium boundary condition.
+    let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
+    let insulated_face = projection.boundary_faces[0].provenance[0]
+        .analysis_selection_id()
+        .unwrap();
+    model
+        .boundaries
+        .push(runmat_analysis_core::AnalysisBoundary {
+            boundary_id: "insulated-face".into(),
+            target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+            operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                value: runmat_analysis_core::PrescribedValue::Constant(
+                    runmat_analysis_core::HeatFlux::new(0.0),
+                ),
+            },
+        });
+    model.thermal = Some(ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    model.sequence = AnalysisSequence::from_steps(
+        "thermal-study",
+        vec![ProcedureStep::thermal_transient("heat")],
+    );
+    let compiled = CompiledAnalysisStudy {
+        module_path: "tests/thermal.fea".into(),
+        study_id: "thermal".into(),
+        formulation_requirement: FormulationRequirement::Experimental,
+        study_inputs: Vec::new(),
+        outputs: Vec::new(),
+        properties: compile_property_map(&model, Some(&mesh)).unwrap(),
+        model,
+        solver_mesh_digest: mesh.canonical_digest,
+    };
+    let workload = plan_thermal_study(
+        &compiled,
+        ThermalStudyPlanningPolicy {
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+        },
+    )
+    .unwrap();
+    ThermalStudyPreparation {
+        product: ThermalStudyProduct { compiled, workload },
+        mesh,
+        frozen_project_digest: None,
+        artifact_access: ArtifactAccess {
+            authorization_scope: "thermal-study-tests".into(),
+            encryption_context: Digest::sha256("scope"),
+        },
+        program_revision: ProgramRevision::new(
+            Digest::sha256("graph"),
+            Digest::sha256("source"),
+            ProgramEnvironment::new(
+                1,
+                1,
+                Digest::sha256("runtime"),
+                Digest::sha256("catalog"),
+                "matlab",
+            )
+            .unwrap(),
+        )
+        .unwrap(),
+        output_policy: AnalysisOutputPolicy::new(1024, ObjectInventoryLimits::default()).unwrap(),
+        required_capabilities: BTreeSet::new(),
+    }
+}
+
+#[test]
+fn rejects_foreign_mesh_and_workload_controls() {
+    let mut input = preparation();
+    input.product.compiled.solver_mesh_digest = StableDigest::ZERO;
+    assert!(ThermalStudyCoordinator::new(input).is_err());
+    let mut input = preparation();
+    input.product.workload.residual_target *= 0.5;
+    assert!(ThermalStudyCoordinator::new(input).is_err());
+    let mut input = preparation();
+    input
+        .product
+        .workload
+        .model
+        .thermal
+        .as_mut()
+        .unwrap()
+        .reference_temperature = Temperature::new(400.0);
+    assert!(ThermalStudyCoordinator::new(input).is_err());
+}
+
+#[test]
+fn rejects_forged_compiled_property_ownership() {
+    let mut input = preparation();
+    input.product.compiled.model.geometry_revision += 1;
+    assert!(ThermalStudyCoordinator::new(input).is_err());
+}
+
+#[test]
+fn lifecycle_cannot_skip_solve_or_publish_incomplete_evidence() {
+    let mut study = ThermalStudyCoordinator::new(preparation()).unwrap();
+    assert_eq!(study.phase(), ThermalStudyPhase::ReadyForSolve);
+    assert!(study.prepare_accuracy().is_err());
+    assert!(study.prepare_next_state().is_err());
+    assert!(study.freeze_baseline().is_err());
+    assert!(study.prepare_publication().is_err());
+    assert!(study.result().is_none());
+    assert!(study.publication().is_none());
+    assert!(study.terminal_usage().is_none());
+    assert!(!study.is_complete());
+    assert!(study.into_completed().is_err());
+}
+
+#[test]
+fn prepared_solve_is_owned_and_cannot_be_prepared_twice() {
+    let mut study = ThermalStudyCoordinator::new(preparation()).unwrap();
+    let expected = study.compiled_study().definition_digest().unwrap();
+    let task = study.prepare_solve().unwrap();
+    assert_eq!(
+        task.host.workload.study,
+        runmat_analysis_fea::execution::StudyIdentity::from_authored_digest(expected, None)
+            .unwrap()
+    );
+    assert_eq!(study.phase(), ThermalStudyPhase::AwaitingSolve);
+    assert!(study.prepare_solve().is_err());
+    assert!(study.prepare_accuracy().is_err());
+    assert!(study.prepare_next_state().is_err());
+    assert!(study.freeze_baseline().is_err());
+    assert!(study.prepare_publication().is_err());
+    assert_eq!(study.phase(), ThermalStudyPhase::AwaitingSolve);
+}
+
+#[test]
+fn all_declared_states_precede_baseline_in_authored_order() {
+    let mut input = preparation();
+    let mut second = input.product.compiled.model.sequence.steps[0].state_outputs[0].clone();
+    second.state_id = runmat_analysis_core::StateId("second-temperature".into());
+    input.product.compiled.model.sequence.steps[0]
+        .state_outputs
+        .push(second);
+    input.product.workload.model = input.product.compiled.model.clone();
+    let mut study = ThermalStudyCoordinator::new(input).unwrap();
+    // Exercise the deterministic routing independently of numerical execution.
+    study.advance_state();
+    assert_eq!(
+        study.phase(),
+        ThermalStudyPhase::ReadyForState { ordinal: 0 }
+    );
+    assert!(study.freeze_baseline().is_err());
+    assert!(study.prepare_publication().is_err());
+    assert_eq!(
+        study.compiled_study().model.sequence.steps[0]
+            .state_outputs
+            .len(),
+        2
+    );
+}

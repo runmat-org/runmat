@@ -24,7 +24,14 @@ mod field_metadata;
 mod frequency;
 mod local_execution;
 mod modal;
+mod observation_history_finalization;
 mod post_process;
+pub use contract::ObservationHistoryFinalizationResourceDemand;
+pub use observation_history_finalization::{
+    build_observation_history_finalization_resource_plan,
+    observation_history_finalization_payload_bytes_upper_bound,
+    observation_history_series_reduction_payload_bytes_upper_bound,
+};
 mod preflight;
 mod random_response;
 mod reconciliation;

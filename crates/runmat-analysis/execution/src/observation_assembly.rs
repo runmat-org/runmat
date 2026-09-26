@@ -27,7 +27,7 @@ use crate::{
 use super::observation_partition::prepare_host_workload;
 use crate::AnalysisHostWorkload;
 
-pub struct StructuralObservationAssemblyPreparation {
+pub struct ObservationAssemblyPreparation {
     pub source_host: AnalysisHostWorkload,
     pub source_request: ObservationEvaluationRequest,
     pub results: Vec<ImportedReducedObservation>,
@@ -36,7 +36,7 @@ pub struct StructuralObservationAssemblyPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub struct PreparedStructuralObservationAssembly {
+pub struct PreparedObservationAssembly {
     pub source_request: ObservationEvaluationRequest,
     pub request: ObservationAssemblyRequest,
     pub resource_plan: FeaResourcePlan,
@@ -46,9 +46,9 @@ pub struct PreparedStructuralObservationAssembly {
     pub inputs: Vec<PreparedAnalysisObjects>,
 }
 
-pub fn prepare_structural_observation_assembly(
-    preparation: StructuralObservationAssemblyPreparation,
-) -> AnalysisBridgeResult<PreparedStructuralObservationAssembly> {
+pub fn prepare_observation_assembly(
+    preparation: ObservationAssemblyPreparation,
+) -> AnalysisBridgeResult<PreparedObservationAssembly> {
     preparation.source_host.validate()?;
     preparation.source_request.validate()?;
     if preparation.chunk_bytes == 0 || preparation.results.is_empty() {
@@ -134,7 +134,7 @@ pub fn prepare_structural_observation_assembly(
         BTreeSet::new(),
     )?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
-    Ok(PreparedStructuralObservationAssembly {
+    Ok(PreparedObservationAssembly {
         source_request: preparation.source_request,
         request,
         resource_plan,
@@ -145,10 +145,10 @@ pub fn prepare_structural_observation_assembly(
     })
 }
 
-pub fn import_structural_observation_assembly(
+pub fn import_observation_assembly(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralObservationAssembly,
+    prepared: &PreparedObservationAssembly,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedObservations> {
     response.validate_against(&prepared.program.request)?;
@@ -196,9 +196,8 @@ pub fn import_structural_observation_assembly(
     let expected_artifact = ObservationArtifact::new(ObservationArtifactInput {
         evaluation_request: prepared.source_request.identity(),
         producer: prepared.source_request.producer,
-        field_recovery_request: prepared.source_request.field_recovery_request,
-        source_fields: prepared.source_request.source_fields,
-        source: prepared.source_request.source,
+        source: prepared.source_request.selection.source(),
+        source_selection: prepared.source_request.selection.identity(),
         topology_digest: prepared.source_request.plan.topology_digest,
         plan_identity: prepared.source_request.plan.identity,
         results,
@@ -210,9 +209,8 @@ pub fn import_structural_observation_assembly(
     if manifest.identity.digest() != output.logical_identity
         || manifest.evaluation_request != prepared.source_request.identity()
         || manifest.producer != prepared.source_request.producer
-        || manifest.field_recovery_request != prepared.source_request.field_recovery_request
-        || manifest.source_fields != prepared.source_request.source_fields
-        || manifest.source != prepared.source_request.source
+        || manifest.source_selection != prepared.source_request.selection.identity()
+        || manifest.source != prepared.source_request.selection.source()
         || manifest.topology_digest != prepared.source_request.plan.topology_digest
         || manifest.plan_identity != prepared.source_request.plan.identity
         || manifest != expected_manifest

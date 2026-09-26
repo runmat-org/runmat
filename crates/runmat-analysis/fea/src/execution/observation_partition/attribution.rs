@@ -108,7 +108,7 @@ fn validate_completed_result(
         },
     ) = attribution
     {
-        if source.source.solver_result() != Some(result) {
+        if source.selection.source().solver_result() != Some(result) {
             return Err(AnalysisExecutionError::Identity(mismatch_message));
         }
     }

@@ -2,15 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{ObservationId, ObservationRequest, ProcedureStep};
 use runmat_analysis_execution::{
-    import_observation_history_checkpoint_task, import_observation_partition_contribution,
-    import_reduced_observation, import_structural_observation_assembly,
-    prepare_observation_history_checkpoint_task, prepare_structural_observation_assembly,
-    prepare_structural_observation_fanout, prepare_structural_observation_reduction,
+    import_observation_assembly, import_observation_history_checkpoint_task,
+    import_observation_partition_contribution, import_reduced_observation,
+    prepare_observation_assembly, prepare_observation_fanout,
+    prepare_observation_history_checkpoint_task, prepare_observation_reduction,
     ImportedObservationHistoryCheckpointTask, ImportedObservations, ImportedRecoveredFields,
-    ImportedReducedObservation, ObservationHistoryCheckpointPreparation, PreparedAnalysisObjects,
-    PreparedStructuralFrequencyFieldRecovery, StructuralObservationAssemblyPreparation,
-    StructuralObservationPreparation, StructuralObservationReductionPreparation,
-    StructuralObservationWorkloadSource,
+    ImportedReducedObservation, ObservationAssemblyPreparation,
+    ObservationHistoryCheckpointPreparation, ObservationPreparation,
+    ObservationReductionPreparation, ObservationWorkloadSource, PreparedAnalysisObjects,
+    PreparedStructuralFrequencyFieldRecovery,
 };
 use runmat_analysis_fea::execution::SequenceIdentity;
 use runmat_analysis_fea::results::field::RecoveredFieldSample;
@@ -98,15 +98,15 @@ pub(crate) async fn execute_structural_frequency_observations(
         .zip(execution.recovery_dependencies)
     {
         let sample = recovered_frequency_sample(recovery, fields)?;
-        let fanout = prepare_structural_observation_fanout(
+        let fanout = prepare_observation_fanout(
             pool,
-            StructuralObservationPreparation {
+            ObservationPreparation {
                 source_host: recovery.host.clone(),
-                source_request: recovery.request.clone(),
-                source_fields: fields.clone(),
-                source_workload: StructuralObservationWorkloadSource::Frequency(
-                    execution.workload.clone(),
-                ),
+                source: runmat_analysis_execution::ObservationPublishedSource::Structural {
+                    recovery_request: recovery.request.clone(),
+                    fields: fields.clone(),
+                },
+                source_workload: ObservationWorkloadSource::Frequency(execution.workload.clone()),
                 mesh: Some(execution.mesh.clone()),
                 accelerator_requests: execution.accelerator_requests.clone(),
                 sequence: execution.sequence,
@@ -186,17 +186,16 @@ pub(crate) async fn execute_structural_frequency_observations(
     let mut reductions = Vec::new();
     for ((sample_index, plan_identity), group) in contribution_groups {
         let source = &fanouts[sample_index].2;
-        let reduction =
-            prepare_structural_observation_reduction(StructuralObservationReductionPreparation {
-                source_host: execution.recoveries[sample_index].host.clone(),
-                source_request: source.source_request.clone(),
-                partition_plan: group.plan,
-                contributions: group.contributions,
-                program_revision: execution.program_revision.clone(),
-                chunk_bytes: execution.chunk_bytes,
-                inventory_limits: execution.inventory_limits,
-            })
-            .map_err(super::analysis_task_pool::protocol)?;
+        let reduction = prepare_observation_reduction(ObservationReductionPreparation {
+            source_host: execution.recoveries[sample_index].host.clone(),
+            source_request: source.source_request.clone(),
+            partition_plan: group.plan,
+            contributions: group.contributions,
+            program_revision: execution.program_revision.clone(),
+            chunk_bytes: execution.chunk_bytes,
+            inventory_limits: execution.inventory_limits,
+        })
+        .map_err(super::analysis_task_pool::protocol)?;
         reduction_origins.push((sample_index, plan_identity, group.dependencies));
         reductions.push(reduction);
     }
@@ -320,7 +319,7 @@ async fn execute_sample_assemblies(
     fanouts: &[(
         RecoveredFieldSample,
         AnalysisTaskDependency,
-        runmat_analysis_execution::PreparedStructuralObservationFanout,
+        runmat_analysis_execution::PreparedObservationFanout,
     )],
     reduced: &[ReducedRecord],
     resource_attempts: &mut Vec<runmat_analysis_execution::PlannedResourceUsageAttempt>,
@@ -341,16 +340,15 @@ async fn execute_sample_assemblies(
             .filter(|record| record.sample_index == sample_index)
             .map(|record| record.dependency)
             .collect();
-        let task =
-            prepare_structural_observation_assembly(StructuralObservationAssemblyPreparation {
-                source_host: execution.recoveries[sample_index].host.clone(),
-                source_request: fanout.source_request.clone(),
-                results,
-                program_revision: execution.program_revision.clone(),
-                chunk_bytes: execution.chunk_bytes,
-                inventory_limits: execution.inventory_limits,
-            })
-            .map_err(super::analysis_task_pool::protocol)?;
+        let task = prepare_observation_assembly(ObservationAssemblyPreparation {
+            source_host: execution.recoveries[sample_index].host.clone(),
+            source_request: fanout.source_request.clone(),
+            results,
+            program_revision: execution.program_revision.clone(),
+            chunk_bytes: execution.chunk_bytes,
+            inventory_limits: execution.inventory_limits,
+        })
+        .map_err(super::analysis_task_pool::protocol)?;
         origins.push((sample_index, dependencies));
         tasks.push(task);
     }
@@ -373,13 +371,9 @@ async fn execute_sample_assemblies(
     let mut observations = BTreeMap::new();
     for ((task, (sample_index, _)), executed) in tasks.iter().zip(&origins).zip(executed) {
         resource_attempts.push(resource_attempt(&task.resource_plan, &executed)?);
-        let imported = import_structural_observation_assembly(
-            pool,
-            executed.response,
-            task,
-            execution.inventory_limits,
-        )
-        .map_err(super::analysis_task_pool::protocol)?;
+        let imported =
+            import_observation_assembly(pool, executed.response, task, execution.inventory_limits)
+                .map_err(super::analysis_task_pool::protocol)?;
         if observations.insert(*sample_index, imported).is_some() {
             return Err(NativeExecutionError::Protocol(
                 "frequency sample observations were assembled more than once".into(),
@@ -405,7 +399,7 @@ async fn execute_histories(
     fanouts: &[(
         RecoveredFieldSample,
         AnalysisTaskDependency,
-        runmat_analysis_execution::PreparedStructuralObservationFanout,
+        runmat_analysis_execution::PreparedObservationFanout,
     )],
     reduced: &[ReducedRecord],
     resource_attempts: &mut Vec<runmat_analysis_execution::PlannedResourceUsageAttempt>,

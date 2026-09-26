@@ -20,6 +20,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) => {
                 demand.topology_digest
             }
+            FeaResourceDemand::ObservationHistoryFinalization(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralObservationAssembly(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralFrequencyResultAssembly(demand) => demand.scope_digest,
             FeaResourceDemand::StructuralTransientScopePreparation(demand) => {
@@ -72,6 +73,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralObservationPartition(_)
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
@@ -109,6 +111,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralObservationPartition(_)
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => {
@@ -151,6 +154,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralObservationPartition(_)
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,
@@ -186,6 +190,7 @@ impl FeaResourcePlanningInput {
             FeaResourceDemand::StructuralObservationPartition(_)
             | FeaResourceDemand::StructuralObservationReduction(_)
             | FeaResourceDemand::StructuralObservationHistoryCheckpoint(_)
+            | FeaResourceDemand::ObservationHistoryFinalization(_)
             | FeaResourceDemand::StructuralObservationAssembly(_)
             | FeaResourceDemand::StructuralFrequencyResultAssembly(_)
             | FeaResourceDemand::StructuralTransientResultAssembly(_) => None,

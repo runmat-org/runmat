@@ -3,37 +3,32 @@ use std::collections::BTreeSet;
 use runmat_analysis_core::{ObservationId, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
-    ObservationEvaluationRequest, SequenceIdentity, StepIdentity,
+    ObservationEvaluationRequest, SequenceIdentity, StepIdentity, ThermalSolverResultManifest,
 };
-use runmat_analysis_fea::results::field::{
-    RecoveredFieldSelection, StructuralRecoveredFieldTopology,
-};
+use runmat_analysis_fea::results::field::StructuralRecoveredFieldTopology;
 use runmat_analysis_fea::results::observation::{
-    resolve_structural_observation_plan, ObservationArtifactManifest, ObservationLimits,
-    ObservationResult,
+    resolve_structural_observation_plan, ObservationArtifactManifest, ObservationFieldCatalog,
+    ObservationFieldSelection, ObservationLimits, ObservationResult,
 };
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::ArtifactAccess;
+use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace};
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    import_analysis_partition, AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload,
-    AnalysisOutputRoot, AnalysisPartitionImport, AnalysisWorkloadInput, ImportedAnalysisPartition,
-    ImportedRecoveredFields, PreparedAnalysisObjects,
+    import_analysis_partition, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisHostWorkload, AnalysisOutputRoot, AnalysisPartitionImport, AnalysisWorkloadInput,
+    ImportedAnalysisPartition, ImportedRecoveredFields, PreparedAnalysisObjects,
 };
 
-use crate::observation_source::{
-    AdmittedStructuralObservationWorkload, StructuralObservationWorkloadSource,
-};
+use crate::observation_source::{AdmittedObservationWorkload, ObservationWorkloadSource};
 
-pub struct StructuralObservationPreparation {
+pub struct ObservationPreparation {
     pub source_host: AnalysisHostWorkload,
-    pub source_request: FieldRecoveryRequest,
-    pub source_fields: ImportedRecoveredFields,
-    pub source_workload: StructuralObservationWorkloadSource,
+    pub source: ObservationPublishedSource,
+    pub source_workload: ObservationWorkloadSource,
     pub mesh: Option<PreparedAnalysisObjects>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
     pub sequence: SequenceIdentity,
@@ -44,10 +39,43 @@ pub struct StructuralObservationPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub(crate) struct AdmittedStructuralObservation {
+/// Published metadata and transport reference; thermal variants never own numerical history.
+pub enum ObservationPublishedSource {
+    Structural {
+        recovery_request: FieldRecoveryRequest,
+        fields: ImportedRecoveredFields,
+    },
+    Thermal {
+        manifest: ThermalSolverResultManifest,
+        output: AnalysisOutputRoot,
+        access: ArtifactAccess,
+        sample_ordinal: usize,
+    },
+}
+
+impl ObservationPublishedSource {
+    pub(crate) fn output(&self) -> &AnalysisOutputRoot {
+        match self {
+            Self::Structural { fields, .. } => &fields.output,
+            Self::Thermal { output, .. } => output,
+        }
+    }
+    pub(crate) fn access<'a>(&'a self, host: &'a AnalysisHostWorkload) -> &'a ArtifactAccess {
+        match self {
+            Self::Structural { .. } => &host.artifact_access,
+            Self::Thermal { access, .. } => access,
+        }
+    }
+}
+
+#[path = "observation_thermal.rs"]
+mod thermal;
+
+pub(crate) struct AdmittedObservation {
     pub request: ObservationEvaluationRequest,
-    pub selection: RecoveredFieldSelection,
-    pub workload: AdmittedStructuralObservationWorkload,
+    pub selection: ObservationFieldSelection,
+    pub field_catalog: PreparedAnalysisObjects,
+    pub workload: AdmittedObservationWorkload,
     pub mesh: Option<SolverMeshArtifact>,
     pub accelerator_requests: Vec<AcceleratorRequest>,
 }
@@ -60,14 +88,28 @@ pub struct ImportedObservations {
     pub access: ArtifactAccess,
 }
 
-pub(crate) fn admit_structural_observation(
-    preparation: &StructuralObservationPreparation,
-) -> AnalysisBridgeResult<AdmittedStructuralObservation> {
+pub(crate) fn admit_observation(
+    preparation: &ObservationPreparation,
+) -> AnalysisBridgeResult<AdmittedObservation> {
+    match &preparation.source {
+        ObservationPublishedSource::Structural {
+            recovery_request,
+            fields,
+        } => admit_structural(preparation, recovery_request, fields),
+        ObservationPublishedSource::Thermal { .. } => thermal::admit_thermal(preparation),
+    }
+}
+
+fn admit_structural(
+    preparation: &ObservationPreparation,
+    source_request: &FieldRecoveryRequest,
+    source_fields: &ImportedRecoveredFields,
+) -> AnalysisBridgeResult<AdmittedObservation> {
     preparation.source_host.validate()?;
-    preparation.source_request.validate()?;
+    source_request.validate()?;
     if preparation.source_host.workload.kind != AnalysisWorkKind::RecoverField
         || preparation.source_host.workload.outputs != vec![AnalysisNumericalObjectKind::Field]
-        || preparation.source_fields.output.kind != AnalysisNumericalObjectKind::Field
+        || source_fields.output.kind != AnalysisNumericalObjectKind::Field
         || preparation
             .mesh
             .as_ref()
@@ -86,8 +128,8 @@ pub(crate) fn admit_structural_observation(
         unique_workload_input(&preparation.source_host, preparation.source_workload.kind())?;
     let mesh_input =
         optional_workload_input(&preparation.source_host, AnalysisNumericalObjectKind::Mesh)?;
-    if request_input.logical_identity != preparation.source_request.identity().digest()
-        || preparation.source_host.workload.step != preparation.source_request.producer
+    if request_input.logical_identity != source_request.identity().digest()
+        || preparation.source_host.workload.step != source_request.producer
         || source_workload_input.logical_identity
             != preparation
                 .source_workload
@@ -121,19 +163,16 @@ pub(crate) fn admit_structural_observation(
     }
     let expected_step =
         StepIdentity::from_solver_contract(preparation.sequence, &preparation.step)?;
-    if expected_step != preparation.source_request.producer {
+    if expected_step != source_request.producer {
         return Err(AnalysisBridgeError::Identity(
             "observation procedure step differs from its producing step",
         ));
     }
     let workload = preparation.source_workload.decode()?;
-    match (&workload, preparation.source_request.source) {
-        (
-            AdmittedStructuralObservationWorkload::Linear(_),
-            FieldRecoverySource::SolverResult(_),
-        )
+    match (&workload, source_request.source) {
+        (AdmittedObservationWorkload::Linear(_), FieldRecoverySource::SolverResult(_))
         | (
-            AdmittedStructuralObservationWorkload::Frequency(_),
+            AdmittedObservationWorkload::Frequency(_),
             FieldRecoverySource::StructuralFrequencyEntry(_),
         ) => {}
         _ => {
@@ -152,15 +191,15 @@ pub(crate) fn admit_structural_observation(
         .transpose()?;
     let topology = StructuralRecoveredFieldTopology::derive(workload.model(), mesh.as_ref())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if topology.identity != preparation.source_request.topology {
+    if topology.identity != source_request.topology {
         return Err(AnalysisBridgeError::Identity(
             "observation topology differs from its field-recovery request",
         ));
     }
-    let fields = &preparation.source_fields.manifest;
-    if fields.identity.digest() != preparation.source_fields.output.logical_identity
-        || fields.recovery_request != preparation.source_request.identity()
-        || fields.source != preparation.source_request.source
+    let fields = &source_fields.manifest;
+    if fields.identity.digest() != source_fields.output.logical_identity
+        || fields.recovery_request != source_request.identity()
+        || fields.source != source_request.source
     {
         return Err(AnalysisBridgeError::Identity(
             "recovered-field artifact differs from its source request",
@@ -197,22 +236,27 @@ pub(crate) fn admit_structural_observation(
         .filter(|entry| required_definitions.contains(&entry.definition.identity()))
         .map(|entry| entry.field)
         .collect::<Vec<_>>();
-    let selection = RecoveredFieldSelection::new(fields.clone(), selected_fields)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let request = ObservationEvaluationRequest::new(
-        preparation.source_request.producer,
-        &selection,
-        topology.identity,
-        plan,
+    let selection = ObservationFieldSelection::structural(source_request, fields, selected_fields)?;
+    let request = ObservationEvaluationRequest::new(selection.clone(), plan)?;
+    let catalog = ObservationFieldCatalog::structural(source_request.clone(), fields.clone())?;
+    catalog.validate_structural_selection(&selection)?;
+    let field_catalog = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ObservationFieldCatalog,
+        catalog.identity(),
+        &catalog.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
     )?;
     for accelerator in &preparation.accelerator_requests {
         accelerator
             .validate()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     }
-    Ok(AdmittedStructuralObservation {
+    Ok(AdmittedObservation {
         request,
         selection,
+        field_catalog,
         workload,
         mesh,
         accelerator_requests: preparation.accelerator_requests.clone(),

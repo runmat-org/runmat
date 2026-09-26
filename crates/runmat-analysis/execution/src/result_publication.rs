@@ -7,6 +7,7 @@ use runmat_analysis_fea::planning::resource::{
     validate_resource_usage_evidence, FeaResourcePlan, ResourceUsageEvidence,
 };
 use runmat_analysis_fea::results::accuracy::AccuracyArtifact;
+use runmat_analysis_fea::results::observation::ObservationPublicationCatalog;
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
@@ -18,7 +19,7 @@ use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
     prepare_analysis_program, validate_observation_resource_usage, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    AnalysisWorkloadInput, AnalysisWorkloadRequest, ImportedObservations, PreparedAnalysisObjects,
+    AnalysisWorkloadInput, AnalysisWorkloadRequest, PreparedAnalysisObjects,
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
@@ -26,7 +27,7 @@ pub struct ResultPublicationPreparation {
     pub accuracy_host: AnalysisHostWorkload,
     pub source_accuracy: PreparedAnalysisObjects,
     pub source_resource_usage: PreparedAnalysisObjects,
-    pub source_observations: Option<ImportedObservations>,
+    pub source_observations: Option<ObservationPublicationCatalog>,
     pub program_revision: ProgramRevision,
     pub chunk_bytes: usize,
     pub inventory_limits: ObjectInventoryLimits,
@@ -97,29 +98,19 @@ pub fn prepare_result_publication(
             "accuracy artifact differs from its evaluation workload",
         ));
     }
-    let observations = preparation
-        .source_observations
-        .as_ref()
-        .map(|observations| {
-            if observations.output.kind != AnalysisNumericalObjectKind::Observation {
-                return Err(AnalysisBridgeError::Invalid(
-                    "publication observation input has the wrong numerical kind".into(),
-                ));
-            }
-            observations
-                .manifest
-                .validate()
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            validate_observation_resource_usage(&observations.manifest, &resource_usage)?;
-            if observations.manifest.identity.digest() != observations.output.logical_identity {
-                return Err(AnalysisBridgeError::Identity(
-                    "publication observation manifest differs from its content",
-                ));
-            }
-            Ok(observations.manifest.clone())
-        })
-        .transpose()?;
-    let request = ResultPublicationRequest::new(&accuracy, observations.as_ref(), &resource_usage)?;
+    if let Some(observations) = &preparation.source_observations {
+        observations.validate_source_result(
+            accuracy.producer,
+            accuracy.source_kind,
+            accuracy.source_result,
+        )?;
+        validate_observation_resource_usage(observations, &resource_usage)?;
+    }
+    let request = ResultPublicationRequest::new(
+        &accuracy,
+        preparation.source_observations.as_ref(),
+        &resource_usage,
+    )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::PublicationRequest,
@@ -139,13 +130,12 @@ pub fn prepare_result_publication(
     ];
     if let Some(observations) = preparation.source_observations {
         let bytes = observations
-            .manifest
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         inputs.push((
             prepare_analysis_objects(
                 AnalysisNumericalObjectKind::ObservationCatalog,
-                observations.manifest.identity.digest(),
+                observations.identity().digest(),
                 &bytes,
                 preparation.chunk_bytes,
                 ObjectNamespace::InputValue,

@@ -28,6 +28,7 @@ mod object;
 mod observation;
 mod observation_assembly;
 mod observation_history_checkpoint;
+mod observation_history_finalization;
 mod observation_partition;
 mod publication;
 mod random_response_interval;
@@ -158,6 +159,10 @@ pub use object::{
 pub use observation::ObservationEvaluationRequest;
 pub use observation_assembly::ObservationAssemblyRequest;
 pub use observation_history_checkpoint::ObservationHistoryCheckpointRequest;
+pub use observation_history_finalization::{
+    FinalizedObservationHistory, ObservationHistoryFinalizationRequest,
+    ObservationHistoryFinalizationRequestIdentity, ObservationHistorySourceContext,
+};
 pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };

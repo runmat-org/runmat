@@ -295,6 +295,22 @@ impl SeriesReductionResult {
         plan: &ResolvedObservationPlan,
         history: &ObservationHistory,
     ) -> Result<(), ObservationError> {
+        self.validate_source(plan, history)?;
+        if self.payload != reduce_values(history, self.operation, self.extrema_ties)? {
+            return Err(ObservationError::Identity(
+                "series-reduction payload differs from its source history",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Validate metadata and exact source-sample evidence without repeating the reduction.
+    /// Numerical workers use `validate_for` when a recomputed payload comparison is required.
+    pub fn validate_source(
+        &self,
+        plan: &ResolvedObservationPlan,
+        history: &ObservationHistory,
+    ) -> Result<(), ObservationError> {
         self.validate()?;
         plan.validate_identity()?;
         history.validate()?;
@@ -312,6 +328,7 @@ impl SeriesReductionResult {
         })?;
         if plan.identity != history.manifest().plan_identity
             || self.source_history != history.manifest().identity
+            || self.observation_id != history.manifest().observation_id
             || self.operation != reduction.series
             || self.extrema_ties != reduction.extrema_ties
         {
@@ -320,11 +337,6 @@ impl SeriesReductionResult {
             ));
         }
         validate_evidence_against_history(&self.evidence, history)?;
-        if self.payload != reduce_values(history, self.operation, self.extrema_ties)? {
-            return Err(ObservationError::Identity(
-                "series-reduction payload differs from its source history",
-            ));
-        }
         Ok(())
     }
 

@@ -8,6 +8,7 @@ use runmat_analysis_fea::execution::{
 use runmat_analysis_fea::results::accuracy::{
     evaluate_accuracy, publication_gate, AccuracyArtifact,
 };
+use runmat_analysis_fea::results::observation::ObservationPublicationCatalog;
 use runmat_execution::value::ValueRefKind;
 use runmat_execution::ProgramRevision;
 use runmat_execution_artifact::cache::CacheImport;
@@ -18,15 +19,18 @@ use crate::{
     import_analysis_objects, import_analysis_output_set, prepare_analysis_objects,
     prepare_analysis_program, AnalysisBridgeError, AnalysisBridgeResult,
     AnalysisCapabilityRequirement, AnalysisHostWorkload, AnalysisWorkloadInput,
-    AnalysisWorkloadRequest, ImportedObservations, PreparedAnalysisObjects,
-    PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
+    AnalysisWorkloadRequest, PreparedAnalysisObjects, PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
 pub struct AccuracyPreparation {
     pub solve_host: AnalysisHostWorkload,
     pub source_kind: AccuracySourceKind,
     pub source_numerical_receipt: PreparedAnalysisObjects,
-    pub source_observations: Option<ImportedObservations>,
+    pub source_observations: Option<ObservationPublicationCatalog>,
+    /// Original numerical intent and topology, not copies reconstructed from a result catalog.
+    /// Thermal evaluations require exactly ThermalWorkload and Mesh; other families currently
+    /// retain their existing receipt contract and do not accept context inputs.
+    pub source_context_inputs: Vec<PreparedAnalysisObjects>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
     pub formulation_requirement: runmat_analysis_core::FormulationRequirement,
@@ -95,44 +99,28 @@ pub fn prepare_accuracy(
         ));
     }
     let source_result = numerical_receipt.source_result();
-    if preparation.source_kind != AccuracySourceKind::StructuralLinear
-        && preparation.source_observations.is_some()
-    {
+    if preparation.source_observations.is_some() == preparation.step.observations.is_empty() {
         return Err(AnalysisBridgeError::Invalid(
-            "this accuracy source does not yet admit observation artifacts".into(),
+            "accuracy observation publication presence differs from authored declarations".into(),
         ));
     }
-    let observations = preparation
-        .source_observations
-        .as_ref()
-        .map(|observations| {
-            if observations.output.kind != AnalysisNumericalObjectKind::Observation {
-                return Err(AnalysisBridgeError::Invalid(
-                    "accuracy observation input has the wrong numerical kind".into(),
-                ));
-            }
-            observations
-                .manifest
-                .validate()
-                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-            if observations.manifest.identity.digest() != observations.output.logical_identity
-                || observations.manifest.producer != producer
-                || observations.manifest.source.solver_result() != Some(source_result)
-            {
-                return Err(AnalysisBridgeError::Identity(
-                    "accuracy observations differ from their producing solve",
-                ));
-            }
-            Ok(observations.manifest.clone())
-        })
-        .transpose()?;
+    if let Some(observations) = &preparation.source_observations {
+        observations.validate_authored_step(&preparation.step)?;
+        observations.validate_source_result(producer, preparation.source_kind, source_result)?;
+    }
     let request = AccuracyEvaluationRequest::new(
         producer,
         preparation.source_kind,
         source_result,
-        observations.as_ref(),
+        preparation.source_observations.as_ref(),
         preparation.formulation_requirement,
         preparation.step.accuracy.clone(),
+    )?;
+    crate::validate_accuracy_source_context(
+        &request,
+        &numerical_receipt,
+        preparation.source_observations.as_ref(),
+        &preparation.source_context_inputs.iter().collect::<Vec<_>>(),
     )?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
@@ -150,15 +138,20 @@ pub fn prepare_accuracy(
             ValueRefKind::ResultObject,
         ),
     ];
+    inputs.extend(
+        preparation
+            .source_context_inputs
+            .into_iter()
+            .map(|input| (input, ValueRefKind::DriverObject)),
+    );
     if let Some(observations) = preparation.source_observations {
         let bytes = observations
-            .manifest
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
         inputs.push((
             prepare_analysis_objects(
                 AnalysisNumericalObjectKind::ObservationCatalog,
-                observations.manifest.identity.digest(),
+                observations.identity().digest(),
                 &bytes,
                 preparation.chunk_bytes,
                 ObjectNamespace::InputValue,

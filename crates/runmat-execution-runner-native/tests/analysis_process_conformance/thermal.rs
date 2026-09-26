@@ -1,17 +1,20 @@
-//! Placement parity conformance, not a distributed thermal solve qualification.
+//! Placement parity through the production coordinator, not distributed-solve qualification.
 use super::publication_chain::{ProcessDriver, PublicationChainDriver};
 use runmat_analysis_core::{
-    AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
+    AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,
+    Temperature, ThermalDomain,
 };
 use runmat_analysis_execution::{
-    import_semantic_state, import_thermal_completion, import_thermal_result,
-    prepare_semantic_state_publication, prepare_thermal_task, AnalysisOutputPolicy,
-    ImportedThermalResult, SemanticStatePublicationPreparation, ThermalTaskPreparation,
+    import_thermal_completion, import_thermal_result, AnalysisOutputPolicy, ImportedThermalResult,
+    ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
 };
 use runmat_analysis_fea::{
-    execution::{SemanticStatePublicationSource, ThermalWorkload},
-    results::field::RecoveredFieldPartition,
-    ComputeBackend, ThermalProcedureControl,
+    properties::compile_property_map,
+    results::{accuracy::AccuracyStatus, field::RecoveredFieldPartition},
+    study::{
+        plan_thermal_study, CompiledAnalysisStudy, ThermalStudyPlanningPolicy, ThermalStudyProduct,
+    },
+    ComputeBackend,
 };
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_execution_runner_native::{
@@ -20,7 +23,6 @@ use runmat_execution_runner_native::{
 };
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
-/// Reuse the harness's isolated stdio worker and authoritative resource-planned submission.
 pub(super) async fn run(session: &NativeProgramSession) {
     let mut store = session.object_store();
     run_driver(
@@ -41,48 +43,100 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
 ) {
     let limits = NativeAnalysisHostLimits::default();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
         let mut model = super::fixture_model(super::FixtureId::CantileverLinearStatic);
+        model.constraints.clear();
+        model.excitations.clear();
+        model.excitation_cases.clear();
+        model.signals.clear();
+        // Explicit insulation retains the natural zero-flux equilibrium boundary condition.
+        let projection = runmat_analysis_fea::topology::AnalysisProjection::derive(&mesh).unwrap();
+        let insulated_face = projection.boundary_faces[0].provenance[0]
+            .analysis_selection_id()
+            .unwrap();
+        model
+            .boundaries
+            .push(runmat_analysis_core::AnalysisBoundary {
+                boundary_id: "insulated-face".into(),
+                target: runmat_analysis_core::RegionTarget::boundary(insulated_face),
+                operator: runmat_analysis_core::BoundaryOperator::ThermalHeatFlux {
+                    value: runmat_analysis_core::PrescribedValue::Constant(
+                        runmat_analysis_core::HeatFlux::new(0.0),
+                    ),
+                },
+            });
         model.thermal = Some(ThermalDomain {
             reference_temperature: Temperature::new(293.15),
         });
-        model.sequence = AnalysisSequence::from_steps(
-            "isolated-thermal",
-            vec![ProcedureStep::thermal_transient("heat")],
-        );
-        let mut energy = model.sequence.steps[0].accuracy.criteria[0].clone();
+        let mut step = ProcedureStep::thermal_transient("heat");
+        step.independent_domain = IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 2.0,
+            interval_count: 2,
+        };
+        let mut energy = step.accuracy.criteria[0].clone();
         energy.criterion_id = "energy_balance".into();
         energy.evidence = runmat_analysis_core::RequiredAccuracyEvidence::ConservationBalance;
-        model.sequence.steps[0].accuracy.criteria.push(energy);
-        let workload = ThermalWorkload {
-            step_id: model.sequence.steps[0].step_id.clone(),
-            model,
-            backend: ComputeBackend::Cpu,
+        step.accuracy.criteria.push(energy);
+        let mut second = step.state_outputs[0].clone();
+        second.state_id = StateId("second-temperature".into());
+        step.state_outputs.push(second);
+        let declarations = step.state_outputs.clone();
+        step.observations = authored_observations();
+        step.accuracy.resources.maximum_samples = 3;
+        model.sequence = AnalysisSequence::from_steps("isolated-thermal", vec![step]);
+        let compiled = CompiledAnalysisStudy {
+            module_path: "conformance/thermal.fea".into(),
+            study_id: "thermal".into(),
             formulation_requirement: FormulationRequirement::Experimental,
-            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
-            residual_target: 1e-4,
+            study_inputs: Vec::new(),
+            outputs: Vec::new(),
+            properties: compile_property_map(&model, Some(&mesh)).unwrap(),
+            model,
+            solver_mesh_digest: mesh.canonical_digest,
         };
-        let mut prepared = prepare_thermal_task(ThermalTaskPreparation {
-            authored_study_digest: super::digest("isolated-thermal-study"),
+        let workload = plan_thermal_study(
+            &compiled,
+            ThermalStudyPlanningPolicy {
+                backend: ComputeBackend::Cpu,
+                formulation_requirement: FormulationRequirement::Experimental,
+            },
+        )
+        .unwrap();
+        let output_policy =
+            AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
+        let mut study = ThermalStudyCoordinator::new(ThermalStudyPreparation {
+            product: ThermalStudyProduct { compiled, workload },
+            mesh,
             frozen_project_digest: None,
-            program_revision: revision.clone(),
             artifact_access: ArtifactAccess {
                 authorization_scope: authorization_scope.into(),
                 encryption_context: super::digest("isolated-thermal-encryption"),
             },
-            workload: workload.clone(),
-            mesh: canonical_tetrahedron_solver_mesh(order),
-            output_policy: AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap(),
+            program_revision: revision.clone(),
+            output_policy,
             required_capabilities: Default::default(),
         })
         .unwrap();
+        let prepared = study.prepare_solve().unwrap();
+        let solve_plan = prepared.resource_plan.identity;
         let directory = tempfile::tempdir().unwrap();
-        let mut store = runmat_execution_runner_native::FilesystemObjectStore::open(
+        let mut inline_store = runmat_execution_runner_native::FilesystemObjectStore::open(
             directory.path().join("inline"),
             limits.inventory.max_object_bytes,
         )
         .unwrap();
-        prepared.program.write_to(&mut store).unwrap();
-        let request = prepared.program.request.clone();
+        prepared.program.write_to(&mut inline_store).unwrap();
+        let inline_response = execute_analysis_program_request(
+            &prepared.program.request,
+            &mut inline_store,
+            &NativeAnalysisKernel,
+            limits,
+        );
+        let inline =
+            import_thermal_result(&inline_store, inline_response, prepared, limits.inventory)
+                .unwrap();
         let process = driver
             .execute(
                 &prepared.host,
@@ -90,8 +144,27 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 Some(&prepared.resource_plan),
             )
             .await;
-        let output_policy =
-            AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
+
+        // Import must reject a foreign admission plan even when the response is genuine.
+        let mut foreign = runmat_analysis_execution::PreparedThermalTask {
+            host: prepared.host.clone(),
+            program: prepared.program.clone(),
+            inputs: prepared.inputs.clone(),
+            resource_plan: prepared.resource_plan.clone(),
+        };
+        foreign.resource_plan.input.phase =
+            runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(
+                prepared.host.workload.identity,
+            );
+        assert!(import_thermal_completion(
+            driver.store(),
+            process.response.clone(),
+            process.resources.clone(),
+            &foreign,
+            output_policy,
+        )
+        .is_err());
+
         let mut wrong_allocation = process.resources.clone();
         let mut allocation = wrong_allocation.resources.allocation.clone();
         allocation.memory_bytes += 1;
@@ -104,38 +177,14 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 process.resources.resources.usage.relay_bytes,
             )
             .unwrap();
-        assert!(import_thermal_completion(
-            driver.store(),
-            process.response.clone(),
-            wrong_allocation,
-            &prepared,
-            output_policy,
-        )
-        .is_err());
-        let admitted_plan = prepared.resource_plan.clone();
-        prepared.resource_plan.input.phase =
-            runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(
-                prepared.host.workload.identity,
-            );
-        assert!(import_thermal_completion(
-            driver.store(),
-            process.response.clone(),
-            process.resources.clone(),
-            &prepared,
-            output_policy,
-        )
-        .is_err());
-        prepared.resource_plan = admitted_plan;
+        assert!(study
+            .complete_solve(driver.store(), process.response.clone(), wrong_allocation,)
+            .is_err());
         let mut wrong_bytes = process.resources.clone();
         wrong_bytes.resources.artifact_bytes += 1;
-        assert!(import_thermal_completion(
-            driver.store(),
-            process.response.clone(),
-            wrong_bytes,
-            &prepared,
-            output_policy,
-        )
-        .is_err());
+        assert!(study
+            .complete_solve(driver.store(), process.response.clone(), wrong_bytes,)
+            .is_err());
         let mut missing_object = process.response.clone();
         if let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
             result_objects,
@@ -144,76 +193,71 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         {
             result_objects.pop();
         }
-        assert!(import_thermal_completion(
-            driver.store(),
-            missing_object,
-            process.resources.clone(),
-            &prepared,
-            output_policy,
-        )
-        .is_err());
-        let completion = import_thermal_completion(
-            driver.store(),
-            process.response,
-            process.resources,
-            &prepared,
-            output_policy,
-        )
-        .unwrap();
-        let process = completion.result;
-        let usage = completion.solve_usage;
-        assert_eq!(usage.evidence.attempts.len(), 1);
+        assert!(study
+            .complete_solve(driver.store(), missing_object, process.resources.clone(),)
+            .is_err());
+        assert_eq!(study.phase(), ThermalStudyPhase::AwaitingSolve);
+        assert!(study.result().is_none());
+        study
+            .complete_solve(driver.store(), process.response, process.resources)
+            .unwrap();
+        let result = study.result().unwrap();
+        assert_eq!(result.manifest, inline.manifest);
+        assert_eq!(result.numerical_receipt, inline.numerical_receipt);
         assert_eq!(
-            usage.evidence.workload_digest,
-            prepared.host.workload.identity.digest()
-        );
-        assert_eq!(
-            usage.evidence.result_digest,
-            process.manifest.identity().digest()
-        );
-        let inline_response =
-            execute_analysis_program_request(&request, &mut store, &NativeAnalysisKernel, limits);
-        let inline =
-            import_thermal_result(&store, inline_response, &prepared, limits.inventory).unwrap();
-        assert_eq!(process.manifest, inline.manifest);
-        assert_eq!(process.numerical_receipt, inline.numerical_receipt);
-        assert_eq!(
-            process.state_publication_profiles,
+            result.state_publication_profiles,
             inline.state_publication_profiles
         );
         assert_eq!(
-            process.state_publication_profile_objects,
+            result.state_publication_profile_objects,
             inline.state_publication_profile_objects
         );
-        assert!(!process.state_publication_profiles.entries().is_empty());
-        assert_eq!(process.objects, inline.objects);
+        assert_eq!(result.objects, inline.objects);
         assert_eq!(
-            process.numerical_receipt_objects,
+            result.numerical_receipt_objects,
             inline.numerical_receipt_objects
         );
-        process
-            .numerical_receipt
-            .validate_against(&workload, &process.manifest)
+        assert_equilibrium(result);
+
+        let mut observation_phases = 0;
+        while study.phase() == ThermalStudyPhase::ReadyForObservations {
+            let Some(task) = study.prepare_next_observation(driver.store()).unwrap() else {
+                break;
+            };
+            task.program.write_to(&mut inline_store).unwrap();
+            let inline_response = execute_analysis_program_request(
+                &task.program.request,
+                &mut inline_store,
+                &NativeAnalysisKernel,
+                limits,
+            );
+            let inline_outputs = runmat_analysis_execution::import_analysis_output_set(
+                &inline_store,
+                inline_response,
+                task.host,
+            )
             .unwrap();
-        assert_equilibrium(&process);
-        let accuracy = runmat_analysis_execution::prepare_accuracy(
-            runmat_analysis_execution::AccuracyPreparation {
-                solve_host: prepared.host.clone(),
-                source_kind: runmat_analysis_fea::execution::AccuracySourceKind::Thermal,
-                source_numerical_receipt: process.numerical_receipt_objects.clone(),
-                source_observations: None,
-                sequence: runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
-                    &workload.model.sequence,
-                )
-                .unwrap(),
-                step: workload.model.sequence.steps[0].clone(),
-                formulation_requirement: workload.formulation_requirement,
-                program_revision: revision.clone(),
-                chunk_bytes: limits.chunk_bytes,
-                inventory_limits: limits.inventory,
-            },
-        )
-        .unwrap();
+            let response = driver
+                .execute(task.host, task.program, Some(task.resource_plan))
+                .await;
+            let outputs = runmat_analysis_execution::import_analysis_output_set(
+                driver.store(),
+                response.response.clone(),
+                task.host,
+            )
+            .unwrap();
+            assert_eq!(outputs.manifest, inline_outputs.manifest);
+            study
+                .complete_observation(driver.store(), response.response, response.resources)
+                .unwrap();
+            observation_phases += 1;
+        }
+        assert_eq!(observation_phases, 13); // 3 × partition/reduce/checkpoint + finalization + final field/assembly
+        assert_eq!(study.observations().histories.len(), 1);
+        assert_eq!(study.observations().samples.len(), 1);
+        let observation_catalog = study.observations().catalog.as_ref().unwrap().identity();
+
+        let accuracy = study.prepare_accuracy().unwrap();
         let response = driver
             .execute(
                 &accuracy.host,
@@ -221,146 +265,121 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 Some(&accuracy.resource_plan),
             )
             .await;
-        let report = runmat_analysis_execution::import_accuracy(
-            driver.store(),
-            response.response,
-            &accuracy,
-            limits.inventory,
-        )
-        .unwrap();
+        study
+            .complete_accuracy(driver.store(), response.response, response.resources)
+            .unwrap();
         assert_eq!(
-            report.artifact.gate().status,
-            runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
+            study.accuracy().unwrap().artifact.gate().status,
+            AccuracyStatus::Satisfied
         );
-        assert_eq!(report.artifact.evidence().len(), 2);
-        let accuracy_wall = response.resources.resources.usage.wall_millis;
-        let usage = runmat_analysis_execution::extend_resource_usage(
-            &usage,
-            &runmat_analysis_execution::PlannedResourceUsageGraph::new(
-                vec![runmat_analysis_execution::PlannedResourceUsageAttempt {
-                    plan: accuracy.resource_plan.clone(),
-                    accounting: response.resources,
-                }],
-                accuracy_wall,
-            )
-            .unwrap(),
-            &prepared.host.artifact_access,
-            output_policy,
-        )
-        .unwrap();
-        assert_eq!(usage.evidence.attempts.len(), 2);
-        let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-            source_host: prepared.host.clone(),
-            source_result: process.objects.clone(),
-            source_profiles: process.state_publication_profile_objects.clone(),
-            source: SemanticStatePublicationSource::ThermalPrimaryField,
-            declaration: workload.model.sequence.steps[0].state_outputs[0].clone(),
-            topology_digest: process.manifest.topology_digest,
-            program_revision: revision.clone(),
-            chunk_bytes: limits.chunk_bytes,
-            inventory_limits: limits.inventory,
-        })
-        .unwrap();
+        assert_eq!(study.accuracy().unwrap().artifact.evidence().len(), 2);
+        assert_eq!(
+            study.accuracy().unwrap().artifact.source_observations,
+            Some(observation_catalog)
+        );
+
+        for declaration in &declarations {
+            let task = study.prepare_next_state().unwrap();
+            let response = driver
+                .execute(&task.host, &task.program, Some(&task.resource_plan))
+                .await;
+            study
+                .complete_next_state(driver.store(), response.response, response.resources)
+                .unwrap();
+            let state = &study.states().last().unwrap().state;
+            assert_eq!(state.state_id, declaration.state_id);
+            assert_eq!(state.kind, runmat_analysis_core::StateKind::Thermal);
+            assert_eq!(
+                state.topology_digest,
+                study.result().unwrap().manifest.topology_digest
+            );
+            let fields = state.payload.fields().unwrap();
+            assert_eq!(fields.len(), 1);
+            let values = fields[0].as_host_f64().unwrap();
+            assert!(!values.is_empty());
+            assert!(values.iter().all(|value| (value - 293.15).abs() < 1e-8));
+        }
+        let baseline = study.freeze_baseline().unwrap().clone();
+        assert_eq!(
+            baseline.evidence.attempts.len(),
+            2 + observation_phases + declarations.len()
+        );
+        let task = study.prepare_publication().unwrap();
         let response = driver
-            .execute(
-                &publication.host,
-                &publication.program,
-                Some(&publication.resource_plan),
-            )
+            .execute(&task.host, &task.program, Some(&task.resource_plan))
             .await;
-        let state = import_semantic_state(
-            driver.store(),
-            response.response,
-            &publication,
-            limits.inventory,
-        )
-        .unwrap();
-        let state_wall = response.resources.resources.usage.wall_millis;
-        let usage = runmat_analysis_execution::extend_resource_usage(
-            &usage,
-            &runmat_analysis_execution::PlannedResourceUsageGraph::new(
-                vec![runmat_analysis_execution::PlannedResourceUsageAttempt {
-                    plan: publication.resource_plan.clone(),
-                    accounting: response.resources,
-                }],
-                state_wall,
-            )
-            .unwrap(),
-            &prepared.host.artifact_access,
-            output_policy,
-        )
-        .unwrap();
-        assert_eq!(usage.evidence.attempts.len(), 3);
-        // The receipt names this immutable baseline. Completed accounting then adds the
-        // publication interval without making the receipt depend on its own future cost.
-        let result_publication = runmat_analysis_execution::prepare_result_publication(
-            runmat_analysis_execution::ResultPublicationPreparation {
-                accuracy_host: accuracy.host.clone(),
-                source_accuracy: report.objects,
-                source_resource_usage: usage.objects.clone(),
-                source_observations: None,
-                program_revision: revision.clone(),
-                chunk_bytes: limits.chunk_bytes,
-                inventory_limits: limits.inventory,
-            },
-        )
-        .unwrap();
-        let response = driver
-            .execute(
-                &result_publication.host,
-                &result_publication.program,
-                Some(&result_publication.resource_plan),
-            )
-            .await;
-        let published = runmat_analysis_execution::import_published_result(
-            driver.store(),
-            response.response,
-            &result_publication,
-            limits.inventory,
-        )
-        .unwrap();
-        let terminal = runmat_analysis_execution::complete_result_publication_resource_usage(
-            &result_publication,
-            &published,
-            &usage,
-            &runmat_analysis_execution::PlannedResourceUsageAttempt {
-                plan: result_publication.resource_plan.clone(),
-                accounting: response.resources,
-            },
-            output_policy,
-        )
-        .unwrap();
-        assert_eq!(terminal.evidence.attempts.len(), 4);
+        study
+            .complete_publication(driver.store(), response.response, response.resources)
+            .unwrap();
+        let completed = study.into_completed().unwrap();
+        assert_eq!(completed.baseline_usage, baseline);
+        assert_eq!(completed.states.len(), declarations.len());
+        assert_eq!(
+            completed.terminal_usage.evidence.attempts.len(),
+            3 + observation_phases + declarations.len()
+        );
         runmat_analysis_execution::validate_result_publication_resource_usage(
-            &published.result,
-            &usage.evidence,
-            &terminal.evidence,
+            &completed.publication.result,
+            &baseline.evidence,
+            &completed.terminal_usage.evidence,
         )
         .unwrap();
-        assert_ne!(terminal.evidence.identity(), usage.evidence.identity());
-        let published = published.result;
-        assert_eq!(published.source_result, process.manifest.identity());
-        assert_eq!(published.source_resource_usage, usage.evidence.identity());
-        assert_eq!(
-            published.source_resource_plan,
-            prepared.resource_plan.identity
+        assert_ne!(
+            completed.terminal_usage.evidence.identity(),
+            baseline.evidence.identity()
         );
+        let receipt = &completed.publication.result;
+        assert_eq!(receipt.source_result, completed.result.manifest.identity());
+        assert_eq!(receipt.source_resource_usage, baseline.evidence.identity());
+        assert_eq!(receipt.source_resource_plan, solve_plan);
+        assert_eq!(receipt.source_observations, Some(observation_catalog));
         assert_eq!(
-            published.formulation_requirement,
+            receipt.formulation_requirement,
             FormulationRequirement::Experimental
         );
-        assert_eq!(
-            published.accuracy_status,
-            runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
-        );
-        assert_eq!(state.kind, runmat_analysis_core::StateKind::Thermal);
-        assert_eq!(state.topology_digest, process.manifest.topology_digest);
-        let fields = state.payload.fields().unwrap();
-        assert_eq!(fields.len(), 1);
-        let values = fields[0].as_host_f64().unwrap();
-        assert!(!values.is_empty());
-        assert!(values.iter().all(|value| (value - 293.15).abs() < 1e-8));
+        assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
     }
+}
+
+fn authored_observations() -> Vec<runmat_analysis_core::ObservationRequest> {
+    use runmat_analysis_core::*;
+    let history = ObservationSpec {
+        observation_id: ObservationId("temperature-history".into()),
+        quantity: ObservationQuantity::Temperature,
+        value_shape: ObservationQuantity::Temperature.canonical_value_shape(),
+        target: ObservationTarget::WholeModel,
+        source_location: FieldLocation::Node,
+        output_location: FieldLocation::Node,
+        recovery: RecoveryPolicy::Native,
+        component: ObservationComponent::All,
+        frame: CoordinateFrame::Global,
+        sign_convention: SignConvention::Native,
+        complex_representation: ComplexRepresentation::Real,
+        sampling: SamplingPolicy::EveryAcceptedIncrement,
+        reduction: Some(ReductionPolicy {
+            spatial: SpatialReduction::None,
+            series: SeriesReduction::Mean {
+                weighting: SeriesWeighting::TrapezoidalIndependentDomain,
+            },
+            extrema_ties: ExtremaTiePolicy::FirstCanonical,
+        }),
+        storage: ObservationStoragePolicy {
+            precision: SignalPrecision::Real64,
+            compression: CompressionPolicy::Lossless,
+            retention: RetentionPolicy::Canonical,
+            partial_access: PartialAccessPolicy::ManifestAndChunks,
+        },
+        purpose: ObservationPurpose::Publication,
+        cost: ObservationCostPolicy::Automatic,
+    };
+    let mut final_field = history.clone();
+    final_field.observation_id = ObservationId("final-temperature".into());
+    final_field.sampling = SamplingPolicy::Final;
+    final_field.reduction = None;
+    vec![
+        ObservationRequest::History(history),
+        ObservationRequest::Field(final_field),
+    ]
 }
 
 fn assert_equilibrium(result: &ImportedThermalResult) {

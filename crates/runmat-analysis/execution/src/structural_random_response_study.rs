@@ -388,6 +388,7 @@ impl StructuralRandomResponseStudyCoordinator {
             .as_ref()
             .ok_or_else(|| invalid("completed random-response result is absent"))?;
         let task = prepare_accuracy(AccuracyPreparation {
+            source_context_inputs: Vec::new(),
             solve_host: self
                 .assembly_host
                 .as_ref()
