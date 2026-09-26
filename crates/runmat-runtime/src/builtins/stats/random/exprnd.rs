@@ -65,7 +65,8 @@ async fn exprnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         && parsed.output_precision == OutputPrecision::Double
         && parsed.gpu_source.is_none()
     {
-        if let Some(value) = try_gpu_exponential(parsed.mu[0], &parsed.shape)? {
+        if let Some(value) = try_gpu_exponential(parsed.mu[0], &parsed.shape, &parsed.borrowed_gpu)?
+        {
             return Ok(value);
         }
     }
@@ -131,6 +132,7 @@ struct ParsedExprnd {
     shape: Vec<usize>,
     output_precision: OutputPrecision,
     gpu_source: Option<GpuTensorHandle>,
+    borrowed_gpu: Vec<GpuTensorHandle>,
 }
 
 fn output_precision(value: &Value) -> OutputPrecision {
@@ -172,7 +174,8 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
         if provider.precision() != required_precision {
             return Ok(exprnd_host_output(output, parsed.output_precision));
         }
-        let mut handle = gpu_helpers::upload_tensor_protecting(provider, &output, &[&source])
+        let protected: Vec<_> = parsed.borrowed_gpu.iter().collect();
+        let mut handle = gpu_helpers::upload_tensor_protecting(provider, &output, &protected)
             .map_err(|err| exprnd_internal_error(format!("exprnd: {err}")))?;
         if !valid_exprnd_gpu_output(
             &handle,
@@ -181,7 +184,7 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
             &output.shape,
             required_precision,
         ) {
-            free_exprnd_gpu_output(&handle, &source);
+            gpu_helpers::free_rejected_provider_output(&handle, &protected, provider);
             return Err(exprnd_internal_error(
                 "exprnd: provider upload returned malformed resident output",
             ));

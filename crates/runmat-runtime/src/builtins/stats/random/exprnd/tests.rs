@@ -5,6 +5,7 @@ use runmat_value::IntegerStorage;
 
 struct MalformedRandomProvider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
+    alias: Option<GpuTensorHandle>,
 }
 
 impl runmat_accelerate_api::AccelProvider for MalformedRandomProvider {
@@ -39,6 +40,9 @@ impl runmat_accelerate_api::AccelProvider for MalformedRandomProvider {
     }
 
     fn random_exponential(&self, _mu: f64, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        if let Some(alias) = &self.alias {
+            return Ok(alias.clone());
+        }
         self.inner.upload(&runmat_accelerate_api::HostTensorView {
             data: &[1.0],
             shape: &[1, 1],
@@ -248,6 +252,7 @@ fn exprnd_rejects_malformed_provider_output_before_advancing_rng() {
     let provider: &'static dyn runmat_accelerate_api::AccelProvider =
         Box::leak(Box::new(MalformedRandomProvider {
             inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            alias: None,
         }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let before = random::snapshot().expect("rng snapshot").state;
@@ -259,6 +264,51 @@ fn exprnd_rejects_malformed_provider_output_before_advancing_rng() {
     .expect_err("malformed provider result");
     assert!(error.message().contains("malformed output"));
     assert_eq!(before, random::snapshot().expect("rng snapshot").state);
+}
+
+#[test]
+fn resident_size_controls_are_protected_without_selecting_output_owner() {
+    let _guard = reset();
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let dimensions = Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &dimensions).unwrap();
+        let parsed = block_on(parse_args(vec![
+            Value::Num(1.0),
+            Value::GpuTensor(handle.clone()),
+        ]))
+        .unwrap();
+        assert!(parsed.gpu_source.is_none());
+        assert_eq!(parsed.shape, vec![2, 3]);
+        assert_eq!(parsed.borrowed_gpu.len(), 1);
+        assert!(gpu_helpers::same_gpu_handle(
+            &parsed.borrowed_gpu[0],
+            &handle
+        ));
+    });
+}
+
+#[test]
+fn random_hook_cannot_adopt_or_free_a_borrowed_size_alias() {
+    use runmat_accelerate_api::AccelProvider;
+    let _guard = reset();
+    let inner = runmat_accelerate::simple_provider::InProcessProvider::new();
+    let handle = inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[1.0, 2.0],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let provider = Box::leak(Box::new(MalformedRandomProvider {
+        inner,
+        alias: Some(handle.clone()),
+    }));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let before = random::snapshot().unwrap().state;
+    let error = try_gpu_exponential(1.0, &[1, 2], std::slice::from_ref(&handle)).unwrap_err();
+    assert!(error.message().contains("malformed output"));
+    assert_eq!(before, random::snapshot().unwrap().state);
+    let original = block_on(provider.download(&handle)).unwrap();
+    assert_eq!(original.data, vec![1.0, 2.0]);
 }
 
 #[test]

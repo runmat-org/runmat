@@ -7,6 +7,13 @@ pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedE
         ));
     }
     let output_precision = output_precision(&args[0]);
+    let borrowed_gpu = args
+        .iter()
+        .filter_map(|arg| match arg {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
     let gpu_source = match &args[0] {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -33,6 +40,7 @@ pub(super) async fn parse_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedE
         shape,
         output_precision,
         gpu_source,
+        borrowed_gpu,
     })
 }
 
