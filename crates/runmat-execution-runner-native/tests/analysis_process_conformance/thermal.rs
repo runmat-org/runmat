@@ -4,9 +4,9 @@ use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
 };
 use runmat_analysis_execution::{
-    import_semantic_state, import_thermal_result, prepare_semantic_state_publication,
-    prepare_thermal_task, AnalysisOutputPolicy, ImportedThermalResult,
-    SemanticStatePublicationPreparation, ThermalTaskPreparation,
+    import_semantic_state, import_thermal_completion, import_thermal_result,
+    prepare_semantic_state_publication, prepare_thermal_task, AnalysisOutputPolicy,
+    ImportedThermalResult, SemanticStatePublicationPreparation, ThermalTaskPreparation,
 };
 use runmat_analysis_fea::{
     execution::{SemanticStatePublicationSource, ThermalWorkload},
@@ -61,7 +61,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
             residual_target: 1e-4,
         };
-        let prepared = prepare_thermal_task(ThermalTaskPreparation {
+        let mut prepared = prepare_thermal_task(ThermalTaskPreparation {
             authored_study_digest: super::digest("isolated-thermal-study"),
             frozen_project_digest: None,
             program_revision: revision.clone(),
@@ -90,13 +90,87 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 Some(&prepared.resource_plan),
             )
             .await;
-        let process = import_thermal_result(
+        let output_policy =
+            AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
+        let mut wrong_allocation = process.resources.clone();
+        let mut allocation = wrong_allocation.resources.allocation.clone();
+        allocation.memory_bytes += 1;
+        wrong_allocation.resources =
+            runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+                allocation,
+                process.resources.resources.usage.wall_millis,
+                process.resources.resources.artifact_bytes,
+                process.resources.resources.usage.egress_bytes,
+                process.resources.resources.usage.relay_bytes,
+            )
+            .unwrap();
+        assert!(import_thermal_completion(
+            driver.store(),
+            process.response.clone(),
+            wrong_allocation,
+            &prepared,
+            output_policy,
+        )
+        .is_err());
+        let admitted_plan = prepared.resource_plan.clone();
+        prepared.resource_plan.input.phase =
+            runmat_analysis_fea::planning::resource::FeaResourcePhase::ThermalSolve(
+                prepared.host.workload.identity,
+            );
+        assert!(import_thermal_completion(
+            driver.store(),
+            process.response.clone(),
+            process.resources.clone(),
+            &prepared,
+            output_policy,
+        )
+        .is_err());
+        prepared.resource_plan = admitted_plan;
+        let mut wrong_bytes = process.resources.clone();
+        wrong_bytes.resources.artifact_bytes += 1;
+        assert!(import_thermal_completion(
+            driver.store(),
+            process.response.clone(),
+            wrong_bytes,
+            &prepared,
+            output_policy,
+        )
+        .is_err());
+        let mut missing_object = process.response.clone();
+        if let runmat_execution_artifact::ProgramExecutionResponse::ExternalizedSuccess {
+            result_objects,
+            ..
+        } = &mut missing_object
+        {
+            result_objects.pop();
+        }
+        assert!(import_thermal_completion(
+            driver.store(),
+            missing_object,
+            process.resources.clone(),
+            &prepared,
+            output_policy,
+        )
+        .is_err());
+        let completion = import_thermal_completion(
             driver.store(),
             process.response,
+            process.resources,
             &prepared,
-            limits.inventory,
+            output_policy,
         )
         .unwrap();
+        let process = completion.result;
+        let usage = completion.solve_usage;
+        assert_eq!(usage.evidence.attempts.len(), 1);
+        assert_eq!(
+            usage.evidence.workload_digest,
+            prepared.host.workload.identity.digest()
+        );
+        assert_eq!(
+            usage.evidence.result_digest,
+            process.manifest.identity().digest()
+        );
         let inline_response =
             execute_analysis_program_request(&request, &mut store, &NativeAnalysisKernel, limits);
         let inline =
@@ -146,6 +220,47 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
         );
         assert_eq!(report.artifact.evidence().len(), 2);
+        // This publication binds solve-attempt usage only. Accuracy, state and publication
+        // tasks currently have no FEA phase plans and are not claimed as measured here.
+        let result_publication = runmat_analysis_execution::prepare_result_publication(
+            runmat_analysis_execution::ResultPublicationPreparation {
+                accuracy_host: accuracy.host.clone(),
+                source_accuracy: report.objects,
+                source_resource_plan: prepared.inputs.iter().find(|input| {
+                    input.manifest.kind == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ResourcePlan
+                }).unwrap().clone(),
+                source_resource_usage: usage.objects,
+                source_observations: None,
+                program_revision: revision.clone(),
+                chunk_bytes: limits.chunk_bytes,
+                inventory_limits: limits.inventory,
+            },
+        ).unwrap();
+        let response = driver
+            .execute(&result_publication.host, &result_publication.program, None)
+            .await;
+        let published = runmat_analysis_execution::import_published_result(
+            driver.store(),
+            response.response,
+            &result_publication,
+            limits.inventory,
+        )
+        .unwrap()
+        .result;
+        assert_eq!(published.source_result, process.manifest.identity());
+        assert_eq!(published.source_resource_usage, usage.evidence.identity());
+        assert_eq!(
+            published.source_resource_plan,
+            prepared.resource_plan.identity
+        );
+        assert_eq!(
+            published.formulation_requirement,
+            FormulationRequirement::Experimental
+        );
+        assert_eq!(
+            published.accuracy_status,
+            runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
+        );
         let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: prepared.host.clone(),
             source_result: process.objects,

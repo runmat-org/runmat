@@ -21,8 +21,8 @@ use crate::{
     import_semantic_state_completion, import_structural_linear_completion,
     prepare_semantic_state_publication, prepare_structural_sequence_step, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, AnalysisHostWorkload,
-    PreparedAnalysisObjects, PreparedSemanticStatePublication, PreparedStructuralLinearProgram,
-    PreparedStructuralResourceUsage, SemanticStatePublicationPreparation,
+    PreparedAnalysisObjects, PreparedResourceUsage, PreparedSemanticStatePublication,
+    PreparedStructuralLinearProgram, SemanticStatePublicationPreparation,
     StructuralLinearProgramPreparation,
 };
 
@@ -95,7 +95,7 @@ pub struct CompletedStructuralSequenceStep {
     pub objects: PreparedAnalysisObjects,
     pub numerical_receipt: runmat_analysis_fea::execution::StructuralLinearNumericalReceiptArtifact,
     pub numerical_receipt_objects: PreparedAnalysisObjects,
-    pub resource_usage: Option<PreparedStructuralResourceUsage>,
+    pub resource_usage: Option<PreparedResourceUsage>,
     pub response: ProgramExecutionResponse,
 }
 

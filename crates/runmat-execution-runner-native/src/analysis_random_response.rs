@@ -5,8 +5,8 @@ use std::time::Instant;
 use runmat_analysis_execution::{
     prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
     ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseResult,
-    PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
-    StructuralRandomResponseStudyCoordinator, StructuralRandomResponseStudyPreparation,
+    PlannedResourceUsageGraph, PreparedResourceUsage, StructuralRandomResponseStudyCoordinator,
+    StructuralRandomResponseStudyPreparation,
 };
 
 use crate::{
@@ -26,7 +26,7 @@ pub struct CompletedStructuralRandomResponseStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralRandomResponseWorkload,
     pub response: ImportedStructuralRandomResponseResult,
     pub accuracy: ImportedAccuracy,
-    pub resource_usage: PreparedStructuralResourceUsage,
+    pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub statistics_state: ImportedSemanticState,
 }

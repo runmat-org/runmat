@@ -12,7 +12,7 @@ use runmat_analysis_execution::{
     prepare_structural_observation_assembly, prepare_structural_observation_fanout,
     prepare_structural_observation_reduction, AccuracyPreparation, AnalysisHostWorkload,
     PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAnalysisProgram,
-    PreparedStructuralLinearProgram, PreparedStructuralResourceUsage, ResultPublicationPreparation,
+    PreparedResourceUsage, PreparedStructuralLinearProgram, ResultPublicationPreparation,
     StructuralFieldRecoveryPreparation, StructuralObservationAssemblyPreparation,
     StructuralObservationPreparation, StructuralObservationReductionPreparation,
     StructuralObservationWorkloadSource,
@@ -66,7 +66,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     driver: &mut D,
     solve: &PreparedStructuralLinearProgram,
     solve_response: ProgramExecutionResponse,
-    resource_usage: &PreparedStructuralResourceUsage,
+    resource_usage: &PreparedResourceUsage,
     program_revision: ProgramRevision,
 ) -> PublishedAnalysisResult {
     let limits = ObjectInventoryLimits::default();

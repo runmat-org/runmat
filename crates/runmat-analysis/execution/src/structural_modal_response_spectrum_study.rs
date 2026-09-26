@@ -23,11 +23,11 @@ use crate::{
     ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState,
     ImportedStructuralModalResponseSpectrumDirection,
     ImportedStructuralModalResponseSpectrumResult, ImportedStructuralModalResult, PreparedAccuracy,
-    PreparedResultPublication, PreparedSemanticStatePublication,
+    PreparedResourceUsage, PreparedResultPublication, PreparedSemanticStatePublication,
     PreparedStructuralModalResponseSpectrumAssemblyTask,
     PreparedStructuralModalResponseSpectrumDirectionTask, PreparedStructuralModalTask,
-    PreparedStructuralResourceUsage, ResultPublicationPreparation,
-    SemanticStatePublicationPreparation, StructuralModalResponseSpectrumAssemblyPreparation,
+    ResultPublicationPreparation, SemanticStatePublicationPreparation,
+    StructuralModalResponseSpectrumAssemblyPreparation,
     StructuralModalResponseSpectrumFanoutPreparation, StructuralModalTaskPreparation,
 };
 
@@ -77,7 +77,7 @@ pub struct StructuralModalResponseSpectrumStudyCoordinator {
     result: Option<ImportedStructuralModalResponseSpectrumResult>,
     accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
-    resource_usage: Option<PreparedStructuralResourceUsage>,
+    resource_usage: Option<PreparedResourceUsage>,
     publication: Option<ImportedPublishedResult>,
     envelope_state: Option<ImportedSemanticState>,
     phase: StudyPhase,
@@ -441,7 +441,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
 
     pub fn prepare_publication(
         &mut self,
-        resource_usage: PreparedStructuralResourceUsage,
+        resource_usage: PreparedResourceUsage,
     ) -> AnalysisBridgeResult<PreparedResultPublication> {
         if self.phase != StudyPhase::ReadyForPublication {
             return Err(invalid(
@@ -587,7 +587,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         self.accuracy.as_ref()
     }
 
-    pub fn resource_usage(&self) -> Option<&PreparedStructuralResourceUsage> {
+    pub fn resource_usage(&self) -> Option<&PreparedResourceUsage> {
         self.resource_usage.as_ref()
     }
 

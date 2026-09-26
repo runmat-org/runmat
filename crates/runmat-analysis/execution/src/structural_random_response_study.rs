@@ -21,12 +21,12 @@ use crate::{
     prepare_structural_random_response_fanout, AccuracyPreparation, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedAccuracy, ImportedPublishedResult,
     ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseInterval,
-    ImportedStructuralRandomResponseResult, PreparedAccuracy, PreparedResultPublication,
-    PreparedSemanticStatePublication, PreparedStructuralModalTask,
+    ImportedStructuralRandomResponseResult, PreparedAccuracy, PreparedResourceUsage,
+    PreparedResultPublication, PreparedSemanticStatePublication, PreparedStructuralModalTask,
     PreparedStructuralRandomResponseAssemblyTask, PreparedStructuralRandomResponseIntervalTask,
-    PreparedStructuralResourceUsage, ResultPublicationPreparation,
-    SemanticStatePublicationPreparation, StructuralModalTaskPreparation,
-    StructuralRandomResponseAssemblyPreparation, StructuralRandomResponseFanoutPreparation,
+    ResultPublicationPreparation, SemanticStatePublicationPreparation,
+    StructuralModalTaskPreparation, StructuralRandomResponseAssemblyPreparation,
+    StructuralRandomResponseFanoutPreparation,
 };
 
 pub struct StructuralRandomResponseStudyPreparation {
@@ -75,7 +75,7 @@ pub struct StructuralRandomResponseStudyCoordinator {
     result: Option<ImportedStructuralRandomResponseResult>,
     accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
-    resource_usage: Option<PreparedStructuralResourceUsage>,
+    resource_usage: Option<PreparedResourceUsage>,
     publication: Option<ImportedPublishedResult>,
     statistics_state: Option<ImportedSemanticState>,
     phase: StudyPhase,
@@ -429,7 +429,7 @@ impl StructuralRandomResponseStudyCoordinator {
 
     pub fn prepare_publication(
         &mut self,
-        resource_usage: PreparedStructuralResourceUsage,
+        resource_usage: PreparedResourceUsage,
     ) -> AnalysisBridgeResult<PreparedResultPublication> {
         if self.phase != StudyPhase::ReadyForPublication {
             return Err(invalid(
@@ -572,7 +572,7 @@ impl StructuralRandomResponseStudyCoordinator {
         self.accuracy.as_ref()
     }
 
-    pub fn resource_usage(&self) -> Option<&PreparedStructuralResourceUsage> {
+    pub fn resource_usage(&self) -> Option<&PreparedResourceUsage> {
         self.resource_usage.as_ref()
     }
 

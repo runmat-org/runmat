@@ -3,7 +3,7 @@ use runmat_analysis_execution::{
     analysis_object_references, decode_prepared_observation_history_checkpoint,
     import_analysis_objects, import_analysis_partition, AnalysisOutputRoot,
     AnalysisPartitionImport, ImportedObservations, ImportedRecoveredFields,
-    PreparedAnalysisObjects, PreparedStructuralResourceUsage,
+    PreparedAnalysisObjects, PreparedResourceUsage,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, FieldRecoverySource, StructuralFrequencyNumericalReceipt,
@@ -47,7 +47,7 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
 ) -> NativeExecutionResult<(
     Vec<ExactStructuralFrequencyEntryResult>,
     Vec<ExactStructuralFrequencyHistoryResult>,
-    PreparedStructuralResourceUsage,
+    PreparedResourceUsage,
     StructuralFrequencyPublicationManifest,
 )> {
     let FrequencyArtifactImport {
@@ -248,7 +248,7 @@ pub(super) fn import_frequency_artifacts<Source: CacheImport>(
             "structural frequency closure contains missing or unreferenced objects",
         ));
     }
-    let prepared_resource_usage = PreparedStructuralResourceUsage {
+    let prepared_resource_usage = PreparedResourceUsage {
         evidence,
         objects: resource_objects,
     };

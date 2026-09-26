@@ -615,7 +615,7 @@ pub struct ExactStructuralModalResponseSpectrumAnalysisResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
-    pub response_resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub response_resource_usage: runmat_analysis_execution::PreparedResourceUsage,
     pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub field_recovery: runmat_analysis_fea::solve::dynamics::ResponseSpectrumFieldRecovery,
     pub envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
@@ -632,7 +632,7 @@ pub struct ExactStructuralRandomResponseAnalysisResult {
     pub response_numerical_receipt:
         runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
     pub response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
-    pub response_resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub response_resource_usage: runmat_analysis_execution::PreparedResourceUsage,
     pub response_publication: runmat_analysis_execution::ImportedPublishedResult,
     pub statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
 }
@@ -696,7 +696,7 @@ pub struct ExactStructuralFrequencyAnalysisResult {
     pub numerical_receipt: StructuralFrequencyNumericalReceipt,
     pub entries: Vec<ExactStructuralFrequencyEntryResult>,
     pub histories: Vec<ExactStructuralFrequencyHistoryResult>,
-    pub resource_usage: runmat_analysis_execution::PreparedStructuralResourceUsage,
+    pub resource_usage: runmat_analysis_execution::PreparedResourceUsage,
     pub publication: Box<runmat_analysis_fea::execution::StructuralFrequencyPublicationManifest>,
     pub object_catalog: PublishedObjectCatalog,
     pub artifact_roots: runmat_runtime::analysis::StructuralFrequencyArtifactRootIndex,

@@ -1,5 +1,5 @@
 use runmat_analysis_execution::{
-    ImportedPublishedResult, PreparedAnalysisObjects, PreparedStructuralResourceUsage,
+    ImportedPublishedResult, PreparedAnalysisObjects, PreparedResourceUsage,
 };
 use runmat_analysis_fea::planning::resource::{
     validate_resource_usage_evidence, ResourceUsageEvidence,
@@ -17,7 +17,7 @@ pub(super) fn import_specialized_publication(
     workload_digest: Digest,
     result_digest: Digest,
     accuracy: &AccuracyArtifact,
-) -> NativeExecutionResult<(PreparedStructuralResourceUsage, ImportedPublishedResult)> {
+) -> NativeExecutionResult<(PreparedResourceUsage, ImportedPublishedResult)> {
     let evidence = ResourceUsageEvidence::from_canonical_bytes(&resource_objects.payload())
         .map_err(protocol)?;
     let primary_plan = evidence
@@ -55,7 +55,7 @@ pub(super) fn import_specialized_publication(
     }
 
     Ok((
-        PreparedStructuralResourceUsage {
+        PreparedResourceUsage {
             evidence,
             objects: resource_objects.clone(),
         },

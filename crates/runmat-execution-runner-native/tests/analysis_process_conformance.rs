@@ -11,8 +11,8 @@ use runmat_analysis_execution::{
     build_analysis_task_submission, build_resource_planned_task_submission,
     import_analysis_objects, import_analysis_output_set, import_structural_linear_completion,
     prepare_structural_linear_program, prepare_structural_resource_usage, AnalysisExecutionContext,
-    AnalysisHostWorkload, PreparedAnalysisProgram, PreparedStructuralLinearProgram,
-    PreparedStructuralResourceUsage, StructuralLinearProgramPreparation,
+    AnalysisHostWorkload, PreparedAnalysisProgram, PreparedResourceUsage,
+    PreparedStructuralLinearProgram, StructuralLinearProgramPreparation,
     StructuralSequencePreparation,
 };
 use runmat_analysis_fea::constraints::{
@@ -438,7 +438,7 @@ fn resource_usage(
     store: &impl CacheImport,
     solve: &PreparedStructuralLinearProgram,
     success: &runmat_execution_runner::AttemptSuccess,
-) -> PreparedStructuralResourceUsage {
+) -> PreparedResourceUsage {
     let result = import_structural_linear_completion(
         store,
         success_response(success),
@@ -513,8 +513,8 @@ async fn durable_conformance(
     expected_explicit_payload: Vec<u8>,
     expected_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
     expected_explicit_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
-    resource_usage: PreparedStructuralResourceUsage,
-    explicit_resource_usage: PreparedStructuralResourceUsage,
+    resource_usage: PreparedResourceUsage,
+    explicit_resource_usage: PreparedResourceUsage,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = publication_chain::DurableDriver::open(

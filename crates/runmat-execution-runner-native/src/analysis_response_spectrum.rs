@@ -5,7 +5,7 @@ use std::time::Instant;
 use runmat_analysis_execution::{
     prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
     ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
-    ImportedStructuralModalResult, PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
+    ImportedStructuralModalResult, PlannedResourceUsageGraph, PreparedResourceUsage,
     StructuralModalResponseSpectrumStudyCoordinator,
     StructuralModalResponseSpectrumStudyPreparation,
 };
@@ -27,7 +27,7 @@ pub struct CompletedStructuralModalResponseSpectrumStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralModalResponseSpectrumWorkload,
     pub response: ImportedStructuralModalResponseSpectrumResult,
     pub accuracy: ImportedAccuracy,
-    pub resource_usage: PreparedStructuralResourceUsage,
+    pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub envelope_state: ImportedSemanticState,
 }

@@ -663,6 +663,16 @@ evidence. These criteria do not establish spatial, temporal, recovery or referen
 Unsupported mandatory criteria remain indeterminate, and the shared production publication gate
 blocks them. Satisfying a residual-only plan does not promote the thermal formulation to production.
 
+`import_thermal_completion` imports the validated result closure once and reconciles it with
+scheduler-owned solve-attempt accounting. It checks exact encoded artifact bytes, the admitted
+thermal plan, allocation and semantic result identity before preparing shared resource-usage
+evidence. The caller must retain the scheduler's response/accounting association: an accounting
+record alone contains no task identity and cannot prove task lineage. CPU and memory usage here
+represent reserved resources over the measured interval, not sampled utilization or peak RSS.
+The shared result-publication path binds this solve evidence to the thermal accuracy report.
+Accuracy, semantic-state and publication tasks do not yet have corresponding FEA phase plans;
+this is explicitly solve-only evidence, not complete study-graph resource qualification.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature
@@ -683,8 +693,9 @@ For sixteen partitions and 64 KiB chunks, an 8 MiB payload required 8,400,432 B 
 Rust heap during preparation, and a 32 MiB payload required 33,593,904 B. Verification required
 1,200 B for both cases (partition-identity metadata). Input construction is excluded; preparation
 includes the owned output chunks. This is not a complete producer/transport memory bound:
-thermal result serialization, bridge import/materialization, retained producer payloads and
-portable thermal Solve routing remain separate work. Reported process RSS is contextual only.
+thermal result serialization, bridge import/materialization and retained producer payloads require
+separate measurement. Portable thermal Solve routing now exists, but routing conformance does not
+prove these residency bounds. Reported process RSS is contextual only.
 
 Bridge whole-object and selected-partition imports also hash their retained chunks directly,
 without a verification-only aggregate buffer. Exact chunk lengths and validated manifest sums

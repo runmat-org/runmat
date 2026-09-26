@@ -20,7 +20,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct PreparedStructuralResourceUsage {
+pub struct PreparedResourceUsage {
     pub evidence: ResourceUsageEvidence,
     pub objects: PreparedAnalysisObjects,
 }
@@ -70,8 +70,9 @@ impl PlannedResourceUsageGraph {
 /// Publishes one scheduler-measured task graph against its terminal numerical result.
 ///
 /// The caller supplies the terminal task's plan as the primary plan; every distinct phase plan is
-/// recovered from the measured attempts, so publication cannot omit an executed phase or invent
-/// a plan that has no scheduler accounting.
+/// recovered from the supplied measured attempts. The caller must supply every executed phase
+/// in the claimed scope; this function cannot detect omitted attempts or unplanned downstream
+/// work. It rejects a primary plan that has no supplied scheduler accounting.
 pub fn prepare_planned_resource_graph_usage(
     primary_plan: &FeaResourcePlan,
     workload_digest: runmat_execution::Digest,
@@ -80,7 +81,7 @@ pub fn prepare_planned_resource_graph_usage(
     access: &ArtifactAccess,
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+) -> AnalysisBridgeResult<PreparedResourceUsage> {
     let mut plans = BTreeMap::new();
     let mut attempts = Vec::with_capacity(graph.attempts.len());
     for attempt in &graph.attempts {
@@ -119,7 +120,7 @@ pub fn prepare_planned_resource_graph_usage(
         limits,
     )?;
     objects.references(access, ValueRefKind::ResultObject)?;
-    Ok(PreparedStructuralResourceUsage { evidence, objects })
+    Ok(PreparedResourceUsage { evidence, objects })
 }
 
 /// Adapts scheduler-owned accounting into source-bound FEA evidence without giving FEA a second
@@ -130,7 +131,7 @@ pub fn prepare_structural_resource_usage(
     success: &AttemptSuccess,
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+) -> AnalysisBridgeResult<PreparedResourceUsage> {
     success.validate_accounting().map_err(|error| {
         AnalysisBridgeError::Invalid(format!("invalid scheduler resource accounting: {error}"))
     })?;
@@ -161,11 +162,11 @@ pub fn prepare_structural_resource_usage(
 pub fn extend_structural_resource_usage(
     prepared: &PreparedStructuralLinearProgram,
     result: &ImportedStructuralLinearResult,
-    baseline: &PreparedStructuralResourceUsage,
+    baseline: &PreparedResourceUsage,
     additional: &PlannedResourceUsageGraph,
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+) -> AnalysisBridgeResult<PreparedResourceUsage> {
     validate_structural_resource_usage(prepared, result, baseline, &prepared.host.artifact_access)?;
     let mut attempts = baseline.evidence.attempts.clone();
     attempts.extend(
@@ -222,7 +223,7 @@ fn prepare_usage_objects(
     evidence: ResourceUsageEvidence,
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedStructuralResourceUsage> {
+) -> AnalysisBridgeResult<PreparedResourceUsage> {
     let objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourceUsage,
         evidence.identity().digest(),
@@ -235,13 +236,13 @@ fn prepare_usage_objects(
     )?;
     // Keep the value role explicit at the boundary used by publication preparation.
     objects.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
-    Ok(PreparedStructuralResourceUsage { evidence, objects })
+    Ok(PreparedResourceUsage { evidence, objects })
 }
 
 pub fn validate_structural_resource_usage(
     prepared: &PreparedStructuralLinearProgram,
     result: &ImportedStructuralLinearResult,
-    usage: &PreparedStructuralResourceUsage,
+    usage: &PreparedResourceUsage,
     access: &ArtifactAccess,
 ) -> AnalysisBridgeResult<()> {
     let decoded = ResourceUsageEvidence::from_canonical_bytes(&usage.objects.payload())

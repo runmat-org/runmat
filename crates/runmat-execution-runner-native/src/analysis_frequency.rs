@@ -9,9 +9,8 @@ use runmat_analysis_execution::{
     prepare_structural_frequency_result_assembly_request_objects,
     prepare_structural_frequency_result_task, prepare_structural_frequency_workload_objects,
     ImportedRecoveredFields, ImportedStructuralFrequencyEntry, ImportedStructuralFrequencyResult,
-    PlannedResourceUsageGraph, PreparedStructuralResourceUsage,
-    StructuralFrequencyFanoutPreparation, StructuralFrequencyFieldRecoveryPreparation,
-    StructuralFrequencyResultPreparation,
+    PlannedResourceUsageGraph, PreparedResourceUsage, StructuralFrequencyFanoutPreparation,
+    StructuralFrequencyFieldRecoveryPreparation, StructuralFrequencyResultPreparation,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, CanonicalSemanticState, SequenceIdentity,
@@ -65,7 +64,7 @@ pub struct CompletedStructuralFrequencyStudy {
     pub entries: Vec<CompletedStructuralFrequencyEntry>,
     pub observation_samples: Vec<CompletedStructuralFrequencyObservationSample>,
     pub histories: Vec<CompletedStructuralFrequencyHistory>,
-    pub resource_usage: PreparedStructuralResourceUsage,
+    pub resource_usage: PreparedResourceUsage,
     pub publication: StructuralFrequencyPublicationManifest,
 }
 
