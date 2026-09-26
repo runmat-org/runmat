@@ -282,6 +282,12 @@ pub(super) fn run(
             .iter()
             .map(|node| node.node_id)
             .collect(),
+        ordered_element_ids: mesh
+            .topology
+            .volume_elements
+            .iter()
+            .map(|element| element.element_id)
+            .collect(),
         time_points_s,
         temperature_snapshots,
         temperature_gradient_snapshots,

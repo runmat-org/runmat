@@ -124,6 +124,15 @@ in memory-ceiling admission and resource-plan identity (estimation revision 25).
 portable source artifact encoding/metadata bound or measured peak-memory qualification; transport
 decoding and result serialization lifetimes still require separate accounting.
 
+Completed thermal results have validated canonical encoding. Decoding checks nodal and element
+inventories, temperature/gradient/flux/storage-rate histories, finite values, shapes, sample counts,
+reference and initial-state evidence, and unique accepted stability/energy diagnostics. These are
+consistency checks, not an independent numerical-accuracy certificate. Native `PublishState` can
+consume this typed result and verifies the publication request's source identity, producer, and
+topology; structural result bytes are not accepted as thermal results. This does not yet provide
+a portable thermal solve task, full source-to-source sequence routing, or complete transport
+resource accounting.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

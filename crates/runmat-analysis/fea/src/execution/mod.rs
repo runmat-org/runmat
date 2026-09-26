@@ -42,6 +42,7 @@ mod state;
 pub(crate) mod structural_identity;
 mod study_workloads;
 mod sweep;
+mod thermal_result;
 mod transient_block;
 mod transient_checkpoint;
 mod transient_coordinates;

@@ -899,10 +899,10 @@ fn execute_state_publication(
     }
     let state = match publication.source {
         SemanticStatePublicationSource::ThermalPrimaryField => {
-            return Err(AnalysisBridgeError::Invalid(
-                "native thermal state publication requires a portable thermal solver-result contract; the retained in-process thermal result is not a structural solver result"
-                    .into(),
-            ));
+            let result = runmat_analysis_fea::FeaThermalRunResult::from_canonical_bytes(
+                &solver_result.payload(),
+            )?;
+            CanonicalSemanticState::from_thermal_publication(&publication, &result)?
         }
         SemanticStatePublicationSource::StructuralPrimaryFields => {
             let solver_result =

@@ -1,7 +1,8 @@
 use super::*;
 
 pub(super) fn execute(solved: &SolvedPipeline) {
-    rejects_unavailable_thermal_publication(solved);
+    rejects_structural_bytes_for_thermal_publication(solved);
+    publishes_retained_thermal_result(solved);
     let host = &solved.prepared.host;
     let step = host.workload.step;
     let publication = SemanticStatePublicationRequest::new(
@@ -164,7 +165,7 @@ pub(super) fn execute(solved: &SolvedPipeline) {
         .is_err());
 }
 
-fn rejects_unavailable_thermal_publication(solved: &SolvedPipeline) {
+fn rejects_structural_bytes_for_thermal_publication(solved: &SolvedPipeline) {
     let declaration =
         runmat_analysis_core::ProcedureStep::thermal_steady("heat").state_outputs[0].clone();
     let request = SemanticStatePublicationRequest::new(
@@ -201,6 +202,87 @@ fn rejects_unavailable_thermal_publication(solved: &SolvedPipeline) {
         })
         .err()
         .expect("structural bytes must not masquerade as a thermal result");
-    assert!(matches!(error, AnalysisBridgeError::Invalid(ref message)
-        if message.contains("portable thermal solver-result contract")));
+    assert!(
+        error.to_string().contains("prefix") || error.to_string().contains("contract"),
+        "{error}"
+    );
+}
+
+fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
+    use runmat_analysis_core::{AnalysisSequence, ProcedureStep, Temperature, ThermalDomain};
+    use runmat_analysis_fea::{ComputeBackend, ThermalProcedureControl, ThermalSolveOptions};
+    let mut model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
+    );
+    model.thermal = Some(ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    model.sequence = AnalysisSequence::from_steps(
+        "thermal_native",
+        vec![ProcedureStep::thermal_transient("heat")],
+    );
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
+        runmat_meshing_core::ElementOrder::Tet4,
+    );
+    let result = runmat_analysis_fea::run_thermal_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        ThermalSolveOptions {
+            formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
+            solver_mesh: Some(mesh.clone()),
+            ..ThermalSolveOptions::default()
+        },
+    )
+    .unwrap();
+    let expected = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();
+    let request = SemanticStatePublicationRequest::new(
+        SemanticStatePublicationSource::ThermalPrimaryField,
+        result.producer,
+        model.sequence.steps[0].state_outputs[0].clone(),
+        result.topology_digest,
+        result.source_result_identity().unwrap(),
+    )
+    .unwrap();
+    let request_bytes = request.canonical_bytes().unwrap();
+    let inputs = vec![
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::StatePublicationRequest,
+            Digest::sha256(&request_bytes),
+            &request_bytes,
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::SolverResult,
+            request.source_result.digest(),
+            &result.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::ResultValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    ];
+    let host = test_host_for_inputs(
+        &solved.prepared.host,
+        AnalysisWorkKind::PublishState,
+        &inputs,
+        vec![AnalysisNumericalObjectKind::SemanticState],
+        None,
+    );
+    let output = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::PublishState,
+            host: &host,
+            inputs: &inputs,
+        })
+        .unwrap();
+    assert_eq!(output.len(), 1);
+    assert_eq!(output[0].logical_identity, expected.identity.digest());
+    assert_eq!(
+        CanonicalSemanticState::from_canonical_bytes(&output[0].payload).unwrap(),
+        expected
+    );
 }

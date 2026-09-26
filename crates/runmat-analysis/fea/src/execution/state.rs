@@ -16,7 +16,7 @@ const STATE_PREFIX: &[u8] = b"runmat-analysis-semantic-state/v1\0";
 const STATE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
-mod field_validation;
+pub(super) mod field_validation;
 mod thermal;
 mod thermal_transfer;
 use field_validation::{structural_state_field_ids, validate_portable_fields};

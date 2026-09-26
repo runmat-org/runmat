@@ -1,23 +1,17 @@
 //! A completed, topology-bound thermal solution, distinct from prescribed temperature profiles.
 
-use runmat_analysis_core::{
-    AnalysisField, AnalysisModel, AnalysisProcedure, PhysicsFamily, StateCompleteness, StateKind,
-};
-use runmat_canonical_codec::encode_contract;
+use runmat_analysis_core::{AnalysisField, AnalysisModel, PhysicsFamily, StateKind};
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    contracts::{fea_thermal_temperature_field_id, FeaThermalRunResult},
-    diagnostics::FeaDiagnosticSeverity,
-};
+use crate::contracts::FeaThermalRunResult;
 
 use super::{
     field_validation::validate_portable_fields, AnalysisExecutionError, AnalysisExecutionResult,
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
     SemanticStatePublicationRequest, SemanticStatePublicationSource, SequenceIdentity,
-    SolverResultIdentity, StepIdentity, STATE_LIMITS, STATE_PREFIX,
+    StepIdentity,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -70,25 +64,15 @@ impl CanonicalSemanticStatePayload {
 }
 
 impl CanonicalSemanticState {
-    /// Publishes the terminal field of a completed physical thermal solve. The producer and
-    /// source-result identities are derived from the authored step and solver output, not supplied
-    /// by a plot, checkpoint, or downstream caller.
+    /// Context-bound publication of the retained terminal thermal solution.
     pub fn from_thermal_result(
         model: &AnalysisModel,
         mesh: &SolverMeshArtifact,
         result: &FeaThermalRunResult,
     ) -> AnalysisExecutionResult<Self> {
-        mesh.validate_canonical().map_err(|error| {
-            AnalysisExecutionError::Invalid(format!("invalid thermal solver mesh: {error}"))
-        })?;
-        result.run.validate_solver_formulation().map_err(|error| {
-            AnalysisExecutionError::Invalid(format!("invalid thermal solver result: {error}"))
-        })?;
-        if result.run.identity.family() != PhysicsFamily::Thermal {
-            return Err(AnalysisExecutionError::Invalid(
-                "thermal semantic state requires a physical thermal result".into(),
-            ));
-        }
+        mesh.validate_canonical()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        result.validate_complete()?;
         let sequence = SequenceIdentity::from_solver_contract(&model.sequence)?;
         let matching = model
             .sequence
@@ -102,34 +86,35 @@ impl CanonicalSemanticState {
             .collect::<Vec<_>>();
         let [step] = matching.as_slice() else {
             return Err(AnalysisExecutionError::Invalid(
-                "thermal result must match exactly one authored thermal producer step".into(),
+                "thermal result must match exactly one authored producer step".into(),
             ));
         };
         let producer = StepIdentity::from_solver_contract(sequence, step)?;
         if result.producer != producer
+            || result.topology_digest != Digest::from_bytes(*mesh.canonical_digest.bytes())
             || !result.ordered_node_ids.iter().copied().eq(mesh
                 .topology
                 .nodes
                 .iter()
                 .map(|node| node.node_id))
+            || !result.ordered_element_ids.iter().copied().eq(mesh
+                .topology
+                .volume_elements
+                .iter()
+                .map(|element| element.element_id))
         {
             return Err(AnalysisExecutionError::Identity(
-                "thermal result producer or node ordering differs from the publication context",
+                "thermal result provenance differs from publication context",
             ));
         }
-        if !matches!(
-            step.procedure,
-            AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
-        ) || result.initial_state.procedure_step_id != step.step_id.0
-            || model
-                .thermal
-                .as_ref()
-                .map(|domain| domain.reference_temperature.kelvin)
-                != Some(result.reference_temperature_k)
-            || result.initial_state.reference_temperature_k != result.reference_temperature_k
+        if model
+            .thermal
+            .as_ref()
+            .map(|domain| domain.reference_temperature.kelvin)
+            != Some(result.reference_temperature_k)
         {
             return Err(AnalysisExecutionError::Invalid(
-                "thermal result reference or producer step differs from the authored study".into(),
+                "thermal result reference differs from authored study".into(),
             ));
         }
         let declarations = step
@@ -139,67 +124,39 @@ impl CanonicalSemanticState {
             .collect::<Vec<_>>();
         let [declaration] = declarations.as_slice() else {
             return Err(AnalysisExecutionError::Invalid(
-                "thermal producer must declare exactly one thermal state output".into(),
+                "thermal producer must declare exactly one thermal output".into(),
             ));
         };
-        if declaration.completeness != StateCompleteness::Complete {
-            return Err(AnalysisExecutionError::Invalid(
-                "thermal producer must declare complete solved state".into(),
-            ));
-        }
-        if result.time_points_s.is_empty()
-            || result.time_points_s.len() != result.temperature_snapshots.len()
-            || result.residual_norms.len()
-                != if step.procedure == AnalysisProcedure::TransientResponse {
-                    result.time_points_s.len().saturating_sub(1)
-                } else {
-                    result.time_points_s.len()
-                }
-            || result.time_points_s.iter().any(|time| !time.is_finite())
-            || result
-                .time_points_s
-                .windows(2)
-                .any(|pair| pair[1] <= pair[0])
-            || result
-                .residual_norms
-                .iter()
-                .any(|residual| !residual.is_finite() || *residual < 0.0)
+        let request = SemanticStatePublicationRequest::new(
+            SemanticStatePublicationSource::ThermalPrimaryField,
+            producer,
+            (*declaration).clone(),
+            result.topology_digest,
+            result.source_result_identity()?,
+        )?;
+        Self::from_thermal_publication(&request, result)
+    }
+
+    /// Publish a decoded completed thermal result, verifying the request against its retained
+    /// producer, topology and numerical content rather than guessing the solver-result schema.
+    pub fn from_thermal_publication(
+        request: &SemanticStatePublicationRequest,
+        result: &FeaThermalRunResult,
+    ) -> AnalysisExecutionResult<Self> {
+        request.validate()?;
+        result.validate_complete()?;
+        if request.source != SemanticStatePublicationSource::ThermalPrimaryField
+            || request.producer != result.producer
+            || request.topology_digest != result.topology_digest
+            || request.source_result != result.source_result_identity()?
         {
-            return Err(AnalysisExecutionError::Invalid(
-                "thermal result has incomplete or nonmonotone terminal solve history".into(),
+            return Err(AnalysisExecutionError::Identity(
+                "thermal publication request names a different source, producer or topology",
             ));
-        }
-        validate_portable_fields(&result.temperature_snapshots)?;
-        if result
-            .temperature_snapshots
-            .iter()
-            .enumerate()
-            .any(|(index, field)| {
-                field.field_id != fea_thermal_temperature_field_id(index)
-                    || field.shape != vec![mesh.topology.nodes.len()]
-                    || field
-                        .as_host_f64()
-                        .is_none_or(|values| values.iter().any(|value| *value <= 0.0))
-            })
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "thermal history has missing, nonphysical, or non-nodal temperature snapshots"
-                    .into(),
-            ));
-        }
-        for required in ["FEA_THERMAL_STABILITY", "FEA_THERMAL_ENERGY_BALANCE"] {
-            if !result.run.diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == required && diagnostic.severity == FeaDiagnosticSeverity::Info
-            }) {
-                return Err(AnalysisExecutionError::Invalid(format!(
-                    "thermal result lacks accepted {required} evidence"
-                )));
-            }
         }
         let terminal_index = result.temperature_snapshots.len() - 1;
-        let temperature = result.temperature_snapshots[terminal_index].clone();
         let payload = CanonicalThermalStatePayload {
-            temperature,
+            temperature: result.temperature_snapshots[terminal_index].clone(),
             ordered_node_ids: result.ordered_node_ids.clone(),
             reference_temperature_k: result.reference_temperature_k,
             sample_time_s: result.time_points_s[terminal_index],
@@ -209,43 +166,9 @@ impl CanonicalSemanticState {
                 .copied()
                 .fold(0.0_f64, f64::max),
         };
-        payload.validate()?;
-        let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
-        if result.topology_digest != topology_digest {
-            return Err(AnalysisExecutionError::Identity(
-                "thermal result and state publication name different solver meshes",
-            ));
-        }
-        let source_content = Digest::sha256(encode_contract(
-            STATE_PREFIX,
-            "thermal-solver-result-content",
-            &(
-                &result.run.identity,
-                &result.time_points_s,
-                &result.temperature_snapshots,
-                &result.temperature_gradient_snapshots,
-                &result.heat_flux_snapshots,
-                &result.energy_storage_rate_snapshots,
-                &result.residual_norms,
-                result.reference_temperature_k,
-                result.topology_digest,
-                result.producer,
-                &result.ordered_node_ids,
-                &result.initial_state,
-            ),
-            STATE_LIMITS,
-        )?);
-        let source_result = SolverResultIdentity::from_step_result(producer, source_content)?;
-        let request = SemanticStatePublicationRequest::new(
-            SemanticStatePublicationSource::ThermalPrimaryField,
-            producer,
-            (*declaration).clone(),
-            topology_digest,
-            source_result,
-        )?;
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
-            declaration: request.declaration,
+            declaration: request.declaration.clone(),
             topology_digest: request.topology_digest,
             source_result: request.source_result,
             payload: CanonicalSemanticStatePayload::Thermal {
@@ -263,11 +186,11 @@ mod tests {
         fixtures::{fixture_model, FixtureId},
     };
     use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisSequence, CoupledPhysicsFamily, InitialStateConflictPolicy,
-        PrescribedValue, ProcedureStep, ReferenceStatePolicy, RegionTarget,
-        SequenceDependencyReason, StateInput, StateSource, StateTransition, StateTransitionMethod,
-        StateUse, Temperature, ThermalConstraint, ThermalConstraintKind, ThermalDomain,
-        ThermoMechanicalDomain, TopologyTransitionPolicy, TransitionId,
+        AnalysisConstraint, AnalysisProcedure, AnalysisSequence, CoupledPhysicsFamily,
+        InitialStateConflictPolicy, PrescribedValue, ProcedureStep, ReferenceStatePolicy,
+        RegionTarget, SequenceDependencyReason, StateInput, StateSource, StateTransition,
+        StateTransitionMethod, StateUse, Temperature, ThermalConstraint, ThermalConstraintKind,
+        ThermalDomain, ThermoMechanicalDomain, TopologyTransitionPolicy, TransitionId,
     };
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -309,6 +232,59 @@ mod tests {
             CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap())
                 .unwrap();
         assert_eq!(decoded, state);
+        let portable =
+            FeaThermalRunResult::from_canonical_bytes(&result.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(portable, result);
+        let request = SemanticStatePublicationRequest::new(
+            SemanticStatePublicationSource::ThermalPrimaryField,
+            result.producer,
+            model.sequence.steps[0].state_outputs[0].clone(),
+            result.topology_digest,
+            result.source_result_identity().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            CanonicalSemanticState::from_thermal_publication(&request, &portable).unwrap(),
+            state
+        );
+        let mut wrong_request = request.clone();
+        wrong_request.topology_digest = Digest::sha256("wrong-publication-topology");
+        assert!(
+            CanonicalSemanticState::from_thermal_publication(&wrong_request, &portable).is_err()
+        );
+        let mut missing_flux = result.clone();
+        missing_flux.heat_flux_snapshots.pop();
+        assert!(missing_flux.canonical_bytes().is_err());
+        // Exercise decode validation, bypassing the validating encoder deliberately.
+        let malformed = runmat_canonical_codec::encode_contract(
+            b"runmat-thermal-solver-result/v1\0",
+            "thermal-solver-result",
+            &missing_flux,
+            runmat_canonical_codec::CanonicalLimits::new(1024 * 1024, 100_000, 65_536, 64),
+        )
+        .unwrap();
+        assert!(FeaThermalRunResult::from_canonical_bytes(&malformed).is_err());
+        let mut bad_shape = result.clone();
+        bad_shape.temperature_gradient_snapshots[0].shape = vec![3];
+        assert!(bad_shape.canonical_bytes().is_err());
+        let mut bad_initial = result.clone();
+        bad_initial.initial_state.reference_node_count += 1;
+        assert!(bad_initial.canonical_bytes().is_err());
+        let mut wrong_elements = result.clone();
+        wrong_elements.ordered_element_ids[0] += 1;
+        assert!(
+            CanonicalSemanticState::from_thermal_result(&model, &mesh, &wrong_elements).is_err()
+        );
+        let mut contradictory = result.clone();
+        let evidence = contradictory
+            .run
+            .diagnostics
+            .iter()
+            .find(|item| item.code == "FEA_THERMAL_STABILITY")
+            .unwrap()
+            .clone();
+        contradictory.run.diagnostics.push(evidence);
+        assert!(contradictory.canonical_bytes().is_err());
 
         let mut reordered = result.clone();
         reordered.ordered_node_ids.swap(0, 1);
@@ -336,6 +312,7 @@ mod tests {
             CanonicalSemanticState::from_thermal_result(&model, &mesh, &changed_flux).unwrap();
         assert_ne!(state.source_result, changed_state.source_result);
         assert_eq!(state.payload, changed_state.payload);
+        assert!(CanonicalSemanticState::from_thermal_publication(&request, &changed_flux).is_err());
 
         let mut forged_result = result.clone();
         forged_result.topology_digest = Digest::sha256("another-mesh");

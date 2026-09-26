@@ -6,7 +6,9 @@ use runmat_analysis_core::{AnalysisField, AnalysisFieldValues, StateKind};
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
 
-pub(super) fn validate_portable_fields(fields: &[AnalysisField]) -> AnalysisExecutionResult<()> {
+pub(in crate::execution) fn validate_portable_fields(
+    fields: &[AnalysisField],
+) -> AnalysisExecutionResult<()> {
     let mut field_ids = BTreeSet::new();
     for field in fields {
         let AnalysisFieldValues::HostF64(values) = &field.values else {

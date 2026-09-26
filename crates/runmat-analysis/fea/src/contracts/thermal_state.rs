@@ -7,12 +7,15 @@ use serde::{Deserialize, Serialize};
 use super::FeaRunResult;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FeaThermalRunResult {
     pub run: FeaRunResult,
     pub producer: crate::execution::StepIdentity,
     pub topology_digest: Digest,
     /// Persistent node identities in exactly the temperature field's storage order.
     pub ordered_node_ids: Vec<u64>,
+    /// Persistent volume-element IDs in recovered field order.
+    pub ordered_element_ids: Vec<u64>,
     pub time_points_s: Vec<f64>,
     pub temperature_snapshots: Vec<AnalysisField>,
     pub temperature_gradient_snapshots: Vec<AnalysisField>,
