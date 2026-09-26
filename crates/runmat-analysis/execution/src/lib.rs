@@ -330,7 +330,8 @@ pub use task::{
 };
 pub use thermal_execution::execute_thermal_solver_result_objects;
 pub use thermal_result_access::{
-    decode_prepared_thermal_state, import_thermal_state, prepare_thermal_solver_result_objects,
+    decode_prepared_thermal_manifest, decode_prepared_thermal_state, import_thermal_state,
+    prepare_thermal_solver_result_objects, thermal_receipt_from_prepared_result,
     ThermalStateImport,
 };
 pub use transient_block_task::{

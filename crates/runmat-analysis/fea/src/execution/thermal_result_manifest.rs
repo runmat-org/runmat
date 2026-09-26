@@ -126,7 +126,7 @@ impl ThermalSolverResultManifest {
         Ok(manifest)
     }
 
-    fn metadata(&self) -> ThermalResultMetadata<'_> {
+    pub(super) fn metadata(&self) -> ThermalResultMetadata<'_> {
         ThermalResultMetadata {
             source_workload: self.source_workload,
             numerical_intent: self.numerical_intent,

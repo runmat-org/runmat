@@ -616,6 +616,14 @@ With prepared handoff validation included, the isolated 16/64-partition fixture 
 8,607,519/34,424,943 B of requested heap growth against reservations of
 8,698,192/34,582,960 B. This remains requested-heap evidence, not a process-memory ceiling.
 
+Thermal numerical receipts can also be constructed from a validated result header. The full-result
+and header paths use the same borrowed metadata and produce identical canonical receipt bytes.
+The bridge checks the header payload digest and its complete semantic partition inventory without
+gathering field arrays. This receipt attests accepted numerical metadata, not the availability or
+integrity of every field body; publication must still validate the complete transport closure.
+It is not an independent accuracy assessment. Tests cover Tet4/Tet10 steady/transient parity,
+workload substitution, altered header bytes and missing inventory entries, and header-only access.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

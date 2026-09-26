@@ -2,7 +2,7 @@
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadBuilder,
     AnalysisPayloadPartition, CanonicalSemanticState, SemanticStatePublicationRequest,
-    ThermalSolverResultManifest,
+    ThermalNumericalReceiptArtifact, ThermalSolverResultManifest, ThermalWorkload,
 };
 use runmat_analysis_fea::results::field::{RecoveredFieldPartition, RecoveredFieldView};
 use runmat_analysis_fea::FeaThermalRunResult;
@@ -67,10 +67,7 @@ pub fn decode_prepared_thermal_state(
     prepared: &PreparedAnalysisObjects,
 ) -> AnalysisBridgeResult<CanonicalSemanticState> {
     publication.validate()?;
-    let manifest = ThermalSolverResultManifest::from_canonical_bytes(
-        &prepared.partition_payload(publication.source_result.digest())?,
-    )?;
-    validate_inventory(&prepared.manifest, &manifest)?;
+    let manifest = decode_prepared_thermal_manifest(prepared)?;
     manifest.validate_publication_request(publication)?;
     let partitions = manifest
         .terminal_temperature()?
@@ -84,6 +81,30 @@ pub fn decode_prepared_thermal_state(
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
     Ok(manifest.publish_terminal(publication, partitions)?)
+}
+
+/// Read the header and validate its semantic inventory, without materializing field arrays.
+/// Field bytes remain governed by the surrounding transport closure validation.
+pub fn decode_prepared_thermal_manifest(
+    prepared: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<ThermalSolverResultManifest> {
+    prepared.manifest.validate()?;
+    let manifest = ThermalSolverResultManifest::from_canonical_bytes(
+        &prepared.partition_payload(prepared.manifest.logical_identity)?,
+    )?;
+    validate_inventory(&prepared.manifest, &manifest)?;
+    Ok(manifest)
+}
+
+/// Create source-bound numerical evidence from a prepared result header, not gathered fields.
+pub fn thermal_receipt_from_prepared_result(
+    workload: &ThermalWorkload,
+    prepared: &PreparedAnalysisObjects,
+) -> AnalysisBridgeResult<ThermalNumericalReceiptArtifact> {
+    let manifest = decode_prepared_thermal_manifest(prepared)?;
+    Ok(ThermalNumericalReceiptArtifact::from_manifest(
+        workload, &manifest,
+    )?)
 }
 
 pub struct ThermalStateImport<'a> {

@@ -70,9 +70,30 @@ impl ThermalNumericalReceiptArtifact {
         result: &FeaThermalRunResult,
     ) -> AnalysisExecutionResult<Self> {
         result.validate_complete()?;
+        Self::from_metadata(
+            workload,
+            result.source_result_identity()?,
+            result.metadata(),
+        )
+    }
+
+    /// Bind accepted evidence from the validated header without reconstructing field arrays.
+    /// This attests header evidence; transport closure validation remains the caller's duty.
+    pub fn from_manifest(
+        workload: &ThermalWorkload,
+        result: &ThermalSolverResultManifest,
+    ) -> AnalysisExecutionResult<Self> {
+        result.validate()?;
+        Self::from_metadata(workload, result.identity(), result.metadata())
+    }
+
+    fn from_metadata(
+        workload: &ThermalWorkload,
+        source_result: SolverResultIdentity,
+        metadata: ThermalResultMetadata<'_>,
+    ) -> AnalysisExecutionResult<Self> {
         let source_workload = workload.identity()?;
-        let source_result = result.source_result_identity()?;
-        let receipt = evidence(workload, result.metadata())?;
+        let receipt = evidence(workload, metadata)?;
         let artifact = Self {
             schema_version: 1,
             identity: receipt_identity(source_workload, source_result, &receipt)?,
@@ -129,24 +150,9 @@ impl ThermalNumericalReceiptArtifact {
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         result.validate()?;
-        let metadata = ThermalResultMetadata {
-            source_workload: result.source_workload,
-            numerical_intent: result.numerical_intent,
-            run: &result.run,
-            time_points_s: &result.time_points_s,
-            residual_norms: &result.residual_norms,
-            residual_target: result.residual_target,
-            energy_balances: &result.energy_balances,
-            reference_temperature_k: result.reference_temperature_k,
-            topology_digest: result.topology_digest,
-            producer: result.producer,
-            ordered_node_ids: &result.ordered_node_ids,
-            ordered_element_ids: &result.ordered_element_ids,
-            initial_state: &result.initial_state,
-        };
         if self.source_workload != workload.identity()?
             || self.source_result != result.identity()
-            || self.receipt != evidence(workload, metadata)?
+            || self.receipt != evidence(workload, result.metadata())?
         {
             return Err(invalid("receipt differs from workload or retained result"));
         }

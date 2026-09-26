@@ -35,6 +35,18 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
             .unwrap();
         let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
+        let header_receipt =
+            ThermalNumericalReceiptArtifact::from_manifest(&workload, &manifest).unwrap();
+        assert_eq!(header_receipt, receipt);
+        assert_eq!(
+            header_receipt.canonical_bytes().unwrap(),
+            receipt.canonical_bytes().unwrap()
+        );
+        let mut invalid_header = manifest.clone();
+        invalid_header.residual_norms[0] = workload.residual_target * 2.0;
+        assert!(
+            ThermalNumericalReceiptArtifact::from_manifest(&workload, &invalid_header).is_err()
+        );
         assert_eq!(result.energy_balances.len(), result.residual_norms.len());
         assert_eq!(
             receipt.receipt().maximum_relative_energy_residual,
@@ -80,12 +92,16 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
             result.numerical_intent
         );
         assert!(ThermalNumericalReceiptArtifact::new(&other_material, &result).is_err());
+        assert!(
+            ThermalNumericalReceiptArtifact::from_manifest(&other_material, &manifest).is_err()
+        );
         assert!(receipt
             .validate_against(&other_material, &manifest)
             .is_err());
         let mut production = workload.clone();
         production.formulation_requirement = FormulationRequirement::Production;
         assert!(ThermalNumericalReceiptArtifact::new(&production, &result).is_err());
+        assert!(ThermalNumericalReceiptArtifact::from_manifest(&production, &manifest).is_err());
         let mut malformed = result.clone();
         malformed.time_points_s[1] *= 0.5;
         assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
@@ -170,6 +186,10 @@ fn steady_receipts_bind_one_accepted_sample_and_mandatory_workload_lineage() {
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
         receipt.validate_against(&workload, &manifest).unwrap();
         assert_eq!(receipt.receipt().accepted_sample_count, 1);
+        assert_eq!(
+            ThermalNumericalReceiptArtifact::from_manifest(&workload, &manifest).unwrap(),
+            receipt
+        );
         assert_eq!(
             receipt.receipt().maximum_relative_linear_residual,
             result.residual_norms[0]

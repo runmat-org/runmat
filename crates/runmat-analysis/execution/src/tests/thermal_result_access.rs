@@ -120,6 +120,24 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
                     <= transport.total_bytes_upper_bound
             );
             assert_eq!(prepared, collected_reference(&result, chunk_bytes));
+            let workload = runmat_analysis_fea::execution::ThermalWorkload {
+                model: model.clone(),
+                step_id: model.sequence.steps[0].step_id.clone(),
+                backend: ComputeBackend::Cpu,
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
+                residual_target: result.residual_target,
+            };
+            assert_eq!(
+                thermal_receipt_from_prepared_result(&workload, &prepared).unwrap(),
+                runmat_analysis_fea::execution::ThermalNumericalReceiptArtifact::new(
+                    &workload, &result
+                )
+                .unwrap()
+            );
+            let mut wrong_workload = workload.clone();
+            wrong_workload.residual_target *= 2.0;
+            assert!(thermal_receipt_from_prepared_result(&wrong_workload, &prepared).is_err());
             assert_eq!(
                 prepared.manifest.partitions.len() as u64,
                 encoding.contract_count
@@ -145,6 +163,19 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
             let mut incomplete = prepared.clone();
             incomplete.manifest.partitions.pop();
             assert!(decode_prepared_thermal_state(&request, &incomplete).is_err());
+            assert!(thermal_receipt_from_prepared_result(&workload, &incomplete).is_err());
+            let mut header_only = prepared.clone();
+            header_only
+                .objects
+                .truncate(1 + prepared.manifest.partitions[0].chunk_count as usize);
+            // Numerical evidence needs the header, not field bytes. This is deliberately not
+            // a proof that a complete field closure is present or valid for publication.
+            assert_eq!(
+                thermal_receipt_from_prepared_result(&workload, &header_only).unwrap(),
+                thermal_receipt_from_prepared_result(&workload, &prepared).unwrap()
+            );
+            header_only.objects[1].bytes[0] ^= 1;
+            assert!(thermal_receipt_from_prepared_result(&workload, &header_only).is_err());
             let manifest = ThermalSolverResultManifest::from_canonical_bytes(
                 &prepared
                     .partition_payload(request.source_result.digest())
