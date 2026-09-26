@@ -214,9 +214,34 @@ fn integer_static_names_are_registered() {
         "uint32.empty",
         "uint64.empty",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
             .unwrap_or_else(|| panic!("missing {name}"));
         assert_eq!(builtin.integer_capabilities.len(), 1);
+        assert!(
+            runmat_builtins::builtin_function_by_name(name).is_none(),
+            "legacy authority retained for {name}"
+        );
+        assert_eq!(builtin.bindings.len(), 1);
+        assert_eq!(builtin.bindings[0].variant, "default");
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
+        assert_eq!(bindings.len(), 1, "expected one implementation for {name}");
+        assert_eq!(
+            bindings[0].identity,
+            builtin.binding_identity(&builtin.bindings[0])
+        );
+        let result = futures::executor::block_on(crate::call_builtin_async(
+            name,
+            &[Value::Num(0.0), Value::Num(7.0)],
+        ))
+        .unwrap_or_else(|error| panic!("joined dispatch of {name} failed: {error}"));
+        let Value::Tensor(result) = result else {
+            panic!("expected typed empty for {name}");
+        };
+        assert_eq!(result.shape, vec![0, 7]);
+        assert_eq!(
+            result.numeric_dtype().class_name(),
+            name.strip_suffix(".empty").unwrap()
+        );
     }
 }
 
