@@ -19,7 +19,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         output = limit_vector();
     } else if let Some(argument) = request.arguments.first() {
         let invalid_kind = match argument.kind {
-            ValueKindFact::Unknown | ValueKindFact::Character => false,
+            ValueKindFact::Unknown => false,
+            ValueKindFact::Character => {
+                !crate::catalog::inference::possible_character_row(&argument.shape)
+            }
             ValueKindFact::String | ValueKindFact::Logical => {
                 !matches!(argument.storage, StorageFact::Unknown | StorageFact::Scalar)
             }

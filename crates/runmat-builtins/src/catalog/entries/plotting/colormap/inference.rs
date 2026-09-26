@@ -22,7 +22,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             && argument.shape.element_count().is_none_or(|n| n == 1);
         let invalid_kind = match argument.kind {
             ValueKindFact::Unknown => false,
-            ValueKindFact::Character => target,
+            ValueKindFact::Character => {
+                target || !crate::catalog::inference::possible_character_row(&argument.shape)
+            }
             ValueKindFact::String => {
                 target || !matches!(argument.storage, StorageFact::Unknown | StorageFact::Scalar)
             }

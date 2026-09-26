@@ -25,7 +25,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                 || matches!(argument.storage, StorageFact::Sparse)
         } else {
             match argument.kind {
-                ValueKindFact::Unknown | ValueKindFact::Character => false,
+                ValueKindFact::Unknown => false,
+                ValueKindFact::Character => {
+                    !crate::catalog::inference::possible_character_row(&argument.shape)
+                }
                 ValueKindFact::String => {
                     !matches!(argument.storage, StorageFact::Unknown | StorageFact::Scalar)
                 }

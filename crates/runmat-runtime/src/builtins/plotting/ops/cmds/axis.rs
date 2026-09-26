@@ -3,8 +3,8 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::cmd_parsing::as_lower_str;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, current_axes_state,
-    current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, axis_z_limits_snapshot_for_axes,
+    current_axes_state, current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
     set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime, set_z_limits,
     FigureHandle,
 };
@@ -58,9 +58,12 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             let x = axis_limit_pair(values[0], values[1], bounds.0, bounds.1)?;
             let y = axis_limit_pair(values[2], values[3], bounds.2, bounds.3)?;
             let z = if values.len() >= 6 {
-                let z_auto = meta
+                let z_auto = state
                     .as_ref()
-                    .and_then(|meta| meta.z_limits)
+                    .map(|state| axis_z_limits_snapshot_for_axes(state.handle, state.active_index))
+                    .transpose()
+                    .map_err(|_| axis_invalid_argument())?
+                    .flatten()
                     .unwrap_or((0.0, 1.0));
                 Some(axis_limit_pair(values[4], values[5], z_auto.0, z_auto.1)?)
             } else {
@@ -233,7 +236,9 @@ fn axis_query_value(target: Option<(FigureHandle, usize)>) -> crate::BuiltinResu
     let x = meta.x_limits.unwrap_or((bounds.0, bounds.1));
     let y = meta.y_limits.unwrap_or((bounds.2, bounds.3));
     let mut values = vec![x.0, x.1, y.0, y.1];
-    if let Some(z) = meta.z_limits {
+    if let Some(z) =
+        axis_z_limits_snapshot_for_axes(handle, axes_index).map_err(|_| axis_invalid_argument())?
+    {
         values.extend_from_slice(&[z.0, z.1]);
     }
     let len = values.len();

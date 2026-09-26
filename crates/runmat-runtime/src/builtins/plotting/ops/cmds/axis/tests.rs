@@ -2,6 +2,61 @@ use super::super::test_support::setup;
 use super::*;
 use crate::builtins::plotting::get::get_builtin;
 use runmat_value::IntegerStorage;
+
+#[test]
+fn automatic_three_dimensional_queries_and_infinite_endpoints_share_z_bounds() {
+    let _guard = setup();
+    let mut figure = runmat_plot::plots::Figure::new();
+    figure.add_line3_plot(
+        runmat_plot::plots::Line3Plot::new(vec![1., 4.], vec![2., 8.], vec![20., 40.]).unwrap(),
+    );
+    let handle = crate::builtins::plotting::state::import_figure(figure);
+    let query = || {
+        Tensor::try_from(&axis_builtin(vec![]).unwrap())
+            .unwrap()
+            .materialize_f64()
+    };
+    assert_eq!(query(), vec![1., 4., 2., 8., 20., 40.]);
+    axis_builtin(vec![Value::Tensor(
+        Tensor::new(
+            vec![
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+            ],
+            vec![1, 6],
+        )
+        .unwrap(),
+    )])
+    .unwrap();
+    assert_eq!(query(), vec![1., 4., 2., 8., 20., 40.]);
+    axis_builtin(vec![Value::String("auto".into())]).unwrap();
+    assert!(axes_metadata_snapshot(handle, 0)
+        .unwrap()
+        .z_limits
+        .is_none());
+    assert_eq!(query().len(), 6);
+    axis_builtin(vec![Value::String("manual".into())]).unwrap();
+    assert_eq!(
+        axes_metadata_snapshot(handle, 0).unwrap().z_limits,
+        Some((20., 40.))
+    );
+    assert_eq!(query(), vec![1., 4., 2., 8., 20., 40.]);
+}
+
+#[test]
+fn explicit_z_limits_do_not_require_three_dimensional_content() {
+    let _guard = setup();
+    axis_builtin(vec![Value::Tensor(
+        Tensor::new(vec![1., 4., 2., 8., 20., 40.], vec![1, 6]).unwrap(),
+    )])
+    .unwrap();
+    let result = Tensor::try_from(&axis_builtin(vec![]).unwrap()).unwrap();
+    assert_eq!(result.materialize_f64(), vec![1., 4., 2., 8., 20., 40.]);
+}
 #[test]
 fn invalid_later_limits_do_not_create_figure_or_mutate_earlier_pairs() {
     let _guard = setup();

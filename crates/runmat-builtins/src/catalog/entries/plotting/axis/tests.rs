@@ -2,6 +2,24 @@ use super::*;
 use runmat_types::*;
 
 #[test]
+fn axis_mode_character_shape_rejection_is_conservative() {
+    for (shape, rejected) in [
+        (vec![Some(2), Some(2)], true),
+        (vec![Some(1), Some(2), Some(2)], true),
+        (vec![Some(1), Some(4), Some(1)], false),
+        (vec![None, Some(4), None], false),
+    ] {
+        let fact = ValueFact::proven(
+            ValueKindFact::Character,
+            ShapeFact::from(shape),
+            StorageFact::Dense,
+        );
+        let result = inference::infer(&request(vec![fact], vec![], 0), &AXIS_CATALOG_ENTRY);
+        assert_eq!(!result.diagnostics.is_empty(), rejected);
+    }
+}
+
+#[test]
 fn axis_query_is_dynamic_length_while_known_setters_return_logical() {
     let result = inference::infer(&request(vec![], vec![], 1), &AXIS_CATALOG_ENTRY);
     assert_eq!(
