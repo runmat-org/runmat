@@ -209,17 +209,8 @@ impl VmIntrinsicExceptionBuiltin {
     }
 }
 
-#[cfg(feature = "native-accel")]
-pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    runmat_accelerate::prepare_builtin_args(name, args)
-        .await
-        .map_err(map_prepare_builtin_args_error)
-}
-
-#[cfg(not(feature = "native-accel"))]
-pub async fn prepare_builtin_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
-    Ok(args.to_vec())
-}
+mod preparation;
+pub use preparation::{call_prepared_builtin, prepare_builtin_args};
 
 pub fn collect_call_args(
     stack: &mut Vec<Value>,
@@ -1165,6 +1156,7 @@ pub async fn resolve_imported_builtin(
     imports: &[(Vec<String>, bool)],
     prepared_primary: &[Value],
     requested_outputs: usize,
+    runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<ImportedBuiltinResolution, RuntimeError> {
     let mut specific_matches: Vec<(String, Value)> = Vec::new();
     for (path, wildcard) in imports {
@@ -1175,13 +1167,8 @@ pub async fn resolve_imported_builtin(
             let Some(qual) = imported_builtin_qualified_name(path, None) else {
                 continue;
             };
-            let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
-            let result = runmat_runtime::call_builtin_async_with_outputs(
-                &qual,
-                &qual_args,
-                requested_outputs,
-            )
-            .await;
+            let mut qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
+            let result = call_prepared_builtin(&qual, &mut qual_args, requested_outputs).await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -1210,10 +1197,8 @@ pub async fn resolve_imported_builtin(
         let Some(qual) = imported_builtin_qualified_name(path, Some(name)) else {
             continue;
         };
-        let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
-        let result =
-            runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, requested_outputs)
-                .await;
+        let mut qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
+        let result = call_prepared_builtin(&qual, &mut qual_args, requested_outputs).await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }

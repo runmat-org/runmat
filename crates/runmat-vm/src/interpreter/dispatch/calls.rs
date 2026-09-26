@@ -68,6 +68,7 @@ pub struct ExceptionRouteContext<'a> {
 }
 
 pub struct BuiltinCallContext<'a> {
+    pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub stack: &'a mut Vec<Value>,
     pub name: &'a str,
     pub arg_count: usize,
@@ -244,6 +245,7 @@ async fn handle_builtin_call_inner(
     requested_outputs: usize,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
+        runtime,
         stack,
         name,
         arg_count,
@@ -301,15 +303,15 @@ async fn handle_builtin_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
-    let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
+    let mut prepared_primary = call_builtins::prepare_builtin_args(name, &args, runtime).await?;
     let result =
-        runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, requested_outputs)
-            .await;
+        call_builtins::call_prepared_builtin(name, &mut prepared_primary, requested_outputs).await;
     let imported = call_builtins::resolve_imported_builtin(
         name,
         imports,
-        &prepared_primary,
+        prepared_primary.args(),
         requested_outputs,
+        runtime,
     )
     .await?;
     if result.is_err() {

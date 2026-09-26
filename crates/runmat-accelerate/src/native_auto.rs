@@ -39,6 +39,9 @@ use runmat_runtime::gather_if_needed_async;
 use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
+mod builtin_call;
+pub use builtin_call::{prepare_builtin_call, BuiltinCallObservation, PreparedBuiltinCall};
+
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
 const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;
 const DEFAULT_CPU_MATMUL_PER_FLOP: f64 = 2.5e-11;
@@ -1222,12 +1225,30 @@ impl NativeAutoOffload {
 
     fn enforce_provider_feasibility(
         &self,
-        mut evaluation: DecisionEvaluation,
+        evaluation: DecisionEvaluation,
         operation: &'static str,
         family: ProviderOperationFamily,
         values: &[&Value],
         workload: ProviderWorkload,
     ) -> (DecisionEvaluation, Option<ProviderRejectionCode>) {
+        let (evaluation, rejection, _) =
+            self.plan_operation(evaluation, operation, family, values, workload, None);
+        (evaluation, rejection)
+    }
+
+    fn plan_operation(
+        &self,
+        mut evaluation: DecisionEvaluation,
+        operation: &str,
+        family: ProviderOperationFamily,
+        values: &[&Value],
+        workload: ProviderWorkload,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> (
+        DecisionEvaluation,
+        Option<ProviderRejectionCode>,
+        Option<Box<crate::placement::LocalPlacementFeedback>>,
+    ) {
         let cpu_cost = ExecutionCostEstimate {
             components: ExecutionCostComponents {
                 execution_ns: evaluation
@@ -1271,7 +1292,7 @@ impl NativeAutoOffload {
                 required_download_bytes: 0,
                 downstream_materialization: false,
                 compare_profitability: true,
-                runtime: None,
+                runtime,
             },
             PlacementPolicy::default(),
         ) {
@@ -1279,24 +1300,24 @@ impl NativeAutoOffload {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::ProviderRejected;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, Some(code))
+                (evaluation, Some(code), None)
             }
             Ok(LocalPlacementOutcome::Selected {
                 selected,
                 cpu_cost,
                 provider_cost,
-                feedback: _,
+                feedback,
             }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
                 evaluation.gpu_secs = provider_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, None)
+                (evaluation, None, feedback)
             }
             Err(_) => {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::Disabled;
-                (evaluation, None)
+                (evaluation, None, None)
             }
         }
     }
@@ -1497,108 +1518,6 @@ impl NativeAutoOffload {
             batch,
         }
     }
-
-    async fn prepare_builtin(&self, name: &str, args: &[Value]) -> Result<Vec<Value>> {
-        if !self.enabled {
-            return Ok(args.to_vec());
-        }
-        // Do not attempt to promote 'double' on providers that cannot store f64.
-        // Offloading a cast to double requires device-side f64; otherwise keep host.
-        if name.eq_ignore_ascii_case("double")
-            && self.provider.precision() != runmat_accelerate_api::ProviderPrecision::F64
-        {
-            return Ok(args.to_vec());
-        }
-        if let Some(policy) = builtin_policy(name) {
-            if policy.is_sink {
-                clear_sink_inputs(args);
-                if should_gather_sink_args(name) {
-                    trace!(
-                        "auto-offload: prepare_builtin(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
-                        name,
-                        args.len()
-                    );
-                    return gather_args(args).await;
-                }
-                trace!(
-                    "auto-offload: prepare_builtin(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
-                    name
-                );
-                return Ok(args.to_vec());
-            }
-
-            let mut processed = args.to_vec();
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Reduction))
-            {
-                if (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
-                    && !max_or_min_reduction_call(args)
-                {
-                    trace!(
-                        "Skipping reduction promotion for builtin '{}' (detected elementwise form)",
-                        name
-                    );
-                } else {
-                    log_promotion(|| format!("Promoting builtin '{}' as reduction", name));
-                    return self.promote_reduction(reduction_op_hint(name), args);
-                }
-            }
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::MatMul))
-                && processed.len() >= 2
-            {
-                log_promotion(|| format!("Promoting builtin '{}' as matmul", name));
-                let (a_p, b_p) =
-                    self.promote_binary(BinaryOp::MatMul, &processed[0], &processed[1])?;
-                processed[0] = a_p;
-                processed[1] = b_p;
-                return Ok(processed);
-            }
-
-            if policy
-                .accel_tags
-                .iter()
-                .any(|tag| matches!(tag, AccelTag::Elementwise))
-                && processed.len() >= 2
-            {
-                log_promotion(|| format!("Promoting builtin '{}' as elementwise", name));
-                let (a_p, b_p) =
-                    self.promote_binary(BinaryOp::Elementwise, &processed[0], &processed[1])?;
-                processed[0] = a_p;
-                processed[1] = b_p;
-                return Ok(processed);
-            }
-
-            if let Some(first) = processed.first_mut() {
-                if policy
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::Transpose))
-                {
-                    log_promotion(|| format!("Promoting builtin '{}' as transpose", name));
-                    *first = self.promote_unary(UnaryOp::Transpose, first)?;
-                    return Ok(processed);
-                }
-
-                if policy
-                    .accel_tags
-                    .iter()
-                    .any(|tag| matches!(tag, AccelTag::Unary))
-                {
-                    log_promotion(|| format!("Promoting builtin '{}' as unary", name));
-                    *first = self.promote_unary(UnaryOp::Generic, first)?;
-                    return Ok(processed);
-                }
-            }
-        }
-        Ok(args.to_vec())
-    }
 }
 
 fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
@@ -1615,20 +1534,9 @@ fn tensor_rows_cols(value: &Value) -> Option<(usize, usize)> {
     }
 }
 
-#[allow(dead_code)]
 fn should_skip_reduction_promotion(name: &str, args: &[Value]) -> bool {
     (name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min"))
         && !max_or_min_reduction_call(args)
-}
-
-fn reduction_op_hint(name: &str) -> ReductionOp {
-    if name.eq_ignore_ascii_case("max") {
-        ReductionOp::Max
-    } else if name.eq_ignore_ascii_case("min") {
-        ReductionOp::Min
-    } else {
-        ReductionOp::Sum
-    }
 }
 
 fn max_or_min_reduction_call(args: &[Value]) -> bool {
@@ -2791,32 +2699,7 @@ pub async fn promote_unary(op: UnaryOp, value: &Value) -> Result<Value> {
 }
 
 pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Value>> {
-    if let Some(policy) = builtin_policy(name) {
-        if policy.is_sink {
-            clear_sink_inputs(args);
-            if should_gather_sink_args(name) {
-                trace!(
-                    "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency=GatherImmediately -> gathering {} arg(s)",
-                    name,
-                    args.len()
-                );
-                return gather_args(args).await;
-            }
-            trace!(
-                "auto-offload: prepare_builtin_args(name={:?}) is_sink=true residency!=GatherImmediately -> no gather (fusion barrier only)",
-                name
-            );
-            return Ok(args.to_vec());
-        }
-    }
-    if !auto_enabled() {
-        return Ok(args.to_vec());
-    }
-    if let Some(auto) = global().await {
-        auto.prepare_builtin(name, args).await
-    } else {
-        Ok(args.to_vec())
-    }
+    Ok(builtin_call::prepare(name, args, None).await?.into_args())
 }
 
 pub fn is_sink(name: &str) -> bool {
