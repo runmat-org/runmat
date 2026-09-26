@@ -39,7 +39,11 @@ export function catalogAlias(value) {
 }
 
 export function constant(value) {
-  exact(value, ["name", "kind", "provenance"], "compiled constant");
+  exact(value, ["name", "kind", "provenance", ...(Object.hasOwn(value, "documentation") ? ["documentation"] : [])], "compiled constant");
+  if (Object.hasOwn(value, "documentation")) {
+    documentation(value.documentation);
+    if (value.documentation.authority !== "Catalog") throw new Error("constant documentation must be catalog-owned");
+  }
   identity(value.name, "constant name");
   enumValue(value.kind, ["real_double", "complex_double", "logical"], "constant kind");
   exact(value.provenance, ["source_file", "module_path"], "constant catalog provenance");

@@ -1,7 +1,7 @@
 use runmat_types::{NumericClass, NumericDomain, NumericFact, ValueFact, ValueKindFact};
 use serde::Serialize;
 
-use super::BuiltinCatalogProvenance;
+use super::{BuiltinCatalogProvenance, BuiltinDocumentation};
 
 /// Static, target-independent contract for a language constant.
 ///
@@ -13,6 +13,10 @@ pub struct BuiltinConstantCatalogEntry {
     pub name: &'static str,
     pub kind: BuiltinConstantKind,
     pub provenance: BuiltinCatalogProvenance,
+    /// Canonical content for a constant-only public identity. Callable forms
+    /// and alternate spellings share their canonical identity's documentation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub documentation: Option<BuiltinDocumentation>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -33,7 +37,13 @@ impl BuiltinConstantCatalogEntry {
             name,
             kind,
             provenance,
+            documentation: None,
         }
+    }
+
+    pub const fn with_documentation(mut self, documentation: BuiltinDocumentation) -> Self {
+        self.documentation = Some(documentation);
+        self
     }
 
     pub fn fact(self) -> ValueFact {
@@ -50,4 +60,29 @@ fn numeric(domain: NumericDomain) -> ValueFact {
         class: NumericClass::Double,
         domain,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_documentation_preserves_legacy_shape_and_constant_facts() {
+        let original = BuiltinConstantCatalogEntry::new(
+            "pi",
+            BuiltinConstantKind::RealDouble,
+            BuiltinCatalogProvenance::new(file!(), module_path!()),
+        );
+        assert!(original.documentation.is_none());
+        assert!(serde_json::to_value(original)
+            .unwrap()
+            .get("documentation")
+            .is_none());
+        let documented = original.with_documentation(BuiltinDocumentation::EMPTY);
+        assert_eq!(original.fact(), documented.fact());
+        assert!(serde_json::to_value(documented)
+            .unwrap()
+            .get("documentation")
+            .is_some());
+    }
 }

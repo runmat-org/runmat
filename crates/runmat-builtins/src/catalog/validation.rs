@@ -1,5 +1,5 @@
 use super::{
-    builtin_catalog_aliases, BuiltinBindingAvailability, BuiltinCatalogEntry,
+    builtin_catalog_aliases, BuiltinBindingAvailability, BuiltinCatalogEntry, BuiltinDocumentation,
     BuiltinDocumentationAuthority, BuiltinExampleVerification,
 };
 use crate::BuiltinAsyncBehavior;
@@ -198,8 +198,33 @@ fn validate_documentation(
     entry: &'static BuiltinCatalogEntry,
     errors: &mut Vec<BuiltinCatalogValidationError>,
 ) {
-    let name = entry.identity.name;
-    let documentation = &entry.documentation;
+    validate_documentation_content(entry.identity.name, &entry.documentation, errors);
+}
+
+/// Validate canonical content without manufacturing a callable contract for a constant.
+pub fn validate_builtin_documentation(
+    name: &'static str,
+    documentation: &BuiltinDocumentation,
+) -> Vec<BuiltinCatalogValidationError> {
+    let mut errors = Vec::new();
+    if documentation.authority != BuiltinDocumentationAuthority::Catalog {
+        errors.push(error(
+            Some(name),
+            "constant documentation must be catalog-owned",
+        ));
+    }
+    if documentation.summary.trim().is_empty() {
+        errors.push(error(Some(name), "documentation summary must not be empty"));
+    }
+    validate_documentation_content(name, documentation, &mut errors);
+    errors
+}
+
+fn validate_documentation_content(
+    name: &'static str,
+    documentation: &BuiltinDocumentation,
+    errors: &mut Vec<BuiltinCatalogValidationError>,
+) {
     if documentation.authority != BuiltinDocumentationAuthority::Catalog {
         return;
     }

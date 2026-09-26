@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { legacyFunction } from "../compiled-schema.mjs";
+import { constant, legacyFunction } from "../compiled-schema.mjs";
+
+test("constant documentation is optional, canonical, and strictly shaped", () => {
+  const value = {
+    name: "pi", kind: "real_double",
+    provenance: { source_file: "crates/runmat-builtins/src/catalog/constant.rs", module_path: "runmat_builtins::catalog::constant" },
+  };
+  assert.doesNotThrow(() => constant(value));
+  value.documentation = {
+    authority: "Catalog", title: null, slug: null, summary: "Circle constant.",
+    description: "A real double scalar.", keywords: ["constant"], related: [], sections: [],
+    examples: [], example_exemption: "Schema fixture; executable examples are tested in the exporter.",
+    faqs: [], links: [], media: [], evidence: { implementation: [], verification: [], notes: [] },
+    introduced: null, status: null,
+  };
+  assert.doesNotThrow(() => constant(value));
+  assert.throws(() => constant({ ...value, documentation: { ...value.documentation, guessed: true } }), /fields must be exactly/);
+  assert.throws(() => constant({ ...value, documentation: { ...value.documentation, authority: "LegacySidecar" } }), /catalog-owned/);
+  assert.throws(() => constant({ ...value, documentation: null }));
+  assert.throws(() => constant({ ...value, callable: true }), /fields must be exactly/);
+});
 
 test("compiled type schema accepts each closed unit and structured variant", () => {
   const value = legacyFunctionFixture([

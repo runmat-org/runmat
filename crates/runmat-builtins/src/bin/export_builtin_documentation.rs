@@ -1,6 +1,7 @@
 use runmat_builtins::{
-    builtin_catalog_entries, validate_builtin_catalog, BuiltinDocumentationAuthority,
-    BuiltinDocumentationLinkTarget,
+    builtin_catalog_aliases, builtin_catalog_entries, builtin_constant_catalog_entries,
+    validate_builtin_catalog, validate_builtin_documentation, BuiltinConstantCatalogEntry,
+    BuiltinDocumentation, BuiltinDocumentationAuthority, BuiltinDocumentationLinkTarget,
 };
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
@@ -75,6 +76,11 @@ fn build_export(
     let complete_names = catalog_names
         .iter()
         .cloned()
+        .chain(
+            builtin_constant_catalog_entries()
+                .iter()
+                .map(|entry| entry.name.to_ascii_lowercase()),
+        )
         .chain(legacy.keys().cloned())
         .collect::<BTreeSet<_>>();
     let mut documents = BTreeMap::new();
@@ -113,6 +119,46 @@ fn build_export(
             missing_legacy.join(", ")
         )
         .into());
+    }
+
+    for entry in builtin_constant_catalog_entries() {
+        let Some(documentation) = &entry.documentation else {
+            continue;
+        };
+        let key = entry.name.to_ascii_lowercase();
+        if catalog_names.contains(&key)
+            || builtin_catalog_aliases()
+                .iter()
+                .any(|alias| alias.alias.name.eq_ignore_ascii_case(entry.name))
+        {
+            return Err(format!(
+                "{} declares separate constant and callable documentation",
+                entry.name
+            )
+            .into());
+        }
+        if legacy.contains_key(&key) {
+            return Err(format!(
+                "{} has canonical constant documentation and a legacy sidecar",
+                entry.name
+            )
+            .into());
+        }
+        let errors = validate_builtin_documentation(entry.name, documentation);
+        if !errors.is_empty() {
+            return Err(format!(
+                "{} has invalid canonical constant documentation: {errors:#?}",
+                entry.name
+            )
+            .into());
+        }
+        validate_documentation_links(entry.name, documentation, &complete_names)?;
+        record_document(
+            &mut documents,
+            &mut slugs,
+            key,
+            constant_document(entry, documentation),
+        )?;
     }
 
     for (key, mut document) in legacy {
@@ -252,6 +298,14 @@ fn validate_catalog_documentation(
             "{name} has invalid canonical catalog data: {errors:#?}"
         ));
     }
+    validate_documentation_links(name, documentation, complete_names)
+}
+
+fn validate_documentation_links(
+    name: &str,
+    documentation: &BuiltinDocumentation,
+    complete_names: &BTreeSet<String>,
+) -> Result<(), String> {
     for related in documentation.related {
         if !complete_names.contains(&related.to_ascii_lowercase()) {
             return Err(format!(
@@ -270,12 +324,37 @@ fn validate_catalog_documentation(
 }
 
 fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
-    let documentation = &entry.documentation;
-    let title = documentation.title.unwrap_or(entry.identity.name);
-    let slug = documentation
-        .slug
-        .unwrap_or(entry.identity.name)
-        .to_ascii_lowercase();
+    let mut document =
+        documentation_document(entry.identity.name, entry.category, &entry.documentation);
+    document["catalog"] = json!({
+        "descriptor": entry.descriptor,
+        "contract": entry.contract,
+        "placement": entry.placement,
+        "link": entry.link,
+        "bindings": entry.bindings,
+        "extensions": entry.extensions,
+        "integer_capabilities": entry.integer_capabilities,
+        "integer_audit": entry.integer_audit,
+    });
+    document
+}
+
+fn constant_document(
+    entry: &BuiltinConstantCatalogEntry,
+    documentation: &BuiltinDocumentation,
+) -> Value {
+    let mut document = documentation_document(entry.name, "constants", documentation);
+    document["catalog"] = json!({ "constant": { "name": entry.name, "kind": entry.kind } });
+    document
+}
+
+fn documentation_document(
+    name: &str,
+    category: &str,
+    documentation: &BuiltinDocumentation,
+) -> Value {
+    let title = documentation.title.unwrap_or(name);
+    let slug = documentation.slug.unwrap_or(name).to_ascii_lowercase();
     let examples = documentation
         .examples
         .iter()
@@ -299,18 +378,12 @@ fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
         .map(|name| json!({ "label": name, "url": format!("./{name}") }))
         .collect::<Vec<_>>();
     let mut object = Map::new();
-    object.insert(
-        "key".into(),
-        Value::String(entry.identity.name.to_ascii_lowercase()),
-    );
-    object.insert(
-        "module_stem".into(),
-        Value::String(entry.identity.name.into()),
-    );
+    object.insert("key".into(), Value::String(name.to_ascii_lowercase()));
+    object.insert("module_stem".into(), Value::String(name.into()));
     object.insert("authority".into(), Value::String("catalog".into()));
     object.insert("title".into(), Value::String(title.into()));
     object.insert("slug".into(), Value::String(slug));
-    object.insert("category".into(), Value::String(entry.category.into()));
+    object.insert("category".into(), Value::String(category.into()));
     object.insert(
         "summary".into(),
         Value::String(documentation.summary.into()),
@@ -363,25 +436,58 @@ fn catalog_document(entry: &runmat_builtins::BuiltinCatalogEntry) -> Value {
     }
     object.insert("introduced".into(), json!(documentation.introduced));
     object.insert("status".into(), json!(documentation.status));
-    object.insert(
-        "catalog".into(),
-        json!({
-            "descriptor": entry.descriptor,
-            "contract": entry.contract,
-            "placement": entry.placement,
-            "link": entry.link,
-            "bindings": entry.bindings,
-            "extensions": entry.extensions,
-            "integer_capabilities": entry.integer_capabilities,
-            "integer_audit": entry.integer_audit,
-        }),
-    );
     Value::Object(object)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn constant_documentation_exports_bare_value_examples_without_callable_contracts() {
+        use runmat_builtins::{
+            BuiltinCatalogProvenance, BuiltinConstantKind, BuiltinExample,
+            BuiltinExampleCompatibility, BuiltinExampleFixture, BuiltinExampleHarness,
+            BuiltinExampleRequirements, BuiltinExampleVerification,
+        };
+        const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
+            authority: BuiltinDocumentationAuthority::Catalog,
+            summary: "Circle constant.",
+            description: "The real double scalar circle constant.",
+            keywords: &["constant"],
+            examples: &[BuiltinExample {
+                id: "bare-value", title: "Read a constant", program: "value = pi;",
+                display_output: None, compatibility: BuiltinExampleCompatibility::Matlab,
+                harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None,
+                requirements: BuiltinExampleRequirements::NONE,
+                verification: BuiltinExampleVerification::Assertions {
+                    source: "assert(isa(value, 'double')); assert(isscalar(value)); assert(value > 3 && value < 4);",
+                },
+            }],
+            ..BuiltinDocumentation::EMPTY
+        };
+        let entry = BuiltinConstantCatalogEntry {
+            name: "pi",
+            kind: BuiltinConstantKind::RealDouble,
+            provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+            documentation: Some(DOCUMENTATION),
+        };
+        assert!(validate_builtin_documentation(entry.name, &DOCUMENTATION).is_empty());
+        let document = constant_document(&entry, &DOCUMENTATION);
+        assert_eq!(document["key"], "pi");
+        assert_eq!(document["authority"], "catalog");
+        assert_eq!(document["examples"][0]["input"], "value = pi;");
+        assert_eq!(document["catalog"]["constant"]["kind"], "real_double");
+        for field in ["descriptor", "contract", "bindings", "link"] {
+            assert!(document["catalog"].get(field).is_none());
+        }
+        let mut invalid = DOCUMENTATION;
+        invalid.examples = &[];
+        assert!(!validate_builtin_documentation(entry.name, &invalid).is_empty());
+        assert!(
+            !validate_builtin_documentation(entry.name, &BuiltinDocumentation::EMPTY).is_empty()
+        );
+    }
 
     #[test]
     fn current_transition_export_is_complete_and_deterministic() {
@@ -400,6 +506,12 @@ mod tests {
                         entry.documentation.authority == BuiltinDocumentationAuthority::Catalog
                     })
                     .map(|entry| entry.identity.name.to_ascii_lowercase()),
+            )
+            .chain(
+                builtin_constant_catalog_entries()
+                    .iter()
+                    .filter(|entry| entry.documentation.is_some())
+                    .map(|entry| entry.name.to_ascii_lowercase()),
             )
             .collect::<BTreeSet<_>>()
             .len();
