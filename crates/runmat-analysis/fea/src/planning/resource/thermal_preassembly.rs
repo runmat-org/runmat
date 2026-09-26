@@ -1,7 +1,8 @@
 //! Composition of thermal preassembly component estimates; not whole-process admission.
 use super::{
-    ByteCount, ResourcePlanningError, ThermalHistoryResourceFacts, ThermalMetadataResourceFacts,
-    ThermalObservationResourceFacts, ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
+    ByteCount, ResourcePlanningError, ThermalFieldConstructionResourceFacts,
+    ThermalHistoryResourceFacts, ThermalMetadataResourceFacts, ThermalObservationResourceFacts,
+    ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
     ThermalSourceEvidenceResourceFacts,
 };
 use crate::execution::ThermalSolveSchedule;
@@ -18,6 +19,7 @@ pub struct ThermalPreassemblyResourceFacts {
     pub observations: ThermalObservationResourceFacts,
     pub realization: ThermalRealizationResourceFacts,
     pub metadata: ThermalMetadataResourceFacts,
+    pub field_construction: ThermalFieldConstructionResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
@@ -66,6 +68,7 @@ impl ThermalPreassemblyResourceFacts {
         let observations = ThermalObservationResourceFacts::derive(mesh, step)?;
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
+        let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;
         let base = component_bytes(
             &history,
             &operators,
@@ -74,7 +77,11 @@ impl ThermalPreassemblyResourceFacts {
             &realization,
             model_materialization_bytes,
             &metadata,
-        )?;
+        )?
+        .checked_add(field_construction.reservation_bytes().0)
+        .ok_or(ResourcePlanningError::Overflow(
+            "thermal field construction reservation",
+        ))?;
         let maximum = step.accuracy.resources.maximum_resident_bytes;
         require_ceiling(base, maximum)?;
         // Admit actual selected metadata before owned constitutive/section/audit cloning.
@@ -111,6 +118,7 @@ impl ThermalPreassemblyResourceFacts {
             observations,
             realization,
             metadata,
+            field_construction,
             model_materialization_bytes,
         })
     }
@@ -126,6 +134,7 @@ impl ThermalPreassemblyResourceFacts {
             &self.metadata,
         )?
         .checked_add(self.property_compilation_bytes.0)
+        .and_then(|bytes| bytes.checked_add(self.field_construction.reservation_bytes().0))
         .map(ByteCount)
         .ok_or(ResourcePlanningError::Overflow(
             "thermal preassembly reservation",

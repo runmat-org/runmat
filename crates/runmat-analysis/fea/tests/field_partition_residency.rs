@@ -22,13 +22,31 @@ fn measure(blocks: usize) -> (u64, u64) {
     )
     .unwrap();
     let storage = AnalysisField::host_f64(definition.field_id(), vec![count], vec![300.0; count]);
-    // The initial full-field identity encoding remains outside this bounded traversal claim.
+    // Identity encoding is measured separately: it still grows with the full field.
+    let identity_profile =
+        runmat_analysis_fea::results::field::RecoveredField::identity_profile_shape(
+            &definition,
+            RecoveredFieldSample::TimeSeconds(0.0),
+            count,
+        )
+        .unwrap();
+    let identity_baseline = peak_allocator::begin_measurement();
     let view = RecoveredFieldView::new(
         &definition,
         RecoveredFieldSample::TimeSeconds(0.0),
         &storage,
     )
     .unwrap();
+    let identity_growth = peak_allocator::end_measurement().saturating_sub(identity_baseline);
+    assert!(
+        identity_growth <= identity_profile.materialization_resident_bytes_estimate,
+        "identity peak={identity_growth}, estimate={}",
+        identity_profile.materialization_resident_bytes_estimate
+    );
+    println!(
+        "identity_peak_growth={identity_growth} identity_estimate={}",
+        identity_profile.materialization_resident_bytes_estimate
+    );
     assert!(std::ptr::eq(view.storage(), &storage));
     let baseline = peak_allocator::begin_measurement();
     let mut partitions = 0;

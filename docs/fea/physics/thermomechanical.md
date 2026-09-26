@@ -453,6 +453,21 @@ in both cases. This is bounded traversal evidence only: full-field identity enco
 materializes a serde value tree and canonical buffer. These temporaries, retained output chunks,
 and manifest validation still need complete resource admission.
 
+Field-construction scratch is now a thermal preassembly component. The recovered-field identity
+shape profiler uses the exact identity tuple and core host-field serializer with counted hypothetical
+scalars, without allocating numeric arrays or a value tree. Thermal profiling uses the same snapshot
+definitions as publication and the longest scheduled ordinal suffix. It reserves the larger of
+full-field identity materialization and one partition's extracted values/indices plus canonical
+materialization: those operations are sequential, while retained histories are reserved separately.
+Tests cover real/complex scalar, vector and symmetric-tensor identity schemas, invalid profiles,
+overflow, and Tet4/Tet10 solve rejection when this scratch is omitted from the resident ceiling.
+This component does not yet admit retained manifest/transport inventory or their validation overlap;
+it is not a whole-process memory qualification.
+The isolated field-residency test also measures identity construction separately: 65,536 scalar
+values used 3,149,451 B peak additional Rust heap against a 5,444,494 B profile; 786,432 values used
+33,558,155 B against 64,557,966 B. These two measured cases support the profile's conservative
+scratch estimate; native allocator overhead and unrelated process memory are not included.
+
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
 counts and total-byte arithmetic before changing retained content. Canonical chunks still restart

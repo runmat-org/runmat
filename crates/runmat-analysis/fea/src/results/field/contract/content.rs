@@ -1,6 +1,17 @@
 //! Shared recovered-field content identity, validation, and canonical encoding.
 use super::*;
 
+mod profile;
+
+// The identity remains the existing three-member tuple for both retained and projected storage.
+fn identity_content<'a, S: Serialize + ?Sized>(
+    definition: &'a RecoveredFieldDefinition,
+    sample: RecoveredFieldSample,
+    storage: &'a S,
+) -> impl Serialize + 'a {
+    (definition, sample, storage)
+}
+
 impl RecoveredField {
     pub fn new(
         definition: RecoveredFieldDefinition,
@@ -77,7 +88,7 @@ impl RecoveredField {
         encode_contract(
             FIELD_PREFIX,
             "recovered-field-identity",
-            &(definition, sample, storage),
+            &identity_content(definition, sample, storage),
             FIELD_LIMITS,
         )
         .map(Digest::sha256)

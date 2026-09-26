@@ -24,6 +24,54 @@ fn workload() -> ThermalWorkload {
 }
 
 #[test]
+fn field_construction_scratch_is_composed_before_assembly() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut workload = workload();
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let schedule = workload.solve_schedule().unwrap();
+        let step = &workload.model.sequence.steps[0];
+        let facts =
+            ThermalPreassemblyResourceFacts::derive(&workload.model, step, &mesh, &schedule)
+                .unwrap();
+        let scratch = facts.field_construction.reservation_bytes().0;
+        assert!(scratch > 0);
+        assert_eq!(
+            scratch,
+            facts
+                .field_construction
+                .largest_identity_materialization_bytes
+                .0
+                .max(
+                    facts
+                        .field_construction
+                        .largest_partition_construction_bytes
+                        .0
+                )
+        );
+        let required = facts.reservation_bytes().unwrap().0;
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required - scratch;
+        assert!(
+            matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
+            ResourcePlanningError::AccuracyCeiling { required: actual, .. }
+        )) if actual == required)
+        );
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required;
+        workload.execute(&mesh).unwrap();
+        let mut overflow = facts;
+        overflow
+            .field_construction
+            .largest_identity_materialization_bytes = ByteCount(u64::MAX);
+        assert!(overflow.reservation_bytes().is_err());
+    }
+}
+
+#[test]
 fn backend_evidence_bound_tracks_solves_and_rejects_overflow() {
     let mut workload = workload();
     for (procedure, expected) in [
@@ -233,6 +281,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.realization.reservation_bytes().unwrap().0
                 + grown.metadata.reservation_bytes().unwrap().0
                 + grown.property_compilation_bytes.0
+                + grown.field_construction.reservation_bytes().0
         );
         workload.model.sequence.steps[0]
             .accuracy

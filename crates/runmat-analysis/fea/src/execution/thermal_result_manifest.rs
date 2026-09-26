@@ -47,24 +47,7 @@ fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
 }
 
 fn definition(index: usize, ordinal: usize) -> AnalysisExecutionResult<RecoveredFieldDefinition> {
-    let definitions = crate::physics::thermal::history_fields::definitions().map_err(invalid)?;
-    let template = &definitions[index];
-    let ids = [
-        crate::contracts::fea_thermal_temperature_field_id,
-        crate::contracts::fea_thermal_temperature_gradient_field_id,
-        crate::contracts::fea_thermal_heat_flux_field_id,
-        crate::contracts::fea_thermal_energy_storage_rate_field_id,
-    ];
-    RecoveredFieldDefinition::new_derived(
-        ids[index](ordinal),
-        template.quantity(),
-        template.location(),
-        template.entity_domain(),
-        template.value_shape().clone(),
-        template.numeric_representation(),
-        template.derivation(),
-    )
-    .map_err(invalid)
+    crate::physics::thermal::history_fields::snapshot_definition(index, ordinal).map_err(invalid)
 }
 
 impl ThermalSolverResultManifest {
