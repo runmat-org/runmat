@@ -227,3 +227,51 @@ fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() 
         assert!(invocation.active.is_none());
     });
 }
+
+#[test]
+fn polled_resume_drop_and_cancellation_keep_roots_and_context_during_work_destruction() {
+    for cancel in [false, true] {
+        runmat_gc::gc_test_context(|| {
+            let source = CancellationSource::new();
+            let allocation =
+                runmat_gc::gc_allocate_rooted(runmat_value::Value::String("polled capture".into()))
+                    .unwrap();
+            let handle = allocation.handle();
+            let (mut work, _, drops, _) = work();
+            work.on_drop = Some(Box::new(move || {
+                let runtime =
+                    runmat_runtime::context::legacy::active().expect("resume destructor context");
+                assert_eq!(runtime.is_cancelled(), cancel);
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+            }));
+            let mut invocation = invocation(&source, work);
+            invocation.active.as_mut().unwrap().state.arena.insert(
+                runmat_value::Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "PolledCapture".into(),
+                    target: handle,
+                    valid: true,
+                }),
+            );
+            allocation.unroot().unwrap();
+            let waker = Waker::from(Arc::new(Wakes::default()));
+            let mut cx = Context::from_waker(&waker);
+            let mut resume = Box::pin(invocation.resume_suspension(1, 1));
+            assert!(resume.as_mut().poll(&mut cx).is_pending());
+            assert!(runmat_runtime::context::legacy::active().is_none());
+            if cancel {
+                source.cancel(CancellationReason::User);
+                assert!(matches!(
+                    resume.as_mut().poll(&mut cx),
+                    Poll::Ready(Err(NativeExecutorError::Cancelled))
+                ));
+            }
+            drop(resume);
+            assert_eq!(drops.get(), 1);
+            assert!(invocation.active.is_none());
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_clone_value(&handle).is_err());
+            assert!(runmat_runtime::context::legacy::active().is_none());
+        });
+    }
+}

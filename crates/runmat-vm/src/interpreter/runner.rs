@@ -63,15 +63,19 @@ fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
 
 fn check_cancelled_with_residency_cleanup(stack: &[Value], vars: &[Value]) -> VmResult<()> {
     let result = interp_engine::check_cancelled();
-    #[cfg(feature = "native-accel")]
     if result.is_err() {
-        for value in stack.iter().chain(vars) {
-            clear_residency(value);
-        }
+        clear_cancelled_residency(stack, vars);
+    }
+    result
+}
+
+fn clear_cancelled_residency(stack: &[Value], vars: &[Value]) {
+    #[cfg(feature = "native-accel")]
+    for value in stack.iter().chain(vars) {
+        clear_residency(value);
     }
     #[cfg(not(feature = "native-accel"))]
     let _ = (stack, vars);
-    result
 }
 
 fn ensure_workspace_resolver_registered() {
@@ -951,41 +955,54 @@ async fn run_interpreter_inner(
             };
         #[cfg(feature = "native-accel")]
         let executed_pc = pc;
-        let dispatch_result = interp_dispatch::dispatch_instruction(
-            interp_dispatch::DispatchMeta {
-                instr: &bytecode.instructions[pc],
-                bytecode: &bytecode,
-                var_names: &bytecode.var_names,
-                function_registry: &function_registry,
-                source_id: bytecode.source_id,
-                call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
-                call_counts: &call_counts_snapshot,
-                current_function_name: &current_function_name,
-            },
-            interp_dispatch::DispatchState {
-                stack: &mut stack,
-                vars: &mut vars,
-                sequence_register: &mut sequence_register,
-                context: &mut context,
-                try_stack: &mut try_stack,
-                last_exception: &mut last_exception,
-                imports: &mut imports,
-                global_aliases: &mut global_aliases,
-                persistent_aliases: &mut persistent_aliases,
-                missing_input_slots: &mut missing_input_slots,
-                pc: &mut pc,
-            },
-            interp_dispatch::DispatchHooks {
-                clear_value_residency: &mut clear_value_residency,
-                store_var_before_overwrite: &mut store_var_before_overwrite,
-                store_var_after_store: &mut store_var_after_store,
-                store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
-                store_local_before_var_overwrite: &mut store_local_before_var_overwrite,
-                store_local_after_store: &mut store_local_after_store,
-                store_local_after_fallback_store: &mut store_local_after_fallback_store,
-            },
+        let cancellation = context.runtime.cancellation();
+        let dispatch_result = super::dispatch_cancellation::until_cancelled(
+            &cancellation,
+            interp_dispatch::dispatch_instruction(
+                interp_dispatch::DispatchMeta {
+                    instr: &bytecode.instructions[pc],
+                    bytecode: &bytecode,
+                    var_names: &bytecode.var_names,
+                    function_registry: &function_registry,
+                    source_id: bytecode.source_id,
+                    call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                    call_counts: &call_counts_snapshot,
+                    current_function_name: &current_function_name,
+                },
+                interp_dispatch::DispatchState {
+                    stack: &mut stack,
+                    vars: &mut vars,
+                    sequence_register: &mut sequence_register,
+                    context: &mut context,
+                    try_stack: &mut try_stack,
+                    last_exception: &mut last_exception,
+                    imports: &mut imports,
+                    global_aliases: &mut global_aliases,
+                    persistent_aliases: &mut persistent_aliases,
+                    missing_input_slots: &mut missing_input_slots,
+                    pc: &mut pc,
+                },
+                interp_dispatch::DispatchHooks {
+                    clear_value_residency: &mut clear_value_residency,
+                    store_var_before_overwrite: &mut store_var_before_overwrite,
+                    store_var_after_store: &mut store_var_after_store,
+                    store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
+                    store_local_before_var_overwrite: &mut store_local_before_var_overwrite,
+                    store_local_after_store: &mut store_local_after_store,
+                    store_local_after_fallback_store: &mut store_local_after_fallback_store,
+                },
+            ),
         )
         .await;
+        // Drop the suspended operation before touching its borrowed VM state.
+        // Cancellation is a terminal control outcome, not a catchable language error.
+        let Some(dispatch_result) = dispatch_result else {
+            #[cfg(feature = "native-accel")]
+            fusion_observations.abort();
+            clear_cancelled_residency(&stack, &vars);
+            sequence_register.clear(&mut stack);
+            return Err(interp_engine::cancellation_error());
+        };
         let dispatch_result = match dispatch_result {
             Ok(result) => result,
             Err(err) => {

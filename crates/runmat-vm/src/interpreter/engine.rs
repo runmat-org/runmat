@@ -62,12 +62,13 @@ pub fn debug_stack_enabled() -> bool {
 
 pub fn check_cancelled() -> Result<(), RuntimeError> {
     if runmat_runtime::interrupt::is_cancelled() {
-        return Err(crate::interpreter::errors::mex(
-            "ExecutionCancelled",
-            "Execution cancelled by user",
-        ));
+        return Err(cancellation_error());
     }
     Ok(())
+}
+
+pub(super) fn cancellation_error() -> RuntimeError {
+    crate::interpreter::errors::mex("ExecutionCancelled", "Execution cancelled by user")
 }
 
 pub fn note_pre_dispatch(

@@ -21,7 +21,8 @@ impl RuntimeMexHostServices {
 
 impl MexHostServices for RuntimeMexHostServices {
     fn cancellation_scope(&self, cancellation: CancellationToken) -> Box<dyn MexCancellationScope> {
-        let previous = self.runtime.replace_cancellation_token(cancellation);
+        let combined = self.runtime.cancellation().or(&cancellation);
+        let previous = self.runtime.replace_cancellation_token(combined);
         Box::new(RuntimeMexCancellationScope {
             runtime: self.runtime.clone(),
             previous: Some(previous),
@@ -352,6 +353,40 @@ mod tests {
         assert!(!runtime.is_cancelled());
         original.cancel(runmat_execution::CancellationReason::Shutdown);
         assert!(runtime.is_cancelled());
+    }
+
+    #[test]
+    fn asynchronous_callback_keeps_parent_and_nested_cancellation_authorities() {
+        let parent = runmat_execution::cancellation::CancellationSource::new();
+        let runtime = RuntimeContext::with_cancellation(
+            Rc::new(RuntimeExecutionService::new()),
+            parent.token(),
+        );
+        let services = RuntimeMexHostServices::new(runtime.clone());
+        let request = runmat_execution::cancellation::CancellationSource::new();
+        let nested = runmat_execution::cancellation::CancellationSource::new();
+        {
+            let _request = services.cancellation_scope(request.token());
+            {
+                let _nested = services.cancellation_scope(nested.token());
+                nested.cancel(runmat_execution::CancellationReason::Deadline);
+                assert!(runtime.is_cancelled());
+            }
+            assert!(!runtime.is_cancelled(), "nested cancellation stays scoped");
+            parent.cancel(runmat_execution::CancellationReason::Shutdown);
+            assert!(
+                runtime.is_cancelled(),
+                "parent remains visible during request"
+            );
+        }
+        assert_eq!(
+            runtime.cancellation().reason(),
+            Some(runmat_execution::CancellationReason::Shutdown)
+        );
+        assert!(
+            !request.token().is_cancelled(),
+            "composition does not cancel siblings"
+        );
     }
 
     #[test]

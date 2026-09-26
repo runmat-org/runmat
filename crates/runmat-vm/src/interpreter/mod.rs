@@ -1,6 +1,7 @@
 pub mod api;
 pub mod debug;
 pub mod dispatch;
+mod dispatch_cancellation;
 pub mod engine;
 pub mod errors;
 #[cfg(feature = "native-accel")]

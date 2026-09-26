@@ -91,12 +91,15 @@ impl NativeInvocation {
         }
         let mut lease = ExecutionLease::take(self)?;
         lease.check_cancellation()?;
-        let token = lease.active().state.runtime.cancellation();
+        let runtime = lease.active().state.runtime.clone();
+        let token = runtime.cancellation();
         let result = {
             let cancelled = std::pin::pin!(token.cancelled());
-            let operation = std::pin::pin!(lease
-                .active_mut()
-                .resume_suspension(continuation, generation));
+            let operation = std::pin::pin!(runtime.scope(
+                lease
+                    .active_mut()
+                    .resume_suspension(continuation, generation)
+            ));
             match futures::future::select(cancelled, operation).await {
                 futures::future::Either::Left(_) => Err(NativeExecutorError::Cancelled),
                 futures::future::Either::Right((result, _)) => result,
