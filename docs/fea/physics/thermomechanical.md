@@ -299,8 +299,15 @@ before encoding; their peak estimate and the retained element-identity cache are
 construction. Borrowed topology contracts preserve the established canonical bytes without cloning
 connectivity or attachments. Selection currently traverses three times (typed validation/counting,
 profiling, owned construction), reusing identities generated once for the same immutable structural
-model. Canonical solver-mesh validation still has separate scratch requirements not admitted by
-this compiler estimate. Whole-producer admission remains open.
+model. Canonical solver-mesh validation is also admitted before it runs in the compiler: the shared
+meshing owner estimates validation indexes (including Tet10 and raw malformed-input inventories)
+and canonical identity encoding. Validation indexes are released before that encoding, so those
+phases use their maximum; the compiler conservatively adds it to its other phases. Profiling may
+reject malformed serialization before resource admission. Thermal preassembly also checks this
+estimate before operator planning derives its validated projection; the thermal entry point no
+longer performs an unadmitted duplicate validation ahead of preassembly. This is not admission of
+all projection/symbolic-builder allocations or every validation call in other execution paths.
+Whole-producer and result-transport admission remain open.
 
 Property owner/section matching streams candidates without per-element candidate arrays, while
 retaining exact coverage counts and missing/duplicate-section rejection. Semantic/audit identity

@@ -459,6 +459,48 @@ fn artifact_rejects_noncanonical_or_dangling_connectivity() {
 }
 
 #[test]
+fn contact_secondary_face_inventory_rejects_malformed_references_without_panicking() {
+    let mut valid = artifact();
+    let contact_id = entity(PersistentEntityKind::Contact, "contact:1");
+    for (index, role) in [
+        BoundaryFaceRole::ContactPrimary,
+        BoundaryFaceRole::ContactSecondary,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let face = &mut valid.topology.boundary_faces[index];
+        face.role = role;
+        face.provenance.push(contact_id.clone());
+        face.provenance.sort();
+    }
+    let primary = valid.topology.boundary_faces[0].face_id;
+    let secondary = valid.topology.boundary_faces[1].face_id;
+    valid.topology.contacts.push(ContactPair {
+        contact_id,
+        primary_boundary_face_ids: vec![primary],
+        secondary_boundary_face_ids: vec![secondary],
+    });
+    valid.seal_canonical_digest().unwrap();
+    valid.validate_canonical().unwrap();
+
+    for secondary_faces in [
+        Vec::new(),
+        vec![u64::MAX],
+        vec![secondary, u64::MAX],
+        vec![secondary, secondary],
+        vec![secondary, primary],
+    ] {
+        let mut invalid = valid.clone();
+        invalid.topology.contacts[0].secondary_boundary_face_ids = secondary_faces;
+        assert_eq!(
+            invalid.validate_canonical().unwrap_err().field,
+            "contact secondary faces"
+        );
+    }
+}
+
+#[test]
 fn solver_node_exact_parameters_are_typed_bounded_and_canonical() {
     let edge = entity(PersistentEntityKind::Edge, "edge:exact");
     let face = entity(PersistentEntityKind::Face, "face:exact");

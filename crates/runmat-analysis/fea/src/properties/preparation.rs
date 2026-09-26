@@ -1,5 +1,4 @@
-//! Property selection, explicit identities and owned-materialization admission. Canonical mesh
-//! validation remains a separate scratch phase; explicit identities are admitted and cached once.
+//! Property selection, mesh validation, explicit identities and owned-materialization admission.
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{AnalysisModel, MaterialModel};
@@ -44,6 +43,15 @@ impl<'a> PreparedProperties<'a> {
         // BTree estimates include key/value slots and conservative spare-node/pointer storage;
         // these are resource estimates, not allocator-exact or native/RSS limits.
         let selection = selection_scratch(model)?;
+        require_fits(selection, maximum)?;
+        let mesh_validation = mesh
+            .map(SolverMeshArtifact::validation_resident_bytes_estimate)
+            .transpose()
+            .map_err(|error| PropertyCompilationError::InvalidMesh(error.to_string()))?
+            .unwrap_or(0);
+        // This phase precedes inventory construction. Reserve it conservatively alongside the
+        // compiler's remaining phases so the thermal caller can compose one admission envelope.
+        let selection = add(selection, mesh_validation)?;
         require_fits(selection, maximum)?;
         validate_mesh(model, mesh)?;
         let explicit = model

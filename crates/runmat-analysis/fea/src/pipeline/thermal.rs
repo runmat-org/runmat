@@ -2,7 +2,7 @@ use runmat_analysis_core::{
     validate_model, AnalysisModel, CoupledPhysicsFamily, PhysicsFamily, ProcedureStep,
     RestartPolicy, SolutionSpace,
 };
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::SolverMeshArtifact;
 
 use crate::{
     contracts::{
@@ -86,8 +86,6 @@ fn execute_validated_model(
     step: &ProcedureStep,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
     validate_step(step, options.procedure)?;
-    mesh.validate_canonical()
-        .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
     let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
         model, step, mesh, &schedule,

@@ -3,6 +3,7 @@ mod artifact_classification;
 mod artifact_identity;
 mod artifact_order;
 mod artifact_parameters;
+mod artifact_resources;
 mod artifact_types;
 mod authoring;
 mod cancellation;

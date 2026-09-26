@@ -24,6 +24,48 @@ fn workload() -> ThermalWorkload {
 }
 
 #[test]
+fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
+    let mut mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let mut workload = workload();
+    // Raw field maps must be counted even when invalid. A stale seal makes validation fail
+    // if either execution or projection reaches it before the resource gate.
+    mesh.topology.field_topologies[0]
+        .ordered_entity_ids
+        .extend(10_000..110_000);
+    mesh.canonical_digest = runmat_meshing_core::StableDigest::ZERO;
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1_000_000;
+    let schedule = workload.solve_schedule().unwrap();
+    assert!(matches!(
+        ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            &mesh,
+            &schedule
+        ),
+        Err(ResourcePlanningError::AccuracyCeiling { .. })
+    ));
+    assert!(matches!(
+        workload.execute(&mesh),
+        Err(crate::FeaRunError::Resource(
+            ResourcePlanningError::AccuracyCeiling { .. }
+        ))
+    ));
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = u64::MAX;
+    assert!(matches!(
+        workload.execute(&mesh),
+        Err(crate::FeaRunError::Resource(
+            ResourcePlanningError::Invalid(_)
+        ))
+    ));
+}
+
+#[test]
 fn model_materialization_is_composed_and_enforced_before_assembly() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);

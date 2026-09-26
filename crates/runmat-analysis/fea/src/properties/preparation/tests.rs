@@ -82,6 +82,27 @@ fn lookup_admission_precedes_mesh_validation() {
     ));
 }
 
+#[test]
+fn mesh_validation_scratch_is_admitted_before_canonical_validation() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut mesh = canonical_tetrahedron_solver_mesh(order);
+        let model = solid_model(&mesh);
+        let validation = mesh.validation_resident_bytes_estimate().unwrap();
+        let required = selection_scratch(&model).unwrap() + validation;
+        // A stale seal is detected only by validation, after resource admission succeeds.
+        mesh.canonical_digest = StableDigest::ZERO;
+        assert!(matches!(
+            PreparedProperties::prepare(&model, Some(&mesh), required - 1),
+            Err(PropertyCompilationError::ResourceCeiling { required: actual, maximum })
+                if actual == required && maximum == required - 1
+        ));
+        assert!(matches!(
+            PreparedProperties::prepare(&model, Some(&mesh), required),
+            Err(PropertyCompilationError::InvalidMesh(_))
+        ));
+    }
+}
+
 fn heterogeneous_model(mesh: &SolverMeshArtifact, large_occurrences: usize) -> AnalysisModel {
     let mut model = solid_model(mesh);
     let mut small = model.materials[0].clone();

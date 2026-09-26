@@ -18,6 +18,7 @@ use runmat_analysis_fea::{
 use runmat_meshing_core::fixtures::{
     connected_quadratic_tetrahedron_solver_mesh, connected_tetrahedron_solver_mesh,
 };
+use runmat_meshing_core::CanonicalMeshingContract;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
@@ -31,6 +32,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         "tet10" => connected_quadratic_tetrahedron_solver_mesh(),
         _ => return Err("element order must be tet4 or tet10".into()),
     };
+    // Independently measure the shared validator, without including fixture construction or
+    // its resource-profile walk in the peak. This remains Rust-heap-only evidence.
+    let validation_reservation = mesh.validation_resident_bytes_estimate()?;
+    let baseline = peak_allocator::begin_measurement();
+    let validation = mesh.validate_canonical();
+    let validation_growth = peak_allocator::end_measurement().saturating_sub(baseline);
+    validation?;
+    if validation_growth > validation_reservation {
+        return Err("mesh validation Rust heap exceeds its estimated reservation".into());
+    }
+    println!("mesh_validation_reservation_bytes={validation_reservation} mesh_validation_rust_heap_growth_bytes={validation_growth}");
     let samples: usize = args[1].parse()?;
     if !(2..=8193).contains(&samples) {
         return Err("samples must be in 2..8193".into());

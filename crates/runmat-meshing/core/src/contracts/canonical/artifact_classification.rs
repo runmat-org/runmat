@@ -181,6 +181,12 @@ fn validate_contacts(
             classified_faces,
             cancellation,
         )?;
+        // Validate references before indexing the face inventory, including malformed inputs.
+        validate_face_set(
+            "contact secondary faces",
+            &contact.secondary_boundary_face_ids,
+            face_ids,
+        )?;
         validate_contact_faces(
             faces,
             &contact.secondary_boundary_face_ids,
@@ -188,11 +194,6 @@ fn validate_contacts(
             &contact.contact_id,
             classified_faces,
             cancellation,
-        )?;
-        validate_face_set(
-            "contact secondary faces",
-            &contact.secondary_boundary_face_ids,
-            face_ids,
         )?;
     }
     Ok(())
