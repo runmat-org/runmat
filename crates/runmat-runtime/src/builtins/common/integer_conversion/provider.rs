@@ -12,11 +12,11 @@ pub(super) async fn cast_gpu_value(
     handle: GpuTensorHandle,
     target: IntegerClass,
 ) -> Result<Value, CastError> {
+    admit_gpu_value(&handle)?;
     let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
         .ok_or_else(|| {
             CastError::Internal("no acceleration provider owns the input handle".into())
         })?;
-    validate_input_metadata(&handle)?;
 
     let input_metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&handle);
     let provenance = runmat_accelerate_api::handle_provenance(&handle)
@@ -25,10 +25,11 @@ pub(super) async fn cast_gpu_value(
         return fallback_through_owner(provider, &handle, target, &input_metadata).await;
     }
 
+    let restore = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let direct = provider
         .cast_to_integer(&handle, target.accelerator_type())
         .await;
-    crate::builtins::common::gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+    drop(restore);
     match direct {
         Ok(mut output) if valid_output(&output, &handle, provider, target.accelerator_type()) => {
             runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
@@ -37,7 +38,11 @@ pub(super) async fn cast_gpu_value(
             ))
         }
         Ok(output) => {
-            crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+            crate::builtins::common::gpu_helpers::free_rejected_provider_output(
+                &output,
+                &[&handle],
+                provider,
+            );
             Err(CastError::Internal(
                 "provider returned an invalid integer conversion result".into(),
             ))
@@ -49,6 +54,16 @@ pub(super) async fn cast_gpu_value(
         }
         Err(error) => Err(CastError::Internal(error.to_string())),
     }
+}
+
+/// Side-effect-free resident admission, also used before operand preparation.
+pub(super) fn admit_gpu_value(handle: &GpuTensorHandle) -> Result<(), CastError> {
+    if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+        return Err(CastError::Internal(
+            "no acceleration provider owns the input handle".into(),
+        ));
+    }
+    validate_input_metadata(handle)
 }
 
 async fn fallback_through_owner(
@@ -78,8 +93,10 @@ fn validate_input_metadata(handle: &GpuTensorHandle) -> Result<(), CastError> {
     let integer = runmat_accelerate_api::handle_integer_type(handle);
     let logical = runmat_accelerate_api::handle_is_logical(handle);
     let precision = runmat_accelerate_api::handle_precision(handle);
-    let storage = runmat_accelerate_api::handle_storage(handle);
-    if representation_is_consistent(storage, precision, integer, logical)
+    if handle
+        .descriptor
+        .storage
+        .is_some_and(|storage| representation_is_consistent(storage, precision, integer, logical))
         && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
             handle, precision, integer, logical,
         )
@@ -115,18 +132,19 @@ fn valid_output(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     target: IntegerElementType,
 ) -> bool {
-    crate::builtins::common::gpu_helpers::unary_gpu_output_matches(
-        output,
-        input,
-        provider,
-        crate::builtins::common::gpu_helpers::UnaryGpuOutputContract {
-            storage: GpuTensorStorage::Real,
-            precision: None,
-            integer: Some(target),
-            logical: false,
-            alias: crate::builtins::common::gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
-        },
-    )
+    output.descriptor.storage == Some(GpuTensorStorage::Real)
+        && crate::builtins::common::gpu_helpers::unary_gpu_output_matches(
+            output,
+            input,
+            provider,
+            crate::builtins::common::gpu_helpers::UnaryGpuOutputContract {
+                storage: GpuTensorStorage::Real,
+                precision: None,
+                integer: Some(target),
+                logical: false,
+                alias: crate::builtins::common::gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            },
+        )
 }
 
 #[cfg(test)]

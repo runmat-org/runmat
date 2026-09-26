@@ -38,7 +38,7 @@ macro_rules! define_integer_conversion_contract {
         pub const ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
             code: concat!("RM.", $upper, ".INVALID_ARGUMENT"),
             identifier: Some(concat!("RunMat:", $name, ":InvalidArgument")),
-            when: "The call has an unsupported number of arguments.",
+            when: "The call has an unsupported number of input arguments or requests more than one output.",
             message: concat!($name, ": invalid argument"),
         };
         pub const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -94,7 +94,7 @@ macro_rules! define_integer_conversion_contract {
             }];
 
         const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-        const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+        const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
         pub const CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -108,7 +108,7 @@ macro_rules! define_integer_conversion_contract {
                     $class,
                 )),
                 compatibility: BuiltinCompatibility::Matlab,
-                async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+                async_behavior: BuiltinAsyncBehavior::MaySuspend,
                 purity: BuiltinPurity::Pure,
                 semantic_kind: BuiltinSemanticKind::General,
                 workspace_effect: None,
@@ -117,7 +117,14 @@ macro_rules! define_integer_conversion_contract {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
-                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+                preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+                    id: crate::BuiltinPreparationFormId(0),
+                    binding_variant: "default",
+                    signatures: &[0],
+                    data_arguments: &[0],
+                    operation: crate::BuiltinPreparationOperation::Unary,
+                    provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+                }]),
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::PreserveInputs,

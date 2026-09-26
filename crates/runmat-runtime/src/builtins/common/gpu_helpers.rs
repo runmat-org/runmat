@@ -127,13 +127,13 @@ pub fn restore_handle_metadata(handle: &GpuTensorHandle, snapshot: &GpuHandleMet
     runmat_accelerate_api::mark_residency(handle);
 }
 
-struct HandleMetadataRestoreGuard<'a> {
+pub(crate) struct HandleMetadataRestoreGuard<'a> {
     handle: &'a GpuTensorHandle,
     snapshot: GpuHandleMetadataSnapshot,
 }
 
 impl<'a> HandleMetadataRestoreGuard<'a> {
-    fn new(handle: &'a GpuTensorHandle) -> Self {
+    pub(crate) fn new(handle: &'a GpuTensorHandle) -> Self {
         Self {
             handle,
             snapshot: snapshot_handle_metadata(handle),

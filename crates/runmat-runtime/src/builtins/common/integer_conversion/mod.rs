@@ -1,3 +1,4 @@
+mod admission;
 mod class;
 mod error;
 mod host;
@@ -5,6 +6,7 @@ mod provider;
 mod representations;
 mod storage;
 
+pub(crate) use admission::admits_preparation;
 pub(crate) use class::IntegerClassExt;
 pub(crate) use error::CastError;
 pub(crate) use representations::cast_complex_value;

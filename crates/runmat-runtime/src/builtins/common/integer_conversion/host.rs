@@ -22,11 +22,11 @@ pub(super) fn cast_host_value(value: Value, target: IntegerClass) -> Result<Valu
         Value::CharArray(chars) => {
             let tensor = Tensor::new(
                 chars
-                    .data
+                    .to_column_major()
                     .iter()
                     .map(|&value| value as u32 as f64)
                     .collect(),
-                vec![chars.rows, chars.cols],
+                chars.shape,
             )
             .map_err(CastError::Internal)?;
             cast_tensor_value(target, tensor)

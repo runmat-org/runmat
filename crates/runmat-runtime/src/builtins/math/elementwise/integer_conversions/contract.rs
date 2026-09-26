@@ -1,9 +1,9 @@
 macro_rules! define_integer_conversion_builtin {
-    ($function:ident, $name:literal, $target:expr, $path:literal, $argument_error:path, $input_error:path, $internal_error:path) => {
+    ($function:ident, $name:literal, $target:expr, $entry:path, $path:literal, $argument_error:path, $input_error:path, $internal_error:path) => {
         use runmat_builtins::BuiltinErrorDescriptor;
         use runmat_value::Value;
 
-        use crate::builtins::common::integer_conversion::{cast_value, CastError};
+        use crate::builtins::common::integer_conversion::CastError;
         use crate::builtins::common::spec::{
             BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
             ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -46,13 +46,23 @@ macro_rules! define_integer_conversion_builtin {
             if !rest.is_empty() {
                 return Err(error(&$argument_error, "too many input arguments"));
             }
-            cast_value(value, $target).await.map_err(|cause| match cause {
+            crate::output_count::validate_fixed_outputs($entry.descriptor, &$argument_error, $name)?;
+            super::preparation::execute(
+                runmat_builtins::BuiltinCatalogIdentity { name: $name },
+                value,
+                $target,
+                conversion_error,
+            ).await
+        }
+
+        fn conversion_error(cause: CastError) -> RuntimeError {
+            match cause {
                 CastError::Unsupported(class) => error(
                     &$input_error,
                     format!("conversion to {} from {class} is not possible", $name),
                 ),
                 CastError::Internal(detail) => error(&$internal_error, detail),
-            })
+            }
         }
 
         fn error(

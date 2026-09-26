@@ -28,6 +28,7 @@ pub(crate) fn cast_sparse_value(
     target: IntegerClass,
     sparse: runmat_value::SparseTensor,
 ) -> Result<Value, CastError> {
+    admit_sparse_value(&sparse)?;
     let values = match sparse.integer_storage() {
         Some(storage) => storage
             .exact_values()
@@ -49,6 +50,15 @@ pub(crate) fn cast_sparse_value(
     )
     .map(Value::SparseTensor)
     .map_err(CastError::Internal)
+}
+
+pub(super) fn admit_sparse_value(sparse: &runmat_value::SparseTensor) -> Result<(), CastError> {
+    // SparseValueStorage has no paired integer-complex representation. Do not
+    // panic in real materialization or silently densify/drop imaginary values.
+    if sparse.is_complex() {
+        return Err(CastError::Unsupported(UnsupportedValueKind::Complex));
+    }
+    Ok(())
 }
 
 pub(crate) fn cast_complex_value(value: Value, target: IntegerClass) -> Result<Value, CastError> {

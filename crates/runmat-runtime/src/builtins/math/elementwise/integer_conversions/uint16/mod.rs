@@ -6,6 +6,7 @@ define_integer_conversion_builtin!(
     uint16_builtin,
     "uint16",
     IntegerClass::UInt16,
+    runmat_builtins::UINT16_CATALOG_ENTRY,
     "crate::builtins::math::elementwise::integer_conversions::uint16",
     runmat_builtins::UINT16_ERROR_INVALID_ARGUMENT,
     runmat_builtins::UINT16_ERROR_INVALID_INPUT,

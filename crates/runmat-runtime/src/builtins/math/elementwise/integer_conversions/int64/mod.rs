@@ -6,6 +6,7 @@ define_integer_conversion_builtin!(
     int64_builtin,
     "int64",
     IntegerClass::Int64,
+    runmat_builtins::INT64_CATALOG_ENTRY,
     "crate::builtins::math::elementwise::integer_conversions::int64",
     runmat_builtins::INT64_ERROR_INVALID_ARGUMENT,
     runmat_builtins::INT64_ERROR_INVALID_INPUT,

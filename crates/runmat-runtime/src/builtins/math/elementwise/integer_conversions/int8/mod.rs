@@ -6,6 +6,7 @@ define_integer_conversion_builtin!(
     int8_builtin,
     "int8",
     IntegerClass::Int8,
+    runmat_builtins::INT8_CATALOG_ENTRY,
     "crate::builtins::math::elementwise::integer_conversions::int8",
     runmat_builtins::INT8_ERROR_INVALID_ARGUMENT,
     runmat_builtins::INT8_ERROR_INVALID_INPUT,
