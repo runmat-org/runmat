@@ -74,20 +74,9 @@ pub fn is_gpu_value(value: &Value) -> bool {
 
 /// Returns true when the value (or nested elements) contains any GPU-resident tensors.
 pub fn value_contains_gpu(value: &Value) -> bool {
-    match value {
-        Value::GpuTensor(_) => true,
-        Value::Cell(ca) => ca.data.iter().any(|ptr| value_contains_gpu(ptr)),
-        Value::Struct(sv) => sv.fields.values().any(value_contains_gpu),
-        Value::StructArray(array) => {
-            let mut found = false;
-            array.for_each_value(|value| found |= value_contains_gpu(value));
-            found
-        }
-        Value::Object(obj) => obj.properties.values().any(value_contains_gpu),
-        Value::Closure(closure) => closure.captures.iter().any(value_contains_gpu),
-        Value::OutputList(values) => values.iter().any(value_contains_gpu),
-        _ => false,
-    }
+    let mut found = false;
+    visit_gpu_handles(value, &mut |_| found = true);
+    found
 }
 
 /// Convert GPU-resident values to host tensors when an acceleration provider exists.
@@ -590,32 +579,66 @@ fn propagate_gpu_provenance(args: &[Value], result: &mut Value) {
     });
 }
 
-fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+/// Visit resident handles, including nested object/callable payloads, without
+/// revisiting cycles in GC-owned object graphs.
+pub fn visit_gpu_handles(value: &Value, visitor: &mut impl FnMut(&GpuTensorHandle)) {
+    visit_gpu_handles_inner(value, visitor, &mut Vec::new());
+}
+
+fn visit_gpu_handles_inner(
+    value: &Value,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+    seen: &mut Vec<runmat_gc_api::GcHandle>,
+) {
     match value {
         Value::GpuTensor(handle) => visitor(handle),
         Value::Cell(cell) => cell
             .data
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
         Value::Struct(value) => value
             .fields
             .values()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
         Value::StructArray(array) => {
-            array.for_each_value(|value| visit_gpu_handles(value, visitor));
+            array.for_each_value(|value| visit_gpu_handles_inner(value, visitor, seen));
         }
         Value::Object(value) => value
             .properties
             .values()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
+        Value::ObjectArray(array) => array
+            .data()
+            .iter()
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
+        Value::HandleObject(handle) => visit_gpu_target(&handle.target, visitor, seen),
+        Value::Listener(listener) => {
+            visit_gpu_target(&listener.target, visitor, seen);
+            visit_gpu_target(&listener.callback, visitor, seen);
+        }
         Value::Closure(value) => value
             .captures
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
         Value::OutputList(values) => values
             .iter()
-            .for_each(|value| visit_gpu_handles(value, visitor)),
+            .for_each(|value| visit_gpu_handles_inner(value, visitor, seen)),
         _ => {}
+    }
+}
+
+fn visit_gpu_target(
+    target: &runmat_gc_api::GcHandle,
+    visitor: &mut impl FnMut(&GpuTensorHandle),
+    seen: &mut Vec<runmat_gc_api::GcHandle>,
+) {
+    if seen.contains(target) {
+        return;
+    }
+    seen.push(*target);
+    // Release the GC access scope before following another handle edge.
+    if let Ok(value) = runmat_gc::gc_with_value(target, Clone::clone) {
+        visit_gpu_handles_inner(&value, visitor, seen);
     }
 }
 
@@ -1060,6 +1083,8 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
     }
 }
 
+#[cfg(test)]
+mod gpu_visit_tests;
 #[cfg(test)]
 mod tests {
     use super::{

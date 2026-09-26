@@ -35,18 +35,20 @@ pub async fn prepare_builtin_args(
     }
 }
 
-pub async fn call_prepared_builtin(
+pub fn call_prepared_builtin(
     name: &str,
-    prepared: &mut PreparedBuiltinCall,
+    prepared: PreparedBuiltinCall,
     outputs: usize,
-) -> Result<Value, RuntimeError> {
+) -> impl std::future::Future<Output = Result<Value, RuntimeError>> + '_ {
     #[cfg(feature = "native-accel")]
-    let observation = prepared.begin_execution();
-    let result =
-        runmat_runtime::call_builtin_async_with_outputs(name, prepared.args(), outputs).await;
-    #[cfg(feature = "native-accel")]
-    if let Some(observation) = observation {
-        observation.finish(&result);
+    {
+        prepared.execute(move |args| async move {
+            runmat_runtime::call_builtin_async_with_outputs(name, &args, outputs).await
+        })
     }
-    result
+    #[cfg(not(feature = "native-accel"))]
+    {
+        let args = prepared.0;
+        async move { runmat_runtime::call_builtin_async_with_outputs(name, &args, outputs).await }
+    }
 }

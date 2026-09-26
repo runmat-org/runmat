@@ -1,6 +1,6 @@
 use super::*;
 
-enum ArgumentOperation {
+pub(super) enum ArgumentOperation {
     Reduction,
     Binary(BinaryOp),
     Unary(UnaryOp),
@@ -101,6 +101,16 @@ impl NativeAutoOffload {
         let Some(operation) = ArgumentOperation::for_call(name, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
+        self.prepare_operation(name, args, runtime, operation)
+    }
+
+    pub(super) fn prepare_operation(
+        &self,
+        name: &str,
+        args: &[Value],
+        runtime: Option<&RuntimeContext>,
+        operation: ArgumentOperation,
+    ) -> Result<PreparedBuiltinCall> {
         let Some((evaluation, family, workload)) = operation.evaluate(self, args) else {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         };
@@ -126,10 +136,12 @@ impl NativeAutoOffload {
         let mut observation =
             BuiltinCallObservation::new(feedback, trace, evaluation.recommend_gpu, args);
         let mut processed = args.to_vec();
+        let mut uploads = super::ownership::OwnedUploads::new(self.provider, args);
         if evaluation.recommend_gpu {
             for value in processed.iter_mut().take(operation.count()) {
                 *value =
                     self.promote_tensor_if_large_observed(value, 1, observation.trace.as_ref())?;
+                uploads.track(value);
             }
             if !processed
                 .iter()
@@ -143,6 +155,7 @@ impl NativeAutoOffload {
         Ok(PreparedBuiltinCall {
             args: processed,
             observation: Some(observation),
+            uploads: Some(uploads),
         })
     }
 }

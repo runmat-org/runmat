@@ -1,4 +1,5 @@
 use super::*;
+mod ownership;
 use crate::placement::{begin_trace, LocalPlacementFeedback};
 use runmat_execution::{
     Digest, PlacementFeedback, PlacementPlanRequest, PlacementRevision, PlacementSignature,
@@ -105,18 +106,17 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
     PreparedBuiltinCall {
         args,
         observation: Some(observation),
+        uploads: None,
     }
 }
 
 #[test]
 fn cpu_call_is_observed_only_once_after_its_result() {
     let probe = Rc::new(Probe::default());
-    let mut prepared = observed(&probe, false, vec![Value::Num(1.)]);
-    let observation = prepared.begin_execution().unwrap();
+    let prepared = observed(&probe, false, vec![Value::Num(1.)]);
+    let observation = prepared.into_execution().1;
     assert!(probe.feedback.borrow().is_empty());
-    assert!(prepared.begin_execution().is_none());
     observation.finish(&Ok(Value::Num(2.)));
-    drop(prepared);
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }
@@ -124,14 +124,14 @@ fn cpu_call_is_observed_only_once_after_its_result() {
 #[test]
 fn errors_abandonment_and_cancelled_call_futures_report_failure() {
     let probe = Rc::new(Probe::default());
-    let mut prepared = observed(&probe, false, vec![]);
+    let prepared = observed(&probe, false, vec![]);
     prepared
-        .begin_execution()
-        .unwrap()
+        .into_execution()
+        .1
         .finish(&Err(RuntimeError::new("test failure")));
     drop(observed(&probe, false, vec![]));
-    let mut prepared = observed(&probe, false, vec![]);
-    let observation = prepared.begin_execution().unwrap();
+    let prepared = observed(&probe, false, vec![]);
+    let observation = prepared.into_execution().1;
     let future = async move {
         std::future::pending::<()>().await;
         observation.finish(&Ok(Value::Num(1.)));
@@ -144,25 +144,21 @@ fn errors_abandonment_and_cancelled_call_futures_report_failure() {
         .borrow()
         .iter()
         .all(|sample| !sample.succeeded));
-    assert_eq!(prepared.args().len(), 0);
 }
 
 #[test]
 fn provider_return_is_not_a_completed_device_cost_sample() {
     let probe = Rc::new(Probe::default());
-    let mut prepared = observed(&probe, true, vec![]);
-    prepared
-        .begin_execution()
-        .unwrap()
-        .finish(&Ok(Value::Num(1.)));
+    let prepared = observed(&probe, true, vec![]);
+    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
     assert!(
         probe.feedback.borrow().is_empty(),
         "host retry or provider submission cannot establish device timing"
     );
-    let mut prepared = observed(&probe, true, vec![]);
+    let prepared = observed(&probe, true, vec![]);
     prepared
-        .begin_execution()
-        .unwrap()
+        .into_execution()
+        .1
         .finish(&Err(RuntimeError::new("provider failed")));
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
@@ -177,8 +173,8 @@ fn resident_input_or_output_prevents_unproven_cpu_sample() {
         42,
     ));
     for (input, output) in [(device.clone(), Value::Num(1.)), (Value::Num(1.), device)] {
-        let mut prepared = observed(&probe, false, vec![input]);
-        prepared.begin_execution().unwrap().finish(&Ok(output));
+        let prepared = observed(&probe, false, vec![input]);
+        prepared.into_execution().1.finish(&Ok(output));
     }
     assert!(probe.feedback.borrow().is_empty());
 }
@@ -192,10 +188,7 @@ fn preparation_fallback_is_failed_provider_attempt_not_cpu_success() {
         .as_mut()
         .unwrap()
         .preparation_fallback();
-    prepared
-        .begin_execution()
-        .unwrap()
-        .finish(&Ok(Value::Num(2.)));
+    prepared.into_execution().1.finish(&Ok(Value::Num(2.)));
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
@@ -203,7 +196,7 @@ fn preparation_fallback_is_failed_provider_attempt_not_cpu_success() {
 #[test]
 fn cancellation_flag_prevents_a_success_sample() {
     let probe = Rc::new(Probe::default());
-    let mut prepared = observed(&probe, false, vec![]);
+    let prepared = observed(&probe, false, vec![]);
     let ticket = prepared
         .observation
         .as_ref()
@@ -215,10 +208,7 @@ fn cancellation_flag_prevents_a_success_sample() {
         .runtime
         .cancellation()
         .store(true, std::sync::atomic::Ordering::Relaxed);
-    prepared
-        .begin_execution()
-        .unwrap()
-        .finish(&Ok(Value::Num(1.)));
+    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
 
@@ -228,15 +218,12 @@ fn preparation_passes_session_and_exact_operation_to_existing_planner() {
     let runtime = runtime(&probe);
     let auto = NativeAutoOffload::new(&PROVIDER, ThresholdConfig::default());
     let input = Value::Tensor(Tensor::new(vec![1.; 4], vec![1, 4]).unwrap());
-    let mut prepared = auto.prepare_call("mean", &[input], Some(&runtime)).unwrap();
+    let prepared = auto.prepare_call("mean", &[input], Some(&runtime)).unwrap();
     assert_eq!(probe.requests.borrow().len(), 1);
     assert_eq!(probe.requests.borrow()[0].signature.operation, "mean");
     assert!(probe.feedback.borrow().is_empty());
     assert!(matches!(prepared.args()[0], Value::Tensor(_)));
-    prepared
-        .begin_execution()
-        .unwrap()
-        .finish(&Ok(Value::Num(1.)));
+    prepared.into_execution().1.finish(&Ok(Value::Num(1.)));
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }

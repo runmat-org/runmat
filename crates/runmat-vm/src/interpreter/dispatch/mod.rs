@@ -1822,11 +1822,10 @@ pub async fn dispatch_instruction(
                 build_builtin_expand_multi_args(stack, specs, sequence_register, &context.runtime)
                     .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let mut prepared =
+            let prepared =
                 crate::call::builtins::prepare_builtin_args(name, &args, &context.runtime).await?;
             let result =
-                crate::call::builtins::call_prepared_builtin(name, &mut prepared, *out_count)
-                    .await?;
+                crate::call::builtins::call_prepared_builtin(name, prepared, *out_count).await?;
             calls::publish_fixed_outputs(
                 stack,
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,

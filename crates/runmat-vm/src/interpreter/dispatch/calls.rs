@@ -303,17 +303,12 @@ async fn handle_builtin_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
-    let mut prepared_primary = call_builtins::prepare_builtin_args(name, &args, runtime).await?;
+    let prepared_primary = call_builtins::prepare_builtin_args(name, &args, runtime).await?;
     let result =
-        call_builtins::call_prepared_builtin(name, &mut prepared_primary, requested_outputs).await;
-    let imported = call_builtins::resolve_imported_builtin(
-        name,
-        imports,
-        prepared_primary.args(),
-        requested_outputs,
-        runtime,
-    )
-    .await?;
+        call_builtins::call_prepared_builtin(name, prepared_primary, requested_outputs).await;
+    let imported =
+        call_builtins::resolve_imported_builtin(name, imports, &args, requested_outputs, runtime)
+            .await?;
     if result.is_err() {
         if let Some(err) = call_builtins::rethrow_without_explicit_exception(
             name,

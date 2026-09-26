@@ -1,0 +1,172 @@
+use super::super::preparation::ArgumentOperation;
+use super::*;
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64, Ordering},
+    Mutex,
+};
+
+struct CounterProvider {
+    next: AtomicU64,
+    fail_on: Option<u64>,
+    freed: Mutex<Vec<u64>>,
+    device: u32,
+}
+impl AccelProvider for CounterProvider {
+    fn upload(&self, view: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        if self.fail_on == Some(id) {
+            return Err(anyhow!("selected upload failure"));
+        }
+        Ok(GpuTensorHandle::new(view.shape.to_vec(), self.device, id)
+            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real))
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        Box::pin(async { Err(anyhow!("unused")) })
+    }
+    fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
+        self.freed.lock().unwrap().push(handle.buffer_id);
+        Ok(())
+    }
+    fn device_info(&self) -> String {
+        "owned-upload-test".into()
+    }
+    fn device_id(&self) -> u32 {
+        self.device
+    }
+    fn precision(&self) -> ProviderPrecision {
+        ProviderPrecision::F64
+    }
+    fn query_feasibility(
+        &self,
+        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        runmat_accelerate_api::ProviderFeasibility::supported(Default::default())
+    }
+}
+fn provider(fail_on: Option<u64>) -> &'static CounterProvider {
+    static DEVICE: AtomicU32 = AtomicU32::new(19000);
+    Box::leak(Box::new(CounterProvider {
+        next: AtomicU64::new(1),
+        fail_on,
+        freed: Mutex::new(vec![]),
+        device: DEVICE.fetch_add(1, Ordering::Relaxed),
+    }))
+}
+fn host() -> Value {
+    Value::Tensor(Tensor::new(vec![1.; 2], vec![1, 2]).unwrap())
+}
+fn prepare(provider: &'static CounterProvider, args: &[Value]) -> Result<PreparedBuiltinCall> {
+    let probe = Rc::new(Probe::default());
+    probe.provider.set(true);
+    NativeAutoOffload::new(provider, ThresholdConfig::default()).prepare_operation(
+        "owned.binary.test",
+        args,
+        Some(&runtime(&probe)),
+        ArgumentOperation::Binary(BinaryOp::Elementwise),
+    )
+}
+
+#[test]
+fn second_upload_failure_releases_first_success() {
+    let provider = provider(Some(2));
+    assert!(prepare(provider, &[host(), host()]).is_err());
+    assert_eq!(*provider.freed.lock().unwrap(), vec![1]);
+}
+
+#[test]
+fn abandoned_preparation_and_failed_call_release_uploads() {
+    for fail_call in [false, true] {
+        let provider = provider(None);
+        let prepared = prepare(provider, &[host(), host()]).unwrap();
+        if fail_call {
+            prepared
+                .into_execution()
+                .1
+                .finish(&Err(RuntimeError::new("call failure")));
+        } else {
+            drop(prepared);
+        }
+        assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2]);
+    }
+}
+
+#[test]
+fn nested_return_alias_adopts_only_its_own_upload() {
+    let provider = provider(None);
+    let prepared = prepare(provider, &[host(), host()]).unwrap();
+    let output = Value::OutputList(vec![Value::OutputList(vec![prepared.args()[0].clone()])]);
+    prepared.into_execution().1.finish(&Ok(output));
+    assert_eq!(*provider.freed.lock().unwrap(), vec![2]);
+}
+
+#[test]
+fn borrowed_input_is_never_released_on_call_failure() {
+    let provider = provider(None);
+    let borrowed = Value::GpuTensor(
+        GpuTensorHandle::new(vec![1, 2], provider.device, 900)
+            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real),
+    );
+    let prepared = prepare(provider, &[borrowed, host()]).unwrap();
+    prepared
+        .into_execution()
+        .1
+        .finish(&Err(RuntimeError::new("call failure")));
+    assert_eq!(*provider.freed.lock().unwrap(), vec![1]);
+}
+
+#[test]
+fn public_execution_future_releases_uploads_when_dropped_before_or_after_poll() {
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    for poll_once in [false, true] {
+        let provider = provider(None);
+        let prepared = prepare(provider, &[host(), host()]).unwrap();
+        let mut future = Box::pin(
+            prepared.execute(|_args| std::future::pending::<Result<Value, RuntimeError>>()),
+        );
+        if poll_once {
+            let mut context = Context::from_waker(futures::task::noop_waker_ref());
+            assert!(matches!(future.as_mut().poll(&mut context), Poll::Pending));
+        }
+        assert!(provider.freed.lock().unwrap().is_empty());
+        drop(future);
+        assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2]);
+    }
+}
+
+#[test]
+fn public_execution_adopts_nested_result_alias_and_releases_other_arguments() {
+    let provider = provider(None);
+    let prepared = prepare(provider, &[host(), host()]).unwrap();
+    let result = futures::executor::block_on(
+        prepared.execute(|args| async move { Ok(Value::OutputList(vec![args[0].clone()])) }),
+    )
+    .unwrap();
+    assert_eq!(*provider.freed.lock().unwrap(), vec![2]);
+    assert!(runmat_runtime::dispatcher::value_contains_gpu(&result));
+}
+
+#[test]
+fn failed_primary_leaves_original_arguments_valid_for_independent_preparation() {
+    let provider = provider(None);
+    let original = [host(), host()];
+    let primary = prepare(provider, &original).unwrap();
+    let result = futures::executor::block_on(
+        primary.execute(|_| async { Err(RuntimeError::new("primary rejection")) }),
+    );
+    assert!(result.is_err());
+    assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2]);
+    assert!(original
+        .iter()
+        .all(|value| matches!(value, Value::Tensor(_))));
+    let imported = prepare(provider, &original).unwrap();
+    let result = futures::executor::block_on(imported.execute(|_| async { Ok(Value::Num(1.)) }));
+    assert_eq!(result.unwrap(), Value::Num(1.));
+    assert_eq!(*provider.freed.lock().unwrap(), vec![1, 2, 3, 4]);
+}

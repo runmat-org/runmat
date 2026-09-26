@@ -1167,8 +1167,8 @@ pub async fn resolve_imported_builtin(
             let Some(qual) = imported_builtin_qualified_name(path, None) else {
                 continue;
             };
-            let mut qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
-            let result = call_prepared_builtin(&qual, &mut qual_args, requested_outputs).await;
+            let qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
+            let result = call_prepared_builtin(&qual, qual_args, requested_outputs).await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -1197,8 +1197,8 @@ pub async fn resolve_imported_builtin(
         let Some(qual) = imported_builtin_qualified_name(path, Some(name)) else {
             continue;
         };
-        let mut qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
-        let result = call_prepared_builtin(&qual, &mut qual_args, requested_outputs).await;
+        let qual_args = prepare_builtin_args(&qual, prepared_primary, runtime).await?;
+        let result = call_prepared_builtin(&qual, qual_args, requested_outputs).await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }

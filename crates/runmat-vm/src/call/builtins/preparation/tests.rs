@@ -15,18 +15,16 @@ fn prepared_call_keeps_outputs_and_runtime_errors() {
             let args = [Value::Tensor(
                 runmat_value::Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
             )];
-            let mut prepared = prepare_builtin_args("size", &args, &runtime).await.unwrap();
-            let result = call_prepared_builtin("size", &mut prepared, 2)
-                .await
-                .unwrap();
+            let prepared = prepare_builtin_args("size", &args, &runtime).await.unwrap();
+            let result = call_prepared_builtin("size", prepared, 2).await.unwrap();
             let Value::OutputList(outputs) = result else {
                 panic!("two outputs")
             };
             assert_eq!(outputs, vec![Value::Num(2.), Value::Num(3.)]);
-            let mut prepared = prepare_builtin_args("__missing_observed_builtin__", &[], &runtime)
+            let prepared = prepare_builtin_args("__missing_observed_builtin__", &[], &runtime)
                 .await
                 .unwrap();
-            let error = call_prepared_builtin("__missing_observed_builtin__", &mut prepared, 1)
+            let error = call_prepared_builtin("__missing_observed_builtin__", prepared, 1)
                 .await
                 .unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));

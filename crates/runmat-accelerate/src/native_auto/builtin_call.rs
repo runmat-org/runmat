@@ -1,5 +1,6 @@
 //! Automatic argument placement and its invocation-owned observation.
 mod observation;
+mod ownership;
 mod preparation;
 #[cfg(test)]
 mod tests;
@@ -11,6 +12,30 @@ use runmat_runtime::{context::RuntimeContext, RuntimeError};
 pub struct PreparedBuiltinCall {
     args: Vec<Value>,
     observation: Option<BuiltinCallObservation>,
+    uploads: Option<ownership::OwnedUploads>,
+}
+
+/// One call owns both its measurement and its fresh operand allocations.
+pub struct BuiltinCallGuard {
+    observation: Option<BuiltinCallObservation>,
+    uploads: Option<ownership::OwnedUploads>,
+}
+
+impl BuiltinCallGuard {
+    pub fn begin_execution(&mut self) {
+        if let Some(observation) = self.observation.as_mut() {
+            observation.execution_started();
+        }
+    }
+
+    pub fn finish(mut self, result: &Result<Value, RuntimeError>) {
+        if let (Some(uploads), Ok(value)) = (self.uploads.as_mut(), result) {
+            uploads.adopt(value);
+        }
+        if let Some(observation) = self.observation.take() {
+            observation.finish(result);
+        }
+    }
 }
 
 impl PreparedBuiltinCall {
@@ -18,6 +43,7 @@ impl PreparedBuiltinCall {
         Self {
             args,
             observation: None,
+            uploads: None,
         }
     }
 
@@ -25,17 +51,41 @@ impl PreparedBuiltinCall {
         &self.args
     }
 
-    /// Move the observation into the call future so cancelling that future
-    /// closes it immediately, even when the prepared arguments remain alive.
-    pub fn begin_execution(&mut self) -> Option<BuiltinCallObservation> {
-        let mut observation = self.observation.take()?;
-        observation.execution_started();
-        Some(observation)
+    /// Transfer one invocation's arguments and ownership to its execution scope.
+    pub fn into_execution(self) -> (Vec<Value>, BuiltinCallGuard) {
+        (
+            self.args,
+            BuiltinCallGuard {
+                observation: self.observation,
+                uploads: self.uploads,
+            },
+        )
+    }
+
+    /// Own the prepared arguments before the returned future is first polled.
+    pub fn execute<F, Fut>(
+        self,
+        call: F,
+    ) -> impl std::future::Future<Output = Result<Value, RuntimeError>>
+    where
+        F: FnOnce(Vec<Value>) -> Fut,
+        Fut: std::future::Future<Output = Result<Value, RuntimeError>>,
+    {
+        let (args, mut guard) = self.into_execution();
+        async move {
+            guard.begin_execution();
+            let result = call(args).await;
+            guard.finish(&result);
+            result
+        }
     }
 
     pub(super) fn into_args(mut self) -> Vec<Value> {
         if let Some(observation) = self.observation.take() {
             observation.preparation_only();
+        }
+        if let Some(uploads) = self.uploads.take() {
+            uploads.transfer_all();
         }
         self.args
     }
