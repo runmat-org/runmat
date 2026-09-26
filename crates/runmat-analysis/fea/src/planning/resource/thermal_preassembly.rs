@@ -1,8 +1,8 @@
 //! Composition of thermal preassembly component estimates; not whole-process admission.
 use super::{
     ByteCount, ResourcePlanningError, ThermalFieldConstructionResourceFacts,
-    ThermalHistoryResourceFacts, ThermalMetadataResourceFacts, ThermalObservationResourceFacts,
-    ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
+    ThermalHistoryResourceFacts, ThermalManifestCatalogResourceFacts, ThermalMetadataResourceFacts,
+    ThermalObservationResourceFacts, ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
     ThermalSourceEvidenceResourceFacts,
 };
 use crate::execution::ThermalSolveSchedule;
@@ -20,6 +20,7 @@ pub struct ThermalPreassemblyResourceFacts {
     pub realization: ThermalRealizationResourceFacts,
     pub metadata: ThermalMetadataResourceFacts,
     pub field_construction: ThermalFieldConstructionResourceFacts,
+    pub manifest_catalog: ThermalManifestCatalogResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
@@ -69,6 +70,8 @@ impl ThermalPreassemblyResourceFacts {
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
         let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;
+        let manifest_catalog = ThermalManifestCatalogResourceFacts::derive(mesh, schedule)?;
+        let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
         let base = component_bytes(
             &history,
             &operators,
@@ -79,6 +82,7 @@ impl ThermalPreassemblyResourceFacts {
             &metadata,
         )?
         .checked_add(field_construction.reservation_bytes().0)
+        .and_then(|bytes| bytes.checked_add(catalog_bytes))
         .ok_or(ResourcePlanningError::Overflow(
             "thermal field construction reservation",
         ))?;
@@ -119,11 +123,13 @@ impl ThermalPreassemblyResourceFacts {
             realization,
             metadata,
             field_construction,
+            manifest_catalog,
             model_materialization_bytes,
         })
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
+        let catalog_bytes = self.manifest_catalog.reservation_bytes()?.0;
         component_bytes(
             &self.history,
             &self.operators,
@@ -135,6 +141,7 @@ impl ThermalPreassemblyResourceFacts {
         )?
         .checked_add(self.property_compilation_bytes.0)
         .and_then(|bytes| bytes.checked_add(self.field_construction.reservation_bytes().0))
+        .and_then(|bytes| bytes.checked_add(catalog_bytes))
         .map(ByteCount)
         .ok_or(ResourcePlanningError::Overflow(
             "thermal preassembly reservation",

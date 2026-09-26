@@ -70,6 +70,37 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             result.source_result_identity().unwrap()
         );
         assert!(manifest.run.fields.is_empty());
+        let mut duplicate = manifest.clone();
+        duplicate.fields[1][0].partitions[0].partition =
+            duplicate.fields[0][0].partitions[0].partition;
+        assert!(duplicate
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("partition coverage"));
+        let schedule = crate::execution::ThermalSolveSchedule::derive(
+            &model,
+            &model.sequence.steps[0],
+            ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
+        )
+        .unwrap();
+        let facts = crate::planning::resource::ThermalManifestCatalogResourceFacts::derive(
+            &canonical_tetrahedron_solver_mesh(order),
+            &schedule,
+        )
+        .unwrap();
+        let actual = runmat_canonical_codec::profile_serialized(&manifest.fields, LIMITS).unwrap();
+        assert!(actual.encoded_bytes_upper_bound <= facts.catalog.encoded_bytes_upper_bound);
+        assert!(
+            actual.materialization_resident_bytes_estimate
+                <= facts.catalog.materialization_resident_bytes_estimate
+        );
+        assert_eq!(
+            facts.validation_scratch_bytes.0,
+            (12 * std::mem::size_of::<crate::results::field::RecoveredFieldPartitionIdentity>()
+                + std::mem::size_of::<Vec<crate::results::field::RecoveredFieldPartitionIdentity>>(
+                )) as u64
+        );
         assert!(manifest.run.observation_histories.is_empty());
         assert_eq!(
             ThermalSolverResultManifest::from_canonical_bytes(&manifest.canonical_bytes().unwrap())

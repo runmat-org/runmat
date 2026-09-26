@@ -468,14 +468,8 @@ pub struct RecoveredFieldArtifact {
     fields: Vec<RecoveredField>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RecoveredFieldArtifactEntry {
-    pub field: RecoveredFieldIdentity,
-    pub definition: RecoveredFieldDefinition,
-    pub sample: RecoveredFieldSample,
-    pub partitions: Vec<RecoveredFieldPartitionDescriptor>,
-}
+mod entry;
+pub use entry::RecoveredFieldArtifactEntry;
 
 /// Lightweight semantic catalog for a recovered-field artifact.
 ///

@@ -72,6 +72,34 @@ fn field_construction_scratch_is_composed_before_assembly() {
 }
 
 #[test]
+fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
+    let mut workload = workload();
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let schedule = workload.solve_schedule().unwrap();
+    let facts = ThermalPreassemblyResourceFacts::derive(
+        &workload.model,
+        &workload.model.sequence.steps[0],
+        &mesh,
+        &schedule,
+    )
+    .unwrap();
+    let catalog = facts.manifest_catalog.reservation_bytes().unwrap().0;
+    let required = facts.reservation_bytes().unwrap().0;
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = required - catalog;
+    assert!(
+        matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
+        ResourcePlanningError::AccuracyCeiling { required: actual, .. }
+    )) if actual == required)
+    );
+    let mut overflow = facts.manifest_catalog;
+    overflow.validation_scratch_bytes = ByteCount(u64::MAX);
+    assert!(overflow.reservation_bytes().is_err());
+}
+
+#[test]
 fn backend_evidence_bound_tracks_solves_and_rejects_overflow() {
     let mut workload = workload();
     for (procedure, expected) in [
@@ -282,6 +310,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.metadata.reservation_bytes().unwrap().0
                 + grown.property_compilation_bytes.0
                 + grown.field_construction.reservation_bytes().0
+                + grown.manifest_catalog.reservation_bytes().unwrap().0
         );
         workload.model.sequence.steps[0]
             .accuracy

@@ -461,12 +461,23 @@ full-field identity materialization and one partition's extracted values/indices
 materialization: those operations are sequential, while retained histories are reserved separately.
 Tests cover real/complex scalar, vector and symmetric-tensor identity schemas, invalid profiles,
 overflow, and Tet4/Tet10 solve rejection when this scratch is omitted from the resident ceiling.
-This component does not yet admit retained manifest/transport inventory or their validation overlap;
+This component alone does not admit retained manifest/transport inventory or their validation overlap;
 it is not a whole-process memory qualification.
 The isolated field-residency test also measures identity construction separately: 65,536 scalar
 values used 3,149,451 B peak additional Rust heap against a 5,444,494 B profile; 786,432 values used
 33,558,155 B against 64,557,966 B. These two measured cases support the profile's conservative
 scratch estimate; native allocator overhead and unrelated process memory are not included.
+
+The retained thermal sample/field/partition catalog now has a separate preassembly component.
+Its shape projection uses the same artifact-entry serializer and actual partition-descriptor schema
+as publication, repeating only borrowed templates rather than allocating descriptor arrays. It
+includes the shared catalog materialization estimate, an explicitly sized partition-identity sort
+buffer, and the result-identity vector. Manifest uniqueness validation uses a fallibly reserved
+sorted copy, preserving the original catalog order; this buffer drops before identity encoding.
+Construction also drops its temporary identity list before manifest validation, avoiding two live
+copies. Tet4/Tet10 tests compare projected and actual catalogs and reject duplicate partition
+identities and insufficient resident ceilings. This still excludes the manifest's other run/source
+metadata and full transport-object/chunk lifetime composition; complete admission remains open.
 
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition

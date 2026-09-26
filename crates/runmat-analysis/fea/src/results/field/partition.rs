@@ -19,6 +19,11 @@ const FIELD_PARTITION_LIMITS: CanonicalLimits =
 pub struct RecoveredFieldPartitionIdentity(Digest);
 
 impl RecoveredFieldPartitionIdentity {
+    /// Fixed-width shape projection only; never published as an artifact identity.
+    pub(super) const fn profile_placeholder() -> Self {
+        Self(Digest::from_bytes([0; 32]))
+    }
+
     pub const fn digest(self) -> Digest {
         self.0
     }

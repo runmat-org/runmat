@@ -82,6 +82,7 @@ impl ThermalSolverResultManifest {
             .map(|entries| entries.each_ref().map(|entry| entry.field))
             .collect::<Vec<_>>();
         let identity = result.metadata().identity(&field_identities)?;
+        drop(field_identities);
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
@@ -158,7 +159,19 @@ impl ThermalSolverResultManifest {
                 "invalid schema, history inventory, or embedded numerical payload",
             ));
         }
-        let mut identities = std::collections::BTreeSet::new();
+        let partition_count = self
+            .fields
+            .iter()
+            .flatten()
+            .try_fold(0usize, |count, entry| {
+                count
+                    .checked_add(entry.partitions.len())
+                    .ok_or_else(|| invalid("partition count overflow"))
+            })?;
+        let mut identities = Vec::new();
+        identities
+            .try_reserve_exact(partition_count)
+            .map_err(|_| invalid("partition identity scratch allocation failed"))?;
         for (ordinal, entries) in self.fields.iter().enumerate() {
             for (index, entry) in entries.iter().enumerate() {
                 if entry.definition != definition(index, ordinal)?
@@ -181,10 +194,10 @@ impl ThermalSolverResultManifest {
                         || partition.entity_count > RECOVERED_FIELD_PARTITION_ENTITY_COUNT
                         || (position + 1 < entry.partitions.len()
                             && partition.entity_count != RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
-                        || !identities.insert(partition.partition)
                     {
                         return Err(invalid("invalid canonical field partition coverage"));
                     }
+                    identities.push(partition.partition);
                     next = next
                         .checked_add(partition.entity_count)
                         .ok_or_else(|| invalid("partition count overflow"))?;
@@ -194,6 +207,11 @@ impl ThermalSolverResultManifest {
                 }
             }
         }
+        identities.sort_unstable();
+        if identities.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid("invalid canonical field partition coverage"));
+        }
+        drop(identities);
         let fields = self
             .fields
             .iter()
