@@ -1,10 +1,9 @@
 //! MATLAB-compatible scalar `syms` builtin for declaring symbolic variables.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BuiltinErrorDescriptor, SYMS_DESCRIPTOR, SYMS_ERRORS, SYMS_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_macros::runtime_builtin;
+
 use runmat_types::{parse_symbolic_declaration, symbolic_declaration_tokens, SymbolicDeclaration};
 use runmat_value::{SymbolicExpr, Value};
 
@@ -14,67 +13,17 @@ use super::{empty_return_value, text_scalar};
 
 const BUILTIN_NAME: &str = "syms";
 
-const SYMS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ans",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Empty return value for command declarations.",
-}];
-
-const SYMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "name",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Symbol names and optional assumption keywords.",
-}];
-
-const SYMS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "syms name ...",
-    inputs: &SYMS_INPUTS,
-    outputs: &SYMS_OUTPUT,
-}];
-
-const SYMS_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BuiltinErrorDescriptor {
-        code: "RM.SYMS.EMPTY",
-        identifier: Some("RunMat:syms:EmptyDeclaration"),
-        when: "No symbol names were supplied.",
-        message: "syms: expected at least one symbolic variable name",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SYMS.INVALID_NAME",
-        identifier: Some("RunMat:syms:InvalidName"),
-        when: "A declaration token is not a valid MATLAB identifier or assumption keyword.",
-        message: "syms: invalid symbolic variable name",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.SYMS.WORKSPACE",
-        identifier: Some("RunMat:syms:WorkspaceUnavailable"),
-        when: "The active runtime cannot assign to the caller workspace.",
-        message: "syms: workspace assignment unavailable",
-    },
-];
-
-pub const SYMS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SYMS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SYMS_ERRORS,
-};
-
-#[runtime_builtin(
+#[runmat_macros::runtime_builtin(
     name = "syms",
-    category = "math/symbolic",
-    summary = "Declare scalar symbolic variables in the active workspace.",
-    keywords = "syms,symbolic,variable,workspace",
-    sink = true,
-    suppress_auto_output = true,
-    descriptor(crate::builtins::math::symbolic::syms::SYMS_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::symbolic::syms"
 )]
 async fn syms_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &SYMS_DESCRIPTOR,
+        &SYMS_ERROR_TOO_MANY_OUTPUTS,
+        "syms",
+    )?;
     let declarations = declared_symbols(&args)?;
     if declarations.is_empty() {
         return Err(syms_error(&SYMS_ERRORS[0]));
@@ -97,6 +46,10 @@ async fn syms_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 fn declared_symbols(args: &[Value]) -> BuiltinResult<Vec<SymbolicDeclaration>> {
     let mut declarations = Vec::new();
     for arg in args {
+        if matches!(arg, Value::CharArray(chars) if chars.shape.iter().skip(2).any(|dimension| *dimension != 1))
+        {
+            return Err(syms_error(&SYMS_ERRORS[1]));
+        }
         let Some(text) = text_scalar(arg) else {
             return Err(syms_error(&SYMS_ERRORS[1]));
         };
@@ -217,6 +170,32 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["x".to_string(), "h".to_string()]
         );
+    }
+
+    #[test]
+    fn validation_and_output_arity_fail_before_any_workspace_write() {
+        let _workspace = test_workspace_guard();
+        let error =
+            block_on(syms_builtin(vec![Value::from("x"), Value::from("_bad")])).unwrap_err();
+        assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
+        assert!(crate::workspace::lookup("x").is_none());
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        let error = block_on(syms_builtin(vec![Value::from("x")])).unwrap_err();
+        assert_eq!(error.identifier(), SYMS_ERROR_TOO_MANY_OUTPUTS.identifier);
+        assert!(crate::workspace::lookup("x").is_none());
+    }
+
+    #[test]
+    fn zero_outputs_still_declares_and_placeholder_is_empty_double() {
+        let _workspace = test_workspace_guard();
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        let value = block_on(syms_builtin(vec![Value::from("x h")])).unwrap();
+        assert_eq!(crate::workspace::lookup("x").unwrap().to_string(), "x");
+        assert_eq!(crate::workspace::lookup("h").unwrap().to_string(), "h");
+        let Value::Tensor(tensor) = value else {
+            panic!("empty double placeholder")
+        };
+        assert_eq!(tensor.shape, vec![0, 0]);
     }
 
     #[test]
