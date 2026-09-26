@@ -3,9 +3,7 @@ use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadPartition,
     CanonicalSemanticState, SemanticStatePublicationRequest, ThermalSolverResultManifest,
 };
-use runmat_analysis_fea::results::field::{
-    canonical_field_partitions, RecoveredField, RecoveredFieldPartition,
-};
+use runmat_analysis_fea::results::field::{RecoveredFieldPartition, RecoveredFieldView};
 use runmat_analysis_fea::FeaThermalRunResult;
 use runmat_execution::{value::ValueRef, Digest};
 use runmat_execution_artifact::{
@@ -25,8 +23,8 @@ pub fn prepare_thermal_solver_result_objects(
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
     let manifest = ThermalSolverResultManifest::from_result(result)?;
     let encoding = manifest.encoding_profile()?;
-    // Reject oversized canonical payloads before the final history cloning/encoding pass.
-    // Manifest construction above already extracts partitions and encodes their identities.
+    // Reject oversized canonical payloads before the final partition encoding pass.
+    // Manifest construction above already encodes field and partition identities.
     // Root/chunk inventory validation remains authoritative after transport construction;
     // this early guard is not a complete process-residency or pre-solve admission claim.
     if encoding.encoded_bytes_upper_bound > limits.max_total_bytes
@@ -45,18 +43,15 @@ pub fn prepare_thermal_solver_result_objects(
     ];
     for (ordinal, entries) in manifest.fields.iter().enumerate() {
         for (entry, history) in entries.iter().zip(histories) {
-            let field = RecoveredField::new(
-                entry.definition.clone(),
-                entry.sample,
-                history[ordinal].clone(),
-            )
-            .map_err(field_error)?;
+            let field = RecoveredFieldView::new(&entry.definition, entry.sample, &history[ordinal])
+                .map_err(field_error)?;
             if field.identity() != entry.field {
                 return Err(AnalysisBridgeError::Identity(
                     "thermal field differs from result manifest",
                 ));
             }
-            for partition in canonical_field_partitions(&field).map_err(field_error)? {
+            for partition in field.canonical_partitions().map_err(field_error)? {
+                let partition = partition.map_err(field_error)?;
                 payloads.push((
                     partition.identity.digest(),
                     partition.canonical_bytes().map_err(field_error)?,

@@ -5,6 +5,7 @@ mod contract;
 mod partition;
 mod partition_set;
 mod topology;
+mod view;
 
 pub use catalog::RecoveredFieldCatalog;
 pub use contract::{
@@ -22,6 +23,7 @@ pub use partition_set::{
     RecoveredFieldPartitionSetIdentity, RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
 };
 pub use topology::StructuralRecoveredFieldTopology;
+pub use view::{CanonicalFieldPartitions, RecoveredFieldView};
 
 #[cfg(test)]
 mod tests;

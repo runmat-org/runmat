@@ -2,9 +2,8 @@
 use super::state::CanonicalThermalStatePayload;
 use super::{thermal_result::ThermalResultMetadata, *};
 use crate::results::field::{
-    canonical_field_partitions, reconstruct_recovered_field, RecoveredField,
-    RecoveredFieldArtifactEntry, RecoveredFieldDefinition, RecoveredFieldPartition,
-    RecoveredFieldPartitionDescriptor, RecoveredFieldSample,
+    reconstruct_recovered_field, RecoveredFieldArtifactEntry, RecoveredFieldDefinition,
+    RecoveredFieldPartition, RecoveredFieldSample, RecoveredFieldView,
     RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
 };
 use crate::{FeaRunResult, FeaThermalRunResult, ThermalInitialStateEvidence};
@@ -82,21 +81,10 @@ impl ThermalSolverResultManifest {
             let entry = |index: usize| -> AnalysisExecutionResult<_> {
                 let definition = definition(index, ordinal)?;
                 let sample = RecoveredFieldSample::TimeSeconds(time);
-                let field = RecoveredField::new(
-                    definition.clone(),
-                    sample,
-                    histories[index][ordinal].clone(),
-                )
-                .map_err(invalid)?;
-                let partitions = canonical_field_partitions(&field)
-                    .map_err(invalid)?
-                    .into_iter()
-                    .map(|partition| RecoveredFieldPartitionDescriptor {
-                        partition: partition.identity,
-                        first_source_index: partition.source_indices[0],
-                        entity_count: partition.source_indices.len(),
-                    })
-                    .collect();
+                let field =
+                    RecoveredFieldView::new(&definition, sample, &histories[index][ordinal])
+                        .map_err(invalid)?;
+                let partitions = field.canonical_partition_descriptors().map_err(invalid)?;
                 Ok(RecoveredFieldArtifactEntry {
                     field: field.identity(),
                     definition,
@@ -106,12 +94,17 @@ impl ThermalSolverResultManifest {
             };
             fields.push([entry(0)?, entry(1)?, entry(2)?, entry(3)?]);
         }
+        let field_identities = fields
+            .iter()
+            .map(|entries| entries.each_ref().map(|entry| entry.field))
+            .collect::<Vec<_>>();
+        let identity = result.metadata().identity(&field_identities)?;
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
             source_workload: result.source_workload,
             numerical_intent: result.numerical_intent,
-            identity: result.source_result_identity()?,
+            identity,
             run: FeaRunResult {
                 identity: run.identity.clone(),
                 requested_backend: run.requested_backend,

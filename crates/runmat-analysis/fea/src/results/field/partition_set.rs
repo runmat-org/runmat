@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::{
     RecoveredField, RecoveredFieldDefinition, RecoveredFieldError, RecoveredFieldIdentity,
     RecoveredFieldPartition, RecoveredFieldPartitionIdentity, RecoveredFieldSample,
+    RecoveredFieldView,
 };
 
 const FIELD_PARTITION_SET_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition-set/v1\0";
@@ -195,39 +196,15 @@ impl RecoveredFieldPartitionSet {
 pub fn canonical_field_partitions(
     field: &RecoveredField,
 ) -> Result<Vec<RecoveredFieldPartition>, RecoveredFieldError> {
-    field.validate()?;
-    let entity_count = field
-        .storage()
-        .shape
-        .first()
-        .copied()
-        .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
-    (0..entity_count)
-        .step_by(RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
-        .map(|start| {
-            let end = start
-                .saturating_add(RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
-                .min(entity_count);
-            RecoveredFieldPartition::select(field, (start..end).collect())
-        })
+    RecoveredFieldView::from_field(field)?
+        .canonical_partitions()?
         .collect()
 }
 
 pub fn canonical_field_partition_descriptors(
     field: &RecoveredField,
 ) -> Result<Vec<RecoveredFieldPartitionDescriptor>, RecoveredFieldError> {
-    canonical_field_partitions(field)?
-        .into_iter()
-        .map(|partition| {
-            let first_source_index = partition.source_indices[0];
-            let entity_count = partition.source_indices.len();
-            Ok(RecoveredFieldPartitionDescriptor {
-                partition: partition.identity,
-                first_source_index,
-                entity_count,
-            })
-        })
-        .collect()
+    RecoveredFieldView::from_field(field)?.canonical_partition_descriptors()
 }
 
 pub fn reconstruct_recovered_field(

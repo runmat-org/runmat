@@ -430,12 +430,28 @@ Post-solve thermal preparation now profiles actual manifest metadata and hypothe
 partition shapes through the same serializers used for retained fields. No dummy numerical arrays
 are allocated. The profile counts each canonical contract, sums encoded-size bounds, and records
 the largest individual materialization estimate. Oversized payload projections and inventories
-that cannot hold at least one chunk per contract plus a root are rejected before numerical payload
-cloning/encoding. These conservative guards may reject an encoding that would happen to be smaller;
+that cannot hold at least one chunk per contract plus a root are rejected before final numerical
+payload encoding. These conservative guards may reject an encoding that would happen to be smaller;
 final transport validation still checks actual chunks and the root. Manifest construction has
-already cloned fields, extracted partitions, and encoded their identities before this guard runs.
+already encoded field and partition identities before this guard runs.
 This does not admit that construction, retained histories, simultaneous buffers, or pre-solve
 runtime provenance. The largest-contract estimate is reported, not a process-memory limit.
+
+Manifest descriptors and transport preparation now use the shared validated `RecoveredFieldView`
+over immutable borrowed snapshots. Canonical extraction yields one owned partition at a time;
+descriptor construction drops its numerical values before advancing, and transport retains its
+encoded bytes but drops the numerical partition. Neither consumer clones a full numerical snapshot
+or retains all extracted numerical partitions. Manifest identity reuses the field identities already
+computed for its entries. Source, partition and result identities and canonical wire formats are
+unchanged. The owned collecting API delegates to the same iterator for consumers needing all parts.
+
+`cargo test -p runmat-analysis-fea --test field_partition_residency -- --nocapture` measures
+traversal separately from initial full-field identity construction. For scalar fields with 4 and 48
+canonical partitions (524,288 and 6,291,456 source bytes), additional peak Rust heap was 1,577,498 B
+in both cases. This is bounded traversal evidence only: full-field identity encoding still
+materializes a canonical buffer, and transport retains all encoded payloads while constructing
+chunks. These overlaps and manifest validation still need complete resource admission.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

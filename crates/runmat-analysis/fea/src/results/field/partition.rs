@@ -7,7 +7,7 @@ mod profile;
 
 use super::{
     RecoveredField, RecoveredFieldDefinition, RecoveredFieldError, RecoveredFieldIdentity,
-    RecoveredFieldSample,
+    RecoveredFieldSample, RecoveredFieldView,
 };
 
 const FIELD_PARTITION_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition/v1\0";
@@ -104,7 +104,14 @@ impl RecoveredFieldPartition {
         source: &RecoveredField,
         source_indices: Vec<usize>,
     ) -> Result<Self, RecoveredFieldError> {
-        source.validate()?;
+        Self::select_view(&RecoveredFieldView::from_field(source)?, source_indices)
+    }
+
+    /// Extract from content already validated by the shared borrowed-field identity boundary.
+    pub fn select_view(
+        source: &RecoveredFieldView<'_>,
+        source_indices: Vec<usize>,
+    ) -> Result<Self, RecoveredFieldError> {
         if source_indices.is_empty() || source_indices.windows(2).any(|pair| pair[0] >= pair[1]) {
             return Err(RecoveredFieldError::InvalidArtifact(
                 "field partition indices must be nonempty and strictly increasing".into(),
