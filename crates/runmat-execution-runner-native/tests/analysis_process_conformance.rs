@@ -64,6 +64,8 @@ mod modal_transient;
 mod publication_chain;
 #[path = "analysis_process_conformance/signal.rs"]
 mod signal;
+#[path = "analysis_process_conformance/thermal.rs"]
+mod thermal;
 #[path = "analysis_process_conformance/transient.rs"]
 mod transient;
 use publication_chain::{success_response, PublicationChainDriver};
@@ -122,6 +124,7 @@ async fn parent() {
     config.store_root = directory.path().join("native-analysis-session");
     config.worker_capabilities = capabilities();
     let session = NativeProgramSession::new(config).unwrap();
+    thermal::run(&session).await;
     let mut store = session.object_store();
     program.write_to(&mut store).unwrap();
     second_program.write_to(&mut store).unwrap();

@@ -643,8 +643,12 @@ a source-bound numerical receipt. Result import validates the exact returned ref
 workload, topology and receipt without gathering field arrays. Terminal-temperature publication
 uses the thermal manifest's semantic result identity rather than a host/transport-derived identity.
 Resource-planned task submission uses the shared analysis allocation check. This path remains an
-explicit-CPU, experimental formulation envelope: isolated-process/durable/remote thermal
-conformance, measured worker residency, and independent accuracy/release gates are not yet proven.
+explicit-CPU, experimental formulation envelope. The native process-conformance harness submits
+Tet4/Tet10 insulated constant-temperature transient tasks through the shared resource admission
+and isolated worker, then checks exact inline/process result and receipt parity and analytic
+equilibrium across nonempty field partitions. This establishes that execution seam for those
+fixtures, not general thermal accuracy. Durable/remote thermal conformance, measured worker
+residency, and independent accuracy/release gates are not yet proven.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
