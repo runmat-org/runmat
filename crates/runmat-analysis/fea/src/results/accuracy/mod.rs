@@ -22,6 +22,11 @@ use crate::execution::{
 
 use super::observation::{ObservationArtifactIdentity, ObservationResultIdentity};
 
+mod resource_profile;
+pub use resource_profile::{
+    accuracy_evaluation_resource_profile, AccuracyEvaluationResourceProfile,
+};
+
 const ACCURACY_REPORT_PREFIX: &[u8] = b"runmat-fea-accuracy-report/v1\0";
 const ACCURACY_REPORT_DOMAIN: &str = "analysis.fea.accuracy-report/v1";
 const ACCURACY_EVIDENCE_PREFIX: &[u8] = b"runmat-fea-accuracy-evidence/v1\0";

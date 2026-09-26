@@ -185,7 +185,6 @@ async fn execute_with_pool(
         inventory_limits,
     )
     .map_err(protocol)?;
-    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
     let [executed_accuracy] = execute_analysis_task_batch(
@@ -193,7 +192,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &accuracy.host,
             program: &accuracy.program,
-            resource_plan: None,
+            resource_plan: Some(&accuracy.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![assembly_dependency],
         }],
@@ -203,9 +202,21 @@ async fn execute_with_pool(
     .try_into()
     .map_err(|_| protocol("response-spectrum accuracy returned an invalid task inventory"))?;
     let accuracy_dependency = dependency(&executed_accuracy);
+    let accuracy_attempt = planned_resource_attempt(&accuracy.resource_plan, &executed_accuracy)?;
+    let accuracy_wall = accuracy_attempt.accounting.resources.usage.wall_millis;
     coordinator
         .complete_accuracy(pool, executed_accuracy.response, &accuracy)
         .map_err(protocol)?;
+
+    let resource_usage = runmat_analysis_execution::extend_resource_usage(
+        &resource_usage,
+        &PlannedResourceUsageGraph::new(vec![accuracy_attempt], accuracy_wall).map_err(protocol)?,
+        &publication_access,
+        runmat_analysis_execution::AnalysisOutputPolicy::new(chunk_bytes, inventory_limits)
+            .map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     let publication = coordinator
         .prepare_publication(resource_usage)

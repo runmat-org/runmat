@@ -7,6 +7,62 @@ use runmat_geometry_core::{
 };
 use runmat_geometry_io::import::{LabeledSubshapeRemapConflict, LabeledSubshapeRemapConflictKind};
 
+#[cfg(feature = "occt-native")]
+#[test]
+fn two_box_preview_picks_vertical_edge_near_top_corner() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/fea/examples/geometry/two-box-assembly.step"
+    );
+    let bytes = std::fs::read(path).unwrap();
+    let asset = geometry_load(path, &bytes).unwrap();
+    let scene = geometry_preview_scene(&asset, "two boxes", GeometryPreviewSceneOptions::default())
+        .unwrap();
+    let chunk = &scene.chunks[0];
+    let mut camera = runmat_plot::core::Camera::new();
+    camera.position = glam::Vec3::new(16.0, 8.0, 8.0);
+    camera.target = glam::Vec3::new(10.5, 1.0, 1.5);
+    camera.up = glam::Vec3::Z;
+    camera.aspect_ratio = 1.0;
+    camera.projection = runmat_plot::core::ProjectionType::Perspective {
+        fov: 45.0_f32.to_radians(),
+        near: 0.1,
+        far: 100.0,
+    };
+    camera.mark_dirty();
+    let index = runmat_plot::GeometryScenePickIndex::build(&scene);
+    for (x, z) in [
+        (11.0, 2.95),
+        (11.0, 2.8),
+        (11.0, 2.5),
+        (11.0, 2.0),
+        (10.0, 2.8),
+    ] {
+        let clip = camera.view_proj_matrix() * glam::Vec3::new(x, 2.0, z).extend(1.0);
+        let point = clip.truncate() / clip.w;
+        let pos = [(point.x + 1.0) * 400.0, (1.0 - point.y) * 400.0];
+        let pick = index.pick(runmat_plot::GeometryScenePickRequest {
+            camera: camera.clone(),
+            surface_size: [800.0, 800.0],
+            position: pos,
+            mode: runmat_plot::GeometryScenePickMode::Edge,
+        });
+        let Some(runmat_plot::GeometrySceneTopologySelection::Edge { vertex_indices, .. }) =
+            pick.and_then(|hit| hit.topology_selection)
+        else {
+            panic!("expected a vertical edge at z={z}");
+        };
+        let a = chunk.vertices[vertex_indices[0] as usize].position;
+        let b = chunk.vertices[vertex_indices[1] as usize].position;
+        assert!(
+            (a[0] - x).abs() < 1.0e-5 && (b[0] - x).abs() < 1.0e-5,
+            "picked {a:?} to {b:?} at x={x} z={z}"
+        );
+        assert!((a[1] - 2.0).abs() < 1.0e-5 && (b[1] - 2.0).abs() < 1.0e-5);
+        assert!((a[2] - b[2]).abs() > 2.9, "picked {a:?} to {b:?} at z={z}");
+    }
+}
+
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 const SIMPLE_OBJ: &str = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n";

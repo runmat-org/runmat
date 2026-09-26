@@ -10,6 +10,7 @@ export type FeaRunArtifactRole =
   | "fields"
   | "diagnostics"
   | "artifact_manifest"
+  | "result_scene"
   | "workspace"
   | "stderr";
 

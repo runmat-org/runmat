@@ -52,9 +52,10 @@ pub use geometry_scene::{
     cad_default_material, vertex as geometry_scene_vertex, GeometryScene,
     GeometrySceneAnnotationKind, GeometrySceneAssemblyNode, GeometrySceneCacheKey,
     GeometrySceneChunk, GeometrySceneCompleteness, GeometrySceneDisplayMode, GeometrySceneOverlay,
-    GeometryScenePickIndex, GeometryScenePickRequest, GeometryScenePickResult,
-    GeometryScenePresentation, GeometrySceneRegion, GeometrySceneRegionAnnotation,
-    GeometrySceneRegionSummary, GeometrySceneTriangleRange,
+    GeometryScenePickIndex, GeometryScenePickMode, GeometryScenePickRequest,
+    GeometryScenePickResult, GeometryScenePresentation, GeometrySceneRegion,
+    GeometrySceneRegionAnnotation, GeometrySceneRegionSummary, GeometrySceneTopologySelection,
+    GeometrySceneTriangleRange,
 };
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,

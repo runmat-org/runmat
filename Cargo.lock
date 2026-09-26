@@ -6365,6 +6365,7 @@ dependencies = [
  "runmat-canonical-codec",
  "runmat-execution",
  "runmat-geometry-core",
+ "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "serde",
  "serde_json",

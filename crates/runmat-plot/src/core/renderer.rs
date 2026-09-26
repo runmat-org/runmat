@@ -237,6 +237,7 @@ pub enum PipelineType {
     Points,
     Lines,
     LinesNoDepth,
+    AnnotationStroke,
     Triangles,
     Scatter3,
     Textured,
@@ -255,6 +256,7 @@ pub struct WgpuRenderer {
     point_pipeline: Option<wgpu::RenderPipeline>,
     line_pipeline: Option<wgpu::RenderPipeline>,
     line_no_depth_pipeline: Option<wgpu::RenderPipeline>,
+    annotation_stroke_pipeline: Option<wgpu::RenderPipeline>,
     triangle_pipeline: Option<wgpu::RenderPipeline>,
 
     // Direct rendering pipelines (optimized coordinate transformation)
@@ -651,6 +653,7 @@ impl WgpuRenderer {
             point_pipeline: None,
             line_pipeline: None,
             line_no_depth_pipeline: None,
+            annotation_stroke_pipeline: None,
             triangle_pipeline: None,
             direct_line_pipeline: None,
             direct_triangle_pipeline: None,
@@ -728,6 +731,7 @@ impl WgpuRenderer {
             self.point_pipeline = None;
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
+            self.annotation_stroke_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -754,6 +758,7 @@ impl WgpuRenderer {
             self.point_pipeline = None;
             self.line_pipeline = None;
             self.line_no_depth_pipeline = None;
+            self.annotation_stroke_pipeline = None;
             self.triangle_pipeline = None;
             self.direct_line_pipeline = None;
             self.direct_triangle_pipeline = None;
@@ -1071,6 +1076,12 @@ impl WgpuRenderer {
                     self.line_no_depth_pipeline = Some(self.create_line_no_depth_pipeline());
                 }
             }
+            PipelineType::AnnotationStroke => {
+                if self.annotation_stroke_pipeline.is_none() {
+                    self.annotation_stroke_pipeline =
+                        Some(self.create_annotation_stroke_pipeline());
+                }
+            }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
                     self.triangle_pipeline = Some(self.create_triangle_pipeline());
@@ -1094,6 +1105,7 @@ impl WgpuRenderer {
             PipelineType::Points => self.point_pipeline.as_ref().unwrap(),
             PipelineType::Lines => self.line_pipeline.as_ref().unwrap(),
             PipelineType::LinesNoDepth => self.line_no_depth_pipeline.as_ref().unwrap(),
+            PipelineType::AnnotationStroke => self.annotation_stroke_pipeline.as_ref().unwrap(),
             PipelineType::Triangles => self.triangle_pipeline.as_ref().unwrap(),
             PipelineType::Scatter3 => self.get_pipeline(PipelineType::Points),
             PipelineType::Textured => self.image_pipeline.as_ref().unwrap(),
@@ -1177,6 +1189,57 @@ impl WgpuRenderer {
             false,
             wgpu::CompareFunction::Always,
         )
+    }
+
+    fn create_annotation_stroke_pipeline(&self) -> wgpu::RenderPipeline {
+        let shader = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Geometry Annotation Stroke Shader"),
+                source: wgpu::ShaderSource::Wgsl(shaders::vertex::ANNOTATION_STROKE.into()),
+            });
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Geometry Annotation Stroke Pipeline Layout"),
+                bind_group_layouts: &[
+                    &self.uniform_bind_group_layout,
+                    &self.marker_screen_bind_group_layout,
+                ],
+                push_constant_ranges: &[],
+            });
+        self.device.create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
+            label: Some("Geometry Annotation Stroke Pipeline"),
+            layout: Some(&layout),
+            vertex: crate::wgpu_compat::wgpu_vertex_state!(&shader, "vs_main", &[Vertex::desc()]),
+            fragment: Some(crate::wgpu_compat::wgpu_fragment_state!(&shader, "fs_main", &[Some(wgpu::ColorTargetState {
+                format: self.surface_config.format,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })])),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: Self::depth_format(),
+                depth_write_enabled: false,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: self.msaa_sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+        })
     }
 
     fn create_camera_line_pipeline(

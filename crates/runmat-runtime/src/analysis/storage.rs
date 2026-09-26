@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -23,6 +23,9 @@ use super::contracts::{
     AnalysisFieldPageValues, AnalysisFieldRequestOptions, AnalysisFieldSelection,
     AnalysisRunResult, AnalysisStudyStepRunData,
 };
+use super::render_tiles::{
+    self, RenderFieldSummary, RenderTile, RenderTileIndex, RenderViewRequest, RenderViewSelection,
+};
 
 mod discovery;
 mod frequency;
@@ -30,7 +33,7 @@ mod frequency_page;
 
 use frequency::PersistedStructuralFrequencyArtifact;
 
-const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-validated-field-shells";
+pub(super) const ARTIFACT_SCHEMA_VERSION: &str = "analysis_run_artifact/2026-09-002";
 const FIELD_IDENTITY_PREFIX: &[u8] = b"runmat-analysis-field/v1\0";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -45,6 +48,7 @@ struct PersistedRunArtifact {
     field_inventory: Vec<AnalysisField>,
     materialized_field_ids: Vec<String>,
     fields: Vec<PersistedFieldArtifact>,
+    render_tiles: Option<RenderTileIndex>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -81,6 +85,28 @@ pub trait AnalysisArtifactStore: Send + Sync {
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
     fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
     fn load_field_inventory(&self, run_id: &str) -> Result<Option<Vec<AnalysisField>>, String>;
+    fn load_render_tile_index(&self, run_id: &str) -> Result<Option<RenderTileIndex>, String>;
+    fn plan_render_view(
+        &self,
+        run_id: &str,
+        view: Option<RenderViewRequest>,
+    ) -> Result<Option<RenderViewSelection>, String>;
+    fn load_render_tile(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        tile_index: usize,
+    ) -> Result<Option<RenderTile>, String>;
+    fn load_render_lod_node(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        node_index: usize,
+    ) -> Result<Option<RenderTile>, String>;
+    fn load_render_topology(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<super::AnalysisRenderTopology>, String>;
     fn load_field_page(
         &self,
         run_id: &str,
@@ -218,6 +244,119 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
         };
         validate_persisted_run(persisted, run_id)?;
         Ok(Some(persisted_field_inventory(persisted)))
+    }
+
+    fn load_render_tile_index(&self, run_id: &str) -> Result<Option<RenderTileIndex>, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+            return Ok(None);
+        };
+        Ok(run.render_tiles.clone())
+    }
+
+    fn plan_render_view(
+        &self,
+        run_id: &str,
+        view: Option<RenderViewRequest>,
+    ) -> Result<Option<RenderViewSelection>, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+            return Ok(None);
+        };
+        run.render_tiles
+            .as_ref()
+            .map(|index| index.select_view_validated(view))
+            .transpose()
+    }
+
+    fn load_render_tile(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        tile_index: usize,
+    ) -> Result<Option<RenderTile>, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+            return Ok(None);
+        };
+        let Some(descriptor) = run
+            .render_tiles
+            .as_ref()
+            .and_then(|index| index.meshes.get(mesh_index))
+            .and_then(|mesh| mesh.tiles.get(tile_index))
+        else {
+            return Ok(None);
+        };
+        let chunks = self
+            .chunks
+            .read()
+            .map_err(|_| "analysis field chunk store lock poisoned")?;
+        let bytes = chunks
+            .get(&descriptor.digest)
+            .ok_or("render tile object is missing")?;
+        render_tiles::decode_tile(descriptor, bytes).map(Some)
+    }
+
+    fn load_render_lod_node(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        node_index: usize,
+    ) -> Result<Option<RenderTile>, String> {
+        validate_run_id_token(run_id)?;
+        let runs = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned")?;
+        let Some(PersistedAnalysisArtifact::Standard(run)) = runs.get(run_id) else {
+            return Ok(None);
+        };
+        let Some(descriptor) = run
+            .render_tiles
+            .as_ref()
+            .and_then(|index| index.meshes.get(mesh_index))
+            .and_then(|mesh| mesh.lod_nodes.get(node_index))
+            .map(|node| &node.tile)
+        else {
+            return Ok(None);
+        };
+        let chunks = self
+            .chunks
+            .read()
+            .map_err(|_| "analysis field chunk store lock poisoned")?;
+        let bytes = chunks
+            .get(&descriptor.digest)
+            .ok_or("render LOD object is missing")?;
+        render_tiles::decode_tile(descriptor, bytes).map(Some)
+    }
+
+    fn load_render_topology(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<super::AnalysisRenderTopology>, String> {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
+            return Ok(None);
+        };
+        let chunks = self
+            .chunks
+            .read()
+            .map_err(|_| "analysis field chunk store lock poisoned")?;
+        render_tiles::reconstruct(&index, |digest| {
+            Ok(chunks.get(&digest).map(|bytes| bytes.to_vec()))
+        })
+        .map(Some)
     }
 
     fn load_field_page(
@@ -366,11 +505,21 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
 
 pub struct FilesystemAnalysisArtifactStore {
     root: PathBuf,
+    manifests: RwLock<FilesystemManifestCache>,
+}
+
+#[derive(Default)]
+struct FilesystemManifestCache {
+    entries: HashMap<String, Arc<PersistedRunArtifact>>,
+    order: VecDeque<String>,
 }
 
 impl FilesystemAnalysisArtifactStore {
     pub fn new(root: PathBuf) -> Self {
-        Self { root }
+        Self {
+            root,
+            manifests: RwLock::new(FilesystemManifestCache::default()),
+        }
     }
 
     fn run_path(&self, run_id: &str) -> Result<PathBuf, String> {
@@ -421,6 +570,49 @@ impl FilesystemAnalysisArtifactStore {
         Ok(Some(bytes))
     }
 
+    fn read_standard(&self, run_id: &str) -> Result<Option<Arc<PersistedRunArtifact>>, String> {
+        validate_run_id_token(run_id)?;
+        if let Some(run) = self
+            .manifests
+            .read()
+            .map_err(|_| "analysis manifest cache lock poisoned")?
+            .entries
+            .get(run_id)
+        {
+            return Ok(Some(run.clone()));
+        }
+        let path = self.run_path(run_id)?;
+        let bytes = match fs_symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type() == FsFileType::File => {
+                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?
+            }
+            Ok(_) => return Err("analysis run artifact must be a regular file".into()),
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
+        };
+        match decode_persisted_artifact(&bytes, run_id)? {
+            PersistedAnalysisArtifact::Standard(run) => {
+                let run: Arc<PersistedRunArtifact> = Arc::from(run);
+                let mut cache = self
+                    .manifests
+                    .write()
+                    .map_err(|_| "analysis manifest cache lock poisoned")?;
+                if let Some(existing) = cache.entries.get(run_id) {
+                    return Ok(Some(existing.clone()));
+                }
+                if cache.entries.len() == 8 {
+                    if let Some(oldest) = cache.order.pop_front() {
+                        cache.entries.remove(&oldest);
+                    }
+                }
+                cache.order.push_back(run_id.into());
+                cache.entries.insert(run_id.into(), run.clone());
+                Ok(Some(run))
+            }
+            PersistedAnalysisArtifact::StructuralFrequency(_) => Ok(None),
+        }
+    }
+
     fn list_persisted_runs(&self) -> Result<Vec<PersistedAnalysisArtifact>, String> {
         discovery::list_supported_artifacts(&self.root, decode_persisted_artifact)
     }
@@ -463,32 +655,19 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
             }
         }
         prune_filesystem_runs(&self.root)?;
+        // Retention may have removed a run whose immutable manifest is cached.
+        // A later lookup must observe the filesystem rather than resurrecting it.
+        *self
+            .manifests
+            .write()
+            .map_err(|_| "analysis manifest cache lock poisoned")? =
+            FilesystemManifestCache::default();
 
         artifact_record(run, prepared.persisted.created_at)
     }
 
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
-        let path = self.run_path(run_id)?;
-        if !owned_directory_exists(&self.root, "analysis artifact root")?
-            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
-        {
-            return Ok(None);
-        }
-        match fs_symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
-            Ok(metadata) => {
-                return Err(format!(
-                    "analysis run artifact must be a regular file, found {:?}",
-                    metadata.file_type()
-                ));
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
-        }
-        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        let PersistedAnalysisArtifact::Standard(persisted) =
-            decode_persisted_artifact(&bytes, run_id)?
-        else {
+        let Some(persisted) = self.read_standard(run_id)? else {
             return Ok(None);
         };
         Ok(Some(materialize_run(&persisted, |digest| {
@@ -497,58 +676,90 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
     }
 
     fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String> {
-        let path = self.run_path(run_id)?;
-        if !owned_directory_exists(&self.root, "analysis artifact root")?
-            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
-        {
-            return Ok(None);
-        }
-        match fs_symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type() == FsFileType::File => {}
-            Ok(metadata) => {
-                return Err(format!(
-                    "analysis run artifact must be a regular file, found {:?}",
-                    metadata.file_type()
-                ));
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
-        }
-        let bytes = fs_read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
-        let PersistedAnalysisArtifact::Standard(persisted) =
-            decode_persisted_artifact(&bytes, run_id)?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(persisted.metadata))
+        Ok(self.read_standard(run_id)?.map(|run| run.metadata.clone()))
     }
 
     fn load_field_inventory(&self, run_id: &str) -> Result<Option<Vec<AnalysisField>>, String> {
-        let path = self.run_path(run_id)?;
-        if !owned_directory_exists(&self.root, "analysis artifact root")?
-            || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
-        {
+        Ok(self
+            .read_standard(run_id)?
+            .map(|run| persisted_field_inventory(&run)))
+    }
+
+    fn load_render_tile_index(&self, run_id: &str) -> Result<Option<RenderTileIndex>, String> {
+        Ok(self
+            .read_standard(run_id)?
+            .and_then(|run| run.render_tiles.clone()))
+    }
+
+    fn plan_render_view(
+        &self,
+        run_id: &str,
+        view: Option<RenderViewRequest>,
+    ) -> Result<Option<RenderViewSelection>, String> {
+        let Some(run) = self.read_standard(run_id)? else {
             return Ok(None);
-        }
-        let bytes = match fs_symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type() == FsFileType::File => {
-                fs_read(&path).map_err(|error| format!("failed to read run artifact: {error}"))?
-            }
-            Ok(metadata) => {
-                return Err(format!(
-                    "analysis run artifact must be a regular file, found {:?}",
-                    metadata.file_type()
-                ));
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(format!("failed to inspect run artifact: {error}")),
         };
-        let PersistedAnalysisArtifact::Standard(persisted) =
-            decode_persisted_artifact(&bytes, run_id)?
+        run.render_tiles
+            .as_ref()
+            .map(|index| index.select_view_validated(view))
+            .transpose()
+    }
+
+    fn load_render_tile(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        tile_index: usize,
+    ) -> Result<Option<RenderTile>, String> {
+        let Some(run) = self.read_standard(run_id)? else {
+            return Ok(None);
+        };
+        let Some(descriptor) = run
+            .render_tiles
+            .as_ref()
+            .and_then(|index| index.meshes.get(mesh_index))
+            .and_then(|mesh| mesh.tiles.get(tile_index))
         else {
             return Ok(None);
         };
-        Ok(Some(persisted_field_inventory(&persisted)))
+        let bytes = self
+            .read_chunk(descriptor.digest)?
+            .ok_or("render tile object is missing")?;
+        render_tiles::decode_tile(descriptor, &bytes).map(Some)
+    }
+
+    fn load_render_lod_node(
+        &self,
+        run_id: &str,
+        mesh_index: usize,
+        node_index: usize,
+    ) -> Result<Option<RenderTile>, String> {
+        let Some(run) = self.read_standard(run_id)? else {
+            return Ok(None);
+        };
+        let Some(descriptor) = run
+            .render_tiles
+            .as_ref()
+            .and_then(|index| index.meshes.get(mesh_index))
+            .and_then(|mesh| mesh.lod_nodes.get(node_index))
+            .map(|node| &node.tile)
+        else {
+            return Ok(None);
+        };
+        let bytes = self
+            .read_chunk(descriptor.digest)?
+            .ok_or("render LOD object is missing")?;
+        render_tiles::decode_tile(descriptor, &bytes).map(Some)
+    }
+
+    fn load_render_topology(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<super::AnalysisRenderTopology>, String> {
+        let Some(index) = self.load_render_tile_index(run_id)? else {
+            return Ok(None);
+        };
+        render_tiles::reconstruct(&index, |digest| self.read_chunk(digest)).map(Some)
     }
 
     fn load_field_page(
@@ -557,6 +768,11 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         selection: &AnalysisFieldSelection,
         options: AnalysisFieldRequestOptions,
     ) -> Result<AnalysisFieldPageLookup, String> {
+        if let Some(run) = self.read_standard(run_id)? {
+            return field_page_from_artifact(&run, selection, options, |digest| {
+                self.read_chunk(digest)
+            });
+        }
         let path = self.run_path(run_id)?;
         if !owned_directory_exists(&self.root, "analysis artifact root")?
             || !owned_directory_exists(&self.root.join("runs"), "analysis artifact runs directory")?
@@ -839,7 +1055,29 @@ fn prepare_run_artifact(
         return Err(error);
     }
 
+    let render_tiles = if let Some(topology) = run.render_topology.as_ref() {
+        let (mut index, objects) = render_tiles::partition(topology)?;
+        index.field_summaries = summarize_render_fields(run, index.volume_element_count)?;
+        index.validate()?;
+        for (digest, bytes) in objects {
+            match chunks.entry(digest) {
+                std::collections::hash_map::Entry::Occupied(existing)
+                    if existing.get() != &bytes =>
+                {
+                    return Err("render tile digest collision".into());
+                }
+                std::collections::hash_map::Entry::Occupied(_) => {}
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    slot.insert(bytes);
+                }
+            }
+        }
+        Some(index)
+    } else {
+        None
+    };
     let mut stripped_run = run.clone();
+    stripped_run.render_topology = None;
     super::operations::visit_analysis_result_fields_mut(&mut stripped_run, |field| {
         if let AnalysisFieldValues::HostF64(values) = &mut field.values {
             if !values.is_empty() {
@@ -851,7 +1089,12 @@ fn prepare_run_artifact(
     let run_value = serde_json::to_value(&stripped_run)
         .map_err(|error| format!("failed to encode stripped analysis run: {error}"))?;
     let materialized_field_ids = fields.keys().cloned().collect::<Vec<_>>();
-    let run_digest = persisted_run_digest(&run_value, &field_inventory, &materialized_field_ids)?;
+    let run_digest = persisted_run_digest(
+        &run_value,
+        &field_inventory,
+        &materialized_field_ids,
+        render_tiles.as_ref(),
+    )?;
     let mut metadata = stripped_run;
     metadata.run.observations.clear();
     metadata.run.series_reductions.clear();
@@ -866,9 +1109,85 @@ fn prepare_run_artifact(
             field_inventory,
             materialized_field_ids,
             fields: fields.into_values().collect(),
+            render_tiles,
         },
         chunks,
     })
+}
+
+fn summarize_render_fields(
+    run: &AnalysisRunResult,
+    volume_element_count: usize,
+) -> Result<Vec<RenderFieldSummary>, String> {
+    let mut summaries = Vec::new();
+    let mut failure = None;
+    super::operations::visit_analysis_result_fields(run, |field| {
+        if failure.is_some() {
+            return;
+        }
+        let descriptor = AnalysisFieldDescriptor::from_field(field);
+        if !matches!(
+            descriptor.location,
+            super::AnalysisFieldLocation::Node | super::AnalysisFieldLocation::Element
+        ) {
+            return;
+        }
+        let Some(values) = field.as_host_f64() else {
+            return;
+        };
+        let components = descriptor.component_count.unwrap_or(1);
+        if components == 0 || values.is_empty() || values.len() % components != 0 {
+            return;
+        }
+        let stride = if descriptor.location == super::AnalysisFieldLocation::Element {
+            let entities = values.len() / components;
+            if volume_element_count == 0 || entities % volume_element_count != 0 {
+                return;
+            }
+            entities / volume_element_count
+        } else {
+            1
+        };
+        let mut minimum = f64::INFINITY;
+        let mut maximum = f64::NEG_INFINITY;
+        for samples in values.chunks_exact(components * stride) {
+            let value = samples
+                .chunks_exact(components)
+                .map(|components| {
+                    if components.len() == 1 {
+                        components[0]
+                    } else {
+                        components
+                            .iter()
+                            .map(|value| value * value)
+                            .sum::<f64>()
+                            .sqrt()
+                    }
+                })
+                .sum::<f64>()
+                / stride as f64;
+            if !value.is_finite() {
+                failure = Some(format!(
+                    "field '{}' contains a non-finite plotted value",
+                    field.field_id
+                ));
+                return;
+            }
+            minimum = minimum.min(value);
+            maximum = maximum.max(value);
+        }
+        if minimum.is_finite() {
+            summaries.push(RenderFieldSummary {
+                field_id: field.field_id.clone(),
+                minimum,
+                maximum,
+            });
+        }
+    });
+    if let Some(error) = failure {
+        return Err(error);
+    }
+    Ok(summaries)
 }
 
 fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtifact) -> bool {
@@ -880,6 +1199,7 @@ fn same_persisted_content(left: &PersistedRunArtifact, right: &PersistedRunArtif
         && left.field_inventory == right.field_inventory
         && left.materialized_field_ids == right.materialized_field_ids
         && left.fields == right.fields
+        && left.render_tiles == right.render_tiles
 }
 
 fn materialize_run(
@@ -896,8 +1216,13 @@ fn materialize_run(
     }
     let mut run = persisted.run.clone();
     hydrate_field_values(&mut run, &values)?;
-    let run = serde_json::from_value::<AnalysisRunResult>(run)
+    let mut run = serde_json::from_value::<AnalysisRunResult>(run)
         .map_err(|error| format!("failed to decode hydrated analysis run: {error}"))?;
+    if let Some(index) = &persisted.render_tiles {
+        run.render_topology = Some(render_tiles::reconstruct(index, |digest| {
+            read_chunk(digest)
+        })?);
+    }
     validate_run_identity(&run)?;
     Ok(run)
 }
@@ -1194,6 +1519,7 @@ fn validate_persisted_run(
         &persisted.run,
         &persisted.field_inventory,
         &persisted.materialized_field_ids,
+        persisted.render_tiles.as_ref(),
     )? != persisted.run_digest
     {
         return Err("analysis run metadata differs from its content digest".into());
@@ -1212,6 +1538,12 @@ fn validate_persisted_run(
         ));
     }
     validate_run_identity(&persisted.metadata)?;
+    if persisted.metadata.render_topology.is_some() {
+        return Err("render topology must be stored in tile objects".into());
+    }
+    if let Some(index) = &persisted.render_tiles {
+        index.validate()?;
+    }
     let mut expected_fields = BTreeMap::new();
     collect_persisted_field_shells(&persisted.run, &mut expected_fields)?;
     let mut inventory_fields = BTreeMap::new();
@@ -1350,8 +1682,9 @@ fn persisted_run_digest(
     value: &serde_json::Value,
     field_inventory: &[AnalysisField],
     materialized_field_ids: &[String],
+    render_tiles: Option<&RenderTileIndex>,
 ) -> Result<Digest, String> {
-    serde_json::to_vec(&(value, field_inventory, materialized_field_ids))
+    serde_json::to_vec(&(value, field_inventory, materialized_field_ids, render_tiles))
         .map(Digest::sha256)
         .map_err(|error| format!("failed to encode analysis run metadata: {error}"))
 }
@@ -1672,6 +2005,52 @@ pub fn load_run_metadata(run_id: &str) -> Result<Option<AnalysisRunResult>, Stri
     guard.load_run_metadata(run_id)
 }
 
+pub fn load_render_tile_index(run_id: &str) -> Result<Option<RenderTileIndex>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned")?;
+    guard.load_render_tile_index(run_id)
+}
+
+pub fn plan_render_view(
+    run_id: &str,
+    view: Option<RenderViewRequest>,
+) -> Result<Option<RenderViewSelection>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned")?;
+    guard.plan_render_view(run_id, view)
+}
+
+pub fn load_render_tile(
+    run_id: &str,
+    mesh_index: usize,
+    tile_index: usize,
+) -> Result<Option<RenderTile>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned")?;
+    guard.load_render_tile(run_id, mesh_index, tile_index)
+}
+
+pub fn load_render_lod_node(
+    run_id: &str,
+    mesh_index: usize,
+    node_index: usize,
+) -> Result<Option<RenderTile>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned")?;
+    guard.load_render_lod_node(run_id, mesh_index, node_index)
+}
+
+pub fn load_render_topology(run_id: &str) -> Result<Option<super::AnalysisRenderTopology>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned")?;
+    guard.load_render_topology(run_id)
+}
+
 pub fn load_field_inventory(run_id: &str) -> Result<Option<Vec<AnalysisField>>, String> {
     let guard = global_store()
         .read()
@@ -1750,7 +2129,7 @@ fn config_from_env() -> AnalysisArtifactStoreConfig {
 }
 
 pub fn default_filesystem_artifact_root() -> PathBuf {
-    PathBuf::from("artifacts")
+    PathBuf::from(".artifacts")
 }
 
 fn fs_create_dir_all(path: impl Into<PathBuf>) -> std::io::Result<()> {

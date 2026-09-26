@@ -228,9 +228,8 @@ pub(super) fn render_topology_for_persisted_run(
     study: &AnalysisStudySpec,
     run_id: &str,
 ) -> Result<Option<AnalysisRenderTopology>, String> {
-    if let Some(topology) = storage::load_run_metadata(run_id)?
-        .and_then(|run| run.render_topology)
-        .filter(render_topology_has_meshes)
+    if let Some(topology) =
+        storage::load_render_topology(run_id)?.filter(render_topology_has_meshes)
     {
         return Ok(Some(topology));
     }
@@ -2782,6 +2781,7 @@ mod tests {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
             source: crate::analysis::contracts::AnalysisRenderTopologySource::SolverPrep,
+            volume_element_count: 1,
             meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
@@ -2800,6 +2800,7 @@ mod tests {
         AnalysisRenderTopology {
             schema_version: "analysis_render_topology/v1".to_string(),
             source: crate::analysis::contracts::AnalysisRenderTopologySource::AnalysisMesh,
+            volume_element_count: 1,
             meshes: vec![crate::analysis::contracts::AnalysisRenderMesh {
                 mesh_id: "analysis_mesh".to_string(),
                 vertices: vec![

@@ -59,6 +59,8 @@ mod contracts;
 mod excitation_authoring;
 mod execution_dispatch;
 mod execution_error;
+#[cfg(feature = "plot-core")]
+pub mod field_scene;
 pub(crate) mod field_selection;
 #[cfg(feature = "plot-core")]
 mod figures;
@@ -69,6 +71,7 @@ mod linear_static_result;
 pub(crate) mod meshing;
 mod operations;
 mod policy;
+pub mod render_tiles;
 mod result_policy;
 mod solver_mesh_artifact;
 mod source;
@@ -335,7 +338,7 @@ fn current_fea_runtime_config() -> FeaRuntimeConfig {
 }
 
 pub fn default_fea_artifact_root() -> PathBuf {
-    PathBuf::from("artifacts")
+    PathBuf::from(".artifacts")
 }
 
 pub fn configure_fea_runtime(config: FeaRuntimeConfig) -> Result<(), String> {
@@ -7095,6 +7098,7 @@ fn render_topology_from_solver_mesh(
     Some(AnalysisRenderTopology {
         schema_version: "analysis_render_topology/v1".to_string(),
         source: AnalysisRenderTopologySource::AnalysisMesh,
+        volume_element_count: mesh.topology.volume_elements.len(),
         meshes: vec![AnalysisRenderMesh {
             mesh_id: "solver_mesh_boundary".to_string(),
             vertices: mesh

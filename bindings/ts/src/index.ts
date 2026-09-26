@@ -1046,6 +1046,7 @@ export interface RunMatSessionHandle {
   exportGeometryScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importGeometryScene?(scene: Uint8Array): Promise<number | null>;
+  createFeaFieldScene?(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
@@ -1141,6 +1142,7 @@ interface RunMatNativeSession {
   exportGeometryScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importGeometryScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  createFeaFieldScene?: (runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null) => { handle: number; deformationScale: number; exact?: boolean } | Promise<{ handle: number; deformationScale: number; exact?: boolean }>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
@@ -1230,6 +1232,18 @@ export interface PlotSurfaceCameraState {
   axes: PlotCameraState[];
 }
 
+export interface FeaFieldSceneView {
+  cameraPosition: [number, number, number];
+  cameraTarget: [number, number, number];
+  cameraUp: [number, number, number];
+  fovYRadians: number;
+  orthographicHeight?: number;
+  aspectRatio: number;
+  viewportHeightPx: number;
+  triangleBudget: number;
+  refineAbovePx: number;
+}
+
 export type GeometrySceneDisplayMode = "shaded" | "edges" | "wireframe";
 export type GeometrySceneViewPreset =
   | "perspective"
@@ -1285,16 +1299,23 @@ export type GeometrySceneAnnotationKind =
 export interface GeometryScenePresentationState {
   selectedRegionId?: string | null;
   selectedRegionIds?: string[] | null;
+  selectedTopology?: GeometrySceneTopologySelectionState[];
   hoveredRegionId?: string | null;
   regionHighlights?: GeometrySceneRegionHighlightState[];
   regionAnnotations?: GeometrySceneRegionAnnotationState[];
   displayMode?: GeometrySceneDisplayMode;
   edgeOverlayEnabled?: boolean;
+  showGrid?: boolean;
   hiddenOwnerNodeIds?: string[] | null;
   isolatedOwnerNodeIds?: string[] | null;
   section?: GeometrySceneImageSectionState | null;
   viewPreset?: GeometrySceneViewPreset | null;
 }
+
+export type GeometrySceneTopologySelectionState =
+  | { kind: "face"; chunkId: string; triangleIndex: number }
+  | { kind: "edge"; chunkId: string; vertexIndices: [number, number]; segments?: [number, number][] }
+  | { kind: "point"; chunkId: string; vertexIndex: number };
 
 export interface GeometryScenePickResult {
   meshId: string | null;
@@ -1307,6 +1328,7 @@ export interface GeometryScenePickResult {
   position: [number, number, number];
   vertexIndices?: [number, number, number];
   barycentricCoordinates?: [number, number, number];
+  topologySelection?: GeometrySceneTopologySelectionState;
 }
 
 
@@ -1388,7 +1410,7 @@ interface RunMatNativeModule {
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
   presentGeometrySceneOnSurface?: (surfaceId: number, handle: number) => void;
   setGeometryScenePresentation?: (surfaceId: number, presentation: GeometryScenePresentationState) => void;
-  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number) => GeometryScenePickResult | null;
+  pickGeometrySceneRegion?: (surfaceId: number, x: number, y: number, mode: string) => GeometryScenePickResult | null;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
   takePlotSurfaceHostActions?: (surfaceId: number) => unknown;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
@@ -1778,10 +1800,11 @@ export async function pickGeometrySceneRegion(
   surfaceId: number,
   x: number,
   y: number,
+  mode = "face",
 ): Promise<GeometryScenePickResult | null> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "pickGeometrySceneRegion");
-  return native.pickGeometrySceneRegion(surfaceId, x, y) ?? null;
+  return native.pickGeometrySceneRegion(surfaceId, x, y, mode) ?? null;
 }
 
 export async function renderCurrentFigureScene(handle: number): Promise<void> {
@@ -2320,6 +2343,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch {
       return null;
     }
+  }
+
+  async createFeaFieldScene(runId: string, fieldId: string | null, shapeMode: "undeformed" | "true" | "exaggerated", exaggeration: number, showUndeformedOutline: boolean, view?: FeaFieldSceneView | null, replaceHandle?: number | null): Promise<{ handle: number; deformationScale: number; exact?: boolean }> {
+    this.ensureActive();
+    if (typeof this.native.createFeaFieldScene !== "function") {
+      throw new Error("FEA field visualization is unavailable in this runtime");
+    }
+    return this.native.createFeaFieldScene(runId, fieldId, shapeMode, exaggeration, showUndeformedOutline, view, replaceHandle);
   }
 
   async importFigureSceneFromPath(path: string): Promise<number | null> {

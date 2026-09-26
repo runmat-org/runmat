@@ -40,6 +40,7 @@ pub struct PreparedAccuracy {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+    pub resource_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -166,7 +167,7 @@ pub fn prepare_accuracy(
             ValueRefKind::DriverObject,
         ));
     }
-    let workload_inputs = inputs
+    let mut workload_inputs: Vec<AnalysisWorkloadInput> = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
@@ -177,10 +178,29 @@ pub fn prepare_accuracy(
             reference_kind: *reference_kind,
         })
         .collect();
-    let inputs = inputs
+    let mut inputs = inputs
         .into_iter()
         .map(|(input, _)| input)
         .collect::<Vec<_>>();
+    let resource_plan =
+        crate::build_prepared_accuracy_resource_plan(&request, &numerical_receipt, &inputs)?;
+    let plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    workload_inputs.push(AnalysisWorkloadInput {
+        kind: plan_objects.manifest.kind,
+        logical_identity: plan_objects.manifest.logical_identity,
+        payload_digest: plan_objects.manifest.payload_digest,
+        manifest_digest: plan_objects.root.digest,
+        manifest_encoded_length: plan_objects.root.encoded_length,
+        reference_kind: ValueRefKind::DriverObject,
+    });
+    inputs.push(plan_objects);
     let workload = AnalysisWorkloadRequest::new(
         preparation.solve_host.workload.study,
         preparation.solve_host.workload.step,
@@ -199,6 +219,7 @@ pub fn prepare_accuracy(
         host,
         program,
         inputs,
+        resource_plan,
     })
 }
 

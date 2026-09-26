@@ -69,7 +69,11 @@ impl StructuralStudyCompletionIdentity {
     ) -> String {
         let digest = runmat_execution::Digest::sha256(
             [
-                b"runmat-remote-structural-study-completion/v1\0".as_slice(),
+                // The schema belongs in the immutable key. A format change must not collide
+                // with an older artifact from the same admitted execution.
+                b"runmat-remote-structural-study-completion/v2\0".as_slice(),
+                super::storage::ARTIFACT_SCHEMA_VERSION.as_bytes(),
+                b"\0".as_slice(),
                 self.0.as_bytes(),
                 authored_study_digest.bytes(),
                 step_id.as_str().as_bytes(),

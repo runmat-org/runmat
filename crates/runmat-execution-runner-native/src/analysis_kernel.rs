@@ -578,7 +578,8 @@ fn execute_accuracy_evaluation(
         unique_input(&invocation, AnalysisNumericalObjectKind::NumericalReceipt)?;
     let observations =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
-    if invocation.inputs.len() != 2 + usize::from(observations.is_some())
+    let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
+    if invocation.inputs.len() != 3 + usize::from(observations.is_some())
         || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::AccuracyReport]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -622,6 +623,19 @@ fn execute_accuracy_evaluation(
     {
         return Err(AnalysisBridgeError::Identity(
             "accuracy numerical receipt differs from its admitted source result",
+        ));
+    }
+    let admitted_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())?;
+    let expected_plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
+        &request,
+        &numerical_receipt,
+        invocation.inputs,
+    )?;
+    if resource_plan_input.manifest.logical_identity != admitted_plan.identity.digest()
+        || admitted_plan != expected_plan
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "accuracy resource plan differs from admitted inputs",
         ));
     }
     let evidence = numerical_receipt.evidence(&request)?;

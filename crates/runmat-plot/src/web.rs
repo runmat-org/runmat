@@ -602,6 +602,7 @@ impl WebRenderer {
         &self,
         index: &GeometryScenePickIndex,
         position: [f32; 2],
+        mode: crate::geometry_scene::GeometryScenePickMode,
     ) -> Option<GeometryScenePickResult> {
         index.pick(GeometryScenePickRequest {
             camera: self.plot_renderer.camera().clone(),
@@ -610,6 +611,7 @@ impl WebRenderer {
                 self.surface_config.height.max(1) as f32,
             ],
             position,
+            mode,
         })
     }
 

@@ -24,6 +24,7 @@ pub struct NativeSurfaceRenderContext {
     renderer: PlotRenderer,
     config: PlotRenderConfig,
     pixels_per_point: f32,
+    presented_frame: Option<Arc<PresentedFrame>>,
     background_policy: BackgroundPolicy,
     textmark: Option<String>,
     #[cfg(feature = "egui-overlay")]
@@ -59,6 +60,72 @@ pub struct NativeSurfaceCameraState {
     pub active_camera: Camera,
     pub axes_cameras: Vec<Camera>,
     pub axes_camera_user_controlled: Vec<bool>,
+}
+
+/// An immutable GPU copy of a completed native frame. Readback does not rerender
+/// or reconstruct layout, so text, antialiasing, and all overlays are preserved.
+pub struct PresentedFrame {
+    texture: wgpu::Texture,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+}
+
+impl PresentedFrame {
+    pub fn size(&self) -> (u32, u32) {
+        (self.texture.width(), self.texture.height())
+    }
+
+    pub async fn rgba(&self) -> Result<Vec<u8>, String> {
+        let (width, height) = self.size();
+        let stride = (width * 4).div_ceil(256) * 256;
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("presented frame readback"),
+            size: u64::from(stride) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("presented frame readback"),
+            });
+        encoder.copy_texture_to_buffer(
+            crate::wgpu_compat::TexelCopyTextureInfo {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            crate::wgpu_compat::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: crate::wgpu_compat::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(stride),
+                    rows_per_image: Some(height),
+                },
+            },
+            self.texture.size(),
+        );
+        self.queue.submit(Some(encoder.finish()));
+        let slice = buffer.slice(..);
+        map_read_async(&self.device, &slice).await?;
+        let data = slice.get_mapped_range();
+        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+        for row in data.chunks_exact(stride as usize) {
+            rgba.extend_from_slice(&row[..(width * 4) as usize]);
+        }
+        drop(data);
+        buffer.unmap();
+        if matches!(
+            self.texture.format(),
+            wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb
+        ) {
+            for pixel in rgba.chunks_exact_mut(4) {
+                pixel.swap(0, 2);
+            }
+        }
+        Ok(rgba)
+    }
 }
 
 impl NativeSurfaceRenderContext {
@@ -111,6 +178,7 @@ impl NativeSurfaceRenderContext {
             renderer,
             config,
             pixels_per_point: 1.0,
+            presented_frame: None,
             background_policy: BackgroundPolicy::ThemeDriven,
             textmark: None,
             #[cfg(feature = "egui-overlay")]
@@ -120,6 +188,62 @@ impl NativeSurfaceRenderContext {
             #[cfg(feature = "egui-overlay")]
             overlay,
         })
+    }
+
+    /// Keep the final native output on the GPU; CPU readback is deferred until
+    /// an actual overlay handoff. Never overwrite a frame held by a reader.
+    pub fn retain_presented_frame(&mut self, source: &wgpu::Texture) {
+        let device = self.renderer.wgpu_renderer.device.clone();
+        let queue = self.renderer.wgpu_renderer.queue.clone();
+        let frame = self
+            .presented_frame
+            .take()
+            .filter(|frame| {
+                Arc::strong_count(frame) == 1
+                    && frame.texture.size() == source.size()
+                    && frame.texture.format() == source.format()
+            })
+            .unwrap_or_else(|| {
+                let texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("completed native frame"),
+                    size: source.size(),
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: source.format(),
+                    usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                Arc::new(PresentedFrame {
+                    texture,
+                    device: device.clone(),
+                    queue: queue.clone(),
+                })
+            });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("retain native frame"),
+        });
+        encoder.copy_texture_to_texture(
+            crate::wgpu_compat::TexelCopyTextureInfo {
+                texture: source,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            crate::wgpu_compat::TexelCopyTextureInfo {
+                texture: &frame.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            source.size(),
+        );
+        queue.submit(Some(encoder.finish()));
+        self.presented_frame = Some(frame);
+    }
+
+    pub fn presented_frame(&self) -> Option<Arc<PresentedFrame>> {
+        self.presented_frame.clone()
     }
 
     /// Resize renderer viewport state.
@@ -423,7 +547,19 @@ impl NativeSurfaceRenderContext {
         scene: &GeometryScene,
         camera: Option<&Camera>,
     ) -> Result<Vec<u8>, String> {
-        self.prepare_geometry_scene(scene, camera, None);
+        self.render_geometry_scene_to_rgba_with_presentation(scene, camera, None)
+            .await
+    }
+
+    /// Render the same presentation used by the native surface, including selections,
+    /// annotations, visibility, sectioning, and display mode.
+    pub async fn render_geometry_scene_to_rgba_with_presentation(
+        &mut self,
+        scene: &GeometryScene,
+        camera: Option<&Camera>,
+        presentation: Option<&GeometryScenePresentation>,
+    ) -> Result<Vec<u8>, String> {
+        self.prepare_geometry_scene(scene, camera, presentation);
 
         let width = self.config.width.max(1);
         let height = self.config.height.max(1);
@@ -976,7 +1112,7 @@ fn is_default_figure_bg(bg: glam::Vec4) -> bool {
         && (bg.w - 1.0).abs() <= EPS
 }
 
-async fn create_headless_context(
+pub async fn create_headless_context(
     width: u32,
     height: u32,
 ) -> Result<NativeSurfaceRenderContext, String> {
@@ -1165,7 +1301,7 @@ pub async fn render_geometry_scene_png_bytes_interactive_and_theme(
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }
 
-fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+pub fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 
     let mut opaque = rgba.to_vec();
@@ -1371,5 +1507,257 @@ mod tests {
         assert!(is_headless_gpu_unavailable_error(
             "Headless GPU context creation panicked: called `Option::unwrap()` on a `None` value"
         ));
+    }
+}
+
+#[cfg(all(test, feature = "egui-overlay"))]
+mod parity_tests {
+    use super::*;
+    use crate::core::{Material, Vertex};
+    use crate::geometry_scene::*;
+    use crate::plots::LinePlot;
+    use crate::styling::ThemeVariant;
+    use glam::{Vec3, Vec4};
+
+    fn target(context: &NativeSurfaceRenderContext) -> wgpu::Texture {
+        context
+            .renderer
+            .wgpu_renderer
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("parity native target"),
+                size: wgpu::Extent3d {
+                    width: context.config.width,
+                    height: context.config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: context.renderer.wgpu_renderer.surface_config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            })
+    }
+
+    async fn peer(
+        context: &NativeSurfaceRenderContext,
+        dpr: f32,
+        theme: &PlotThemeConfig,
+    ) -> NativeSurfaceRenderContext {
+        let mut peer = NativeSurfaceRenderContext::new(
+            context.renderer.wgpu_renderer.device.clone(),
+            context.renderer.wgpu_renderer.queue.clone(),
+            context.config.width,
+            context.config.height,
+            wgpu::TextureFormat::Rgba8Unorm,
+        )
+        .await
+        .unwrap();
+        peer.set_pixels_per_point(dpr);
+        peer.set_theme_config(theme.clone());
+        peer
+    }
+
+    fn assert_pixels(label: &str, actual: &[u8], expected: &[u8], width: u32, height: u32) {
+        let differences = actual.iter().zip(expected).filter(|(a, b)| a != b).count();
+        if differences > 0 {
+            for (suffix, data) in [("native", expected), ("snapshot", actual)] {
+                let path = std::env::temp_dir().join(format!("runmat-parity-{label}-{suffix}.png"));
+                image::save_buffer(path, data, width, height, image::ColorType::Rgba8).unwrap();
+            }
+        }
+        assert_eq!(
+            differences, 0,
+            "{label}: native/snapshot channel differences"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a GPU; run explicitly with --ignored"]
+    async fn native_snapshot_pixel_parity() {
+        // Intentionally fail if no GPU is available: this suite must exercise real rendering.
+        let seed = create_headless_context(640, 480).await.unwrap();
+        // Native Metal/DirectX targets generally use BGRA; the canvas uses RGBA.
+        let mut live = NativeSurfaceRenderContext::new(
+            seed.renderer.wgpu_renderer.device.clone(),
+            seed.renderer.wgpu_renderer.queue.clone(),
+            640,
+            480,
+            wgpu::TextureFormat::Bgra8Unorm,
+        )
+        .await
+        .unwrap();
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        for axis in 0..2 {
+            let line = figure
+                .add_line_plot(LinePlot::new(vec![0., 1., 2., 3.], vec![0., 2., 1., 3.]).unwrap());
+            figure.assign_plot_to_axes(line, axis).unwrap();
+            figure.set_axes_title(axis, format!("Panel {axis}"));
+            figure.set_axes_labels(axis, "Time (s)", "Amplitude");
+            figure.set_axes_legend_enabled(axis, true);
+            figure.set_axes_tick_label_rotations(axis, Some(30.0), None);
+        }
+        let cameras = vec![
+            Camera::new_2d((0.5, 2.5, 0.5, 2.5)),
+            Camera::new_2d((0., 3., 0., 3.)),
+        ];
+        let flags = [true, false];
+        let chunk = GeometrySceneChunk::indexed_triangles(
+            "face",
+            vec![
+                Vertex::new(Vec3::new(-1., -1., 0.), Vec4::new(0.6, 0.7, 0.8, 1.)),
+                Vertex::new(Vec3::new(1., -1., 0.), Vec4::new(0.6, 0.7, 0.8, 1.)),
+                Vertex::new(Vec3::new(0., 1., 0.), Vec4::new(0.6, 0.7, 0.8, 1.)),
+            ],
+            vec![0, 1, 2],
+            Material::default(),
+        )
+        .with_regions(vec![GeometrySceneRegion::new(
+            "support",
+            None,
+            None,
+            vec![GeometrySceneTriangleRange::new(0, 1)],
+        )]);
+        let scene =
+            GeometryScene::new("parity", 1, vec![chunk]).with_overlay(GeometrySceneOverlay {
+                source_name: None,
+                status: GeometrySceneCompleteness::Complete,
+                quality_label: None,
+                format: None,
+                source_label: None,
+                allow_create_fea_study: false,
+                byte_count: None,
+                mesh_count: 1,
+                vertex_count: 3,
+                triangle_count: 1,
+                progress_percent: None,
+                scalar_legend: Some(GeometrySceneScalarLegend {
+                    label: "structural.displacement magnitude".into(),
+                    unit: "m".into(),
+                    minimum: 0.0,
+                    maximum: 9.65e-10,
+                }),
+                region_count: 1,
+                mapped_region_count: 1,
+                assembly_nodes: vec![],
+                regions: vec![],
+                warnings: vec![],
+            });
+        for dpr in [1.0, 1.25, 2.0] {
+            let width = (640.0 * dpr) as u32;
+            let height = (480.0 * dpr) as u32;
+            live.resize(width, height);
+            for variant in [ThemeVariant::ModernDark, ThemeVariant::ClassicLight] {
+                let theme = PlotThemeConfig {
+                    variant,
+                    ..Default::default()
+                };
+                live.set_pixels_per_point(dpr);
+                live.set_theme_config(theme.clone());
+                let texture = target(&live);
+                let view = texture.create_view(&Default::default());
+                for _ in 0..2 {
+                    live.render_to_view_with_camera_state(
+                        &figure,
+                        &view,
+                        Some(&cameras[0]),
+                        Some(&cameras),
+                        Some(&flags),
+                    )
+                    .unwrap();
+                }
+                live.retain_presented_frame(&texture);
+                let retained = live.presented_frame().unwrap();
+                let expected = retained.rgba().await.unwrap();
+                let mut snapshot = peer(&live, dpr, &theme).await;
+                let actual = snapshot
+                    .render_to_rgba_with_camera_state(
+                        &figure,
+                        Some(&cameras[0]),
+                        Some(&cameras),
+                        Some(&flags),
+                    )
+                    .await
+                    .unwrap();
+                assert_pixels(
+                    &format!("2d-{dpr}-{variant:?}"),
+                    &actual,
+                    &expected,
+                    width,
+                    height,
+                );
+                for mode in [
+                    GeometrySceneDisplayMode::Shaded,
+                    GeometrySceneDisplayMode::Edges,
+                    GeometrySceneDisplayMode::Wireframe,
+                ] {
+                    let presentation = GeometryScenePresentation {
+                        display_mode: mode,
+                        selected_region_ids: vec!["support".into()],
+                        selected_topology: vec![
+                            GeometrySceneTopologySelection::Edge {
+                                chunk_id: "face".into(),
+                                vertex_indices: [0, 1],
+                                segments: vec![],
+                            },
+                            GeometrySceneTopologySelection::Point {
+                                chunk_id: "face".into(),
+                                vertex_index: 2,
+                            },
+                        ],
+                        region_annotations: vec![GeometrySceneRegionAnnotation {
+                            region_id: "support".into(),
+                            kind: GeometrySceneAnnotationKind::FixedSupport,
+                            color: None,
+                            label: None,
+                            direction: None,
+                            size: None,
+                        }],
+                        show_grid: Some(false),
+                        ..Default::default()
+                    };
+                    live.render_geometry_scene_to_view_with_presentation(
+                        &scene,
+                        &view,
+                        None,
+                        Some(&presentation),
+                    )
+                    .unwrap();
+                    let camera = live.camera_state().active_camera;
+                    live.render_geometry_scene_to_view_with_presentation(
+                        &scene,
+                        &view,
+                        Some(&camera),
+                        Some(&presentation),
+                    )
+                    .unwrap();
+                    live.retain_presented_frame(&texture);
+                    let expected_geometry = live.presented_frame().unwrap().rgba().await.unwrap();
+                    let mut snapshot = peer(&live, dpr, &theme).await;
+                    let actual = snapshot
+                        .render_geometry_scene_to_rgba_with_presentation(
+                            &scene,
+                            Some(&camera),
+                            Some(&presentation),
+                        )
+                        .await
+                        .unwrap();
+                    assert_pixels(
+                        &format!("geometry-{dpr}-{variant:?}-{mode:?}"),
+                        &actual,
+                        &expected_geometry,
+                        width,
+                        height,
+                    );
+                    assert_eq!(
+                        retained.rgba().await.unwrap(),
+                        expected,
+                        "retained frame changed after another present"
+                    );
+                }
+            }
+        }
     }
 }

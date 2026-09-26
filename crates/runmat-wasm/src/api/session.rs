@@ -1419,6 +1419,57 @@ impl RunMatWasm {
         }
     }
 
+    #[wasm_bindgen(js_name = createFeaFieldScene)]
+    pub fn create_fea_field_scene(
+        &self,
+        run_id: &str,
+        field_id: Option<String>,
+        shape_mode: &str,
+        exaggeration: f64,
+        show_undeformed_outline: bool,
+        view: JsValue,
+        replace_handle: Option<u32>,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let view = if view.is_null() || view.is_undefined() {
+            None
+        } else {
+            Some(
+                serde_wasm_bindgen::from_value(view)
+                    .map_err(|error| JsValue::from_str(&format!("invalid FEA view: {error}")))?,
+            )
+        };
+        let (mut scene, deformation_scale, exact) =
+            runmat_runtime::analysis::field_scene::build_scene_view(
+                run_id,
+                field_id.as_deref(),
+                shape_mode,
+                exaggeration,
+                show_undeformed_outline,
+                view,
+            )
+            .map_err(|error| JsValue::from_str(&error))?;
+        let handle = if let Some(handle) = replace_handle {
+            let previous = runmat_runtime::builtins::plotting::clone_geometry_scene(handle)
+                .ok_or_else(|| {
+                    JsValue::from_str(&format!("geometry scene handle {handle} does not exist"))
+                })?;
+            scene.revision = previous.revision.saturating_add(1);
+            runmat_runtime::builtins::plotting::replace_geometry_scene(handle, scene)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            handle
+        } else {
+            runtime_import_geometry_scene(scene)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?
+        };
+        serde_wasm_bindgen::to_value(&serde_json::json!({
+            "handle": handle,
+            "deformationScale": deformation_scale,
+            "exact": exact,
+        }))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
     #[wasm_bindgen(js_name = importFigureSceneFromPath)]
     pub async fn import_figure_scene_from_path(&self, path: &str) -> Result<Option<u32>, JsValue> {
         self.ensure_not_disposed()?;

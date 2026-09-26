@@ -323,6 +323,7 @@ pub(crate) mod wasm {
         surface_id: u32,
         x: f32,
         y: f32,
+        mode: runmat_plot::GeometryScenePickMode,
     ) -> BuiltinResult<Option<GeometryScenePickResult>> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
@@ -352,7 +353,7 @@ pub(crate) mod wasm {
             Ok(entry.geometry_pick_index.as_ref().and_then(|cached| {
                 entry
                     .renderer
-                    .pick_geometry_scene_region(&cached.index, [x, y])
+                    .pick_geometry_scene_region(&cached.index, [x, y], mode)
             }))
         })
     }
@@ -673,6 +674,7 @@ pub(crate) mod wasm {
         _surface_id: u32,
         _x: f32,
         _y: f32,
+        _mode: runmat_plot::GeometryScenePickMode,
     ) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -779,8 +781,9 @@ pub fn pick_geometry_scene_region(
     surface_id: u32,
     x: f32,
     y: f32,
+    mode: runmat_plot::GeometryScenePickMode,
 ) -> BuiltinResult<Option<runmat_plot::GeometryScenePickResult>> {
-    wasm::pick_geometry_scene_region_impl(surface_id, x, y)
+    wasm::pick_geometry_scene_region_impl(surface_id, x, y, mode)
 }
 
 pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {

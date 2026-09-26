@@ -149,8 +149,18 @@ pub fn set_geometry_scene_presentation(
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = pickGeometrySceneRegion)]
-pub fn pick_geometry_scene_region(surface_id: u32, x: f32, y: f32) -> Result<JsValue, JsValue> {
-    let result = runtime_pick_geometry_scene_region(surface_id, x, y)
+pub fn pick_geometry_scene_region(
+    surface_id: u32,
+    x: f32,
+    y: f32,
+    mode: &str,
+) -> Result<JsValue, JsValue> {
+    let mode = match mode {
+        "edge" => runmat_plot::GeometryScenePickMode::Edge,
+        "point" => runmat_plot::GeometryScenePickMode::Point,
+        _ => runmat_plot::GeometryScenePickMode::Face,
+    };
+    let result = runtime_pick_geometry_scene_region(surface_id, x, y, mode)
         .map_err(|err| runtime_error_to_js(&err))?;
     serde_wasm_bindgen::to_value(&result).map_err(|err| js_error(&err.to_string()))
 }

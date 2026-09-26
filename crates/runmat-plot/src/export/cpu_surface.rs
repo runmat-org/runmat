@@ -1392,6 +1392,12 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
     let oy = origin_component(bmin.y, bmax.y);
     let oz = origin_component(bmin.z, bmax.z);
     let floor_z = oz;
+    let grid_level = bmin.z - (bmax - bmin).length().max(1.0) * 0.001;
+    let min_u = bmin.x;
+    let max_u = bmax.x;
+    let min_v = bmin.y;
+    let max_v = bmax.y;
+    let on_grid = |u: f32, v: f32| Vec3::new(u, v, grid_level);
 
     if axes.show_minor_grid {
         let divisions = 28usize;
@@ -1400,13 +1406,13 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
                 continue;
             }
             let t = i as f32 / divisions as f32;
-            let x = bmin.x + t * (bmax.x - bmin.x);
-            let y = bmin.y + t * (bmax.y - bmin.y);
+            let u = min_u + t * (max_u - min_u);
+            let v = min_v + t * (max_v - min_v);
 
-            let gx0 = Vec3::new(x, bmin.y, floor_z);
-            let gx1 = Vec3::new(x, bmax.y, floor_z);
-            let gy0 = Vec3::new(bmin.x, y, floor_z);
-            let gy1 = Vec3::new(bmax.x, y, floor_z);
+            let gx0 = on_grid(u, min_v);
+            let gx1 = on_grid(u, max_v);
+            let gy0 = on_grid(min_u, v);
+            let gy1 = on_grid(max_u, v);
 
             let Some(a0) = project_3d(gx0, axes.plot_rect, cam, floor_grid_minor) else {
                 continue;
@@ -1431,13 +1437,13 @@ fn draw_3d_axes_decorations(canvas: &mut Canvas, axes: &AxesView) {
         let floor_grid_major = [74, 86, 106, 116];
         for i in 0..=divisions {
             let t = i as f32 / divisions as f32;
-            let x = bmin.x + t * (bmax.x - bmin.x);
-            let y = bmin.y + t * (bmax.y - bmin.y);
+            let u = min_u + t * (max_u - min_u);
+            let v = min_v + t * (max_v - min_v);
 
-            let gx0 = Vec3::new(x, bmin.y, floor_z);
-            let gx1 = Vec3::new(x, bmax.y, floor_z);
-            let gy0 = Vec3::new(bmin.x, y, floor_z);
-            let gy1 = Vec3::new(bmax.x, y, floor_z);
+            let gx0 = on_grid(u, min_v);
+            let gx1 = on_grid(u, max_v);
+            let gy0 = on_grid(min_u, v);
+            let gy1 = on_grid(max_u, v);
 
             let Some(a0) = project_3d(gx0, axes.plot_rect, cam, floor_grid_major) else {
                 continue;
@@ -1947,6 +1953,40 @@ fn draw_render_data(canvas: &mut Canvas, render_data: &RenderData, axes: &AxesVi
     let style_code = render_data.material.metallic as i32;
 
     match render_data.pipeline_type {
+        PipelineType::AnnotationStroke => {
+            let projection = axes.camera_3d.as_ref().map(|camera| {
+                let mut camera = camera.clone();
+                camera.update_aspect_ratio(
+                    axes.plot_rect.2.max(1) as f32 / axes.plot_rect.3.max(1) as f32,
+                );
+                camera.view_proj_matrix()
+            });
+            for stroke in render_data.vertices.chunks_exact(6) {
+                let face_span = stroke[0].color[3];
+                if face_span > 0.0 {
+                    if let Some(view_proj) = projection {
+                        let clip = view_proj * Vec3::from_array(stroke[0].position).extend(1.0);
+                        let span_px =
+                            face_span * view_proj.y_axis.y.abs() * axes.plot_rect.3.max(1) as f32
+                                / (2.0 * clip.w.abs().max(0.0001));
+                        if span_px < 105.0 {
+                            continue;
+                        }
+                    }
+                }
+                let Some(a) = project_vertex(&stroke[0], axes) else {
+                    continue;
+                };
+                let Some(b) = project_vertex(&stroke[2], axes) else {
+                    continue;
+                };
+                let mut a = a;
+                let mut b = b;
+                a.color[3] = 255;
+                b.color[3] = 255;
+                canvas.draw_line(a, b, 2.8, style_code, false);
+            }
+        }
         PipelineType::Lines | PipelineType::LinesNoDepth => {
             let depth_test =
                 axes.has_3d_content && render_data.pipeline_type != PipelineType::LinesNoDepth;

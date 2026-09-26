@@ -4543,6 +4543,7 @@ mod tests {
             render_topology: Some(crate::analysis::AnalysisRenderTopology {
                 schema_version: "analysis_render_topology/v1".to_string(),
                 source: crate::analysis::AnalysisRenderTopologySource::AnalysisMesh,
+                volume_element_count: 1,
                 meshes: vec![crate::analysis::AnalysisRenderMesh {
                     mesh_id: "synthetic_plot_boundary".to_string(),
                     vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],

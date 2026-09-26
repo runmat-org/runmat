@@ -501,12 +501,30 @@ impl Scene {
 
     /// Get visible nodes for rendering (with frustum culling)
     pub fn get_visible_nodes(&self) -> Vec<&SceneNode> {
-        self.nodes
+        let mut nodes: Vec<_> = self
+            .nodes
             .values()
             .filter(|node| {
                 node.visible && node.render_data.is_some() && self.is_node_in_frustum(node)
             })
-            .collect()
+            .collect();
+        // HashMap iteration is not a draw order. In particular, depth-free
+        // annotations must be composited after surfaces, never underneath them.
+        // Node IDs preserve insertion order within each layer.
+        nodes.sort_by_key(|node| {
+            let overlay = node
+                .render_data
+                .as_ref()
+                .map(|data| {
+                    matches!(
+                        data.pipeline_type,
+                        super::PipelineType::LinesNoDepth | super::PipelineType::AnnotationStroke
+                    )
+                })
+                .unwrap_or(false);
+            (overlay, node.id)
+        });
+        nodes
     }
 
     fn is_node_in_frustum(&self, node: &SceneNode) -> bool {

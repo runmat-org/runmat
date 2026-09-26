@@ -281,7 +281,11 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     })
     .unwrap();
     let accuracy_response = driver
-        .execute(&accuracy.host, &accuracy.program, None)
+        .execute(
+            &accuracy.host,
+            &accuracy.program,
+            Some(&accuracy.resource_plan),
+        )
         .await;
     let imported_accuracy = import_accuracy(
         driver.store(),
@@ -290,6 +294,27 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         limits,
     )
     .unwrap();
+
+    let accuracy_wall = accuracy_response.resources.resources.usage.wall_millis;
+    let resource_usage = runmat_analysis_execution::extend_resource_usage(
+        &resource_usage,
+        &PlannedResourceUsageGraph::new(
+            vec![PlannedResourceUsageAttempt {
+                plan: accuracy.resource_plan.clone(),
+                accounting: accuracy_response.resources,
+            }],
+            accuracy_wall,
+        )
+        .unwrap(),
+        &solve.host.artifact_access,
+        runmat_analysis_execution::AnalysisOutputPolicy::new(DEFAULT_ANALYSIS_CHUNK_BYTES, limits)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        resource_usage.evidence.attempts.len(),
+        expected_attempt_count + 1
+    );
 
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),

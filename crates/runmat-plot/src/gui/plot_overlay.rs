@@ -2740,6 +2740,12 @@ impl PlotOverlay {
             }
         }
 
+        // Geometry views keep the world axes and grid, but the plot tick values
+        // obscure the model and its result legend.
+        if plot_renderer.has_geometry_scene() {
+            return;
+        }
+
         let draw_axis = |axis: Vec3, color: Color32| {
             for i in 1..=6 {
                 let t = (i as f32) * (major_step as f32);
@@ -3002,8 +3008,8 @@ impl PlotOverlay {
         let label_font = FontId::proportional(11.0 * scale);
         let detail_font = FontId::proportional(9.0 * scale);
         ui.painter().text(
-            rect.left_top(),
-            Align2::LEFT_TOP,
+            rect.right_top(),
+            Align2::RIGHT_TOP,
             &legend.label,
             label_font,
             text_color,

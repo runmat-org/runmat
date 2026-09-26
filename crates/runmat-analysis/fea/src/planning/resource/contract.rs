@@ -9,18 +9,21 @@ use runmat_execution::{
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    AnalysisNumericalObjectKind, AnalysisWorkloadIdentity, FieldRecoveryRequestIdentity,
-    ObservationAssemblyRequestIdentity, ObservationHistoryCheckpointRequestIdentity,
-    ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
-    SolverResultIdentity, StructuralBucklingWorkloadIdentity,
-    StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
+    AccuracyEvaluationRequestIdentity, AnalysisNumericalObjectKind, AnalysisWorkloadIdentity,
+    FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
+    ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
+    ObservationPartitionReductionRequestIdentity, SolverResultIdentity,
+    StructuralBucklingWorkloadIdentity, StructuralFrequencyEntryRequestIdentity,
+    StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalResponseSpectrumAssemblyRequestIdentity,
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
     StructuralRandomResponseAssemblyRequestIdentity,
     StructuralRandomResponseIntervalRequestIdentity, StructuralTransientBlockRequestIdentity,
     StructuralTransientResultAssemblyRequestIdentity,
 };
+mod accuracy_demand;
 mod assembly_demand;
+pub use accuracy_demand::AccuracyEvaluationResourceDemand;
 mod error;
 mod modal_demand;
 mod prepared;
@@ -56,7 +59,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 26;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 27;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -228,6 +231,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "request")]
 pub enum FeaResourcePhase {
+    AccuracyEvaluation(AccuracyEvaluationRequestIdentity),
     ThermalSolve(AnalysisWorkloadIdentity),
     StructuralLinearPipeline,
     StructuralModalExtraction(StructuralModalWorkloadIdentity),
@@ -369,6 +373,7 @@ pub struct ObservationAssemblyResourceDemand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
+    AccuracyEvaluation(AccuracyEvaluationResourceDemand),
     ThermalSolve(ThermalSolveResourceDemand),
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
     StructuralModalExtraction(StructuralModalResourceDemand),
@@ -400,6 +405,9 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::AccuracyEvaluation(demand), AnalysisNumericalObjectKind::AccuracyReport) => {
+                Some(&demand.output)
+            }
             (Self::ThermalSolve(demand), AnalysisNumericalObjectKind::SolverResult) => {
                 Some(&demand.result_output)
             }
@@ -523,6 +531,8 @@ pub struct FeaResourcePlanningInput {
 impl FeaResourcePlanningInput {
     pub const fn topology_digest(&self) -> Digest {
         match &self.demand {
+            // Accuracy is scoped to the semantic numerical result, not a mesh operation.
+            FeaResourceDemand::AccuracyEvaluation(demand) => demand.source_result.digest(),
             FeaResourceDemand::ThermalSolve(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
@@ -561,6 +571,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
+            FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.observations),
             FeaResourceDemand::StructuralModalExtraction(demand) => {
@@ -599,6 +610,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
+            FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
@@ -642,6 +654,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
+            FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
@@ -670,6 +683,7 @@ impl FeaResourcePlanningInput {
 
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
+            FeaResourceDemand::AccuracyEvaluation(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),

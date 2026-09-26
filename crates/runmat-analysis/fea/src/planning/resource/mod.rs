@@ -1,6 +1,8 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
+mod accuracy;
 mod admission;
+pub use accuracy::build_accuracy_resource_plan;
 mod assembly_sizing;
 mod buckling;
 mod connector_buffers;
@@ -64,10 +66,11 @@ pub use buckling::{
     structural_buckling_result_payload_bytes_upper_bound, PreparedStructuralBucklingResourceFacts,
 };
 pub use contract::{
-    AcceleratorRequirement, AccuracyResourceDemand, AssemblyResourcePolicy, ByteCount,
-    CheckpointArtifactPolicy, ConstraintResourceFacts, Count, FeaResourceDemand, FeaResourcePhase,
-    FeaResourcePlan, FeaResourcePlanIdentity, FeaResourcePlanningInput, FieldRecoveryResourceFacts,
-    NumericalScalar, ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
+    AcceleratorRequirement, AccuracyEvaluationResourceDemand, AccuracyResourceDemand,
+    AssemblyResourcePolicy, ByteCount, CheckpointArtifactPolicy, ConstraintResourceFacts, Count,
+    FeaResourceDemand, FeaResourcePhase, FeaResourcePlan, FeaResourcePlanIdentity,
+    FeaResourcePlanningInput, FieldRecoveryResourceFacts, NumericalScalar,
+    ObservationAssemblyResourceDemand, ObservationHistoryCheckpointResourceDemand,
     ObservationPartitionPayloadLayout, ObservationPartitionResourceDemand,
     ObservationReductionResourceDemand, ObservationResourceFacts, PartitioningPolicy,
     PhaseResourcePolicy, PreconditionerStorage, PreparedInputResourceFacts,

@@ -174,6 +174,31 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
     let metadata = storage::AnalysisArtifactStore::load_run_metadata(&store, &run.run_id)
         .unwrap()
         .expect("persisted run metadata");
+    assert!(metadata.render_topology.is_none());
+    if let Some(source_topology) = &run.render_topology {
+        let index = storage::AnalysisArtifactStore::load_render_tile_index(&store, &run.run_id)
+            .unwrap()
+            .expect("persisted render tile index");
+        assert!(!index.meshes.is_empty());
+        let selection = storage::AnalysisArtifactStore::plan_render_view(&store, &run.run_id, None)
+            .unwrap()
+            .expect("persisted render view plan");
+        assert_eq!(selection.mesh_count, index.meshes.len());
+        assert!(!selection.nodes.is_empty());
+        let root = index.meshes[0].lod_root.expect("render LOD root");
+        let overview =
+            storage::AnalysisArtifactStore::load_render_lod_node(&store, &run.run_id, 0, root)
+                .unwrap()
+                .expect("persisted render LOD node");
+        assert!(!overview.triangles.is_empty());
+        assert!(index.field_summaries.iter().any(|summary| {
+            summary.field_id == "published_displacement" && summary.minimum <= summary.maximum
+        }));
+        let restored = storage::AnalysisArtifactStore::load_render_topology(&store, &run.run_id)
+            .unwrap()
+            .expect("persisted render topology");
+        assert_eq!(&restored, source_topology);
+    }
     assert!(metadata.run.observations.is_empty());
     assert!(metadata
         .run
@@ -190,6 +215,20 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
         root: store_root,
     })
     .unwrap();
+    if run.render_topology.is_some() {
+        let (scene, scale, _exact) = crate::analysis::field_scene::build_scene_view(
+            &run.run_id,
+            Some("published_displacement"),
+            "undeformed",
+            1.0,
+            false,
+            None,
+        )
+        .expect("render selected field from persisted LOD tiles");
+        assert_eq!(scale, 0.0);
+        assert!(scene.triangle_count() > 0);
+        assert!(scene.overlay.as_ref().unwrap().scalar_legend.is_some());
+    }
     let mut metadata_query = AnalysisResultsQuery::metadata_only();
     metadata_query.include_fields = vec!["published_displacement".to_string()];
     let public_metadata = analysis_results_by_run_id_op(
@@ -218,6 +257,7 @@ fn authored_output_fields_are_chunked_and_selectively_readable() {
     let reloaded = storage::AnalysisArtifactStore::load_run(&store, &run.run_id)
         .unwrap()
         .expect("persisted run");
+    assert_eq!(reloaded.render_topology, run.render_topology);
     let reloaded_output = reloaded
         .run
         .observations
@@ -569,6 +609,82 @@ fn study_evidence_rejects_symlink_targets_and_owned_directories() {
     drop(_runtime_guard);
     let _ = fs::remove_dir_all(&root);
     let _ = fs::remove_dir_all(&outside);
+}
+
+#[test]
+fn remote_completion_uses_a_new_artifact_key_for_the_numbered_schema() {
+    let _guard = analysis_test_guard();
+    let identity = StructuralStudyCompletionIdentity::new("admitted-run").unwrap();
+    let study_digest = runmat_execution::Digest::sha256(b"authored-study");
+    let step_id = &sample_model().sequence.steps[0].step_id;
+    let current = identity.local_run_id(study_digest, step_id);
+    assert_eq!(current, identity.local_run_id(study_digest, step_id));
+
+    let previous_numbered = runmat_execution::Digest::sha256(
+        [
+            b"runmat-remote-structural-study-completion/v2\0".as_slice(),
+            b"analysis_run_artifact/2026-09-001".as_slice(),
+            b"\0".as_slice(),
+            b"admitted-run".as_slice(),
+            study_digest.bytes(),
+            step_id.as_str().as_bytes(),
+        ]
+        .concat(),
+    );
+    let previous_numbered_run_id = format!(
+        "run_remote_{}",
+        previous_numbered.to_string().trim_start_matches("sha256:")
+    );
+    assert_ne!(current, previous_numbered_run_id);
+
+    let retired = runmat_execution::Digest::sha256(
+        [
+            b"runmat-remote-structural-study-completion/v1\0".as_slice(),
+            b"admitted-run".as_slice(),
+            study_digest.bytes(),
+            step_id.as_str().as_bytes(),
+        ]
+        .concat(),
+    );
+    let retired_run_id = format!(
+        "run_remote_{}",
+        retired.to_string().trim_start_matches("sha256:")
+    );
+    assert_ne!(current, retired_run_id);
+
+    let root = temp_artifact_root("remote-completion-schema-revision");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("runs")).unwrap();
+    fs::write(
+        root.join(format!("runs/{retired_run_id}.json")),
+        br#"{"schema_version":"analysis_run_artifact/2026-09-validated-field-shells"}"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join(format!("runs/{previous_numbered_run_id}.json")),
+        br#"{"schema_version":"analysis_run_artifact/2026-09-001"}"#,
+    )
+    .unwrap();
+    let generated = analysis_run_linear_static_with_options(
+        &sample_model(),
+        ComputeBackend::Cpu,
+        FormulationRequirement::Experimental,
+        AnalysisRunOptions::default(),
+        OperationContext::new(None, None),
+    )
+    .unwrap();
+    let mut run = generated.data;
+    run.run_id = current;
+    let store = storage::FilesystemAnalysisArtifactStore::new(root.clone());
+    storage::AnalysisArtifactStore::persist_run(&store, &run).unwrap();
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&fs::read(root.join(format!("runs/{}.json", run.run_id))).unwrap())
+            .unwrap();
+    assert_eq!(
+        persisted["schema_version"],
+        "analysis_run_artifact/2026-09-002"
+    );
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]

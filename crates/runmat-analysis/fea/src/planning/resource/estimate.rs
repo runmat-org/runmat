@@ -1,3 +1,4 @@
+mod accuracy;
 mod common;
 use common::validate_common;
 mod demand_validation;
@@ -45,6 +46,10 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::AccuracyEvaluation(request),
+            FeaResourceDemand::AccuracyEvaluation(demand),
+        ) if *request == demand.request => accuracy::build_accuracy_plan(input.clone(), demand),
         (FeaResourcePhase::ThermalSolve(workload), FeaResourceDemand::ThermalSolve(demand))
             if *workload == demand.workload =>
         {

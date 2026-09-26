@@ -109,18 +109,7 @@ pub fn prepare_planned_resource_graph_usage(
         graph.wall_millis,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let objects = prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ResourceUsage,
-        evidence.identity().digest(),
-        &evidence
-            .canonical_bytes()
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        chunk_bytes,
-        ObjectNamespace::ResultValue,
-        limits,
-    )?;
-    objects.references(access, ValueRefKind::ResultObject)?;
-    Ok(PreparedResourceUsage { evidence, objects })
+    prepare_usage_objects(evidence, access, chunk_bytes, limits)
 }
 
 /// Adapts scheduler-owned accounting into source-bound FEA evidence without giving FEA a second
@@ -153,7 +142,12 @@ pub fn prepare_structural_resource_usage(
         accounting.resources.usage.wall_millis,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    prepare_usage_objects(prepared, evidence, chunk_bytes, limits)
+    prepare_usage_objects(
+        evidence,
+        &prepared.host.artifact_access,
+        chunk_bytes,
+        limits,
+    )
 }
 
 /// Extends solve accounting with a measured downstream execution graph while retaining one
@@ -168,6 +162,42 @@ pub fn extend_structural_resource_usage(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedResourceUsage> {
     validate_structural_resource_usage(prepared, result, baseline, &prepared.host.artifact_access)?;
+    extend_resource_usage(
+        baseline,
+        additional,
+        &prepared.host.artifact_access,
+        crate::AnalysisOutputPolicy::new(chunk_bytes, limits)?,
+    )
+}
+
+/// Extend a source-bound baseline with measured sequential downstream work. Preserve every
+/// prior phase plan; repeated extensions must not drop earlier observation or accuracy plans.
+pub fn extend_resource_usage(
+    baseline: &PreparedResourceUsage,
+    additional: &PlannedResourceUsageGraph,
+    access: &ArtifactAccess,
+    policy: crate::AnalysisOutputPolicy,
+) -> AnalysisBridgeResult<PreparedResourceUsage> {
+    let primary = baseline
+        .evidence
+        .plans
+        .iter()
+        .find(|plan| plan.identity == baseline.evidence.primary_plan)
+        .ok_or(AnalysisBridgeError::Identity(
+            "resource usage baseline omits primary plan",
+        ))?;
+    runmat_analysis_fea::planning::resource::validate_resource_usage_evidence(
+        primary,
+        &baseline.evidence,
+    )?;
+    if baseline.objects.manifest.kind != AnalysisNumericalObjectKind::ResourceUsage
+        || baseline.objects.manifest.logical_identity != baseline.evidence.identity().digest()
+        || baseline.objects.payload() != baseline.evidence.canonical_bytes()?
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "resource usage baseline differs from canonical objects",
+        ));
+    }
     let mut attempts = baseline.evidence.attempts.clone();
     attempts.extend(
         additional
@@ -176,6 +206,9 @@ pub fn extend_structural_resource_usage(
             .map(|attempt| usage_attempt(attempt.plan.identity, &attempt.accounting)),
     );
     let mut plans = BTreeMap::new();
+    for plan in &baseline.evidence.plans {
+        plans.insert(plan.identity, plan.clone());
+    }
     for attempt in &additional.attempts {
         if let Some(existing) = plans.insert(attempt.plan.identity, attempt.plan.clone()) {
             if existing != attempt.plan {
@@ -194,16 +227,22 @@ pub fn extend_structural_resource_usage(
         .ok_or_else(|| {
             AnalysisBridgeError::Invalid("resource graph wall time overflowed".into())
         })?;
+    plans.remove(&primary.identity);
     let evidence = record_resource_graph_usage(
-        &prepared.resource_plan,
+        primary,
         plans.into_values().collect(),
-        prepared.host.workload.identity.digest(),
-        result.identity.digest(),
+        baseline.evidence.workload_digest,
+        baseline.evidence.result_digest,
         attempts,
         graph_wall_millis,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    prepare_usage_objects(prepared, evidence, chunk_bytes, limits)
+    prepare_usage_objects(
+        evidence,
+        access,
+        policy.chunk_bytes(),
+        policy.inventory_limits(),
+    )
 }
 
 fn usage_attempt(
@@ -219,8 +258,8 @@ fn usage_attempt(
 }
 
 fn prepare_usage_objects(
-    prepared: &PreparedStructuralLinearProgram,
     evidence: ResourceUsageEvidence,
+    access: &ArtifactAccess,
     chunk_bytes: usize,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedResourceUsage> {
@@ -235,7 +274,7 @@ fn prepare_usage_objects(
         limits,
     )?;
     // Keep the value role explicit at the boundary used by publication preparation.
-    objects.references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    objects.references(access, ValueRefKind::ResultObject)?;
     Ok(PreparedResourceUsage { evidence, objects })
 }
 

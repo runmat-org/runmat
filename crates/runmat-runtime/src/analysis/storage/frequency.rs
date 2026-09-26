@@ -18,7 +18,7 @@ use crate::analysis::{
 use super::{validate_run_id_token, AnalysisFieldPageLookup};
 
 pub(super) const FREQUENCY_ARTIFACT_SCHEMA_VERSION: &str =
-    "analysis_structural_frequency_artifact/2026-09";
+    "analysis_structural_frequency_artifact/2026-09-001";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

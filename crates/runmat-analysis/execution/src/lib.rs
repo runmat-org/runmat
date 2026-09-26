@@ -1,6 +1,7 @@
 //! Narrow bridge from analysis-owned logical contracts to shared RunMat execution services.
 
 mod accuracy_evaluation;
+mod accuracy_resource;
 mod buckling_object_access;
 mod buckling_task;
 mod callable;
@@ -29,6 +30,7 @@ mod portable_task_support;
 mod random_response_object_access;
 mod random_response_task;
 mod resource_usage;
+pub use accuracy_resource::build_prepared_accuracy_resource_plan;
 mod response;
 mod response_spectrum_object_access;
 mod response_spectrum_task;
@@ -210,7 +212,7 @@ pub use random_response_task::{
     StructuralRandomResponseAssemblyPreparation, StructuralRandomResponseFanoutPreparation,
 };
 pub use resource_usage::{
-    extend_structural_resource_usage, prepare_planned_resource_graph_usage,
+    extend_resource_usage, extend_structural_resource_usage, prepare_planned_resource_graph_usage,
     prepare_structural_resource_usage, validate_observation_resource_usage,
     validate_structural_resource_usage, PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
     PreparedResourceUsage,

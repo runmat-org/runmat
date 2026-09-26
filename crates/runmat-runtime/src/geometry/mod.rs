@@ -1112,7 +1112,14 @@ pub fn geometry_preview_scene(
             ))
             .with_regions(regions)
             .with_owner_node_ids(owner_node_ids);
+            // The CAD import contains surface triangles but no line topology.
+            // Keep explicit edges resident so wireframe and X-ray can draw the
+            // solid even after the shaded triangles are suppressed.
+            let edges = chunk.wireframe_edges([0.58, 0.72, 0.88, 0.95]);
             chunks.push(chunk);
+            if let Some(edges) = edges {
+                chunks.push(edges);
+            }
             chunk_start_triangle = chunk_end_triangle;
             chunk_index += 1;
         }

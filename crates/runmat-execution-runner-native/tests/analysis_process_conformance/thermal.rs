@@ -206,7 +206,11 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         )
         .unwrap();
         let response = driver
-            .execute(&accuracy.host, &accuracy.program, None)
+            .execute(
+                &accuracy.host,
+                &accuracy.program,
+                Some(&accuracy.resource_plan),
+            )
             .await;
         let report = runmat_analysis_execution::import_accuracy(
             driver.store(),
@@ -220,8 +224,24 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
         );
         assert_eq!(report.artifact.evidence().len(), 2);
-        // This publication binds solve-attempt usage only. Accuracy, state and publication
-        // tasks currently have no FEA phase plans and are not claimed as measured here.
+        let accuracy_wall = response.resources.resources.usage.wall_millis;
+        let usage = runmat_analysis_execution::extend_resource_usage(
+            &usage,
+            &runmat_analysis_execution::PlannedResourceUsageGraph::new(
+                vec![runmat_analysis_execution::PlannedResourceUsageAttempt {
+                    plan: accuracy.resource_plan.clone(),
+                    accounting: response.resources,
+                }],
+                accuracy_wall,
+            )
+            .unwrap(),
+            &prepared.host.artifact_access,
+            output_policy,
+        )
+        .unwrap();
+        assert_eq!(usage.evidence.attempts.len(), 2);
+        // Solve and accuracy attempts are measured. State and publication still lack phase
+        // plans and are not claimed as whole-study resource evidence.
         let result_publication = runmat_analysis_execution::prepare_result_publication(
             runmat_analysis_execution::ResultPublicationPreparation {
                 accuracy_host: accuracy.host.clone(),

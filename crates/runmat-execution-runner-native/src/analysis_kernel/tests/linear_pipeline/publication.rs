@@ -31,11 +31,32 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let accuracy_inputs = vec![
+    let mut accuracy_inputs = vec![
         accuracy_request,
         solved.numerical_receipt.clone(),
         observation_artifact,
     ];
+    let plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
+        &AccuracyEvaluationRequest::from_canonical_bytes(&accuracy_inputs[0].payload()).unwrap(),
+        &runmat_analysis_fea::execution::AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::StructuralLinear,
+            &accuracy_inputs[1].payload(),
+        )
+        .unwrap(),
+        &accuracy_inputs,
+    )
+    .unwrap();
+    accuracy_inputs.push(
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            plan.identity.digest(),
+            &plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    );
     let accuracy_host = test_host_for_inputs(
         host,
         AnalysisWorkKind::EvaluateAccuracy,

@@ -21,12 +21,29 @@ use glam::{Mat4, Vec3, Vec4};
 use runmat_time::Instant;
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
+use std::ops::Range;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::OnceLock;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+
+fn indexed_draw_ranges(
+    draw_calls: &[crate::core::DrawCall],
+    available_indices: usize,
+) -> Vec<(Range<u32>, Range<u32>)> {
+    draw_calls
+        .iter()
+        .filter_map(|call| {
+            let start = call.index_offset.unwrap_or(0).min(available_indices);
+            let count = call.index_count.unwrap_or(available_indices - start);
+            let end = start.saturating_add(count).min(available_indices);
+            (start < end && call.instance_count > 0)
+                .then_some((start as u32..end as u32, 0..call.instance_count as u32))
+        })
+        .collect()
+}
 
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
@@ -612,14 +629,24 @@ impl PlotRenderer {
         let preserved_xray_enabled = same_scene_identity.then_some(self.geometry_xray_enabled);
         self.geometry_overlay = geometry_scene.overlay.clone();
         let geometry_xray_enabled = geometry_scene.chunks.iter().any(|chunk| {
-            chunk.material.albedo.w < 0.95
-                || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend)
+            chunk.render_data.pipeline_type == crate::core::PipelineType::Triangles
+                && (chunk.material.albedo.w < 0.95
+                    || matches!(chunk.material.alpha_mode, crate::core::AlphaMode::Blend))
         });
         if self.last_geometry_scene_key.as_ref() == Some(&cache_key) {
             self.last_geometry_scene = Some(geometry_scene.clone());
+            let show_grid = presentation.show_grid.unwrap_or(geometry_scene.show_grid);
+            if self.figure_show_grid != show_grid {
+                self.figure_show_grid = show_grid;
+                self.needs_update = true;
+            }
             if self.geometry_presentation != presentation {
+                let mut previous = self.geometry_presentation.clone();
+                previous.show_grid = presentation.show_grid;
                 self.geometry_presentation = presentation;
-                self.refresh_geometry_scene_render_data(&geometry_scene);
+                if previous != self.geometry_presentation {
+                    self.refresh_geometry_scene_render_data(&geometry_scene);
+                }
             }
             return;
         }
@@ -649,7 +676,10 @@ impl PlotRenderer {
         self.figure_x_label = Some("X".to_string());
         self.figure_y_label = Some("Y".to_string());
         self.figure_z_label = Some("Z".to_string());
-        self.figure_show_grid = geometry_scene.show_grid;
+        self.figure_show_grid = self
+            .geometry_presentation
+            .show_grid
+            .unwrap_or(geometry_scene.show_grid);
         self.figure_show_legend = false;
         self.figure_show_box = true;
         self.figure_x_limits = None;
@@ -1825,6 +1855,14 @@ impl PlotRenderer {
                             self.wgpu_renderer.get_marker_screen_bind_group(),
                             &[],
                         );
+                    } else if render_data.pipeline_type
+                        == crate::core::PipelineType::AnnotationStroke
+                    {
+                        render_pass.set_bind_group(
+                            1,
+                            self.wgpu_renderer.get_marker_screen_bind_group(),
+                            &[],
+                        );
                     }
                 }
 
@@ -1845,8 +1883,12 @@ impl PlotRenderer {
                 if let Some(index_buffer) = index_buffer {
                     render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                     if let Some(indices) = &render_data.indices {
-                        log::trace!(target: "runmat_plot", "draw indexed count={}", indices.len());
-                        render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        for (index_range, instance_range) in
+                            indexed_draw_ranges(&render_data.draw_calls, indices.len())
+                        {
+                            log::trace!(target: "runmat_plot", "draw indexed count={}", index_range.len());
+                            render_pass.draw_indexed(index_range, 0, instance_range);
+                        }
                     }
                 } else {
                     log::trace!(target: "runmat_plot", "draw direct vertices");
@@ -2269,12 +2311,28 @@ impl PlotRenderer {
             total_triangles
         );
 
-        // 3D helpers: CAD-style XY grid and world-axis ticks. The compact corner
-        // triad is drawn separately and remains available as navigation context.
-        // These are generated per-frame so they can adapt to zoom level.
+        // 3D helpers: a horizontal world grid and world-axis ticks. Keeping the
+        // grid on XY gives it a stable meaning as the camera moves.
         if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
             let view_proj = view_proj_matrix;
             let inv_view_proj = view_proj.inverse();
+            let scene_bounds = self
+                .scene
+                .get_visible_nodes()
+                .into_iter()
+                .filter(|node| node.axes_index == axes_index)
+                .filter_map(|node| node.render_data.as_ref().and_then(|data| data.bounds))
+                .reduce(|a, b| a.union(&b));
+            let plane_level = self
+                .last_geometry_scene
+                .as_ref()
+                .map(|scene| scene.bounds)
+                .or(scene_bounds)
+                .filter(|bounds| bounds.min.is_finite() && bounds.max.is_finite())
+                .map(|bounds| bounds.min.z - bounds.size().length().max(1.0) * 0.001)
+                .unwrap_or(cam.target.z);
+
+            let on_grid = |x: f32, y: f32| -> Vec3 { Vec3::new(x, y, plane_level) };
 
             let unproject = |ndc_x: f32, ndc_y: f32, ndc_z: f32| -> Option<Vec3> {
                 let clip = Vec4::new(ndc_x, ndc_y, ndc_z, 1.0);
@@ -2290,7 +2348,7 @@ impl PlotRenderer {
                 }
             };
 
-            let ray_intersect_z0 = |ndc_x: f32, ndc_y: f32| -> Option<Vec3> {
+            let ray_intersect_grid = |ndc_x: f32, ndc_y: f32| -> Option<Vec3> {
                 // Use a near/far pair in clip space to form a ray.
                 let p0 = unproject(ndc_x, ndc_y, -1.0)?;
                 let p1 = unproject(ndc_x, ndc_y, 1.0)?;
@@ -2298,7 +2356,7 @@ impl PlotRenderer {
                 if !dir.z.is_finite() || dir.z.abs() < 1e-8 {
                     return None;
                 }
-                let t = (-p0.z) / dir.z;
+                let t = (plane_level - p0.z) / dir.z;
                 if !t.is_finite() || t <= 0.0 {
                     return None;
                 }
@@ -2307,7 +2365,7 @@ impl PlotRenderer {
 
             let mut plane_pts: Vec<Vec3> = Vec::new();
             for (nx, ny) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-                if let Some(p) = ray_intersect_z0(nx, ny) {
+                if let Some(p) = ray_intersect_grid(nx, ny) {
                     plane_pts.push(p);
                 }
             }
@@ -2334,11 +2392,10 @@ impl PlotRenderer {
             {
                 let dist = (cam.position - cam.target).length().max(1e-3);
                 let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
-                let center = Vec3::new(cam.target.x, cam.target.y, 0.0);
-                min_x = center.x - extent;
-                max_x = center.x + extent;
-                min_y = center.y - extent;
-                max_y = center.y + extent;
+                min_x = cam.target.x - extent;
+                max_x = cam.target.x + extent;
+                min_y = cam.target.y - extent;
+                max_y = cam.target.y + extent;
             }
 
             // Expand a bit so grid lines don't pop at edges.
@@ -2383,19 +2440,22 @@ impl PlotRenderer {
                 mult * pow10
             };
 
-            // Determine grid scale from projection at the plane center.
-            let cx = (min_x + max_x) * 0.5;
-            let cy = (min_y + max_y) * 0.5;
-            let center = Vec3::new(cx, cy, 0.0);
+            // Use the more visible ground direction for spacing. A nearly
+            // edge-on X or Y axis should not make every major cell enormous.
+            let center = on_grid(cam.target.x, cam.target.y);
             let px_per_world = {
                 let a = project_to_px(center);
-                let b = project_to_px(center + Vec3::new(1.0, 0.0, 0.0));
-                match (a, b) {
-                    (Some((ax, ay)), Some((bx, by))) => ((bx - ax).hypot(by - ay)).max(1e-3),
+                let bx = project_to_px(center + Vec3::X);
+                let by = project_to_px(center + Vec3::Y);
+                match (a, bx, by) {
+                    (Some((ax, ay)), Some((bx, by)), Some((cx, cy))) => (bx - ax)
+                        .hypot(by - ay)
+                        .max((cx - ax).hypot(cy - ay))
+                        .max(1e-3),
                     _ => 1.0,
                 }
             };
-            let desired_major_px = 120.0_f64;
+            let desired_major_px = 96.0_f64;
             let major_step = nice_step((desired_major_px / (px_per_world as f64)).max(1e-6));
             let mut minor_step = major_step / 10.0;
             if !minor_step.is_finite() || minor_step <= 0.0 {
@@ -2416,11 +2476,7 @@ impl PlotRenderer {
                 helper_vertices.push(Vertex::new(b, color));
             };
 
-            // Slightly offset the grid plane to reduce z-fighting with geometry on z=0.
-            let z_grid = -1e-4_f32;
-
-            // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
-            // popping and keeps line density stable via shader derivatives.
+            // Procedural ground grid (depth-tested, no depth writes).
             let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
             let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
             if show_major_grid || show_minor_grid {
@@ -2430,8 +2486,8 @@ impl PlotRenderer {
                 let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
                 let mut major_rgb = [grid.x, grid.y, grid.z];
                 let mut minor_rgb = [grid.x, grid.y, grid.z];
-                let mut major_alpha = grid.w.clamp(0.08, 0.22);
-                let mut minor_alpha = (grid.w * 0.45).clamp(0.04, 0.14);
+                let mut major_alpha = grid.w.clamp(0.22, 0.34);
+                let mut minor_alpha = (grid.w * 0.55).clamp(0.07, 0.16);
                 if bg_luma <= 0.62 {
                     major_rgb = [grid.x * 0.80, grid.y * 0.80, grid.z * 0.80];
                     minor_rgb = [grid.x * 0.68, grid.y * 0.68, grid.z * 0.68];
@@ -2439,8 +2495,8 @@ impl PlotRenderer {
                 if bg_luma > 0.62 {
                     major_rgb = [grid.x * 0.45, grid.y * 0.45, grid.z * 0.45];
                     minor_rgb = [grid.x * 0.33, grid.y * 0.33, grid.z * 0.33];
-                    major_alpha = major_alpha.max(0.24);
-                    minor_alpha = minor_alpha.max(0.12);
+                    major_alpha = major_alpha.max(0.32);
+                    minor_alpha = minor_alpha.max(0.14);
                 }
                 if !show_major_grid {
                     major_alpha = 0.0;
@@ -2454,11 +2510,11 @@ impl PlotRenderer {
                     crate::core::renderer::GridUniforms {
                         major_step: major_step as f32,
                         minor_step: minor_step as f32,
-                        fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
-                        fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        fade_start: (0.85 * dx.max(dy)).max(major_step as f32),
+                        fade_end: (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
                         camera_pos: cam.position.to_array(),
                         _pad0: 0.0,
-                        target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
+                        target_pos: [cam.target.x, cam.target.y, plane_level],
                         _pad1: 0.0,
                         major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                         minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
@@ -2466,10 +2522,10 @@ impl PlotRenderer {
                 );
 
                 let quad_vertices = [
-                    Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
-                    Vertex::new(Vec3::new(max_x, min_y, z_grid), Vec4::ONE),
-                    Vertex::new(Vec3::new(max_x, max_y, z_grid), Vec4::ONE),
-                    Vertex::new(Vec3::new(min_x, max_y, z_grid), Vec4::ONE),
+                    Vertex::new(on_grid(min_x, min_y), Vec4::ONE),
+                    Vertex::new(on_grid(max_x, min_y), Vec4::ONE),
+                    Vertex::new(on_grid(max_x, max_y), Vec4::ONE),
+                    Vertex::new(on_grid(min_x, max_y), Vec4::ONE),
                 ];
                 let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
                 let vb = self.wgpu_renderer.create_vertex_buffer(&quad_vertices);
@@ -3000,6 +3056,15 @@ impl PlotRenderer {
                                 .get_marker_screen_bind_group_for_axes(axes_index),
                             &[],
                         );
+                    } else if render_data.pipeline_type
+                        == crate::core::PipelineType::AnnotationStroke
+                    {
+                        render_pass.set_bind_group(
+                            1,
+                            self.wgpu_renderer
+                                .get_marker_screen_bind_group_for_axes(axes_index),
+                            &[],
+                        );
                     }
                     if render_item_logs {
                         log::debug!(
@@ -3037,7 +3102,11 @@ impl PlotRenderer {
                     render_pass
                         .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
                     if let Some(indices) = &render_data.indices {
-                        render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        for (index_range, instance_range) in
+                            indexed_draw_ranges(&render_data.draw_calls, indices.len())
+                        {
+                            render_pass.draw_indexed(index_range, 0, instance_range);
+                        }
                         if render_item_logs {
                             log::debug!(
                                 "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=indexed indices={}",
@@ -3542,6 +3611,9 @@ impl PlotRenderer {
     pub fn geometry_overlay(&self) -> Option<&GeometrySceneOverlay> {
         self.geometry_overlay.as_ref()
     }
+    pub fn has_geometry_scene(&self) -> bool {
+        self.last_geometry_scene.is_some()
+    }
     pub fn geometry_xray_enabled(&self) -> bool {
         self.geometry_xray_enabled
     }
@@ -3611,7 +3683,21 @@ impl PlotRenderer {
         if self.geometry_presentation == presentation {
             return;
         }
+        let mut previous = self.geometry_presentation.clone();
+        previous.show_grid = presentation.show_grid;
+        self.figure_show_grid = presentation
+            .show_grid
+            .or_else(|| {
+                self.last_geometry_scene
+                    .as_ref()
+                    .map(|scene| scene.show_grid)
+            })
+            .unwrap_or(false);
         self.geometry_presentation = presentation;
+        if previous == self.geometry_presentation {
+            self.needs_update = true;
+            return;
+        }
         self.apply_geometry_presentation_visibility();
         if let Some(scene) = self.last_geometry_scene.clone() {
             self.refresh_geometry_scene_render_data(&scene);
@@ -3732,11 +3818,10 @@ impl PlotRenderer {
         }
     }
     fn apply_geometry_xray_to_nodes(&mut self) {
-        let alpha = if self.geometry_xray_enabled {
-            0.38
-        } else {
-            1.0
-        };
+        if !self.geometry_xray_enabled {
+            return;
+        }
+        let alpha = 0.38;
         self.scene.for_each_node_mut(|node| {
             if let Some(render_data) = node.render_data.as_mut() {
                 if matches!(
@@ -4255,7 +4340,21 @@ fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::DrawCall;
     use crate::plots::{figure::PlotElement, Figure, PatchPlot};
+
+    #[test]
+    fn indexed_renderer_respects_cleared_draw_calls_and_index_ranges() {
+        assert!(indexed_draw_ranges(&[], 6).is_empty());
+        let calls = [DrawCall {
+            vertex_offset: 0,
+            vertex_count: 4,
+            index_offset: Some(2),
+            index_count: Some(3),
+            instance_count: 2,
+        }];
+        assert_eq!(indexed_draw_ranges(&calls, 6), vec![(2..5, 0..2)]);
+    }
 
     fn patch_element(vertices: Vec<Vec3>) -> PlotElement {
         PlotElement::Patch(PatchPlot::new(vertices, vec![vec![0, 1, 2]]).unwrap())

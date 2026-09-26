@@ -775,6 +775,8 @@ pub struct RunProvenance {
 pub struct AnalysisRenderTopology {
     pub schema_version: String,
     pub source: AnalysisRenderTopologySource,
+    #[serde(default)]
+    pub volume_element_count: usize,
     pub meshes: Vec<AnalysisRenderMesh>,
 }
 
