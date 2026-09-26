@@ -9,6 +9,67 @@ fn fusion_var_index(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
         .expect("named fixture variable")
 }
 
+fn resume_after_input_store(
+    bytecode: &runmat_vm::Bytecode,
+    input: Value,
+) -> runmat_vm::InterpreterResumeState {
+    let slot = fusion_var_index(bytecode, "x");
+    let store = bytecode
+        .instructions
+        .iter()
+        .position(|instruction| matches!(instruction, Instr::StoreVar(index) if *index == slot))
+        .expect("compiler input store");
+    // The prefix is a literal matrix/range construction, not user code. Never
+    // rewrite instructions or fusion windows to manufacture an observable span.
+    for instruction in &bytecode.instructions[..store] {
+        assert!(
+            matches!(
+                instruction,
+                Instr::LoadConst(_)
+                    | Instr::LoadInt(_)
+                    | Instr::CreateRange(_)
+                    | Instr::CreateMatrix(_, _)
+                    | Instr::CreateMatrixDynamic(_)
+                    | Instr::EnterScope(_)
+            ),
+            "unexpected input-prefix instruction: {instruction:?}"
+        );
+    }
+    let pc = store + 1;
+    let groups = bytecode.runtime_fusion_groups();
+    assert!(groups.iter().any(|group| group.span.start >= pc));
+    assert!(
+        groups
+            .iter()
+            .all(|group| !(group.span.start < pc && pc <= group.span.end)),
+        "resume boundary must not split a fusion region"
+    );
+    let mut vars = vec![None; bytecode.var_count];
+    vars[slot] = Some(input);
+    runmat_vm::InterpreterResumeState {
+        pc,
+        completion_boundary: None,
+        vars,
+        supplied_inputs: 0,
+        requested_outputs: 0,
+        missing_input_slots: Default::default(),
+        global_aliases: Default::default(),
+        persistent_aliases: Default::default(),
+        side_effect_epoch: 0,
+    }
+}
+
+fn resident_small_input() -> Value {
+    let mut handle = PROVIDER
+        .get()
+        .expect("test provider")
+        .push(vec![0.25, 0.5], vec![1, 2]);
+    // Model an automatically resident input at a real resume boundary, not an
+    // explicit gpuArray whose placement intent may not be silently discarded.
+    runmat_accelerate_api::mark_handle_automatic(&mut handle);
+    Value::GpuTensor(handle)
+}
+
 fn assert_fusion_numeric_output(bytecode: &runmat_vm::Bytecode, vars: &[Value], inputs: &[f64]) {
     let value = gather_if_needed(&vars[fusion_var_index(bytecode, "y")]).expect("gather result");
     let Value::Tensor(tensor) = value else {
@@ -61,7 +122,19 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
             y = sin(x) .* x + 2;
             "#,
         );
-        let vars = interpret(&bytecode).expect("fused execution");
+        let inputs = (1..=4096).map(f64::from).collect::<Vec<_>>();
+        let resume = resume_after_input_store(
+            &bytecode,
+            Value::Tensor(Tensor::new(inputs.clone(), vec![1, 4096]).expect("host fixture")),
+        );
+        let runtime = fusion_test_runtime(Rc::new(
+            runmat_accelerate::placement::PlacementSession::default(),
+        ));
+        let runmat_vm::InterpreterOutcome::Completed(completion) = block_on(
+            runmat_vm::interpret_resume_in_context(&bytecode, resume, None, runtime),
+        )
+        .expect("fused execution from host input");
+        let vars = completion.values;
         assert_fusion_numeric_output(
             &bytecode,
             &vars,
@@ -274,7 +347,8 @@ fn assert_cpu_fusion_was_selected_without_completion() {
                     .events
                     .iter()
                     .any(|event| event.kind == PlacementEventKind::Complete)),
-        "expected an incomplete CPU-selected region"
+        "expected an incomplete CPU-selected region: {:?}",
+        report.traces
     );
 }
 
@@ -339,13 +413,13 @@ fn fusion_cpu_region_polled_drop_records_failure_not_completion() {
         runmat_accelerate::placement::reset();
         // This is an ordinary compiler-produced region. A tiny resident input
         // selects shared bytecode; unsupported unary_sin then downloads it.
-        let bytecode = compile_semantic("x = gpuArray([0.25, 0.5]); y = sin(x) .* x + 2;");
+        let bytecode = compile_semantic("x = [0.25, 0.5]; y = sin(x) .* x + 2;");
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
         let runtime = fusion_test_runtime(placement.clone());
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let resume = resume_after_input_store(&bytecode, resident_small_input());
         let mode = ScopedDownloadMode::new(DownloadMode::Pending);
-        let mut future = Box::pin(runmat_vm::interpret_with_vars_in_context(
-            &bytecode, &mut vars, None, runtime,
+        let mut future = Box::pin(runmat_vm::interpret_resume_in_context(
+            &bytecode, resume, None, runtime,
         ));
         let waker = futures::task::noop_waker();
         let mut context = std::task::Context::from_waker(&waker);
@@ -369,20 +443,23 @@ fn fusion_cpu_region_caught_error_records_failure_not_completion() {
         let _guard = accel_test_lock();
         ensure_provider_registered();
         runmat_accelerate::placement::reset();
-        let bytecode = compile_semantic("x = gpuArray([0.25, 0.5]); caught = false; try; y = sin(x) .* x + 2; catch; caught = true; end");
+        let bytecode = compile_semantic(
+            "x = [0.25, 0.5]; caught = false; try; y = sin(x) .* x + 2; catch; caught = true; end",
+        );
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
-        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let resume = resume_after_input_store(&bytecode, resident_small_input());
         let mode = ScopedDownloadMode::new(DownloadMode::Fail);
-        block_on(runmat_vm::interpret_with_vars_in_context(
-            &bytecode,
-            &mut vars,
-            None,
-            fusion_test_runtime(placement.clone()),
-        ))
-        .expect("handler resumes actual bytecode");
+        let runmat_vm::InterpreterOutcome::Completed(completion) =
+            block_on(runmat_vm::interpret_resume_in_context(
+                &bytecode,
+                resume,
+                None,
+                fusion_test_runtime(placement.clone()),
+            ))
+            .expect("handler resumes actual bytecode");
         assert!(mode.0.download_started.load(Ordering::SeqCst));
         assert_eq!(
-            vars[fusion_var_index(&bytecode, "caught")],
+            completion.values[fusion_var_index(&bytecode, "caught")],
             Value::Bool(true)
         );
         assert_cpu_region_failed_without_success(&placement);
