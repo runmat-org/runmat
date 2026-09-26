@@ -1,14 +1,17 @@
-//! Local process isolation conformance, not a distributed thermal solve qualification.
+//! Placement parity conformance, not a distributed thermal solve qualification.
+use super::publication_chain::{ProcessDriver, PublicationChainDriver};
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
 };
 use runmat_analysis_execution::{
-    import_thermal_result, prepare_thermal_task, AnalysisOutputPolicy, ImportedThermalResult,
-    ThermalTaskPreparation,
+    import_semantic_state, import_thermal_result, prepare_semantic_state_publication,
+    prepare_thermal_task, AnalysisOutputPolicy, ImportedThermalResult,
+    SemanticStatePublicationPreparation, ThermalTaskPreparation,
 };
 use runmat_analysis_fea::{
-    execution::ThermalWorkload, results::field::RecoveredFieldPartition, ComputeBackend,
-    ThermalProcedureControl,
+    execution::{SemanticStatePublicationSource, ThermalWorkload},
+    results::field::RecoveredFieldPartition,
+    ComputeBackend, ThermalProcedureControl,
 };
 use runmat_execution_artifact::ArtifactAccess;
 use runmat_execution_runner_native::{
@@ -19,6 +22,23 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 
 /// Reuse the harness's isolated stdio worker and authoritative resource-planned submission.
 pub(super) async fn run(session: &NativeProgramSession) {
+    let mut store = session.object_store();
+    run_driver(
+        &mut ProcessDriver {
+            session,
+            store: &mut store,
+        },
+        "analysis-process-conformance",
+        super::revision(),
+    )
+    .await;
+}
+
+pub(super) async fn run_driver<D: PublicationChainDriver>(
+    driver: &mut D,
+    authorization_scope: &str,
+    revision: runmat_execution::ProgramRevision,
+) {
     let limits = NativeAnalysisHostLimits::default();
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut model = super::fixture_model(super::FixtureId::CantileverLinearStatic);
@@ -40,9 +60,9 @@ pub(super) async fn run(session: &NativeProgramSession) {
         let prepared = prepare_thermal_task(ThermalTaskPreparation {
             authored_study_digest: super::digest("isolated-thermal-study"),
             frozen_project_digest: None,
-            program_revision: super::revision(),
+            program_revision: revision.clone(),
             artifact_access: ArtifactAccess {
-                authorization_scope: "analysis-process-conformance".into(),
+                authorization_scope: authorization_scope.into(),
                 encryption_context: super::digest("isolated-thermal-encryption"),
             },
             workload: workload.clone(),
@@ -51,26 +71,24 @@ pub(super) async fn run(session: &NativeProgramSession) {
             required_capabilities: Default::default(),
         })
         .unwrap();
-        let mut store = session.object_store();
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = runmat_execution_runner_native::FilesystemObjectStore::open(
+            directory.path().join("inline"),
+            limits.inventory.max_object_bytes,
+        )
+        .unwrap();
         prepared.program.write_to(&mut store).unwrap();
         let request = prepared.program.request.clone();
-        let submission = super::analysis_submission(
-            session.scope_id(),
-            session.pool_id(),
-            &prepared.host,
-            &request,
-            Some(&prepared.resource_plan),
-            prepared.resource_plan.request.clone(),
-        );
-        let task = session
-            .submit_graph(vec![(request.clone(), submission)])
-            .unwrap()
-            .pop()
-            .unwrap();
-        let process = super::wait_for_native_task(task).await;
+        let process = driver
+            .execute(
+                &prepared.host,
+                &prepared.program,
+                Some(&prepared.resource_plan),
+            )
+            .await;
         let process = import_thermal_result(
-            &store,
-            super::success_response(&process),
+            driver.store(),
+            process.response,
             &prepared,
             limits.inventory,
         )
@@ -91,6 +109,34 @@ pub(super) async fn run(session: &NativeProgramSession) {
             .validate_against(&workload, &process.manifest)
             .unwrap();
         assert_equilibrium(&process);
+        let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
+            source_host: prepared.host.clone(),
+            source_result: process.objects,
+            source: SemanticStatePublicationSource::ThermalPrimaryField,
+            declaration: workload.model.sequence.steps[0].state_outputs[0].clone(),
+            topology_digest: process.manifest.topology_digest,
+            program_revision: revision.clone(),
+            chunk_bytes: limits.chunk_bytes,
+            inventory_limits: limits.inventory,
+        })
+        .unwrap();
+        let response = driver
+            .execute(&publication.host, &publication.program, None)
+            .await;
+        let state = import_semantic_state(
+            driver.store(),
+            response.response,
+            &publication,
+            limits.inventory,
+        )
+        .unwrap();
+        assert_eq!(state.kind, runmat_analysis_core::StateKind::Thermal);
+        assert_eq!(state.topology_digest, process.manifest.topology_digest);
+        let fields = state.payload.fields().unwrap();
+        assert_eq!(fields.len(), 1);
+        let values = fields[0].as_host_f64().unwrap();
+        assert!(!values.is_empty());
+        assert!(values.iter().all(|value| (value - 293.15).abs() < 1e-8));
     }
 }
 

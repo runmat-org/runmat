@@ -528,6 +528,7 @@ async fn durable_conformance(
             max_object_bytes: 64 * 1024 * 1024,
         },
     );
+    thermal::run_driver(&mut driver, "durable-analysis", revision()).await;
     let (host, program, input_objects, resource_plan) = fixture(revision(), "durable-analysis");
     let solve = PreparedStructuralLinearProgram {
         host,
@@ -934,6 +935,7 @@ async fn remote_conformance(
             scope_id,
             pool_id,
         };
+        thermal::run_driver(&mut publication_driver, "remote-analysis", revision.clone()).await;
         let publication = publication_chain::execute_publication_chain(
             &mut publication_driver,
             &solve,
