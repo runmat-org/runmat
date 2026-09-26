@@ -4,26 +4,26 @@ use crate::NativeExecutorResult;
 use runmat_runtime::native::{
     NativeSiteOutcome, NativeSiteOutcomeKind, NativeSitePhase, NativeSiteRequest,
 };
-use std::collections::BTreeSet;
+use std::collections::VecDeque;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(in crate::execute) mod test_support;
 
 pub(crate) struct GenericRegionObservation {
     exit: runmat_types::ProgramPointId,
-    remaining: BTreeSet<SiteIdentity>,
+    remaining: VecDeque<SiteIdentity>,
     observation: RegionObservation,
 }
 impl GenericRegionObservation {
     pub(crate) fn new(plan: &OptimizedRegionPlan, observation: RegionObservation) -> Self {
-        let mut remaining = plan.skipped_sites.clone();
-        remaining.insert(plan.entry);
         Self {
             exit: plan.exit,
-            remaining,
+            remaining: plan.traversal_sites.iter().copied().collect(),
             observation,
         }
     }
-    fn before(self, site: SiteIdentity, forward_goto: bool, cancelled: bool) -> Option<Self> {
+    fn before(self, site: SiteIdentity, cancelled: bool) -> Option<Self> {
         if cancelled {
             return None;
         }
@@ -33,7 +33,7 @@ impl GenericRegionObservation {
             }
             return None;
         }
-        if self.remaining.contains(&site) || forward_goto {
+        if self.remaining.front() == Some(&site) {
             Some(self)
         } else {
             None
@@ -47,7 +47,7 @@ impl GenericRegionObservation {
     ) -> Option<Self> {
         match result {
             Ok(outcome) if outcome.kind == NativeSiteOutcomeKind::CONTINUE => {
-                self.remaining.remove(&site);
+                self.remaining.pop_front();
                 Some(self)
             }
             Ok(outcome)
@@ -55,6 +55,7 @@ impl GenericRegionObservation {
                     && outcome.kind == NativeSiteOutcomeKind::EDGE
                     && outcome.edge == 0 =>
             {
+                self.remaining.pop_front();
                 Some(self)
             }
             _ => None,
@@ -83,23 +84,8 @@ pub(in crate::execute) fn before_site(state: &mut HostState, request: NativeSite
     let Some(pending) = state.region_observation.take() else {
         return;
     };
-    let forward_goto = request.phase == NativeSitePhase::TERMINATOR
-        && request.function == state.function.id.0
-        && state
-            .function
-            .blocks
-            .iter()
-            .find(|block| block.id.0 == request.block)
-            .is_some_and(|block| match &block.terminator.kind {
-                runmat_native_codegen::NativeTerminatorKind::Goto { edge } => pending
-                    .remaining
-                    .iter()
-                    .any(|site| site.point.block == edge.target.0),
-                _ => false,
-            });
     state.region_observation = pending.before(
         identity(request),
-        forward_goto,
         state
             .runtime
             .cancellation()

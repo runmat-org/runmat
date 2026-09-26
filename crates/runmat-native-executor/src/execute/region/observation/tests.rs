@@ -30,7 +30,7 @@ fn success_requires_all_sites_and_the_real_region_exit() {
         probe.feedback.borrow().is_empty(),
         "last instruction alone is not an observed region exit"
     );
-    assert!(pending.before(exit_site(&plan), false, false).is_none());
+    assert!(pending.before(exit_site(&plan), false).is_none());
     let feedback = probe.feedback.borrow();
     assert_eq!(feedback.len(), 1);
     assert!(feedback[0].succeeded);
@@ -39,9 +39,9 @@ fn success_requires_all_sites_and_the_real_region_exit() {
 fn premature_exit_cancellation_error_and_drop_never_report_success() {
     let probe = Rc::new(Probe::default());
     let (value, plan) = pending(&probe);
-    assert!(value.before(exit_site(&plan), false, false).is_none());
+    assert!(value.before(exit_site(&plan), false).is_none());
     let (value, plan) = pending(&probe);
-    assert!(value.before(plan.entry, false, true).is_none());
+    assert!(value.before(plan.entry, true).is_none());
     let (value, plan) = pending(&probe);
     assert!(value
         .after(
@@ -67,12 +67,12 @@ fn unexpected_jump_or_reentry_aborts_incomplete_measurement() {
     let (value, plan) = pending(&probe);
     let mut unexpected = plan.entry;
     unexpected.point.block = 99;
-    assert!(value.before(unexpected, false, false).is_none());
+    assert!(value.before(unexpected, false).is_none());
     let (value, plan) = pending(&probe);
     let value = value
         .after(plan.entry, &Ok(NativeSiteOutcome::continue_execution()))
         .unwrap();
-    assert!(value.before(plan.entry, false, false).is_none());
+    assert!(value.before(plan.entry, false).is_none());
     assert_eq!(probe.feedback.borrow().len(), 2);
     assert!(probe
         .feedback
@@ -87,7 +87,6 @@ fn forward_linear_edge_keeps_one_observation_until_the_exit() {
     let (mut value, mut plan) = pending(&probe);
     let mut next = plan.entry;
     next.point.block = 1;
-    value.remaining.insert(next);
     plan.exit.block = 1;
     value.exit = plan.exit;
     let value = value
@@ -96,14 +95,44 @@ fn forward_linear_edge_keeps_one_observation_until_the_exit() {
     let mut edge = plan.entry;
     edge.phase = runmat_native_codegen::NativeSitePhase::Terminator;
     edge.point.position = 1;
-    let value = value.before(edge, true, false).unwrap();
+    let mut value = value;
+    value.remaining.push_back(edge);
+    value.remaining.push_back(next);
+    let value = value.before(edge, false).unwrap();
     let value = value.after(edge, &Ok(NativeSiteOutcome::edge(0))).unwrap();
-    let value = value.before(next, false, false).unwrap();
+    let value = value.before(next, false).unwrap();
     let value = value
         .after(next, &Ok(NativeSiteOutcome::continue_execution()))
         .unwrap();
     assert!(probe.feedback.borrow().is_empty());
-    assert!(value.before(exit_site(&plan), false, false).is_none());
+    assert!(value.before(exit_site(&plan), false).is_none());
+    assert_eq!(probe.feedback.borrow().len(), 1);
+    assert!(probe.feedback.borrow()[0].succeeded);
+}
+
+#[test]
+fn final_goto_and_empty_intermediate_blocks_reach_the_actual_exit() {
+    let probe = Rc::new(Probe::default());
+    let (mut value, mut plan) = pending(&probe);
+    let mut edge = plan.entry;
+    edge.phase = runmat_native_codegen::NativeSitePhase::Terminator;
+    edge.point.position = 1;
+    let mut empty_edge = edge;
+    empty_edge.point.block = 1;
+    empty_edge.point.position = 0;
+    value.remaining.extend([edge, empty_edge]);
+    plan.exit.block = 2;
+    plan.exit.position = 0;
+    value.exit = plan.exit;
+    let mut value = value
+        .after(plan.entry, &Ok(NativeSiteOutcome::continue_execution()))
+        .unwrap();
+    for site in [edge, empty_edge] {
+        value = value.before(site, false).unwrap();
+        value = value.after(site, &Ok(NativeSiteOutcome::edge(0))).unwrap();
+        assert!(probe.feedback.borrow().is_empty());
+    }
+    assert!(value.before(exit_site(&plan), false).is_none());
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }

@@ -14,6 +14,7 @@ pub(crate) struct OptimizedRegionPlan {
     pub entry: SiteIdentity,
     /// First site outside the linear region, from the compiler's exit contract.
     pub exit: ProgramPointId,
+    pub traversal_sites: Vec<SiteIdentity>,
     pub inputs: Vec<RegionValueId>,
     pub outputs: Vec<RegionOutput>,
     pub program: NumericRegionProgram,
@@ -36,6 +37,7 @@ pub(crate) enum RegionOutputSource {
 
 struct LinearRegion<'a> {
     instructions: Vec<&'a runmat_native_codegen::NativeInstruction>,
+    sites: Vec<SiteIdentity>,
 }
 
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
@@ -197,6 +199,7 @@ fn derive_plan(
         region: contract.id,
         entry,
         exit: contract.exits[0],
+        traversal_sites: trace.sites,
         inputs,
         outputs,
         program,
@@ -405,6 +408,7 @@ fn linear_region<'a>(
     let mut position = entry.position;
     let mut visited = BTreeSet::new();
     let mut instructions = Vec::new();
+    let mut sites = Vec::new();
     loop {
         if !visited.insert(block) {
             return None;
@@ -415,17 +419,25 @@ fn linear_region<'a>(
                 continue;
             }
             if instruction.site.point == exit {
-                return Some(LinearRegion { instructions });
+                return Some(LinearRegion {
+                    instructions,
+                    sites,
+                });
             }
             instructions.push(instruction);
+            sites.push(site_identity(&instruction.site));
         }
         if current.terminator.site.point == exit {
-            return Some(LinearRegion { instructions });
+            return Some(LinearRegion {
+                instructions,
+                sites,
+            });
         }
         let runmat_native_codegen::NativeTerminatorKind::Goto { edge } = &current.terminator.kind
         else {
             return None;
         };
+        sites.push(site_identity(&current.terminator.site));
         block = edge.target.0;
         position = 0;
     }

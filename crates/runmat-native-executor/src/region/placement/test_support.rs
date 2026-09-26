@@ -96,6 +96,15 @@ pub(crate) fn plan() -> OptimizedRegionPlan {
             block: 0,
             position: 1,
         },
+        traversal_sites: vec![SiteIdentity {
+            point: runmat_types::ProgramPointId {
+                function,
+                block: 0,
+                position: 0,
+            },
+            phase: runmat_native_codegen::NativeSitePhase::Rvalue,
+            ordinal: 0,
+        }],
         inputs: vec![runmat_types::RegionValueId { function, local: 0 }],
         outputs: vec![crate::region::plan::RegionOutput {
             value: None,
