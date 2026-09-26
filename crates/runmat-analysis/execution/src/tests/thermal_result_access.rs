@@ -35,6 +35,30 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
         )
         .unwrap();
         let expected = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();
+        let encoding = ThermalSolverResultManifest::from_result(&result)
+            .unwrap()
+            .encoding_profile()
+            .unwrap();
+        assert_eq!(encoding.contract_count, 1 + 4 * 4);
+        for limits in [
+            ObjectInventoryLimits {
+                max_total_bytes: encoding.encoded_bytes_upper_bound - 1,
+                ..ObjectInventoryLimits::default()
+            },
+            ObjectInventoryLimits {
+                max_objects: encoding.contract_count as usize,
+                ..ObjectInventoryLimits::default()
+            },
+        ] {
+            let error = prepare_thermal_solver_result_objects(
+                &result,
+                1024,
+                ObjectNamespace::ResultValue,
+                limits,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("canonical payload projection"));
+        }
         let request = SemanticStatePublicationRequest::new(
             SemanticStatePublicationSource::ThermalPrimaryField,
             result.producer,
@@ -51,6 +75,24 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
                 ObjectInventoryLimits::default(),
             )
             .unwrap();
+            assert_eq!(
+                prepared.manifest.partitions.len() as u64,
+                encoding.contract_count
+            );
+            let actual_payload_bytes = prepared
+                .manifest
+                .partitions
+                .iter()
+                .map(|partition| partition.encoded_length)
+                .sum::<u64>();
+            assert!(actual_payload_bytes <= encoding.encoded_bytes_upper_bound);
+            for partition in &prepared.manifest.partitions {
+                let bytes = prepared
+                    .partition_payload(partition.logical_identity)
+                    .unwrap();
+                let actual = runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(&bytes).unwrap();
+                assert!(actual <= encoding.largest_contract_materialization_bytes);
+            }
             assert_eq!(
                 decode_prepared_thermal_state(&request, &prepared).unwrap(),
                 expected

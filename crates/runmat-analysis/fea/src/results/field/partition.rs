@@ -3,6 +3,8 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
+mod profile;
+
 use super::{
     RecoveredField, RecoveredFieldDefinition, RecoveredFieldError, RecoveredFieldIdentity,
     RecoveredFieldSample,
@@ -27,7 +29,7 @@ impl RecoveredFieldPartitionIdentity {
 /// `source_indices` are global indices in the recovered field's entity domain. Values are stored
 /// in that canonical order, so a worker can evaluate its partition without loading unrelated
 /// field entities.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "RecoveredFieldPartitionWire")]
 pub struct RecoveredFieldPartition {
     pub schema_version: u16,
@@ -37,6 +39,34 @@ pub struct RecoveredFieldPartition {
     pub sample: RecoveredFieldSample,
     pub source_indices: Vec<usize>,
     pub storage: AnalysisField,
+}
+
+// Shared wire authority for retained partitions and pre-solve shape profiling.
+#[derive(Serialize)]
+#[serde(rename = "RecoveredFieldPartition")]
+struct PartitionSerialization<'a, I: Serialize + ?Sized, S: Serialize + ?Sized> {
+    schema_version: u16,
+    identity: Digest,
+    source_field: Digest,
+    definition: &'a RecoveredFieldDefinition,
+    sample: RecoveredFieldSample,
+    source_indices: &'a I,
+    storage: &'a S,
+}
+
+impl Serialize for RecoveredFieldPartition {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        PartitionSerialization {
+            schema_version: self.schema_version,
+            identity: self.identity.digest(),
+            source_field: self.source_field.digest(),
+            definition: &self.definition,
+            sample: self.sample,
+            source_indices: &self.source_indices,
+            storage: &self.storage,
+        }
+        .serialize(serializer)
+    }
 }
 
 #[derive(Deserialize)]

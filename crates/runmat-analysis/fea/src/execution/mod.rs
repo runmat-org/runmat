@@ -46,7 +46,7 @@ mod thermal_receipt;
 mod thermal_result;
 pub use thermal_receipt::{ThermalNumericalReceipt, ThermalNumericalReceiptArtifact};
 mod thermal_result_manifest;
-pub use thermal_result_manifest::ThermalSolverResultManifest;
+pub use thermal_result_manifest::{ThermalResultEncodingProfile, ThermalSolverResultManifest};
 mod thermal_schedule;
 pub use thermal_schedule::ThermalSolveSchedule;
 mod thermal_workload;

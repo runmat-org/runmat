@@ -19,6 +19,9 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 #[path = "thermal_result_manifest_tests.rs"]
 mod tests;
 
+mod profile;
+pub use profile::ThermalResultEncodingProfile;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalSolverResultManifest {

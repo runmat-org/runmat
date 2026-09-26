@@ -379,6 +379,16 @@ from a single borrowed Serde traversal, without constructing encoded bytes or a 
 separately encoded field partition needs its own contract envelope. Thermal producer metadata and
 overlapping output construction still need domain-owned sizing before portable worker admission;
 a generic manifest schema limit is not a demonstrated useful thermal execution envelope.
+Post-solve thermal preparation now profiles actual manifest metadata and hypothetical field
+partition shapes through the same serializers used for retained fields. No dummy numerical arrays
+are allocated. The profile counts each canonical contract, sums encoded-size bounds, and records
+the largest individual materialization estimate. Oversized payload projections and inventories
+that cannot hold at least one chunk per contract plus a root are rejected before numerical payload
+cloning/encoding. These conservative guards may reject an encoding that would happen to be smaller;
+final transport validation still checks actual chunks and the root. Manifest construction has
+already cloned fields, extracted partitions, and encoded their identities before this guard runs.
+This does not admit that construction, retained histories, simultaneous buffers, or pre-solve
+runtime provenance. The largest-contract estimate is reported, not a process-memory limit.
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

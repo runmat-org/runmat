@@ -29,6 +29,112 @@ fn temperature_field(label: &str) -> AnalysisField {
 }
 
 #[test]
+fn partition_shape_profile_bounds_actual_contract_without_numeric_storage() {
+    for count in [1, 4, RECOVERED_FIELD_PARTITION_ENTITY_COUNT] {
+        let definition = temperature_definition("temperature.profile");
+        let sample = RecoveredFieldSample::TimeSeconds(1.25);
+        let field = RecoveredField::new(
+            definition.clone(),
+            sample,
+            AnalysisField::host_f64(definition.field_id(), vec![count], vec![f64::MAX; count]),
+        )
+        .unwrap();
+        let partition = RecoveredFieldPartition::select(&field, (0..count).collect()).unwrap();
+        let profile = RecoveredFieldPartition::profile_shape(&definition, sample, count).unwrap();
+        let actual = runmat_canonical_codec::profile_serialized(
+            &partition,
+            runmat_canonical_codec::CanonicalLimits::new(
+                64 * 1024 * 1024,
+                4_000_000,
+                4_000_000,
+                32,
+            ),
+        )
+        .unwrap();
+        assert_eq!(profile, actual);
+        let bytes = partition.canonical_bytes().unwrap();
+        assert!(bytes.len() as u64 <= profile.encoded_bytes_upper_bound);
+        assert_eq!(
+            RecoveredFieldPartition::from_canonical_bytes(&bytes).unwrap(),
+            partition
+        );
+        // Explicit pre-refactor wire contract protects field names, identity transparency and storage.
+        let legacy = serde_json::json!({
+            "schema_version": 1, "identity": partition.identity,
+            "source_field": partition.source_field, "definition": definition,
+            "sample": sample, "source_indices": partition.source_indices,
+            "storage": partition.storage,
+        });
+        assert_eq!(serde_json::to_value(&partition).unwrap(), legacy);
+    }
+    let definition = temperature_definition("temperature.profile");
+    for count in [0, RECOVERED_FIELD_PARTITION_ENTITY_COUNT + 1, usize::MAX] {
+        assert!(RecoveredFieldPartition::profile_shape(
+            &definition,
+            RecoveredFieldSample::Final,
+            count
+        )
+        .is_err());
+    }
+    assert!(RecoveredFieldPartition::profile_shape(
+        &definition,
+        RecoveredFieldSample::TimeSeconds(f64::NAN),
+        1
+    )
+    .is_err());
+}
+
+#[test]
+fn partition_shape_profile_covers_vector_and_tensor_widths() {
+    for (quantity, shape) in [
+        (
+            ObservationQuantity::HeatFlux,
+            ObservationValueShape::Vector3,
+        ),
+        (
+            ObservationQuantity::Stress,
+            ObservationValueShape::SymmetricTensor3,
+        ),
+    ] {
+        let definition = RecoveredFieldDefinition::new(
+            "profile.components",
+            quantity,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
+            shape,
+            RecoveredFieldNumericRepresentation::Real,
+        )
+        .unwrap();
+        let count = 7;
+        let storage = AnalysisField::host_f64(
+            definition.field_id(),
+            definition.storage_shape(count).unwrap(),
+            vec![-f64::MAX; count * definition.storage_component_count().unwrap()],
+        );
+        let field =
+            RecoveredField::new(definition.clone(), RecoveredFieldSample::Final, storage).unwrap();
+        let partition = RecoveredFieldPartition::select(&field, vec![0, 2, 6]).unwrap();
+        let profile =
+            RecoveredFieldPartition::profile_shape(&definition, RecoveredFieldSample::Final, 3)
+                .unwrap();
+        let actual = runmat_canonical_codec::profile_serialized(
+            &partition,
+            runmat_canonical_codec::CanonicalLimits::new(
+                64 * 1024 * 1024,
+                4_000_000,
+                4_000_000,
+                32,
+            ),
+        )
+        .unwrap();
+        assert_eq!(profile, actual);
+        assert!(
+            partition.canonical_bytes().unwrap().len() as u64 <= profile.encoded_bytes_upper_bound
+        );
+    }
+}
+
+#[test]
 fn borrowed_field_identity_matches_owned_contract_and_rejects_bad_storage() {
     let definition = temperature_definition("temperature");
     let storage = temperature_field("temperature");
