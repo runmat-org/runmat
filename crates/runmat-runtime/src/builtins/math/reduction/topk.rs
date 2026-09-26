@@ -137,22 +137,27 @@ async fn evaluate_topk(
         TopKInput::Complex(tensor) => evaluate_complex(kind, tensor, &args),
         TopKInput::Logical(logical) => evaluate_logical(kind, logical, &args),
     }?;
+    let evaluation = if let Some(source) = source {
+        let (values, indices) = super::resident_results::restore_pair(
+            &source,
+            evaluation.values,
+            evaluation.indices,
+            crate::output_count::current_output_count().unwrap_or(1),
+            kind.name(),
+            &protected.iter().collect::<Vec<_>>(),
+        )
+        .map_err(|error| topk_internal(kind, error.message()))?;
+        TopKEvaluation { values, indices }
+    } else {
+        evaluation
+    };
+    // Restoration's borrowed-input metadata guards re-mark inputs as resident.
+    // Apply the completed sink barrier after those guards, leaving the distinct
+    // requested output allocations resident and every source buffer reusable.
     for handle in &protected {
         runmat_accelerate_api::clear_residency(handle);
     }
-    let Some(source) = source else {
-        return Ok(evaluation);
-    };
-    let (values, indices) = super::resident_results::restore_pair(
-        &source,
-        evaluation.values,
-        evaluation.indices,
-        crate::output_count::current_output_count().unwrap_or(1),
-        kind.name(),
-        &protected.iter().collect::<Vec<_>>(),
-    )
-    .map_err(|error| topk_internal(kind, error.message()))?;
-    Ok(TopKEvaluation { values, indices })
+    Ok(evaluation)
 }
 
 fn topk_error(

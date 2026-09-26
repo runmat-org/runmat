@@ -55,8 +55,13 @@ fn topk_barrier_preserves_explicit_owner_and_requested_resident_outputs() {
                     assert!(block_on(provider.download_numeric(&output)).is_ok());
                     provider.free(&output).unwrap();
                 }
-                for handle in [&input, &k] {
-                    assert!(!runmat_accelerate::fusion_residency::is_resident(handle));
+                for (role, handle) in [("input", &input), ("k", &k)] {
+                    assert!(
+                        !runmat_accelerate::fusion_residency::is_resident(handle),
+                        "{kind:?}, requested={requested}, role={role}, device={}, buffer={}",
+                        handle.device_id,
+                        handle.buffer_id
+                    );
                     assert!(block_on(provider.download_numeric(handle)).is_ok());
                 }
             }
