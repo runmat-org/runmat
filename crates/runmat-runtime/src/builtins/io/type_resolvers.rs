@@ -227,16 +227,6 @@ pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
-}
-
-pub fn uiputfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let _ = args;
-    Type::Union(vec![Type::String, Type::Num])
-}
-
 pub fn unzip_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::cell_of(Type::String)
@@ -454,18 +444,6 @@ mod tests {
     assert_resolver!(write_type_resolver, write_type, &[], Type::Num);
 
     assert_resolver!(delete_type_resolver, delete_type, &[], Type::Void);
-    assert_resolver!(
-        uigetfile_type_resolver,
-        uigetfile_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])
-    );
-    assert_resolver!(
-        uiputfile_type_resolver,
-        uiputfile_type,
-        &[],
-        Type::Union(vec![Type::String, Type::Num])
-    );
     assert_resolver!(
         audioinfo_type_resolver,
         struct_type,
