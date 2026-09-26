@@ -2,6 +2,8 @@ use runmat_accelerate_api::{SparseOperationEvidence, SPARSE_EVIDENCE_SCHEMA_VERS
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
+mod evidence_profile;
+
 pub const ACCELERATOR_SOLVE_EVIDENCE_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

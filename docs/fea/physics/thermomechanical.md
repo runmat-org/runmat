@@ -411,8 +411,14 @@ produce no diagnostic. Successful shared PCG diagnostics are bounded across CPU,
 accelerator, Jacobi, and ILU0 alternatives. Thermal checks the last successful solve's list before
 cloning it for output and reserves two lists for previous/current solve or final-report overlap.
 Arbitrary provider failure strings are not part of this bound: thermal rejects nonconverged solves.
-Backend evidence, validation scratch, and overlapping transport construction remain separate open
-admission work.
+Successful backend evidence now has a producer-owned profile through its derived serializer, with
+the optional preconditioner binding present. Preassembly reserves the scheduled solve count plus
+one in-flight record, including inline vector slots. Accepted records are validated and moved out
+of the current solve into a lazily reserved inventory; CPU-only execution allocates no inventory.
+This removes duplicate retained evidence in the last solve. Fixed-width typed IDs can allocate
+temporary strings during profiling. These are evidence-metadata bounds, not accelerator device
+memory qualification. Validation scratch and overlapping transport construction remain separate
+open admission work.
 
 Post-solve thermal preparation now profiles actual manifest metadata and hypothetical field
 partition shapes through the same serializers used for retained fields. No dummy numerical arrays

@@ -65,7 +65,7 @@ impl ThermalPreassemblyResourceFacts {
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = ThermalObservationResourceFacts::derive(mesh, step)?;
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
-        let metadata = ThermalMetadataResourceFacts::derive(model, step)?;
+        let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
         let base = component_bytes(
             &history,
             &operators,

@@ -24,17 +24,57 @@ fn workload() -> ThermalWorkload {
 }
 
 #[test]
+fn backend_evidence_bound_tracks_solves_and_rejects_overflow() {
+    let mut workload = workload();
+    for (procedure, expected) in [
+        (crate::ThermalProcedureControl::Steady, 1),
+        (
+            crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
+            2,
+        ),
+        (
+            crate::ThermalProcedureControl::BackwardEuler {
+                snapshot_count: 257,
+            },
+            256,
+        ),
+    ] {
+        workload.procedure = procedure;
+        workload.model.sequence.steps[0] = match procedure {
+            crate::ThermalProcedureControl::Steady => ProcedureStep::thermal_steady("heat"),
+            crate::ThermalProcedureControl::BackwardEuler { .. } => {
+                ProcedureStep::thermal_transient("heat")
+            }
+        };
+        let schedule = workload.solve_schedule().unwrap();
+        let facts = super::super::ThermalBackendEvidenceResourceFacts::derive(&schedule).unwrap();
+        assert_eq!(facts.maximum_records, expected);
+        let record =
+            crate::solve::accelerator::AcceleratorSolveEvidence::completed_evidence_fixture();
+        facts.verify(&record).unwrap();
+        assert!(
+            facts.reservation_bytes().unwrap().0
+                > expected as u64 * facts.record.materialization_resident_bytes_estimate
+        );
+        let mut overflow = facts;
+        overflow.record.materialization_resident_bytes_estimate = u64::MAX;
+        assert!(overflow.reservation_bytes().is_err());
+    }
+}
+
+#[test]
 fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
     use runmat_analysis_core::EvidenceConfidence;
     let mut workload = workload();
     let step = workload.model.sequence.steps[0].clone();
-    let base = ThermalMetadataResourceFacts::derive(&workload.model, &step).unwrap();
+    let schedule = workload.solve_schedule().unwrap();
+    let base = ThermalMetadataResourceFacts::derive(&workload.model, &step, &schedule).unwrap();
     let mut alternate = workload.model.materials[0].clone();
     alternate.material_id = "expected".repeat(512);
     workload.model.material_assignments[0].expected_material_id = alternate.material_id.clone();
     workload.model.material_assignments[0].confidence = EvidenceConfidence::Probable;
     workload.model.materials.push(alternate);
-    let facts = ThermalMetadataResourceFacts::derive(&workload.model, &step).unwrap();
+    let facts = ThermalMetadataResourceFacts::derive(&workload.model, &step, &schedule).unwrap();
     assert!(facts.reservation_bytes().unwrap().0 > base.reservation_bytes().unwrap().0);
     let diagnostics = crate::diagnostics::builders::material_assignment_diagnostics(
         &workload.model.material_assignments,
@@ -124,6 +164,7 @@ fn producer_metadata_is_bounded_and_verified_against_actual_initial_state() {
         let base = super::super::ThermalMetadataResourceFacts::derive(
             &workload.model,
             &workload.model.sequence.steps[0],
+            &workload.solve_schedule().unwrap(),
         )
         .unwrap();
         let long_id = "thermal_long_step".repeat(256);
@@ -132,6 +173,7 @@ fn producer_metadata_is_bounded_and_verified_against_actual_initial_state() {
         let grown = super::super::ThermalMetadataResourceFacts::derive(
             &workload.model,
             &workload.model.sequence.steps[0],
+            &workload.solve_schedule().unwrap(),
         )
         .unwrap();
         assert!(

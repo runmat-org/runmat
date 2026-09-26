@@ -22,6 +22,7 @@ use crate::{
     },
 };
 
+mod backend_evidence;
 mod diagnostics;
 mod snapshots;
 use diagnostics::{diagnostics, ThermalDiagnosticsInput};
@@ -134,7 +135,7 @@ pub(super) fn run(
             time_origin_s,
             requested_solver_backend,
             algebra.as_ref(),
-            operators,
+            facts,
             options.residual_target,
         )?,
         ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
@@ -145,7 +146,7 @@ pub(super) fn run(
             initial_assembly: &initial_assembly,
             initial_temperature_k: &initial.temperature_k,
             schedule,
-            operators,
+            facts,
             requested_solver_backend,
             algebra: algebra.as_ref(),
             residual_target: options.residual_target,
@@ -320,24 +321,30 @@ fn solve_steady(
     time_origin_s: f64,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
-    operators: &crate::planning::resource::ThermalOperatorResourceFacts,
+    facts: &crate::planning::resource::ThermalPreassemblyResourceFacts,
     residual_target: f64,
 ) -> Result<ProcedureOutcome, FeaRunError> {
     let operator = assembly
         .steady_operator()
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let rhs_norm = rhs_norm(operator.load());
-    let solve = solve_checked(
+    let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
         algebra,
         Some(initial_temperature_k),
-        operators,
+        &facts.operators,
         residual_target,
     )?;
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, &mut recovered)?;
     let energy_balance = assembly.energy_balance(&solve.solution, &solve.solution, 1.0);
+    let mut accelerator_evidence = Vec::new();
+    backend_evidence::retain(
+        &mut accelerator_evidence,
+        &mut solve.accelerator_evidence,
+        &facts.metadata.backend_evidence,
+    )?;
     Ok(ProcedureOutcome {
         time_points_s: vec![time_origin_s],
         recovered,
@@ -347,7 +354,7 @@ fn solve_steady(
         host_sync_count: solve.host_sync_count,
         device_apply_count: solve.device_apply_k_count,
         device_apply_attempt_count: solve.device_apply_k_attempt_count,
-        accelerator_evidence: solve.accelerator_evidence.clone().into_iter().collect(),
+        accelerator_evidence,
         last_solve: solve,
     })
 }
@@ -360,13 +367,14 @@ struct TransientSolveInput<'a> {
     initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
     initial_temperature_k: &'a [f64],
     schedule: &'a crate::execution::ThermalSolveSchedule,
-    operators: &'a crate::planning::resource::ThermalOperatorResourceFacts,
+    facts: &'a crate::planning::resource::ThermalPreassemblyResourceFacts,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
     residual_target: f64,
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
+    let operators = &input.facts.operators;
     let solve_times = input.schedule.points_s();
     let mut time_points_s = Vec::with_capacity(solve_times.len());
     let mut recovered = RecoveredSnapshots::with_capacity(solve_times.len());
@@ -407,32 +415,36 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             input.model,
             input.mesh,
             input.properties,
-            input.operators.support(),
+            operators.support(),
             &excitations,
             sample,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         drop(excitations);
-        input.operators.verify_matrix(&assembly.conductivity)?;
-        input.operators.verify_matrix(&assembly.capacity)?;
+        operators.verify_matrix(&assembly.conductivity)?;
+        operators.verify_matrix(&assembly.capacity)?;
         source_evidence.extend(assembly.source_evidence.clone());
         let operator = assembly
             .transient_operator(time_step_s, &previous)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
         let rhs_norm = rhs_norm(operator.load());
-        let solve = solve_checked(
+        let mut solve = solve_checked(
             &operator,
             input.requested_solver_backend,
             input.algebra,
             Some(&previous),
-            input.operators,
+            operators,
             input.residual_target,
         )?;
         host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
         device_apply_attempt_count =
             device_apply_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
-        accelerator_evidence.extend(solve.accelerator_evidence.clone());
+        backend_evidence::retain(
+            &mut accelerator_evidence,
+            &mut solve.accelerator_evidence,
+            &input.facts.metadata.backend_evidence,
+        )?;
         residual_norms.push(solve.residual_norm / rhs_norm);
         energy_balances.push(assembly.energy_balance(&previous, &solve.solution, time_step_s));
         push_recovered_snapshot(

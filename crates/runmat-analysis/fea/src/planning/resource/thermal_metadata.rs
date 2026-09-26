@@ -1,9 +1,9 @@
 //! Producer-owned initial-state, physical, assignment and successful-solver metadata projections.
-//! Backend evidence and transport lifetimes remain separate bounds.
+//! Includes scheduled backend-evidence metadata; transport lifetimes remain separate bounds.
 use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_canonical_codec::{profile_serialized, CanonicalLimits, SerializedCanonicalProfile};
 
-use super::{ByteCount, ResourcePlanningError};
+use super::{ByteCount, ResourcePlanningError, ThermalBackendEvidenceResourceFacts};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ThermalMetadataResourceFacts {
@@ -11,14 +11,17 @@ pub struct ThermalMetadataResourceFacts {
     pub physical_diagnostics: SerializedCanonicalProfile,
     pub assignment_diagnostics: SerializedCanonicalProfile,
     pub solver_diagnostics: SerializedCanonicalProfile,
+    pub backend_evidence: ThermalBackendEvidenceResourceFacts,
 }
 
 impl ThermalMetadataResourceFacts {
     pub fn derive(
         model: &AnalysisModel,
         step: &ProcedureStep,
+        schedule: &crate::execution::ThermalSolveSchedule,
     ) -> Result<Self, ResourcePlanningError> {
         Ok(Self {
+            backend_evidence: ThermalBackendEvidenceResourceFacts::derive(schedule)?,
             solver_diagnostics: crate::solve::linear::successful_diagnostics_profile()
                 .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
             assignment_diagnostics: crate::diagnostics::material_assignment::profile(
@@ -35,6 +38,7 @@ impl ThermalMetadataResourceFacts {
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
+        let backend = self.backend_evidence.reservation_bytes()?.0;
         self.initial_state
             .materialization_resident_bytes_estimate
             .checked_add(
@@ -54,6 +58,7 @@ impl ThermalMetadataResourceFacts {
                     .checked_mul(2)
                     .and_then(|solver| bytes.checked_add(solver))
             })
+            .and_then(|bytes| bytes.checked_add(backend))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal metadata materialization",
