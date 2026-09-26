@@ -1,3 +1,18 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MomentProjectionSummary {
+    pub load_id: String,
+    pub region_id: String,
+    pub target_node_count: usize,
+    pub projection_point_m: [f64; 3],
+    pub applied_force: [f64; 3],
+    pub applied_moment: [f64; 3],
+    pub force_residual: [f64; 3],
+    pub moment_residual: [f64; 3],
+    pub projection_applied: bool,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct MomentProjection {
     pub point_m: [f64; 3],

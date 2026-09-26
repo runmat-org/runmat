@@ -165,6 +165,7 @@ const fn source_order(source: SourceImplementation) -> u8 {
         SourceImplementation::OrdinalDistribution => 14,
         SourceImplementation::SyntheticProfileFallback => 15,
         SourceImplementation::UnmappedFallback => 16,
+        SourceImplementation::SolvedThermalStateNodalField => 17,
     }
 }
 

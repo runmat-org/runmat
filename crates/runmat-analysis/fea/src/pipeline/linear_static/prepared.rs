@@ -33,8 +33,15 @@ pub fn run_linear_static_with_prepared_constraint_plan(
     constraint_plan: &CanonicalStructuralConstraintPlan,
     admitted: Option<StaticResourceAdmission<'_>>,
 ) -> Result<FeaRunResult, FeaRunError> {
-    run_linear_static_with_constraint_plan(model, backend, options, Some(constraint_plan), admitted)
-        .map(|result| result.run)
+    run_linear_static_with_constraint_plan(
+        model,
+        backend,
+        options,
+        Some(constraint_plan),
+        admitted,
+        None,
+    )
+    .map(|result| result.run)
 }
 
 /// Executes the preload solve and publishes the exact initial-stress tangent from the same
@@ -54,6 +61,7 @@ pub fn run_linear_static_with_prepared_constraint_plan_and_linearization(
         options,
         Some(constraint_plan),
         admitted,
+        None,
     )?;
     let linearization =
         super::super::structural_linearization::StructuralLinearizationArtifact::from_solution(

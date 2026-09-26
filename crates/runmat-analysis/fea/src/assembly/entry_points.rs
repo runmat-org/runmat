@@ -16,6 +16,7 @@ pub(crate) fn assemble_linear_system(
         None,
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
+        None,
     )
 }
 
@@ -42,6 +43,7 @@ pub(crate) fn assemble_structural_system_borrowed(
         Some(requirement),
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
+        None,
     )
 }
 
@@ -59,6 +61,7 @@ pub(crate) fn assemble_structural_system_with_constraint_plan(
         requirement,
         Some(constraint_plan),
         crate::planning::resource::LocalExecutionPlan::serial(),
+        None,
     )
 }
 
@@ -69,6 +72,7 @@ pub(crate) fn assemble_structural_system_with_execution(
     requirement: StructuralFormulationRequirement,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
+    solved_nodal_temperature_k: Option<&[f64]>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     assemble_with_mesh(
         model,
@@ -77,6 +81,7 @@ pub(crate) fn assemble_structural_system_with_execution(
         Some(requirement),
         constraint_plan,
         local_execution,
+        solved_nodal_temperature_k,
     )
 }
 
@@ -87,20 +92,34 @@ fn assemble_with_mesh(
     requirement: Option<StructuralFormulationRequirement>,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
+    solved_nodal_temperature_k: Option<&[f64]>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
     let (thermo_mechanical_context, electro_thermal_context) =
         crate::excitation::realize_coupling_contexts(model, excitations)
             .map_err(LinearAssemblyError::CouplingRealization)?;
+    if solved_nodal_temperature_k.is_some()
+        && excitations.iter().any(|excitation| {
+            matches!(
+                excitation.kind,
+                crate::excitation::RealizedExcitationKind::TemperatureField(_)
+            )
+        })
+    {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "solved thermal state conflicts with an active prescribed temperature field".into(),
+        ));
+    }
     assemble_linear_system_impl(
         model,
         excitations,
         solver_mesh,
-        thermo_mechanical_context,
+        thermo_mechanical_context.filter(|_| solved_nodal_temperature_k.is_none()),
         electro_thermal_context,
         AssemblyExecution {
             structural_requirement: requirement,
             supplied_constraint_plan: constraint_plan,
             local_execution,
+            solved_nodal_temperature_k,
         },
     )
 }

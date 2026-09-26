@@ -66,6 +66,7 @@ mod tests {
             Some(context),
             None,
             AssemblyExecution {
+                solved_nodal_temperature_k: None,
                 structural_requirement: Some(
                     StructuralFormulationRequirement::PhysicalDiscretization,
                 ),

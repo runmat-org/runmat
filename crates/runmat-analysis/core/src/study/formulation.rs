@@ -29,6 +29,7 @@ pub enum SpatialOperatorImplementation {
     ThermalGalerkinConduction,
     PrescribedThermalCouplingProfile,
     IntegratedPrescribedSolidThermoelasticLoad,
+    IntegratedSolvedSolidThermoelasticLoad,
     ReducedAcousticHelmholtz,
     ReducedElectromagneticPotential,
     ReducedEdgeGraphCurlCurl,
@@ -58,6 +59,7 @@ pub enum TemporalImplementation {
     CoupledFixedPointRelaxation,
     CoupledScalarResidualIteration,
     PrescribedThermomechanicalProfileApplication,
+    SolvedThermalStateApplication,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -78,6 +80,7 @@ pub enum ConstitutiveImplementation {
 pub enum CouplingImplementation {
     Uncoupled,
     OnePassPrescribedThermomechanicalProfile,
+    OneWaySolvedThermoelasticState,
     StaggeredElectrothermalConductanceLine,
     PartitionedConjugateProjection,
     PartitionedFluidStructureRelaxation,
@@ -139,6 +142,7 @@ pub enum SourceImplementation {
     PrescribedTemperatureDeltaProfile,
     OrdinalRegionTemperatureDistribution,
     PersistentRegionElementTemperatureMap,
+    SolvedThermalStateNodalField,
     OrdinalDistribution,
     SyntheticProfileFallback,
     UnmappedFallback,

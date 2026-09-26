@@ -297,18 +297,36 @@ fn thermomechanical_realizations(procedure: AnalysisProcedure) -> Vec<ExactFormu
     ];
     branches
         .into_iter()
-        .map(|(operator, recovery)| {
-            thermomechanical_exact_realization(ThermomechanicalRealizationInput {
-                structural: StructuralRealizationInput {
-                    assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
-                    procedure,
-                    coupling: CouplingImplementation::OnePassPrescribedThermomechanicalProfile,
-                    sources: vec![SourceImplementation::NotApplicable],
-                    boundary_transfers: vec![BoundaryTransferImplementation::NotApplicable],
-                },
-                profile_sources: vec![SourceImplementation::PrescribedTemperatureDeltaProfile],
+        .flat_map(|(operator, recovery)| {
+            let mut couplings = vec![(
+                CouplingImplementation::OnePassPrescribedThermomechanicalProfile,
+                SourceImplementation::PrescribedTemperatureDeltaProfile,
+            )];
+            if procedure == AnalysisProcedure::Static
+                && matches!(
+                    operator,
+                    StructuralOperatorImplementation::Tet4LinearElasticity
+                        | StructuralOperatorImplementation::Tet10LinearElasticity
+                )
+            {
+                couplings.push((
+                    CouplingImplementation::OneWaySolvedThermoelasticState,
+                    SourceImplementation::SolvedThermalStateNodalField,
+                ));
+            }
+            couplings.into_iter().map(move |(coupling, source)| {
+                thermomechanical_exact_realization(ThermomechanicalRealizationInput {
+                    structural: StructuralRealizationInput {
+                        assemblies: vec![StructuralFormulationRealization::new(operator, recovery)],
+                        procedure,
+                        coupling,
+                        sources: vec![SourceImplementation::NotApplicable],
+                        boundary_transfers: vec![BoundaryTransferImplementation::NotApplicable],
+                    },
+                    profile_sources: vec![source],
+                })
+                .expect("registered thermomechanical procedure and operator must be compatible")
             })
-            .expect("registered thermomechanical procedure and operator must be compatible")
         })
         .collect()
 }

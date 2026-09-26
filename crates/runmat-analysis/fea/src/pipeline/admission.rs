@@ -111,10 +111,15 @@ pub(super) fn admit_structural(
             "the structural pipelines do not implement an electrothermal formulation".to_string(),
         ));
     }
-    let thermomechanical = summary
-        .thermo_mechanical
-        .as_ref()
-        .is_some_and(|value| value.enabled);
+    let solved_thermal = summary
+        .structural_solid_recovery
+        .iter()
+        .any(|element| element.solved_thermal_quadrature.is_some());
+    let thermomechanical = solved_thermal
+        || summary
+            .thermo_mechanical
+            .as_ref()
+            .is_some_and(|value| value.enabled);
     let realized_family = if thermomechanical {
         PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical)
     } else {
@@ -128,7 +133,9 @@ pub(super) fn admit_structural(
             realized_family,
         )));
     }
-    let coupling = if thermomechanical {
+    let coupling = if solved_thermal {
+        runmat_analysis_core::CouplingImplementation::OneWaySolvedThermoelasticState
+    } else if thermomechanical {
         runmat_analysis_core::CouplingImplementation::OnePassPrescribedThermomechanicalProfile
     } else {
         runmat_analysis_core::CouplingImplementation::Uncoupled
@@ -143,11 +150,15 @@ pub(super) fn admit_structural(
     let realization = if thermomechanical {
         thermomechanical_exact_realization(ThermomechanicalRealizationInput {
             structural: input,
-            profile_sources: summary
-                .thermo_mechanical
-                .as_ref()
-                .map(|value| value.profile_sources.clone())
-                .unwrap_or_default(),
+            profile_sources: if solved_thermal {
+                vec![runmat_analysis_core::SourceImplementation::SolvedThermalStateNodalField]
+            } else {
+                summary
+                    .thermo_mechanical
+                    .as_ref()
+                    .map(|value| value.profile_sources.clone())
+                    .unwrap_or_default()
+            },
         })
     } else {
         structural_exact_realization(input)

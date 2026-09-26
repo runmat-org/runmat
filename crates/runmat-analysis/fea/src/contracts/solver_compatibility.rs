@@ -110,6 +110,7 @@ const fn is_auxiliary_temporal(temporal: TemporalImplementation) -> bool {
     matches!(
         temporal,
         TemporalImplementation::PrescribedThermomechanicalProfileApplication
+            | TemporalImplementation::SolvedThermalStateApplication
     )
 }
 
@@ -190,7 +191,8 @@ const fn method_is_compatible(
             }
             _ => false,
         },
-        TemporalImplementation::PrescribedThermomechanicalProfileApplication => false,
+        TemporalImplementation::PrescribedThermomechanicalProfileApplication
+        | TemporalImplementation::SolvedThermalStateApplication => false,
     }
 }
 

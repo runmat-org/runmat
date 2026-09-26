@@ -5,9 +5,9 @@ combination with mechanical loading. RunMat treats temperature as typed state an
 a constitutive contribution; it does not convert temperature into an arbitrary equivalent force.
 
 The `.fea` language checks steady, transient, and nonlinear thermomechanical procedure contracts.
-The numerical library currently admits experimental structural realizations driven by a
-**one-pass prescribed temperature-delta profile**. It is not yet a bidirectionally coupled thermal
-and structural solve, and the public typed `.fea` executor does not connect it end to end.
+The numerical library admits experimental prescribed-temperature structural realizations and an
+experimental **retained thermal state to static solid solve** path. Neither is bidirectionally
+coupled, and the public typed `.fea` executor does not yet connect the retained-state path end to end.
 
 ## What thermomechanical equation is implemented?
 
@@ -29,18 +29,21 @@ $$
 \boldsymbol\varepsilon_{th}\,d\Omega.
 $$
 
-The current experimental realization evaluates a prescribed temperature-difference profile, combines
-it with each admitted structural spatial operator (Tet4, Tet10, Euler–Bernoulli beam, MITC3 shell,
-or the explicitly synthetic test branch), and records
-`OnePassPrescribedThermomechanicalProfile`. It does not solve the heat equation in the same step or
-feed deformation back into temperature.
+The physical static Tet4/Tet10 branch integrates the thermal load and subtracts material-owned
+thermal eigenstrain during stress/energy recovery. A prescribed field records
+`OnePassPrescribedThermomechanicalProfile`; a retained solved nodal field records
+`OneWaySolvedThermoelasticState`. The latter interpolates the retained temperatures at integration
+points and bypasses reduced-profile stiffness/load adjustments. Other experimental prescribed
+branches include reduced beam, shell, and explicitly synthetic profiles; those do not establish
+the physical solid formulation's equations or qualification. Neither path solves heat in the
+structural step or feeds deformation back into temperature.
 
 ## Which thermomechanical procedures are defined?
 
 | Procedure | Contract | Registered realization |
 | --- | --- | --- |
-| `thermomechanical steady` | Coupled static thermal/structural state | One-pass prescribed-temperature structural response |
-| `thermomechanical transient` | Time samples and coupled evolving state | Same profile family with experimental transient structural policy |
+| `thermomechanical steady` | Coupled static thermal/structural state | Prescribed profile, or retained solved temperature on Tet4/Tet10 through the Rust library |
+| `thermomechanical transient` | Time samples and coupled evolving state | Not currently admitted as a coupled transient solve |
 | `thermomechanical nonlinear` | Load-factor domain and coupled nonlinear state | Same profile family with experimental nonlinear structural policy |
 
 These are not bidirectional thermal solves. The transient/nonlinear coupling helpers adjust bounded
@@ -90,8 +93,28 @@ analysis deformation after analysis.temperature {
 ```
 
 The typed state must retain mesh/topology, units, reference temperature, and producer identity.
-Today this full source-to-source state transfer is a contract target, not an admitted public
-execution path; use current status/evidence rather than assuming the two blocks will run.
+The `.fea` source-to-source workflow above remains a contract target; do not assume the two blocks
+will execute as a coupled sequence yet.
+
+The Rust numerical library provides the narrower executable path:
+
+1. Publish a completed physical thermal result with `CanonicalSemanticState::from_thermal_result`.
+2. Author a static thermomechanical consumer with a thermal `StateInput`, `Prestress` use, and a
+   `Reuse` transition requiring identical topology and preserved reference temperature.
+3. Call `run_linear_static_from_thermal_state` with the retained state and canonical solver mesh.
+
+The result includes the thermal transition and a source-linked `SolverResultIdentity`. Missing
+declared state, incompatible topology/reference, and an active prescribed temperature field that
+conflicts with the retained source reject. Temperature/eigenstrain/eigenstress snapshots are
+integration-point fields, not fabricated nodal fields. Recovery means deriving strain, stress,
+and energy from retained solutions—not reconstructing lost data.
+
+This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
+expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
+Tet4/Tet10 load and linear-temperature recovery references. General quadratic-temperature or
+curved-Tet10 energy quadrature, spatial convergence, temperature-dependent constitutive iteration,
+cross-mesh projection, portable execution/persistence, and downstream thermal-prestress procedures
+are not qualified by these tests. Production admission remains closed.
 
 ## Why is my thermal stress wrong?
 

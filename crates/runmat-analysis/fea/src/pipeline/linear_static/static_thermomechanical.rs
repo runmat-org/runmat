@@ -21,6 +21,19 @@ pub(super) fn recover(
     if summary
         .structural_solid_recovery
         .iter()
+        .any(|element| element.solved_thermal_quadrature.is_some())
+    {
+        return crate::pipeline::thermo_mechanical::recover_solved_static_fields(
+            summary,
+            &displacement,
+            &von_mises,
+            residual_norm,
+        )
+        .map_err(FeaRunError::Assembly);
+    }
+    if summary
+        .structural_solid_recovery
+        .iter()
         .any(|element| element.thermal_eigenstrain.is_some())
     {
         recover_physical_static_thermo_mechanical_fields(

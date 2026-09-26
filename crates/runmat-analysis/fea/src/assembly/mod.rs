@@ -1,5 +1,6 @@
 pub mod complex_structural;
 mod constraint_projection;
+mod coupling_summary;
 mod direct_constraints;
 pub mod dofs;
 pub mod elements;
@@ -694,56 +695,15 @@ pub use solid_recovery_types::{
     SolidRecoveryElementSummary, SolidRecoveryGeometry, SolvedThermalRecoveryQuadrature,
 };
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MomentProjectionSummary {
-    pub load_id: String,
-    pub region_id: String,
-    pub target_node_count: usize,
-    pub projection_point_m: [f64; 3],
-    pub applied_force: [f64; 3],
-    pub applied_moment: [f64; 3],
-    pub force_residual: [f64; 3],
-    pub moment_residual: [f64; 3],
-    pub projection_applied: bool,
-}
+pub use moment_projection::MomentProjectionSummary;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ThermoMechanicalAssemblySummary {
-    pub enabled: bool,
-    pub reference_temperature_k: f64,
-    pub applied_temperature_delta_k: f64,
-    pub thermal_expansion_coefficient: f64,
-    pub thermal_strain_scale: f64,
-    pub thermal_load_scale: f64,
-    pub constitutive_temperature_factor: f64,
-    pub constitutive_poisson_coupling: f64,
-    pub effective_modulus_scale: f64,
-    pub constitutive_material_spread_ratio: f64,
-    pub assignment_heterogeneity_index: f64,
-    pub spatial_gradient_index: f64,
-    pub spatial_coverage_ratio: f64,
-    pub region_delta_count: usize,
-    pub coupling_fingerprint: u64,
-    pub profile_sources: Vec<SourceImplementation>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ElectroThermalAssemblySummary {
-    pub enabled: bool,
-    pub reference_temperature_k: f64,
-    pub applied_voltage_v: f64,
-    pub base_electrical_conductivity_s_per_m: f64,
-    pub resistive_heating_coefficient: f64,
-    pub joule_heating_scale: f64,
-    pub conductivity_spread_ratio: f64,
-    pub region_scale_count: usize,
-    pub coupling_fingerprint: u64,
-}
+pub use coupling_summary::{ElectroThermalAssemblySummary, ThermoMechanicalAssemblySummary};
 
 pub(super) struct AssemblyExecution<'a> {
     structural_requirement: Option<StructuralFormulationRequirement>,
     supplied_constraint_plan: Option<&'a CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
+    solved_nodal_temperature_k: Option<&'a [f64]>,
 }
 
 pub(super) fn assemble_linear_system_impl(
@@ -758,7 +718,25 @@ pub(super) fn assemble_linear_system_impl(
         structural_requirement,
         supplied_constraint_plan,
         local_execution,
+        solved_nodal_temperature_k,
     } = execution;
+    if solved_nodal_temperature_k.is_some()
+        && (solver_mesh.is_none()
+            || structural_requirement
+                != Some(StructuralFormulationRequirement::PhysicalDiscretization)
+            || thermo_mechanical_context.is_some()
+            || electro_thermal_context.is_some()
+            || model.thermo_mechanical.is_none()
+            || model
+                .structural
+                .as_ref()
+                .is_some_and(|domain| !domain.elements.is_empty()))
+    {
+        return Err(LinearAssemblyError::CouplingRealization(
+            "solved thermal input requires exclusively physical solid thermomechanical assembly"
+                .into(),
+        ));
+    }
     let explicit_element_count = model
         .structural
         .as_ref()
@@ -1022,6 +1000,23 @@ pub(super) fn assemble_linear_system_impl(
         };
     }
 
+    if let Some(temperatures) = solved_nodal_temperature_k {
+        let (mesh, properties) = solver_mesh.zip(solid_properties.as_ref()).ok_or_else(|| {
+            LinearAssemblyError::CouplingRealization(
+                "solved thermal input lacks solid material coverage".into(),
+            )
+        })?;
+        let thermal_load =
+            thermoelastic_load::assemble_solved_temperature_load(mesh, properties, temperatures)
+                .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
+        for (index, value) in thermal_load.into_iter().enumerate() {
+            if !constrained[index] {
+                rhs[index] += value;
+            }
+            physical_load[index] += value;
+        }
+    }
+
     if let Some(context) = thermo_mechanical_context.as_ref() {
         let physical_thermal_load = solver_mesh
             .filter(|_| {
@@ -1188,7 +1183,7 @@ pub(super) fn assemble_linear_system_impl(
                     structural_requirement
                         == Some(StructuralFormulationRequirement::PhysicalDiscretization)
                 }),
-                None,
+                solved_nodal_temperature_k,
             )
         })
         .transpose()

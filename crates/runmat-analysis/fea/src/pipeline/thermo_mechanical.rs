@@ -1,4 +1,6 @@
 use runmat_analysis_core::AnalysisField;
+mod solved;
+pub(crate) use solved::recover_solved_static_fields;
 
 use crate::{
     assembly::{AssemblySummary, ThermoMechanicalAssemblySummary},

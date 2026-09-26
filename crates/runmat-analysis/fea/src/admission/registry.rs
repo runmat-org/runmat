@@ -204,7 +204,12 @@ fn validate_structural_identity(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let expected_coupling = if thermomechanical {
-        CouplingImplementation::OnePassPrescribedThermomechanicalProfile
+        match request.realization.coupling {
+            CouplingImplementation::OneWaySolvedThermoelasticState => {
+                CouplingImplementation::OneWaySolvedThermoelasticState
+            }
+            _ => CouplingImplementation::OnePassPrescribedThermomechanicalProfile,
+        }
     } else {
         CouplingImplementation::Uncoupled
     };
