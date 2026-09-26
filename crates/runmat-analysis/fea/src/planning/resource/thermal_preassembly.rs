@@ -1,7 +1,8 @@
 //! Composition of thermal preassembly component estimates; not whole-process admission.
 use super::{
     ByteCount, ResourcePlanningError, ThermalHistoryResourceFacts, ThermalObservationResourceFacts,
-    ThermalOperatorResourceFacts, ThermalSourceEvidenceResourceFacts,
+    ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
+    ThermalSourceEvidenceResourceFacts,
 };
 use crate::execution::ThermalSolveSchedule;
 use runmat_analysis_core::{AnalysisModel, ProcedureStep};
@@ -12,6 +13,7 @@ pub struct ThermalPreassemblyResourceFacts {
     pub operators: ThermalOperatorResourceFacts,
     pub sources: ThermalSourceEvidenceResourceFacts,
     pub observations: ThermalObservationResourceFacts,
+    pub realization: ThermalRealizationResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
@@ -48,18 +50,21 @@ impl ThermalPreassemblyResourceFacts {
             operators,
             sources: ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?,
             observations: ThermalObservationResourceFacts::derive(mesh, step)?,
+            realization: ThermalRealizationResourceFacts::derive(model, step)?,
             model_materialization_bytes,
         })
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
         let observations = self.observations.reservation_bytes()?.0;
+        let realization = self.realization.reservation_bytes()?.0;
         self.operators
             .numerical_reservation_bytes(&self.history)?
             .0
             .checked_add(self.sources.reservation_bytes()?.0)
             .and_then(|bytes| bytes.checked_add(self.model_materialization_bytes.0))
             .and_then(|bytes| bytes.checked_add(observations))
+            .and_then(|bytes| bytes.checked_add(realization))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal preassembly reservation",

@@ -54,24 +54,8 @@ pub(crate) fn time_breakpoints(
     start_time_s: f64,
     end_time_s: f64,
 ) -> Result<Vec<f64>, RealizationError> {
-    let active_cases = super::activation::active_case_ids(model, Some(step.step_id.as_str()))?;
-    let active_signal_ids = model
-        .excitations
-        .iter()
-        .map(|action| action.excitation())
-        .filter(|excitation| {
-            model.excitation_cases.iter().any(|case| {
-                active_cases.contains(case.case_id.0.as_str())
-                    && case.action_ids.contains(&excitation.excitation_id)
-            }) && step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
-                excitation.excitation_id.0.clone(),
-            )) && (excitation.active_step_ids.is_empty()
-                || excitation
-                    .active_step_ids
-                    .iter()
-                    .any(|active| active == step.step_id.as_str()))
-        })
-        .map(|excitation| excitation.signal_id.0.as_str())
+    let active_signal_ids = super::activation::active_actions(model, Some(step))?
+        .map(|selected| selected.action.excitation().signal_id.0.as_str())
         .collect::<std::collections::HashSet<_>>();
     let mut active_signal_ids = active_signal_ids;
     collect_constraint_signal_ids(model, step, &mut active_signal_ids);

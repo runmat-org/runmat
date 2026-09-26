@@ -26,6 +26,8 @@ pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
 pub use thermal_operator::ThermalOperatorResourceFacts;
 mod thermal_preassembly;
+mod thermal_realization;
+pub use thermal_realization::ThermalRealizationResourceFacts;
 mod thermal_sources;
 pub use thermal_preassembly::ThermalPreassemblyResourceFacts;
 mod thermal_state;

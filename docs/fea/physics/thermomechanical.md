@@ -263,6 +263,19 @@ and convection boundary matches stream without temporary face arrays. These chan
 quadrature order, regional overrides, and conflicting-temperature diagnostics; they do not bound
 the separate realized-action inventory or compiled property metadata.
 
+`ThermalRealizationResourceFacts` additionally admits every active realized action, not only
+heat-generation/flux evidence producers. It streams selected authored metadata (including nested
+targets and frames) and each case membership through the shared codec estimator, then adds typed
+entry/case slots and the borrowed signal-pointer lookup. Expanded case metadata has the same
+bounded profiling envelope and can conservatively reject a model whose authored encoding fits.
+Realization reserves exact requested vector lengths, uses an in-place sorted signal lookup, and
+rejects duplicate signal identifiers. Selection, breakpoint scheduling and resource preflight now
+share borrowed case/action traversal; nonempty lifecycle inventories can still allocate temporary
+identifier checks. Thermal execution releases realized entries immediately after assembly, so
+initial and subsequent realization inventories do not coexist. This remains estimated requested
+heap payload, not allocator/native/RSS coverage; signal-sampling scratch, compiled property
+metadata, and result/transport allocation admission still require separate qualification.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

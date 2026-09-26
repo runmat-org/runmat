@@ -32,9 +32,10 @@ impl ThermalSourceEvidenceResourceFacts {
         }
         let mut records = 0_u64;
         let mut record_bytes = 0_u64;
-        for (action, _) in active_actions(model, Some(step))
+        for selected in active_actions(model, Some(step))
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
         {
+            let action = selected.action;
             if !matches!(
                 action,
                 ExcitationAction::HeatGeneration(_) | ExcitationAction::HeatFlux(_)

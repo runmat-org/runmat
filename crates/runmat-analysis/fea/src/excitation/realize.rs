@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
 use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 
@@ -60,17 +60,37 @@ fn realize_excitations_for_step(
     step: Option<&ProcedureStep>,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
-    let signals = model
-        .signals
-        .iter()
-        .map(|signal| (signal.signal_id().0.as_str(), signal))
-        .collect::<HashMap<_, _>>();
+    let mut signals = Vec::new();
+    signals
+        .try_reserve_exact(model.signals.len())
+        .map_err(|error| RealizationError::new(error.to_string()))?;
+    signals.extend(model.signals.iter());
+    signals.sort_unstable_by(|left, right| left.signal_id().cmp(right.signal_id()));
+    if signals
+        .windows(2)
+        .any(|pair| pair[0].signal_id() == pair[1].signal_id())
+    {
+        return Err(RealizationError::new(
+            "duplicate signal identifiers in realization",
+        ));
+    }
+    let active = active_actions(model, step)?;
     let mut entries = Vec::new();
-    for (action, case_ids) in active_actions(model, step)? {
+    entries
+        .try_reserve_exact(active.clone().count())
+        .map_err(|error| RealizationError::new(error.to_string()))?;
+    for selected in active {
+        let action = selected.action;
+        let mut case_ids = Vec::new();
+        case_ids
+            .try_reserve_exact(selected.case_ids().count())
+            .map_err(|error| RealizationError::new(error.to_string()))?;
+        case_ids.extend(selected.case_ids().cloned());
         let excitation = action.excitation();
         let signal = signals
-            .get(excitation.signal_id.0.as_str())
-            .ok_or_else(|| {
+            .binary_search_by(|signal| signal.signal_id().cmp(&excitation.signal_id))
+            .map(|index| signals[index])
+            .map_err(|_| {
                 RealizationError::new(format!(
                     "excitation {} references missing signal {}",
                     excitation.excitation_id.0, excitation.signal_id.0

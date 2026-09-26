@@ -73,6 +73,7 @@ pub(super) fn run(
         initial_sample,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    drop(initial_excitations);
     operators.verify_matrix(&initial_assembly.conductivity)?;
     operators.verify_matrix(&initial_assembly.capacity)?;
     let initial = initial_state::realize(
@@ -377,6 +378,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             sample,
         )
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        drop(excitations);
         input.operators.verify_matrix(&assembly.conductivity)?;
         input.operators.verify_matrix(&assembly.capacity)?;
         source_evidence.extend(assembly.source_evidence.clone());
