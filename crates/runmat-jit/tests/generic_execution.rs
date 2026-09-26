@@ -50,7 +50,7 @@ use runmat_types::{
     INTEROP_MANIFEST_SCHEMA_VERSION, PARALLEL_MANIFEST_SCHEMA_VERSION,
     REGION_CONTRACT_SCHEMA_VERSION,
 };
-use runmat_value::Value;
+use runmat_value::{Value, ValueSequence};
 
 fn compile_executor(
     assembly: runmat_native_codegen::NativeAssembly,
@@ -212,7 +212,10 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
 #[test]
 fn native_symbol_constants_match_registered_values_in_generic_and_linked_entries() {
     let constants = runmat_builtins::constants();
-    assert!(!constants.is_empty(), "runtime constants must be registered");
+    assert!(
+        !constants.is_empty(),
+        "runtime constants must be registered"
+    );
     for constant in constants {
         let assembly = constant_fixture(MirConstant::Symbol(runmat_hir::SymbolName(
             constant.name.into(),
@@ -540,7 +543,7 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
             Arc::new(move |_function, arguments, _requested_outputs| {
                 observed.fetch_add(1, Ordering::SeqCst);
                 let result = arguments[0].clone();
-                Box::pin(async move { Ok(result) })
+                Box::pin(async move { Ok(ValueSequence::single(result).unwrap()) })
             }),
         ));
         drop(activation);
@@ -613,7 +616,7 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
                         ))
                     })?;
                 }
-                Ok(value)
+                Ok(ValueSequence::single(value).unwrap())
             })
         }),
     ));
@@ -703,7 +706,7 @@ fn suspending_external_call_resumes_exactly_without_replay() {
                     }
                 })
                 .await;
-                Ok(Value::Num(7.0))
+                Ok(ValueSequence::single(Value::Num(7.0)).unwrap())
             })
         }),
     ));
@@ -766,9 +769,10 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
                     }
                 })
                 .await;
-                Ok(Value::Tensor(
+                Ok(ValueSequence::single(Value::Tensor(
                     runmat_value::Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap(),
                 ))
+                .unwrap())
             })
         }),
     ));
@@ -833,9 +837,10 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                     let call = observed_subsref.fetch_add(1, Ordering::SeqCst);
                     Box::pin(async move {
                         if call == 0 {
-                            return Ok(Value::Object(runmat_value::ObjectInstance::new(
-                                "StagedPathObject",
-                            )));
+                            return Ok(ValueSequence::single(Value::Object(
+                                runmat_value::ObjectInstance::new("StagedPathObject"),
+                            ))
+                            .unwrap());
                         }
                         let mut yielded = false;
                         futures::future::poll_fn(|context| {
@@ -848,7 +853,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                             }
                         })
                         .await;
-                        Ok(Value::Num(42.0))
+                        Ok(ValueSequence::single(Value::Num(42.0)).unwrap())
                     })
                 }
                 12 => {
@@ -865,7 +870,7 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
                             }
                         })
                         .await;
-                        Ok(Value::Num(1.0))
+                        Ok(ValueSequence::single(Value::Num(1.0)).unwrap())
                     })
                 }
                 _ => panic!("unexpected semantic function {function}"),
@@ -984,7 +989,9 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
             assert_eq!(requested_outputs, 1);
             let value = arguments[0].clone();
             Box::pin(async move {
-                runmat_runtime::call_builtin_async("plus", &[value, Value::Num(1.0)]).await
+                runmat_runtime::call_builtin_async("plus", &[value, Value::Num(1.0)])
+                    .await
+                    .map(|value| ValueSequence::single(value).unwrap())
             })
         }),
     ));
@@ -1231,17 +1238,22 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
                         9 => {
                             assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 0);
                             if dynamic {
-                                Ok(Value::String("value".into()))
+                                Ok(ValueSequence::single(Value::String("value".into())).unwrap())
                             } else {
-                                Ok(Value::Tensor(
+                                Ok(ValueSequence::single(Value::Tensor(
                                     runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
                                 ))
+                                .unwrap())
                             }
                         }
                         10 => {
                             assert_eq!(observed.fetch_add(1, Ordering::SeqCst), 1);
                             assert_eq!(requested_outputs, 2);
-                            Ok(Value::OutputList(vec![Value::Num(7.0), Value::Num(8.0)]))
+                            Ok(ValueSequence::comma_separated(vec![
+                                Value::Num(7.0),
+                                Value::Num(8.0),
+                            ])
+                            .unwrap())
                         }
                         _ => unreachable!("unexpected fixture function"),
                     }
@@ -1434,7 +1446,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
             let value = arguments[0].clone();
             Box::pin(async move {
                 if function == 8 {
-                    return Ok(value);
+                    return Ok(ValueSequence::single(value).unwrap());
                 }
                 let mut yielded = false;
                 futures::future::poll_fn(|context| {
@@ -1447,7 +1459,7 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
                     }
                 })
                 .await;
-                Ok(value)
+                Ok(ValueSequence::single(value).unwrap())
             })
         }),
     ));
@@ -1502,7 +1514,7 @@ fn contextual_regions_at_one_site_resume_without_replaying_prior_regions() {
                     })
                     .await;
                 }
-                Ok(value)
+                Ok(ValueSequence::single(value).unwrap())
             })
         }),
     ));
@@ -1547,7 +1559,7 @@ fn contextual_step_calls_have_distinct_resume_identities() {
                     })
                     .await;
                 }
-                Ok(Value::Bool(true))
+                Ok(ValueSequence::single(Value::Bool(true)).unwrap())
             })
         }),
     ));
@@ -1596,9 +1608,12 @@ fn nested_contextual_call_restores_the_outer_operation_identity() {
                         }
                     })
                     .await;
-                    return Ok(Value::Bool(true));
+                    return Ok(ValueSequence::single(Value::Bool(true)).unwrap());
                 }
-                Ok(argument.expect("fixture function 8 receives one argument"))
+                Ok(ValueSequence::single(
+                    argument.expect("fixture function 8 receives one argument"),
+                )
+                .unwrap())
             })
         }),
     ));
@@ -1725,12 +1740,12 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
                             "contextual roots did not retain their handle: {error}"
                         ))
                     })?;
-                    return Ok(completed);
+                    return Ok(ValueSequence::single(completed).unwrap());
                 }
                 if call == 0 {
-                    Ok(retained)
+                    Ok(ValueSequence::single(retained).unwrap())
                 } else {
-                    Ok(Value::Num(4.0))
+                    Ok(ValueSequence::single(Value::Num(4.0)).unwrap())
                 }
             })
         }),
