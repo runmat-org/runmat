@@ -12,7 +12,6 @@ use runmat_core::{
 use runmat_time::Instant;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::cli::{CaptureFiguresMode, Cli, FigureSize};
@@ -157,7 +156,7 @@ async fn execute_script_request(
     let interrupt = engine.interrupt_handle();
     let signal_task = tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
-            interrupt.store(true, Ordering::Relaxed);
+            interrupt.cancel(runmat_execution::CancellationReason::User);
         }
     });
     tokio::task::yield_now().await;

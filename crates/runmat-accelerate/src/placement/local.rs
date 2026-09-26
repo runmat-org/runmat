@@ -165,9 +165,7 @@ pub(crate) fn plan_local(
                 let resources = PlacementResourceSnapshot {
                     cpu_millicores_available: host_resources.cpu_millicores_available,
                     memory_available_bytes: host_resources.memory_available_bytes,
-                    cancellation_requested: runtime
-                        .cancellation()
-                        .load(std::sync::atomic::Ordering::Relaxed),
+                    cancellation_requested: runtime.is_cancelled(),
                     providers: vec![provider_resources.clone()],
                     epoch: provider_resources.epoch ^ host_resources.epoch.rotate_left(32),
                 };

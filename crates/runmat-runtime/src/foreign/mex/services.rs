@@ -1,7 +1,6 @@
+use runmat_execution::cancellation::CancellationToken;
 use runmat_mex::{MexCancellationScope, MexDiagnostic, MexEngineCompletion, MexHostServices};
 use runmat_value::Value;
-use std::rc::Rc;
-use std::sync::{atomic::AtomicBool, Arc};
 
 use crate::context::RuntimeContext;
 
@@ -21,10 +20,10 @@ impl RuntimeMexHostServices {
 }
 
 impl MexHostServices for RuntimeMexHostServices {
-    fn cancellation_scope(&self, cancellation: Arc<AtomicBool>) -> Box<dyn MexCancellationScope> {
-        let previous = self.runtime.state().cancellation.replace(cancellation);
+    fn cancellation_scope(&self, cancellation: CancellationToken) -> Box<dyn MexCancellationScope> {
+        let previous = self.runtime.replace_cancellation_token(cancellation);
         Box::new(RuntimeMexCancellationScope {
-            state: Rc::clone(self.runtime.state()),
+            runtime: self.runtime.clone(),
             previous: Some(previous),
         })
     }
@@ -202,8 +201,8 @@ fn captured_completion<T>(
 }
 
 struct RuntimeMexCancellationScope {
-    state: Rc<crate::context::RuntimeContextState>,
-    previous: Option<Arc<AtomicBool>>,
+    runtime: RuntimeContext,
+    previous: Option<CancellationToken>,
 }
 
 impl MexCancellationScope for RuntimeMexCancellationScope {}
@@ -211,7 +210,7 @@ impl MexCancellationScope for RuntimeMexCancellationScope {}
 impl Drop for RuntimeMexCancellationScope {
     fn drop(&mut self) {
         if let Some(previous) = self.previous.take() {
-            self.state.cancellation.replace(previous);
+            self.runtime.replace_cancellation_token(previous);
         }
     }
 }
@@ -335,23 +334,24 @@ mod tests {
 
     #[test]
     fn asynchronous_callback_cancellation_is_scoped_and_restored() {
-        let original = Arc::new(AtomicBool::new(false));
+        let original = runmat_execution::cancellation::CancellationSource::new();
         let runtime = RuntimeContext::with_cancellation(
             Rc::new(RuntimeExecutionService::new()),
-            Arc::clone(&original),
+            original.token(),
         );
         let services = RuntimeMexHostServices::new(runtime.clone());
-        let request = Arc::new(AtomicBool::new(false));
+        let request = runmat_execution::cancellation::CancellationSource::new();
 
         {
-            let _scope = services.cancellation_scope(Arc::clone(&request));
-            assert!(Arc::ptr_eq(&runtime.cancellation(), &request));
-            request.store(true, std::sync::atomic::Ordering::Release);
-            assert!(runtime.state().is_cancelled());
+            let _scope = services.cancellation_scope(request.token());
+            assert!(!runtime.is_cancelled());
+            request.cancel(runmat_execution::CancellationReason::User);
+            assert!(runtime.is_cancelled());
         }
 
-        assert!(Arc::ptr_eq(&runtime.cancellation(), &original));
-        assert!(!runtime.state().is_cancelled());
+        assert!(!runtime.is_cancelled());
+        original.cancel(runmat_execution::CancellationReason::Shutdown);
+        assert!(runtime.is_cancelled());
     }
 
     #[test]

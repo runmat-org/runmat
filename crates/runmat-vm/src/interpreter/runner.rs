@@ -1587,7 +1587,7 @@ mod tests {
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
-    use std::sync::{atomic::AtomicBool, Arc};
+    use std::sync::Arc;
     #[cfg(feature = "native-accel")]
     use {
         once_cell::sync::Lazy,
@@ -1913,8 +1913,10 @@ mod tests {
 
         let mut vars = vec![Value::GpuTensor(handle.clone())];
         let bytecode = Bytecode::with_instructions(vec![Instr::Return], vars.len());
-        let cancelled = Arc::new(AtomicBool::new(true));
-        let _interrupt_guard = runmat_runtime::interrupt::replace_interrupt(Some(cancelled));
+        let cancelled = runmat_execution::cancellation::CancellationSource::new();
+        cancelled.cancel(runmat_execution::CancellationReason::User);
+        let _interrupt_guard =
+            runmat_runtime::interrupt::replace_interrupt(Some(cancelled.token()));
 
         let err = block_on(interpret_with_vars(&bytecode, &mut vars, Some("<main>")))
             .expect_err("cancelled execution should return error");

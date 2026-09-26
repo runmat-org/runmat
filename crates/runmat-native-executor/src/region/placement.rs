@@ -116,9 +116,7 @@ pub(crate) fn choose_region(
         resources: PlacementResourceSnapshot {
             cpu_millicores_available: resources.cpu_millicores_available,
             memory_available_bytes: resources.memory_available_bytes,
-            cancellation_requested: runtime
-                .cancellation()
-                .load(std::sync::atomic::Ordering::Relaxed),
+            cancellation_requested: runtime.is_cancelled(),
             providers: Vec::new(),
             epoch: resources.epoch,
         },

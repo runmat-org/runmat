@@ -67,8 +67,10 @@ impl Default for GeometryImportOptions {
 
 #[derive(Clone, Default)]
 pub struct GeometryImportContext {
-    cancellation: Option<Arc<AtomicBool>>,
+    cancellation: Option<CancellationProbe>,
 }
+
+pub(crate) type CancellationProbe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 impl std::fmt::Debug for GeometryImportContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -84,15 +86,21 @@ impl GeometryImportContext {
     }
 
     pub fn with_cancellation(cancellation: Arc<AtomicBool>) -> Self {
+        Self::with_cancellation_probe(move || cancellation.load(Ordering::Relaxed))
+    }
+
+    /// Cooperative synchronous import boundary. The probe does not register
+    /// wakeups or interrupt a noncooperative native geometry operation.
+    pub fn with_cancellation_probe(probe: impl Fn() -> bool + Send + Sync + 'static) -> Self {
         Self {
-            cancellation: Some(cancellation),
+            cancellation: Some(Arc::new(probe)),
         }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
-            .map(|flag| flag.load(Ordering::Relaxed))
+            .map(|is_cancelled| is_cancelled())
             .unwrap_or(false)
     }
 
@@ -105,7 +113,7 @@ impl GeometryImportContext {
     }
 
     #[cfg(all(not(target_arch = "wasm32"), feature = "occt-native"))]
-    pub(crate) fn cancellation_flag(&self) -> Option<Arc<AtomicBool>> {
+    pub(crate) fn cancellation_probe(&self) -> Option<CancellationProbe> {
         self.cancellation.clone()
     }
 }

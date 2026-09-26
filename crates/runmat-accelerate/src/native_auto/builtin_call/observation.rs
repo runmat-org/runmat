@@ -57,12 +57,11 @@ impl BuiltinCallObservation {
 
     pub fn finish(mut self, result: &Result<Value, RuntimeError>) {
         let Ok(value) = result else { return };
-        if self.feedback.as_ref().is_some_and(|ticket| {
-            ticket
-                .runtime
-                .cancellation()
-                .load(std::sync::atomic::Ordering::Relaxed)
-        }) {
+        if self
+            .feedback
+            .as_ref()
+            .is_some_and(|ticket| ticket.runtime.is_cancelled())
+        {
             return;
         }
         let elapsed = duration_ns_saturating(self.started.elapsed()).max(1);

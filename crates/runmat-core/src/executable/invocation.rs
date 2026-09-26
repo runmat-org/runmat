@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use runmat_execution::cancellation::CancellationToken;
 
 use runmat_value::Value;
 
@@ -46,14 +43,14 @@ impl ProcedureInvocation {
 
 #[derive(Clone, Debug, Default)]
 pub struct InvocationControl {
-    cancellation: Option<Arc<AtomicBool>>,
+    cancellation: Option<CancellationToken>,
     deadline_unix_ms: Option<u64>,
     #[cfg(not(target_arch = "wasm32"))]
     backend: ExecutableBackendPolicy,
 }
 
 impl InvocationControl {
-    pub fn with_cancellation(mut self, cancellation: Arc<AtomicBool>) -> Self {
+    pub fn with_cancellation(mut self, cancellation: CancellationToken) -> Self {
         self.cancellation = Some(cancellation);
         self
     }
@@ -77,7 +74,11 @@ impl InvocationControl {
     pub(crate) fn is_cancelled(&self) -> bool {
         self.cancellation
             .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+            .is_some_and(CancellationToken::is_cancelled)
+    }
+
+    pub(crate) fn cancellation(&self) -> Option<&CancellationToken> {
+        self.cancellation.as_ref()
     }
 
     pub(crate) fn deadline_elapsed(&self) -> bool {

@@ -423,6 +423,7 @@ impl RunMatSession {
         invocation: crate::ProcedureInvocation,
         control: &crate::InvocationControl,
     ) -> std::result::Result<runmat_value::ValueSequence, RunError> {
+        let _admission = self.admit_execution(control.cancellation());
         self.configure_runtime_context();
         let runtime = self
             .runtime_context
@@ -454,7 +455,7 @@ impl RunMatSession {
         self.stats.total_executions += 1;
         self.configure_executable_runtime();
         let _interrupt_guard =
-            runmat_runtime::interrupt::replace_interrupt(Some(self.interrupt_flag.clone()));
+            runmat_runtime::interrupt::replace_interrupt(Some(self.runtime_context.cancellation()));
         let _source_guard = runmat_runtime::source_context::replace_current_source_context(
             Some(&unit.source().relative_path),
             Some(&unit.source().text),

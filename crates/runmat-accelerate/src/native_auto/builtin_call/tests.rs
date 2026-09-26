@@ -210,18 +210,20 @@ fn preparation_fallback_is_failed_provider_attempt_not_cpu_success() {
 #[test]
 fn cancellation_flag_prevents_a_success_sample() {
     let probe = Rc::new(Probe::default());
-    let prepared = observed(&probe, false, vec![]);
+    let mut prepared = observed(&probe, false, vec![]);
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
     let ticket = prepared
         .observation
-        .as_ref()
+        .as_mut()
         .unwrap()
         .feedback
-        .as_ref()
+        .as_mut()
         .unwrap();
-    ticket
+    ticket.runtime = ticket
         .runtime
-        .cancellation()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .clone()
+        .with_cancellation_token(cancellation.token());
+    cancellation.cancel(runmat_execution::CancellationReason::User);
     prepared
         .into_execution()
         .1

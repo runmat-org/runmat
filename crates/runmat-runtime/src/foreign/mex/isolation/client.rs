@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::channel::mpsc as async_mpsc;
@@ -184,7 +184,7 @@ impl IsolatedMexClient {
         runtime: RuntimeContext,
     ) -> Result<MexInvocation, MexWireError> {
         loop {
-            if runtime.cancellation().load(Ordering::Relaxed) {
+            if runtime.is_cancelled() {
                 return Err(wire_error(
                     "RunMat:MEX:Cancelled",
                     "isolated MEX invocation was cancelled",
@@ -333,7 +333,7 @@ impl IsolatedMexClient {
         runtime: RuntimeContext,
     ) -> Result<MexLifecycleOutcome, MexWireError> {
         loop {
-            if runtime.cancellation().load(Ordering::Relaxed) {
+            if runtime.is_cancelled() {
                 return Err(wire_error(
                     "RunMat:MEX:Cancelled",
                     "isolated MEX lifecycle operation was cancelled",

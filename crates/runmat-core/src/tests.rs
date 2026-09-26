@@ -16518,10 +16518,10 @@ fn forced_generic_native_executable_lane_matches_runtime_cancellation() {
         RunMatSession::with_options(false, false).expect("native session init");
     established_session
         .interrupt_handle()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .cancel(runmat_execution::CancellationReason::User);
     native_session
         .interrupt_handle()
-        .store(true, std::sync::atomic::Ordering::Relaxed);
+        .cancel(runmat_execution::CancellationReason::User);
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCancel".into()),
         arguments: vec![runmat_value::Value::Num(2.0)],

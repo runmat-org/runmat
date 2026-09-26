@@ -1,9 +1,11 @@
 use super::{ContextFuture, RuntimeContextGuard, RuntimeContextState, RuntimeServicePorts};
 use crate::execution::RuntimeExecutionServices;
+use runmat_execution::cancellation::{CancellationSource, CancellationToken};
+use std::cell::RefCell;
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicU64, Ordering},
     Arc,
 };
 
@@ -88,6 +90,9 @@ pub struct RuntimeContext {
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
+    // Invocation-scoped, unlike shared session language state. Scoped guards
+    // affect this invocation's clones, never an earlier/later generation.
+    cancellation: Rc<RefCell<CancellationToken>>,
 }
 
 impl std::fmt::Debug for RuntimeContext {
@@ -103,20 +108,17 @@ impl std::fmt::Debug for RuntimeContext {
 
 impl RuntimeContext {
     pub fn new(execution: Rc<dyn RuntimeExecutionServices>) -> Self {
-        Self::with_cancellation(execution, Arc::new(AtomicBool::new(false)))
+        Self::with_cancellation(execution, CancellationSource::new().token())
     }
 
     pub fn with_cancellation(
         execution: Rc<dyn RuntimeExecutionServices>,
-        cancellation: Arc<AtomicBool>,
+        cancellation: CancellationToken,
     ) -> Self {
         runmat_accelerate_api::register_execution_provider_authorizer(
             super::scope::execution_provider_authorization,
         );
-        let state = Rc::new(RuntimeContextState::new(
-            RuntimeContextLocalId::next(),
-            cancellation,
-        ));
+        let state = Rc::new(RuntimeContextState::new(RuntimeContextLocalId::next()));
         crate::class_registry::register_context_state(&state);
         Self {
             execution,
@@ -124,6 +126,7 @@ impl RuntimeContext {
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
+            cancellation: Rc::new(RefCell::new(cancellation)),
         }
     }
 
@@ -147,8 +150,27 @@ impl RuntimeContext {
         self.state.local_identity
     }
 
-    pub fn cancellation(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.state.cancellation.borrow())
+    pub fn cancellation(&self) -> CancellationToken {
+        self.cancellation.borrow().clone()
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation.borrow().is_cancelled()
+    }
+
+    /// Bind a fresh invocation generation while retaining the session's
+    /// language state and services. Previously cloned contexts stay bound to
+    /// their own invocation generation.
+    pub fn with_cancellation_token(mut self, cancellation: CancellationToken) -> Self {
+        self.cancellation = Rc::new(RefCell::new(cancellation));
+        self
+    }
+
+    pub(crate) fn replace_cancellation_token(
+        &self,
+        cancellation: CancellationToken,
+    ) -> CancellationToken {
+        self.cancellation.replace(cancellation)
     }
 
     pub fn program_revision(&self) -> Option<&runmat_execution::ProgramRevision> {

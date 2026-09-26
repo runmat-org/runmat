@@ -157,15 +157,19 @@ impl RunMatSession {
 
     /// Request cooperative cancellation for the currently running execution.
     pub fn cancel_execution(&self) {
-        self.interrupt_flag.store(true, Ordering::Relaxed);
+        self.cancellation
+            .handle()
+            .cancel(runmat_execution::CancellationReason::User);
         self.runtime_context
             .execution()
             .drain_scope(runmat_execution::CancellationReason::User);
     }
 
-    /// Shared interrupt flag used by the VM to implement cooperative cancellation.
-    pub fn interrupt_handle(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.interrupt_flag)
+    /// Cancellation authority for the current or next admitted execution.
+    /// Obtain a fresh handle for each top-level request. A retained handle can
+    /// never cancel a later execution generation, even after this request ends.
+    pub fn interrupt_handle(&self) -> runmat_execution::cancellation::CancellationSource {
+        self.cancellation.handle()
     }
 
     /// Get execution statistics

@@ -993,7 +993,7 @@ pub fn geometry_load(path: &str, bytes: &[u8]) -> BuiltinResult<GeometryAsset> {
 
 fn current_geometry_import_context() -> GeometryImportContext {
     crate::interrupt::current_interrupt()
-        .map(GeometryImportContext::with_cancellation)
+        .map(|token| GeometryImportContext::with_cancellation_probe(move || token.is_cancelled()))
         .unwrap_or_default()
 }
 

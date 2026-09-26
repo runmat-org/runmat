@@ -1,10 +1,7 @@
 //! Executor-neutral fused evaluation for a deliberately small, exact numeric
 //! region subset. Executors build plans; Runtime owns MATLAB value semantics.
 
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use runmat_execution::cancellation::CancellationToken;
 
 use runmat_value::{Tensor, Value};
 
@@ -114,7 +111,7 @@ impl NumericRegionProgram {
 pub fn execute(
     program: &NumericRegionProgram,
     inputs: &[&Value],
-    cancellation: &Arc<AtomicBool>,
+    cancellation: &CancellationToken,
 ) -> Result<NumericRegionExecution, &'static str> {
     program.validate(inputs.len())?;
     let Some((input_views, output_shape)) = analyze_inputs(inputs) else {
@@ -131,7 +128,7 @@ pub fn execute(
     let mut output_values = vec![Vec::with_capacity(element_count); program.outputs.len()];
     let mut values = vec![0.0; program.nodes.len()];
     for element in 0..element_count {
-        if element % 1_024 == 0 && cancellation.load(Ordering::Relaxed) {
+        if element % 1_024 == 0 && cancellation.is_cancelled() {
             return Ok(NumericRegionExecution::Cancelled);
         }
         for (index, node) in program.nodes.iter().enumerate() {
@@ -230,7 +227,7 @@ mod tests {
     fn execute_values(
         program: &NumericRegionProgram,
         inputs: &[Value],
-        cancellation: &Arc<AtomicBool>,
+        cancellation: &CancellationToken,
     ) -> Result<NumericRegionExecution, &'static str> {
         let inputs = inputs.iter().collect::<Vec<_>>();
         execute(program, &inputs, cancellation)
@@ -260,7 +257,7 @@ mod tests {
         let result = execute_values(
             &program,
             &[Value::Tensor(tensor), Value::Num(1.0)],
-            &Arc::new(AtomicBool::new(false)),
+            &runmat_execution::cancellation::CancellationSource::new().token(),
         )
         .unwrap();
         let NumericRegionExecution::Completed(outputs) = result else {
@@ -292,7 +289,7 @@ mod tests {
             execute_values(
                 &program,
                 &[Value::Tensor(left), Value::Tensor(right)],
-                &Arc::new(AtomicBool::new(false)),
+                &runmat_execution::cancellation::CancellationSource::new().token(),
             )
             .unwrap(),
             NumericRegionExecution::Ineligible
@@ -314,7 +311,9 @@ mod tests {
             outputs: vec![2],
         };
         let input = Tensor::new(vec![0.0; 2_048], vec![1, 2_048]).unwrap();
-        let cancellation = Arc::new(AtomicBool::new(true));
+        let source = runmat_execution::cancellation::CancellationSource::new();
+        source.cancel(runmat_execution::CancellationReason::User);
+        let cancellation = source.token();
         assert_eq!(
             execute_values(&program, &[Value::Tensor(input)], &cancellation).unwrap(),
             NumericRegionExecution::Cancelled
@@ -339,7 +338,7 @@ mod tests {
         let result = execute_values(
             &program,
             &[Value::Tensor(input)],
-            &Arc::new(AtomicBool::new(false)),
+            &runmat_execution::cancellation::CancellationSource::new().token(),
         )
         .unwrap();
         let NumericRegionExecution::Completed(outputs) = result else {

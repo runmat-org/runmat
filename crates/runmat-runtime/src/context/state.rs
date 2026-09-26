@@ -1,9 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 
 use runmat_types::SourceId;
 use runmat_value::Value;
@@ -44,15 +40,11 @@ pub struct RuntimeContextState {
     pub(crate) execution_job: RefCell<Option<runmat_execution::JobId>>,
     pub(crate) callstack_limit: Cell<usize>,
     pub(crate) error_namespace: RefCell<String>,
-    pub(crate) cancellation: RefCell<Arc<AtomicBool>>,
     pub(crate) random: RefCell<crate::builtins::common::random::RuntimeRng>,
 }
 
 impl RuntimeContextState {
-    pub fn new(
-        local_identity: super::RuntimeContextLocalId,
-        cancellation: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn new(local_identity: super::RuntimeContextLocalId) -> Self {
         Self {
             local_identity,
             source: RefCell::new(SourceState::default()),
@@ -81,13 +73,8 @@ impl RuntimeContextState {
             execution_job: RefCell::new(None),
             callstack_limit: Cell::new(super::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: RefCell::new(super::DEFAULT_ERROR_NAMESPACE.to_string()),
-            cancellation: RefCell::new(cancellation),
             random: RefCell::new(crate::builtins::common::random::RuntimeRng::new()),
         }
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancellation.borrow().load(Ordering::Relaxed)
     }
 }
 

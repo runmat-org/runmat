@@ -411,9 +411,11 @@ impl PythonAdapter {
         };
         let cancellation = context.cancellation();
         let values = session
-            .invoke_with_callback_and_cancellation(python_call, Some(&cancellation), |invocation| {
-                self.invoke_callback(&session, invocation)
-            })
+            .invoke_with_callback_and_cancellation(
+                python_call,
+                Some(&|| cancellation.is_cancelled()),
+                |invocation| self.invoke_callback(&session, invocation),
+            )
             .map_err(python_runtime_error)?;
         if let Some(reference) = assigned_receiver {
             return super::super::single_output_sequence(Value::Foreign(reference));

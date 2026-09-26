@@ -1,6 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
 use runmat_core::RunMatSession;
 use runmat_test::discovery::FrozenTestRunSnapshot;
 use runmat_test::plan::TestPlan;
@@ -119,13 +116,13 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                     .await?;
                     continue;
                 };
-                let cancellation = Arc::new(AtomicBool::new(false));
+                let cancellation = runmat_execution::cancellation::CancellationSource::new();
                 let execution = run.session.execute_planned_test(
                     &run.snapshot,
                     &run.plan,
                     &test_id,
                     attempt,
-                    cancellation.clone(),
+                    cancellation.token(),
                 );
                 tokio::pin!(execution);
                 let result = loop {
@@ -136,7 +133,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                                 WorkerRequest::Cancel { run_id, .. }
                                     if run_id == run.plan.run_id =>
                                 {
-                                    cancellation.store(true, Ordering::Relaxed);
+                                    cancellation.cancel(runmat_execution::CancellationReason::User);
                                 }
                                 WorkerRequest::Cancel { .. } => {
                                     reject(

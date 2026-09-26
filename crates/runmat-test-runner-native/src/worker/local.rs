@@ -1,5 +1,5 @@
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
 use runmat_core::RunMatSession;
@@ -134,7 +134,7 @@ struct LocalState {
 
 #[derive(Clone)]
 struct ActiveExecution {
-    cancellation: Arc<AtomicBool>,
+    cancellation: runmat_execution::cancellation::CancellationSource,
     result: watch::Receiver<Option<Result<WorkerExecution, BackendError>>>,
 }
 
@@ -142,7 +142,7 @@ enum LocalCommand {
     Execute {
         test_id: TestId,
         attempt: u32,
-        cancellation: Arc<AtomicBool>,
+        cancellation: runmat_execution::cancellation::CancellationSource,
         result: watch::Sender<Option<Result<WorkerExecution, BackendError>>>,
     },
     Shutdown {
@@ -202,7 +202,7 @@ impl WorkerBackend for LocalBackend {
         request: ExecutionRequest,
     ) -> BackendFuture<'a, WorkerExecution> {
         Box::pin(async move {
-            let cancellation = Arc::new(AtomicBool::new(false));
+            let cancellation = runmat_execution::cancellation::CancellationSource::new();
             let (result_sender, result) = watch::channel(None);
             {
                 let mut active = session
@@ -256,7 +256,9 @@ impl WorkerBackend for LocalBackend {
             let Some(active) = active else {
                 return Ok(None);
             };
-            active.cancellation.store(true, Ordering::Release);
+            active
+                .cancellation
+                .cancel(runmat_execution::CancellationReason::User);
             await_result(active.result).await.map(Some)
         })
     }
@@ -270,7 +272,9 @@ impl WorkerBackend for LocalBackend {
                 .expect("local session lock poisoned")
                 .as_ref()
             {
-                active.cancellation.store(true, Ordering::Release);
+                active
+                    .cancellation
+                    .cancel(runmat_execution::CancellationReason::User);
             }
             Ok(())
         })
@@ -367,7 +371,7 @@ fn worker_loop(
                         &submission.plan,
                         &test_id,
                         attempt,
-                        cancellation,
+                        cancellation.token(),
                     ))
                     .map(|attempt| WorkerExecution {
                         result: attempt.result,
