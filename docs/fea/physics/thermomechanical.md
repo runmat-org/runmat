@@ -254,6 +254,15 @@ history case measured 30,426,688 B against 1,092,144,217 B. Their reference erro
 4,559,307 B and reported zero temperature error. Realization/projection scratch, provider memory,
 and result materialization/transport still prevent a whole-producer admission claim.
 
+Thermal excitation scratch is now topology-bounded: scalar projection conservation tracks unique
+touched nodes in one fallibly reserved node mask, including zero and cancelling contributions.
+Temperature-field conflict checks borrow excitation names from the realized inventory rather than
+copying a name per selected node; only error diagnostics own those strings. The preassembly
+workspace includes these masks and regional value/owner slots. Prescribed-temperature, heat-flux
+and convection boundary matches stream without temporary face arrays. These changes preserve
+quadrature order, regional overrides, and conflicting-temperature diagnostics; they do not bound
+the separate realized-action inventory or compiled property metadata.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

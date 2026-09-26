@@ -6,6 +6,9 @@ use super::{
 };
 use crate::topology::AnalysisProjection;
 
+#[cfg(test)]
+mod tests;
+
 enum ProjectionCoordinates<'a> {
     Canonical(&'a AnalysisProjection),
     Explicit(&'a [[f64; 3]]),
@@ -46,7 +49,8 @@ pub(crate) struct ScalarProjectionAccumulator<'a> {
     projection: &'a AnalysisProjection,
     integration_rule: SpatialIntegrationRule,
     resolved_entity_count: usize,
-    resolved_nodes: BTreeSet<usize>,
+    resolved_nodes: Vec<bool>,
+    resolved_node_count: usize,
     requested: ProjectionScalar,
     projected: ProjectionScalar,
     requested_scale: f64,
@@ -59,13 +63,17 @@ impl<'a> ScalarProjectionAccumulator<'a> {
         projection: &'a AnalysisProjection,
         integration_rule: SpatialIntegrationRule,
         resolved_entity_count: usize,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, std::collections::TryReserveError> {
+        let mut resolved_nodes = Vec::new();
+        resolved_nodes.try_reserve_exact(projection.nodes.len())?;
+        resolved_nodes.resize(projection.nodes.len(), false);
+        Ok(Self {
             load,
             projection,
             integration_rule,
             resolved_entity_count,
-            resolved_nodes: BTreeSet::new(),
+            resolved_nodes,
+            resolved_node_count: 0,
             requested: ProjectionScalar {
                 real: 0.0,
                 imaginary: 0.0,
@@ -76,7 +84,7 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             },
             requested_scale: 0.0,
             projected_scale: 0.0,
-        }
+        })
     }
 
     pub(crate) fn add_requested(&mut self, real: f64, imaginary: f64) {
@@ -86,7 +94,10 @@ impl<'a> ScalarProjectionAccumulator<'a> {
     }
 
     pub(crate) fn add_projected(&mut self, node_index: usize, real: f64, imaginary: f64) {
-        self.resolved_nodes.insert(node_index);
+        if !self.resolved_nodes[node_index] {
+            self.resolved_nodes[node_index] = true;
+            self.resolved_node_count += 1;
+        }
         self.projected.real += real;
         self.projected.imaginary += imaginary;
         self.projected_scale += real.hypot(imaginary);
@@ -110,7 +121,7 @@ impl<'a> ScalarProjectionAccumulator<'a> {
             analysis_projection_digest: self.projection.projection_digest,
             integration_rule: self.integration_rule,
             resolved_entity_count: self.resolved_entity_count,
-            resolved_node_count: self.resolved_nodes.len(),
+            resolved_node_count: self.resolved_node_count,
             reference_point_m: [0.0; 3],
             balance: SpatialProjectionBalance::ScalarIntegral {
                 requested_integral: self.requested,

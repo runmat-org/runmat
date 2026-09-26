@@ -11,6 +11,7 @@ pub struct ThermalWorkspaceResourceFacts {
     pub solver_vector_bytes: ByteCount,
     pub assembly_vector_bytes: ByteCount,
     pub recovery_scratch_bytes: ByteCount,
+    pub excitation_scratch_bytes: ByteCount,
     pub projection_estimated_bytes: ByteCount,
 }
 
@@ -47,10 +48,20 @@ impl ThermalWorkspaceResourceFacts {
         // Recovery can hold vector-valued gradients/flux and a flattened destination together.
         // Energy-balance's 3N doubles fit inside the separately reserved solver vector envelope.
         let recovery_scratch_bytes = ByteCount(scale(elements, 6 * 8)?);
+        // Scalar source evidence uses one visited-node mask, not an allocation-per-node tree.
+        // Temperature-field conflict checking borrows identifiers from the realized inventory;
+        // its regional values/owners and selected-node mask coexist with the output vector
+        // already included in assembly_vector_bytes. Reserve both phases conservatively.
+        let excitation_scratch_bytes = ByteCount(scale(
+            nodes,
+            2 * std::mem::size_of::<bool>() as u64
+                + std::mem::size_of::<Option<(f64, &str)>>() as u64,
+        )?);
         Ok(Self {
             solver_vector_bytes: ByteCount(solver_vector_bytes),
             assembly_vector_bytes: ByteCount(assembly_vector_bytes),
             recovery_scratch_bytes,
+            excitation_scratch_bytes,
             projection_estimated_bytes: ByteCount(scale(projection.0, 2)?),
         })
     }
@@ -60,6 +71,7 @@ impl ThermalWorkspaceResourceFacts {
             self.solver_vector_bytes,
             self.assembly_vector_bytes,
             self.recovery_scratch_bytes,
+            self.excitation_scratch_bytes,
             self.projection_estimated_bytes,
         ]
         .into_iter()
@@ -92,6 +104,10 @@ mod tests {
             10 * (32 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48
         );
         assert_eq!(facts.recovery_scratch_bytes.0, 96);
+        assert_eq!(
+            facts.excitation_scratch_bytes.0,
+            10 * (2 + std::mem::size_of::<Option<(f64, &str)>>() as u64)
+        );
         assert_eq!(facts.projection_estimated_bytes.0, 200);
         for (nodes, elements, projection) in [(u64::MAX, 1, 1), (1, u64::MAX, 1), (1, 1, u64::MAX)]
         {

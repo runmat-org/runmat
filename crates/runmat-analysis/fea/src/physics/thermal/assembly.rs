@@ -305,7 +305,8 @@ pub(crate) fn assemble(
             });
         }
         let mut evidence =
-            ScalarProjectionAccumulator::new(excitation, &projection, rule, entity_count);
+            ScalarProjectionAccumulator::new(excitation, &projection, rule, entity_count)
+                .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
         match excitation.kind {
             RealizedExcitationKind::HeatGeneration(_) => {
                 for element in projection
@@ -387,10 +388,10 @@ pub(crate) fn assemble(
                 operator_id: constraint.constraint_id.clone(),
             });
         }
-        let faces = projection
+        let mut faces = projection
             .boundary_faces_matching(&target.region_id)
-            .collect::<Vec<_>>();
-        if faces.is_empty() {
+            .peekable();
+        if faces.peek().is_none() {
             return Err(ThermalAssemblyError::UnmappedBoundary {
                 operator_id: constraint.constraint_id.clone(),
             });
@@ -410,9 +411,9 @@ pub(crate) fn assemble(
     }
 
     for boundary in &model.boundaries {
-        let faces = projection
+        let mut faces = projection
             .boundary_faces_matching(&boundary.target.region_id)
-            .collect::<Vec<_>>();
+            .peekable();
         match &boundary.operator {
             BoundaryOperator::ThermalHeatFlux { value } => {
                 let heat_flux = sample_prescribed_heat_flux(value, &model.signals, sample)
@@ -425,7 +426,7 @@ pub(crate) fn assemble(
                         operator_id: boundary.boundary_id.clone(),
                     });
                 }
-                if faces.is_empty() {
+                if faces.peek().is_none() {
                     return Err(ThermalAssemblyError::UnmappedBoundary {
                         operator_id: boundary.boundary_id.clone(),
                     });
@@ -460,7 +461,7 @@ pub(crate) fn assemble(
                         operator_id: boundary.boundary_id.clone(),
                     });
                 }
-                if faces.is_empty() {
+                if faces.peek().is_none() {
                     return Err(ThermalAssemblyError::UnmappedBoundary {
                         operator_id: boundary.boundary_id.clone(),
                     });

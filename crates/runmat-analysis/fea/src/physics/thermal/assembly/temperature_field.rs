@@ -9,8 +9,9 @@ pub(super) fn prescribed_temperatures(
     projection: &AnalysisProjection,
     excitations: &RealizedExcitations,
 ) -> Result<Vec<Option<f64>>, ThermalAssemblyError> {
-    let mut whole_model = None::<(f64, String)>;
-    let mut regional = vec![None::<(f64, String)>; projection.nodes.len()];
+    // Ownership remains in the realized inventory; only error diagnostics copy identifiers.
+    let mut whole_model = None::<(f64, &str)>;
+    let mut regional = vec![None::<(f64, &str)>; projection.nodes.len()];
 
     for excitation in excitations.iter() {
         let RealizedExcitationKind::TemperatureField(value) = excitation.kind else {
@@ -27,13 +28,13 @@ pub(super) fn prescribed_temperatures(
                 if let Some((existing, first_excitation_id)) = &whole_model {
                     if *existing != value.real {
                         return Err(ThermalAssemblyError::ConflictingTemperatureFields {
-                            first_excitation_id: first_excitation_id.clone(),
+                            first_excitation_id: (*first_excitation_id).to_owned(),
                             second_excitation_id: excitation.excitation_id.0.clone(),
                             location: "the whole model".to_string(),
                         });
                     }
                 }
-                whole_model = Some((value.real, excitation.excitation_id.0.clone()));
+                whole_model = Some((value.real, excitation.excitation_id.0.as_str()));
             }
             RealizedExcitationTarget::Region(target) => {
                 let mut selected = vec![false; projection.nodes.len()];
@@ -65,7 +66,7 @@ pub(super) fn prescribed_temperatures(
                     if let Some((existing, first_excitation_id)) = &regional[node_index] {
                         if *existing != value.real {
                             return Err(ThermalAssemblyError::ConflictingTemperatureFields {
-                                first_excitation_id: first_excitation_id.clone(),
+                                first_excitation_id: (*first_excitation_id).to_owned(),
                                 second_excitation_id: excitation.excitation_id.0.clone(),
                                 location: format!(
                                     "solver node {}",
@@ -74,7 +75,7 @@ pub(super) fn prescribed_temperatures(
                             });
                         }
                     }
-                    regional[node_index] = Some((value.real, excitation.excitation_id.0.clone()));
+                    regional[node_index] = Some((value.real, excitation.excitation_id.0.as_str()));
                 }
             }
             _ => {
@@ -181,7 +182,44 @@ mod tests {
 
         assert!(matches!(
             prescribed_temperatures(&projection, &excitations),
-            Err(ThermalAssemblyError::ConflictingTemperatureFields { .. })
+            Err(ThermalAssemblyError::ConflictingTemperatureFields {
+                first_excitation_id, second_excitation_id, location,
+            }) if first_excitation_id == "first" && second_excitation_id == "second"
+                && location.starts_with("solver node ")
         ));
+    }
+
+    #[test]
+    fn long_identifiers_and_equal_overlaps_preserve_temperature_values() {
+        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+            let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+            let projection = AnalysisProjection::derive(&mesh).unwrap();
+            let id = "temperature_owner".repeat(2048);
+            let excitations = RealizedExcitations::new(vec![
+                temperature("whole", RealizedExcitationTarget::WholeModel, 300.0),
+                temperature(
+                    &id,
+                    RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                    350.0,
+                ),
+                temperature(
+                    "same",
+                    RealizedExcitationTarget::Region(RegionTarget::boundary("face:0")),
+                    350.0,
+                ),
+            ]);
+            let prescribed = prescribed_temperatures(&projection, &excitations).unwrap();
+            let face = projection.boundary_faces_matching("face:0").next().unwrap();
+            for (index, value) in prescribed.iter().enumerate() {
+                assert_eq!(
+                    *value,
+                    Some(if face.node_indices.contains(&index) {
+                        350.0
+                    } else {
+                        300.0
+                    })
+                );
+            }
+        }
     }
 }
