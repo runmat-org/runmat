@@ -171,28 +171,11 @@ pub async fn dispatch_arithmetic(
         }
         crate::bytecode::Instr::Neg => {
             arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match runmat_runtime::call_builtin_async("uminus", &args).await {
-                            Ok(v) => Ok(v),
-                            Err(_) => {
-                                runmat_runtime::call_builtin_async(
-                                    "times",
-                                    &[value.clone(), Value::Num(-1.0)],
-                                )
-                                .await
-                            }
-                        }
-                    }
-                    _ => {
-                        runmat_runtime::call_builtin_async(
-                            "times",
-                            &[value.clone(), Value::Num(-1.0)],
-                        )
-                        .await
-                    }
-                }
+                runmat_runtime::unary_arithmetic::evaluate(
+                    runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus,
+                    value,
+                )
+                .await
             })
             .await?;
             Ok(true)
@@ -223,16 +206,11 @@ pub async fn dispatch_arithmetic(
         }
         crate::bytecode::Instr::UPlus => {
             arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match runmat_runtime::call_builtin_async("uplus", &args).await {
-                            Ok(v) => Ok(v),
-                            Err(_) => Ok(value),
-                        }
-                    }
-                    _ => Ok(value),
-                }
+                runmat_runtime::unary_arithmetic::evaluate(
+                    runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus,
+                    value,
+                )
+                .await
             })
             .await?;
             Ok(true)

@@ -552,7 +552,7 @@ fn distributed_service(
     Ok((context, service))
 }
 
-fn compatibility_checked_builtin_result(
+pub(crate) fn compatibility_checked_builtin_result(
     name: &str,
     args: &[Value],
     mut result: Value,

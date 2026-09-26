@@ -63,6 +63,7 @@ pub mod replay;
 pub mod runtime_error;
 pub mod sequence;
 pub mod user_functions;
+pub mod unary_arithmetic;
 pub mod warning_store;
 pub(crate) mod warnings;
 pub mod workspace;

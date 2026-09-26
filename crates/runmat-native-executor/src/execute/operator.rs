@@ -15,6 +15,24 @@ pub(super) fn evaluate(
         .overload_name()
         .expect("short-circuit operators do not reach runtime evaluation");
     let future = async {
+        let unary = match operator {
+            OperatorKind::UnaryPlus => {
+                Some(runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus)
+            }
+            OperatorKind::UnaryMinus => {
+                Some(runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus)
+            }
+            _ => None,
+        };
+        if let Some(operation) = unary {
+            let [argument] = arguments.as_slice() else {
+                return Err(runmat_runtime::runtime_error::semantic_error(
+                    "NativeUnaryArity",
+                    "unary arithmetic requires one operand",
+                ));
+            };
+            return runmat_runtime::unary_arithmetic::evaluate(operation, argument.clone()).await;
+        }
         if arguments.len() == 2
             && !matches!(arguments[0], Value::Object(_) | Value::HandleObject(_))
             && matches!(arguments[1], Value::Object(_) | Value::HandleObject(_))

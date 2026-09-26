@@ -292,6 +292,45 @@ fn constant_fixture(constant: MirConstant) -> runmat_native_codegen::NativeAssem
 }
 
 #[test]
+fn native_unary_arithmetic_uses_numeric_semantics_not_overload_names_as_builtins() {
+    for (operator, constant, expected) in [
+        (
+            runmat_types::OperatorKind::UnaryMinus,
+            MirConstant::Number("1".into()),
+            Value::Num(-1.0),
+        ),
+        (
+            runmat_types::OperatorKind::UnaryPlus,
+            MirConstant::Number("1".into()),
+            Value::Num(1.0),
+        ),
+        (
+            runmat_types::OperatorKind::UnaryMinus,
+            MirConstant::Symbol(runmat_hir::SymbolName("i".into())),
+            Value::Complex(-0.0, -1.0),
+        ),
+    ] {
+        let span = Span { start: 0, end: 2 };
+        let assembly = lower_body(
+            "unary",
+            1,
+            vec![statement(
+                0,
+                MirRvalue::Unary(operator, MirOperand::Constant(constant)),
+                span,
+            )],
+            MirOperand::Local(MirLocalId(0)),
+            span,
+        );
+        let executor = compile_executor(assembly).unwrap();
+        let execution = executor
+            .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+            .unwrap();
+        assert_eq!(execution.outputs, vec![expected]);
+    }
+}
+
+#[test]
 fn linked_static_entrypoint_uses_the_same_invocation_host() {
     let assembly = fixture();
     let linked_owner = GenericCompiler::compile(&assembly).unwrap();
