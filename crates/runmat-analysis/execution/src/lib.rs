@@ -56,6 +56,7 @@ mod structural_sequence;
 mod structural_transient_recovery;
 mod structural_transient_sequence;
 mod task;
+mod thermal_result_access;
 mod transient_block_task;
 mod transient_object_access;
 mod transient_result_access;
@@ -323,6 +324,10 @@ pub use structural_transient_sequence::{
 pub use task::{
     build_analysis_task_submission, build_structural_task_submission, AnalysisExecutionContext,
     DEFAULT_ANALYSIS_MAXIMUM_ATTEMPTS,
+};
+pub use thermal_result_access::{
+    decode_prepared_thermal_state, import_thermal_state, prepare_thermal_solver_result_objects,
+    ThermalStateImport,
 };
 pub use transient_block_task::{
     import_structural_transient_block, prepare_structural_transient_block_task,

@@ -899,10 +899,7 @@ fn execute_state_publication(
     }
     let state = match publication.source {
         SemanticStatePublicationSource::ThermalPrimaryField => {
-            let result = runmat_analysis_fea::FeaThermalRunResult::from_canonical_bytes(
-                &solver_result.payload(),
-            )?;
-            CanonicalSemanticState::from_thermal_publication(&publication, &result)?
+            runmat_analysis_execution::decode_prepared_thermal_state(&publication, solver_result)?
         }
         SemanticStatePublicationSource::StructuralPrimaryFields => {
             let solver_result =

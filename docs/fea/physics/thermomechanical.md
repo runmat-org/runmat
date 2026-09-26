@@ -346,7 +346,21 @@ identity fallback. Shared recovered-field canonical limits apply to each field, 
 sample times are rejected consistently. A thermal result may fit its monolithic serialization
 limit yet exceed a shared per-field identity limit; publication fails closed in that case. This
 does not expand the qualified large-field envelope. The canonical serializer still materializes
-one field at a time, and result manifests/partial terminal-state publication remain unfinished.
+one field at a time.
+
+Thermal result manifests now bind all four retained field inventories and their shared recovered-field
+partition descriptors. Metadata validation and numerical identity are shared with the full retained
+result; the manifest contains no observation or field-history values. Native state publication
+decodes this manifest and only the terminal-temperature partitions. The artifact-cache importer can
+publish the same state with all unrelated history blocks absent. It validates request lineage before
+reading numerical blocks, checks the exact declared inventory, and bounds the selected closure's
+aggregate bytes and object count before fetching temperature blocks. Selected partition corruption
+fails closed. This partial import does not independently validate unread historical values.
+
+Preparation still retains encoded partitions and output chunks, and the existing native prepared
+input closure can retain all chunks. This is not streaming producer execution or a whole-process
+memory bound. Portable thermal Solve/task/receipt routing and native partial input acquisition
+remain open; the isolated state-publication path does not qualify whole-study thermal execution.
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

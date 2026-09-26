@@ -1,0 +1,184 @@
+use super::*;
+use runmat_analysis_core::{Temperature, ThermalDomain};
+use runmat_analysis_fea::execution::{
+    CanonicalSemanticState, SemanticStatePublicationRequest, SemanticStatePublicationSource,
+    ThermalSolverResultManifest,
+};
+use runmat_analysis_fea::{ComputeBackend, ThermalProcedureControl, ThermalSolveOptions};
+
+#[test]
+fn thermal_terminal_publication_reads_only_selected_validated_closure() {
+    for order in [
+        runmat_meshing_core::ElementOrder::Tet4,
+        runmat_meshing_core::ElementOrder::Tet10,
+    ] {
+        let mut model = runmat_analysis_fea::fixtures::fixture_model(
+            runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
+        );
+        model.thermal = Some(ThermalDomain {
+            reference_temperature: Temperature::new(293.15),
+        });
+        model.sequence = AnalysisSequence::from_steps(
+            "thermal_partial",
+            vec![ProcedureStep::thermal_transient("heat")],
+        );
+        let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(order);
+        let result = runmat_analysis_fea::run_thermal_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            ThermalSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
+                solver_mesh: Some(mesh.clone()),
+                ..ThermalSolveOptions::default()
+            },
+        )
+        .unwrap();
+        let expected = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();
+        let request = SemanticStatePublicationRequest::new(
+            SemanticStatePublicationSource::ThermalPrimaryField,
+            result.producer,
+            model.sequence.steps[0].state_outputs[0].clone(),
+            result.topology_digest,
+            result.source_result_identity().unwrap(),
+        )
+        .unwrap();
+        for chunk_bytes in [1024, 8192] {
+            let prepared = prepare_thermal_solver_result_objects(
+                &result,
+                chunk_bytes,
+                ObjectNamespace::ResultValue,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                decode_prepared_thermal_state(&request, &prepared).unwrap(),
+                expected
+            );
+            let mut incomplete = prepared.clone();
+            incomplete.manifest.partitions.pop();
+            assert!(decode_prepared_thermal_state(&request, &incomplete).is_err());
+            let manifest = ThermalSolverResultManifest::from_canonical_bytes(
+                &prepared
+                    .partition_payload(request.source_result.digest())
+                    .unwrap(),
+            )
+            .unwrap();
+            let selected = std::iter::once(manifest.identity().digest())
+                .chain(
+                    manifest
+                        .terminal_temperature()
+                        .unwrap()
+                        .partitions
+                        .iter()
+                        .map(|p| p.partition.digest()),
+                )
+                .collect::<BTreeSet<_>>();
+            let root = prepared
+                .root_reference(&access(), ValueRefKind::ResultObject)
+                .unwrap();
+            let mut allowed = BTreeSet::from([prepared.root.digest]);
+            let mut header_only = allowed.clone();
+            let mut selected_bytes = root.encoded_length;
+            let mut selected_objects = 1;
+            for part in &prepared.manifest.partitions {
+                if selected.contains(&part.logical_identity) {
+                    selected_bytes += part.encoded_length;
+                    selected_objects += part.chunk_count as usize;
+                    let start = part.first_chunk_ordinal as usize;
+                    for chunk in &prepared.manifest.chunks[start..start + part.chunk_count as usize]
+                    {
+                        allowed.insert(chunk.digest);
+                        if part.logical_identity == manifest.identity().digest() {
+                            header_only.insert(chunk.digest);
+                        }
+                    }
+                }
+            }
+            let mut store = RecordingObjects {
+                objects: prepared
+                    .objects
+                    .iter()
+                    .filter(|o| allowed.contains(&o.descriptor.digest))
+                    .map(|o| (o.descriptor.digest, o.bytes.clone()))
+                    .collect(),
+                reads: RefCell::new(Vec::new()),
+            };
+            assert!(store.objects.len() < prepared.objects.len());
+            let import = |store: &RecordingObjects,
+                          publication: &SemanticStatePublicationRequest,
+                          limits| {
+                import_thermal_state(
+                    store,
+                    ThermalStateImport {
+                        root: &root,
+                        publication,
+                        expected_payload_digest: prepared.manifest.payload_digest,
+                        access: &access(),
+                        limits,
+                    },
+                )
+            };
+            assert_eq!(
+                import(&store, &request, ObjectInventoryLimits::default()).unwrap(),
+                expected
+            );
+            assert!(store.reads.borrow().iter().all(|id| allowed.contains(id)));
+            assert!(store
+                .reads
+                .borrow()
+                .iter()
+                .any(|id| !header_only.contains(id)));
+
+            // Valid request syntax with a wrong topology must fail before numerical reads.
+            let mut wrong = request.clone();
+            wrong.topology_digest = digest("wrong topology");
+            store.reads.borrow_mut().clear();
+            assert!(import(&store, &wrong, ObjectInventoryLimits::default()).is_err());
+            assert!(store
+                .reads
+                .borrow()
+                .iter()
+                .all(|id| header_only.contains(id)));
+
+            // Each selected partition can fit individually while the selected union cannot.
+            store.reads.borrow_mut().clear();
+            let error = import(
+                &store,
+                &request,
+                ObjectInventoryLimits {
+                    max_total_bytes: selected_bytes - 1,
+                    ..ObjectInventoryLimits::default()
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("selected closure"), "{error}");
+            assert!(store
+                .reads
+                .borrow()
+                .iter()
+                .all(|id| header_only.contains(id)));
+
+            store.reads.borrow_mut().clear();
+            let error = import(
+                &store,
+                &request,
+                ObjectInventoryLimits {
+                    max_objects: selected_objects - 1,
+                    ..ObjectInventoryLimits::default()
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("selected closure"), "{error}");
+            assert!(store
+                .reads
+                .borrow()
+                .iter()
+                .all(|id| header_only.contains(id)));
+
+            let terminal = *allowed.difference(&header_only).next().unwrap();
+            store.objects.get_mut(&terminal).unwrap()[0] ^= 1;
+            assert!(import(&store, &request, ObjectInventoryLimits::default()).is_err());
+        }
+    }
+}

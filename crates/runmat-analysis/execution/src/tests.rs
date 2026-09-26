@@ -24,6 +24,9 @@ use crate::response::prepare_analysis_output_set;
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
+#[path = "tests/thermal_result_access.rs"]
+mod thermal_result_access_tests;
+
 fn digest(label: &str) -> Digest {
     Digest::sha256(label)
 }

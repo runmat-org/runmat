@@ -19,6 +19,19 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_0
 mod fields;
 
 impl FeaThermalRunResult {
+    pub(super) fn metadata(&self) -> ThermalResultMetadata<'_> {
+        ThermalResultMetadata {
+            run: &self.run,
+            time_points_s: &self.time_points_s,
+            residual_norms: &self.residual_norms,
+            reference_temperature_k: self.reference_temperature_k,
+            topology_digest: self.topology_digest,
+            producer: self.producer,
+            ordered_node_ids: &self.ordered_node_ids,
+            ordered_element_ids: &self.ordered_element_ids,
+            initial_state: &self.initial_state,
+        }
+    }
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate_complete()?;
         Ok(encode_contract(
@@ -36,77 +49,14 @@ impl FeaThermalRunResult {
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
         self.validate_complete()?;
         let fields = fields::retained_field_identities(self)?;
-        // Numerical identity excludes presentation diagnostics and execution telemetry.
-        let content = encode_contract(
-            PREFIX,
-            "thermal-solver-result-field-content",
-            &(
-                &self.run.identity,
-                &self.time_points_s,
-                &fields,
-                &self.residual_norms,
-                self.reference_temperature_k,
-                self.topology_digest,
-                self.producer,
-                &self.ordered_node_ids,
-                &self.ordered_element_ids,
-                &self.initial_state,
-            ),
-            LIMITS,
-        )?;
-        SolverResultIdentity::from_step_result(self.producer, Digest::sha256(content))
+        self.metadata().identity(&fields)
     }
     /// Checks structural consistency and accepted solver evidence, not independent accuracy.
     pub fn validate_complete(&self) -> AnalysisExecutionResult<()> {
-        let invalid = || {
-            AnalysisExecutionError::Invalid(
-                "thermal result has incomplete or inconsistent history/provenance".into(),
-            )
-        };
-        self.run
-            .validate_solver_formulation()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        self.metadata().validate()?;
         let samples = self.time_points_s.len();
-        let residuals = match self.run.identity.procedure() {
-            AnalysisProcedure::Static if samples == 1 => 1,
-            AnalysisProcedure::TransientResponse if samples >= 2 => samples - 1,
-            _ => return Err(invalid()),
-        };
-        let initial = &self.initial_state;
-        let initial_nodes = initial
-            .authored_node_count
-            .checked_add(initial.prescribed_node_count)
-            .and_then(|count| count.checked_sub(initial.authored_and_prescribed_node_count))
-            .and_then(|count| count.checked_add(initial.reference_node_count));
-        if self.run.identity.family() != PhysicsFamily::Thermal
-            || !unique_nonempty(&self.ordered_node_ids)
-            || !unique_nonempty(&self.ordered_element_ids)
-            || !self.reference_temperature_k.is_finite()
-            || self.reference_temperature_k <= 0.0
-            || self.initial_state.reference_temperature_k != self.reference_temperature_k
-            || self.initial_state.procedure_step_id.trim().is_empty()
-            || initial_nodes != Some(self.ordered_node_ids.len())
-            || initial.authored_and_prescribed_node_count
-                > initial
-                    .authored_node_count
-                    .min(initial.prescribed_node_count)
-            || !initial.minimum_temperature_k.is_finite()
-            || initial.minimum_temperature_k <= 0.0
-            || !initial.maximum_temperature_k.is_finite()
-            || initial.maximum_temperature_k < initial.minimum_temperature_k
-            || self
-                .time_points_s
-                .iter()
-                .any(|x| !x.is_finite() || x.to_bits() == (-0.0_f64).to_bits())
-            || self.time_points_s.windows(2).any(|pair| pair[1] <= pair[0])
-            || self.residual_norms.len() != residuals
-            || self
-                .residual_norms
-                .iter()
-                .any(|x| !x.is_finite() || *x < 0.0)
-        {
-            return Err(invalid());
-        }
+        let invalid =
+            || AnalysisExecutionError::Invalid("thermal result has invalid temperatures".into());
         validate_history(
             &self.temperature_snapshots,
             samples,
@@ -138,19 +88,6 @@ impl FeaThermalRunResult {
         {
             return Err(invalid());
         }
-        validate_portable_fields(&self.run.fields)?;
-        for code in ["FEA_THERMAL_STABILITY", "FEA_THERMAL_ENERGY_BALANCE"] {
-            let mut matching = self.run.diagnostics.iter().filter(|item| item.code == code);
-            if !matching
-                .next()
-                .is_some_and(|item| item.severity == FeaDiagnosticSeverity::Info)
-                || matching.next().is_some()
-            {
-                return Err(AnalysisExecutionError::Invalid(format!(
-                    "thermal result lacks unique accepted {code} evidence"
-                )));
-            }
-        }
         Ok(())
     }
 }
@@ -175,4 +112,107 @@ fn validate_history(
         ));
     }
     Ok(())
+}
+
+pub(super) struct ThermalResultMetadata<'a> {
+    pub run: &'a crate::FeaRunResult,
+    pub time_points_s: &'a [f64],
+    pub residual_norms: &'a [f64],
+    pub reference_temperature_k: f64,
+    pub topology_digest: Digest,
+    pub producer: super::StepIdentity,
+    pub ordered_node_ids: &'a [u64],
+    pub ordered_element_ids: &'a [u64],
+    pub initial_state: &'a crate::ThermalInitialStateEvidence,
+}
+impl ThermalResultMetadata<'_> {
+    pub(super) fn validate(&self) -> AnalysisExecutionResult<()> {
+        let invalid = || {
+            AnalysisExecutionError::Invalid(
+                "thermal result has incomplete or inconsistent history/provenance".into(),
+            )
+        };
+        self.run
+            .validate_solver_formulation()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        let samples = self.time_points_s.len();
+        let residuals = match self.run.identity.procedure() {
+            AnalysisProcedure::Static if samples == 1 => 1,
+            AnalysisProcedure::TransientResponse if samples >= 2 => samples - 1,
+            _ => return Err(invalid()),
+        };
+        let initial = &self.initial_state;
+        let initial_nodes = initial
+            .authored_node_count
+            .checked_add(initial.prescribed_node_count)
+            .and_then(|count| count.checked_sub(initial.authored_and_prescribed_node_count))
+            .and_then(|count| count.checked_add(initial.reference_node_count));
+        if self.run.identity.family() != PhysicsFamily::Thermal
+            || !unique_nonempty(self.ordered_node_ids)
+            || !unique_nonempty(self.ordered_element_ids)
+            || !self.reference_temperature_k.is_finite()
+            || self.reference_temperature_k <= 0.0
+            || self.initial_state.reference_temperature_k != self.reference_temperature_k
+            || self.initial_state.procedure_step_id.trim().is_empty()
+            || initial_nodes != Some(self.ordered_node_ids.len())
+            || initial.authored_and_prescribed_node_count
+                > initial
+                    .authored_node_count
+                    .min(initial.prescribed_node_count)
+            || !initial.minimum_temperature_k.is_finite()
+            || initial.minimum_temperature_k <= 0.0
+            || !initial.maximum_temperature_k.is_finite()
+            || initial.maximum_temperature_k < initial.minimum_temperature_k
+            || self
+                .time_points_s
+                .iter()
+                .any(|x| !x.is_finite() || x.to_bits() == (-0.0_f64).to_bits())
+            || self.time_points_s.windows(2).any(|pair| pair[1] <= pair[0])
+            || self.residual_norms.len() != residuals
+            || self
+                .residual_norms
+                .iter()
+                .any(|x| !x.is_finite() || *x < 0.0)
+        {
+            return Err(invalid());
+        }
+        validate_portable_fields(&self.run.fields)?;
+        for code in ["FEA_THERMAL_STABILITY", "FEA_THERMAL_ENERGY_BALANCE"] {
+            let mut matching = self.run.diagnostics.iter().filter(|item| item.code == code);
+            if !matching
+                .next()
+                .is_some_and(|item| item.severity == FeaDiagnosticSeverity::Info)
+                || matching.next().is_some()
+            {
+                return Err(AnalysisExecutionError::Invalid(format!(
+                    "thermal result lacks unique accepted {code} evidence"
+                )));
+            }
+        }
+        Ok(())
+    }
+    pub(super) fn identity(
+        &self,
+        fields: &[[crate::results::field::RecoveredFieldIdentity; 4]],
+    ) -> AnalysisExecutionResult<SolverResultIdentity> {
+        // Numerical identity excludes presentation diagnostics and execution telemetry.
+        let content = encode_contract(
+            PREFIX,
+            "thermal-solver-result-field-content",
+            &(
+                &self.run.identity,
+                &self.time_points_s,
+                &fields,
+                &self.residual_norms,
+                self.reference_temperature_k,
+                self.topology_digest,
+                self.producer,
+                &self.ordered_node_ids,
+                &self.ordered_element_ids,
+                &self.initial_state,
+            ),
+            LIMITS,
+        )?;
+        SolverResultIdentity::from_step_result(self.producer, Digest::sha256(content))
+    }
 }

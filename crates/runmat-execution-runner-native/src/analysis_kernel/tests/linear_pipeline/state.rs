@@ -255,10 +255,8 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
             ObjectInventoryLimits::default(),
         )
         .unwrap(),
-        runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::SolverResult,
-            request.source_result.digest(),
-            &result.canonical_bytes().unwrap(),
+        runmat_analysis_execution::prepare_thermal_solver_result_objects(
+            &result,
             4096,
             ObjectNamespace::ResultValue,
             ObjectInventoryLimits::default(),
