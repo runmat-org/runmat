@@ -4082,7 +4082,7 @@ impl AccelProvider for InProcessProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        crate::placement::dense_feasibility(&self.capability_snapshot(), query)
+        crate::placement::in_process_feasibility(self, query)
     }
 
     fn gather_linear(

@@ -12,12 +12,12 @@ mod recorder;
 mod residency;
 mod session;
 
-#[cfg(feature = "wgpu")]
-pub(crate) use provider_contract::wgpu_capability_snapshot;
 pub(crate) use provider_contract::{
-    dense_feasibility, dense_output_representation, in_process_capability_snapshot,
+    dense_output_representation, in_process_capability_snapshot, in_process_feasibility,
     provider_rejection_token, tensor_representation,
 };
+#[cfg(feature = "wgpu")]
+pub(crate) use provider_contract::{wgpu_capability_snapshot, wgpu_feasibility};
 #[cfg(feature = "wgpu")]
 pub(crate) use provider_cost::wgpu_cost_estimate;
 
