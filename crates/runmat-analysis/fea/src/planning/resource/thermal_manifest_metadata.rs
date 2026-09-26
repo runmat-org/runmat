@@ -15,6 +15,7 @@ pub struct ThermalManifestMetadataResourceFacts {
     pub wrapper: SerializedCanonicalProfile,
     pub scalar_inventories: SerializedCanonicalProfile,
     pub complete_header: SerializedCanonicalProfile,
+    pub numerical_identity: SerializedCanonicalProfile,
 }
 
 impl ThermalManifestMetadataResourceFacts {
@@ -58,15 +59,33 @@ impl ThermalManifestMetadataResourceFacts {
             u64::try_from(metadata.backend_evidence.maximum_records)
                 .map_err(|_| ResourcePlanningError::Overflow("thermal manifest backend count"))?,
         )?;
+        let mut numerical_identity = ThermalSolverResultManifest::numerical_identity_profile(
+            identity,
+            mesh.topology.nodes.len(),
+            mesh.topology.volume_elements.len(),
+            schedule.sample_count(),
+            schedule.solve_count(),
+        )
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        add(&mut numerical_identity, metadata.initial_state, 1)?;
         Ok(Self {
             wrapper,
             scalar_inventories,
             complete_header,
+            numerical_identity,
         })
     }
 
     pub fn reservation_bytes(&self) -> ByteCount {
-        ByteCount(self.complete_header.materialization_resident_bytes_estimate)
+        // Identity validation completes before canonical header encoding starts.
+        ByteCount(
+            self.complete_header
+                .materialization_resident_bytes_estimate
+                .max(
+                    self.numerical_identity
+                        .materialization_resident_bytes_estimate,
+                ),
+        )
     }
 }
 

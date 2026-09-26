@@ -334,6 +334,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.field_construction.reservation_bytes().0
                 + grown.manifest_catalog.reservation_bytes().unwrap().0
                 + grown.manifest_metadata.reservation_bytes().0
+                + grown.manifest_retained.reservation_bytes().unwrap().0
         );
         workload.model.sequence.steps[0]
             .accuracy

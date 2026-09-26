@@ -70,6 +70,10 @@ pub(crate) fn diagnostics(assignments: &[MaterialAssignment]) -> Vec<FeaDiagnost
         .collect()
 }
 
+pub(crate) fn record_count(assignments: &[MaterialAssignment]) -> usize {
+    records(assignments).count()
+}
+
 pub(crate) fn profile(
     assignments: &[MaterialAssignment],
 ) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
@@ -111,6 +115,7 @@ mod tests {
             assignments.push(assignment);
         }
         let actual = diagnostics(&assignments);
+        assert_eq!(record_count(&assignments), actual.len());
         assert_eq!(actual.len(), 3);
         assert_eq!(actual[0].severity, FeaDiagnosticSeverity::Error);
         for (record, assignment) in actual.iter().zip(&assignments) {
@@ -141,6 +146,8 @@ mod tests {
         ));
         assert_eq!(profile(&assignments).unwrap(), projected);
         assert_eq!(diagnostics(&assignments), actual);
+        assert_eq!(record_count(&assignments), actual.len());
+        assert_eq!(record_count(&[]), 0);
         assert!(
             profile(&[]).unwrap().encoded_bytes_upper_bound < projected.encoded_bytes_upper_bound
         );

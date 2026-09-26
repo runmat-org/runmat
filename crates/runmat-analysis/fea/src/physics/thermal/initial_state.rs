@@ -74,6 +74,13 @@ fn selected_conditions<'a>(
         })
 }
 
+pub(crate) fn selected_condition_count(
+    model: &AnalysisModel,
+    step: &runmat_analysis_core::ProcedureStep,
+) -> usize {
+    selected_conditions(model, step).count()
+}
+
 /// Profiles the producer's selected IDs without retaining copies or realizing temperature arrays.
 /// The shared applies_to_step selection may allocate a temporary object-reference ID.
 pub(crate) fn evidence_profile(

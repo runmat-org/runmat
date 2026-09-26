@@ -15,6 +15,7 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_0
 
 #[path = "thermal_result_fields.rs"]
 mod fields;
+pub(in crate::execution) mod identity;
 
 #[cfg(test)]
 #[path = "thermal_result_validation_tests.rs"]
@@ -220,32 +221,5 @@ impl ThermalResultMetadata<'_> {
             }
         }
         Ok(())
-    }
-    pub(super) fn identity(
-        &self,
-        fields: &[[crate::results::field::RecoveredFieldIdentity; 4]],
-    ) -> AnalysisExecutionResult<SolverResultIdentity> {
-        // Numerical identity excludes presentation diagnostics and execution telemetry.
-        let content = encode_contract(
-            PREFIX,
-            "thermal-solver-result-accepted-intent-field-content",
-            &(
-                self.numerical_intent,
-                &self.run.identity,
-                &self.time_points_s,
-                &fields,
-                &self.residual_norms,
-                self.residual_target,
-                &self.energy_balances,
-                self.reference_temperature_k,
-                self.topology_digest,
-                self.producer,
-                &self.ordered_node_ids,
-                &self.ordered_element_ids,
-                &self.initial_state,
-            ),
-            LIMITS,
-        )?;
-        SolverResultIdentity::from_step_result(self.producer, Digest::sha256(content))
     }
 }

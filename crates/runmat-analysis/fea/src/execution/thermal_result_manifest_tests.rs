@@ -69,6 +69,30 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             manifest.identity(),
             result.source_result_identity().unwrap()
         );
+        let identity_shape = ThermalSolverResultManifest::numerical_identity_profile(
+            &result.run.identity,
+            result.ordered_node_ids.len(),
+            result.ordered_element_ids.len(),
+            result.time_points_s.len(),
+            result.residual_norms.len(),
+        )
+        .unwrap();
+        let initial_shape =
+            runmat_canonical_codec::profile_serialized(&result.initial_state, LIMITS).unwrap();
+        let metadata = result.metadata();
+        let identity_payload = metadata.identity_serialization(&field_ids);
+        let actual_identity =
+            runmat_canonical_codec::profile_serialized(&identity_payload, LIMITS).unwrap();
+        assert!(
+            actual_identity.encoded_bytes_upper_bound
+                <= identity_shape.encoded_bytes_upper_bound
+                    + initial_shape.encoded_bytes_upper_bound
+        );
+        assert!(
+            actual_identity.materialization_resident_bytes_estimate
+                <= identity_shape.materialization_resident_bytes_estimate
+                    + initial_shape.materialization_resident_bytes_estimate
+        );
         assert!(manifest.run.fields.is_empty());
         let mut duplicate = manifest.clone();
         duplicate.fields[1][0].partitions[0].partition =

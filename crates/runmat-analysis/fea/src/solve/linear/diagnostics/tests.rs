@@ -3,6 +3,7 @@ use super::*;
 #[test]
 fn successful_profile_bounds_each_supported_placement_outcome() {
     let bound = crate::solve::linear::successful_diagnostics_profile().unwrap();
+    let mut largest_actual_count = 0;
     for preconditioner in [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0] {
         for messages in [
             vec![SuccessfulDiagnostic::CpuMethod(preconditioner)],
@@ -13,6 +14,8 @@ fn successful_profile_bounds_each_supported_placement_outcome() {
             vec![SuccessfulDiagnostic::AcceleratorMethod(preconditioner)],
         ] {
             let actual: Vec<_> = messages.iter().map(|value| value.diagnostic()).collect();
+            largest_actual_count = largest_actual_count.max(actual.len());
+            assert!(actual.len() <= crate::solve::linear::successful_diagnostic_record_count());
             let profile = profile_serialized(&actual, PROFILE_LIMITS).unwrap();
             assert!(profile.encoded_bytes_upper_bound <= bound.encoded_bytes_upper_bound);
             assert!(
@@ -30,6 +33,10 @@ fn successful_profile_bounds_each_supported_placement_outcome() {
             );
         }
     }
+    assert_eq!(
+        crate::solve::linear::successful_diagnostic_record_count(),
+        largest_actual_count
+    );
 }
 
 #[test]

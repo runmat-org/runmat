@@ -47,6 +47,7 @@ fn projection_uses_actual_diagnostic_wire_shape_and_longest_severities() {
         .iter()
         .map(|record| record.message.diagnostic(record.severity))
         .collect();
+    assert_eq!(thermal_diagnostic_record_count(), actual.len());
     assert_eq!(
         serde_json::to_value(&projected).unwrap(),
         serde_json::to_value(&actual).unwrap()

@@ -30,6 +30,10 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
     )
     .unwrap();
     assert_eq!(realized.evidence.applied_initial_condition_ids, [long_id]);
+    assert_eq!(
+        selected_condition_count(&model, step),
+        realized.evidence.applied_initial_condition_ids.len()
+    );
     let actual = profile_serialized(
         &realized.evidence,
         crate::execution::THERMAL_WORKLOAD_LIMITS,
@@ -62,6 +66,10 @@ fn projected_initial_evidence_uses_exact_selected_ids_and_covers_realized_values
         .evidence
         .applied_initial_condition_ids
         .is_empty());
+    assert_eq!(
+        selected_condition_count(&model, &model.sequence.steps[0]),
+        inactive_state.evidence.applied_initial_condition_ids.len()
+    );
     assert_eq!(
         inactive_profile,
         profile_serialized(

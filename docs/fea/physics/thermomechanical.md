@@ -499,7 +499,24 @@ checked arithmetic. Shared-codec estimates are positive linear sums plus fixed o
 composition conservatively double-counts wrappers rather than dropping their cost. Tet4/Tet10
 steady and transient headers are compared against this bound, including source-bearing results
 and exact resident-ceiling rejection. This is canonical materialization scratch, not a claim that
-all retained manifest clones, numerical-identity buffers and transport lifetimes are yet qualified.
+all transport lifetimes or whole-process memory are qualified.
+
+Retained manifest metadata now has a separate preassembly reservation using actual Rust record
+sizes and producer-owned inventory counts. This includes scalar inventories, nested admitted
+identity vectors, source records and IDs, diagnostic records and strings, successful backend
+records, and initial-condition IDs. Catalog storage remains separately reserved. Canonical encoded
+byte bounds cover string payloads only; they are not treated as estimates of typed record storage.
+Numerical-result identity now shares one tuple serializer between execution and shape profiling,
+with a legacy-wire parity test. Identity validation and header encoding are sequential scratch
+phases, so their maximum is reserved alongside the retained metadata and catalog.
+
+The isolated `thermal_manifest_residency` test holds the source result live while constructing,
+validating and encoding its manifest. Tet4/Tet10 fixtures with source evidence, long UTF8 IDs and
+8/128 snapshots measured incremental requested-heap peaks of 248,195–3,568,584 bytes against
+composed reservations of 1,718,680–17,716,280 bytes. Tests also cover exact resident-ceiling
+acceptance/rejection and checked overflow. These are fixture measurements of Rust allocations,
+not allocator/native/RSS qualification. Actual chunk-size-dependent transport inventories,
+output accumulation and their overlapping lifetimes remain open.
 
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition

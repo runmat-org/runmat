@@ -66,6 +66,24 @@ impl Serialize for SuccessfulDiagnostic {
 const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 32);
 
+fn cpu_projection(preconditioner: SpdPreconditionerKind) -> [SuccessfulDiagnostic; 2] {
+    [
+        SuccessfulDiagnostic::AdmissionFallback,
+        SuccessfulDiagnostic::CpuMethod(preconditioner),
+    ]
+}
+
+fn accelerator_projection(preconditioner: SpdPreconditionerKind) -> [SuccessfulDiagnostic; 1] {
+    [SuccessfulDiagnostic::AcceleratorMethod(preconditioner)]
+}
+
+/// Maximum record count among the same successful placement alternatives used by profiling.
+pub(crate) fn successful_diagnostic_record_count() -> usize {
+    cpu_projection(SpdPreconditionerKind::Jacobi)
+        .len()
+        .max(accelerator_projection(SpdPreconditionerKind::Jacobi).len())
+}
+
 /// Bounds successful shared PCG diagnostics for Jacobi and ILU0, irrespective of placement.
 /// Nonconvergence and provider errors are deliberately excluded: callers must first require
 /// convergence. Profiles the fallback-plus-CPU and accelerator alternatives through the actual
@@ -78,14 +96,11 @@ pub(crate) fn successful_diagnostics_profile(
     };
     for preconditioner in [SpdPreconditionerKind::Jacobi, SpdPreconditionerKind::Ilu0] {
         let cpu = profile_serialized(
-            &[
-                SuccessfulDiagnostic::AdmissionFallback.wire(),
-                SuccessfulDiagnostic::CpuMethod(preconditioner).wire(),
-            ],
+            &cpu_projection(preconditioner).map(SuccessfulDiagnostic::wire),
             PROFILE_LIMITS,
         )?;
         let accelerator = profile_serialized(
-            &[SuccessfulDiagnostic::AcceleratorMethod(preconditioner).wire()],
+            &accelerator_projection(preconditioner).map(SuccessfulDiagnostic::wire),
             PROFILE_LIMITS,
         )?;
         bound = SerializedCanonicalProfile {

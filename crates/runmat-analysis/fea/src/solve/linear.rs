@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 mod admission;
 mod diagnostics;
 mod settings;
-pub(crate) use diagnostics::successful_diagnostics_profile;
 use diagnostics::SuccessfulDiagnostic;
+pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
 use settings::iteration_limit;
 pub(crate) use settings::ScopedLinearSolveSettings;
 

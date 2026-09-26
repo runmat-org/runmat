@@ -80,6 +80,10 @@ pub(crate) fn thermal_diagnostic_profile(
     profile_serialized(&projection(procedure_step_id), PROFILE_LIMITS)
 }
 
+pub(crate) fn thermal_diagnostic_record_count() -> usize {
+    projection("").len()
+}
+
 fn projection(step: &str) -> [DiagnosticSerialization<'_, ThermalDiagnosticMessage<'_>>; 5] {
     // IEEE binary64 finite decimal exponents range from -324 through 308. Scientific .16e
     // has 17 significant digits (enough to round-trip), one decimal point, an optional value

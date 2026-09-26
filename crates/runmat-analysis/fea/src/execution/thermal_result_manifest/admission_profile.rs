@@ -14,6 +14,54 @@ const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 
 impl ThermalSolverResultManifest {
+    /// Profile the exact identity tuple, excluding the separately composed initial-state record.
+    pub(crate) fn numerical_identity_profile(
+        identity: &AnalysisRunIdentity,
+        nodes: usize,
+        elements: usize,
+        samples: usize,
+        solves: usize,
+    ) -> AnalysisExecutionResult<SerializedCanonicalProfile> {
+        use crate::execution::thermal_result::identity::IdentitySerialization;
+        Ok(profile_serialized(
+            &IdentitySerialization(
+                ThermalNumericalIntentIdentity::derive("profile", &0_u8)?,
+                identity,
+                Repeated {
+                    value: 0.0_f64,
+                    count: samples,
+                },
+                // RecoveredFieldIdentity is a transparent Digest; fixed rows mirror four histories.
+                Repeated {
+                    value: [Digest::from_bytes([0; 32]); 4],
+                    count: samples,
+                },
+                Repeated {
+                    value: 0.0_f64,
+                    count: solves,
+                },
+                0.0,
+                Repeated {
+                    value: ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0),
+                    count: solves,
+                },
+                0.0,
+                Digest::from_bytes([0; 32]),
+                StepIdentity::derive("profile", &0_u8)?,
+                Repeated {
+                    value: 0_u64,
+                    count: nodes,
+                },
+                Repeated {
+                    value: 0_u64,
+                    count: elements,
+                },
+                (),
+            ),
+            PROFILE_LIMITS,
+        )?)
+    }
+
     /// This is a serialization-only skeleton, not a valid or publishable numerical result.
     /// Variable evidence/catalog collections are empty and must be composed by the caller.
     /// Opaque identities have fixed width; the registry-issued run identity is never fabricated.

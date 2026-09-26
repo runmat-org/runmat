@@ -2,9 +2,9 @@
 use super::{
     ByteCount, ResourcePlanningError, ThermalFieldConstructionResourceFacts,
     ThermalHistoryResourceFacts, ThermalManifestCatalogResourceFacts,
-    ThermalManifestMetadataResourceFacts, ThermalMetadataResourceFacts,
-    ThermalObservationResourceFacts, ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
-    ThermalSourceEvidenceResourceFacts,
+    ThermalManifestMetadataResourceFacts, ThermalManifestRetainedResourceFacts,
+    ThermalMetadataResourceFacts, ThermalObservationResourceFacts, ThermalOperatorResourceFacts,
+    ThermalRealizationResourceFacts, ThermalSourceEvidenceResourceFacts,
 };
 use crate::execution::ThermalSolveSchedule;
 use runmat_analysis_core::{AnalysisModel, ProcedureStep};
@@ -24,6 +24,7 @@ pub struct ThermalPreassemblyResourceFacts {
     pub field_construction: ThermalFieldConstructionResourceFacts,
     pub manifest_catalog: ThermalManifestCatalogResourceFacts,
     pub manifest_metadata: ThermalManifestMetadataResourceFacts,
+    pub manifest_retained: ThermalManifestRetainedResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
@@ -94,6 +95,10 @@ impl ThermalPreassemblyResourceFacts {
             &manifest_catalog,
         )?;
         let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
+        let manifest_retained = ThermalManifestRetainedResourceFacts::derive(
+            model, step, mesh, schedule, identity, &metadata, &sources,
+        )?;
+        let retained_bytes = manifest_retained.reservation_bytes()?.0;
         let base = component_bytes(
             &history,
             &operators,
@@ -106,6 +111,7 @@ impl ThermalPreassemblyResourceFacts {
         .checked_add(field_construction.reservation_bytes().0)
         .and_then(|bytes| bytes.checked_add(catalog_bytes))
         .and_then(|bytes| bytes.checked_add(manifest_metadata.reservation_bytes().0))
+        .and_then(|bytes| bytes.checked_add(retained_bytes))
         .ok_or(ResourcePlanningError::Overflow(
             "thermal field construction reservation",
         ))?;
@@ -149,12 +155,14 @@ impl ThermalPreassemblyResourceFacts {
             field_construction,
             manifest_catalog,
             manifest_metadata,
+            manifest_retained,
             model_materialization_bytes,
         })
     }
 
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
         let catalog_bytes = self.manifest_catalog.reservation_bytes()?.0;
+        let retained_bytes = self.manifest_retained.reservation_bytes()?.0;
         component_bytes(
             &self.history,
             &self.operators,
@@ -168,6 +176,7 @@ impl ThermalPreassemblyResourceFacts {
         .and_then(|bytes| bytes.checked_add(self.field_construction.reservation_bytes().0))
         .and_then(|bytes| bytes.checked_add(catalog_bytes))
         .and_then(|bytes| bytes.checked_add(self.manifest_metadata.reservation_bytes().0))
+        .and_then(|bytes| bytes.checked_add(retained_bytes))
         .map(ByteCount)
         .ok_or(ResourcePlanningError::Overflow(
             "thermal preassembly reservation",
