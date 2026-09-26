@@ -111,13 +111,6 @@ fn assert_output(value: &Value, expected: &[u8]) {
             assert_eq!(array.shape, [2, 2]);
             assert_eq!(array.data, expected);
         }
-        Value::Tensor(tensor) => {
-            assert_eq!(tensor.shape, [2, 2]);
-            assert_eq!(
-                tensor.materialize_f64(),
-                expected.iter().map(|&x| f64::from(x)).collect::<Vec<_>>()
-            );
-        }
         other => panic!("expected logical matrix, got {other:?}"),
     }
 }
