@@ -166,6 +166,7 @@ async fn bounds_invalid_reduction_arguments_use_bounds_identifier() {
 
 #[tokio::test]
 async fn bounds_builtin_pads_requested_outputs() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let input = tensor(vec![1.0, 4.0], vec![2, 1]);
     let _guard = crate::output_count::push_output_count(Some(3));
     let result = bounds_builtin(input, Vec::new()).await.unwrap();
@@ -175,6 +176,7 @@ async fn bounds_builtin_pads_requested_outputs() {
     assert_eq!(values.len(), 3);
     assert_eq!(values[0], Value::Num(1.0));
     assert_eq!(values[1], Value::Num(4.0));
+    assert_eq!(values[2], Value::Num(0.0));
 }
 
 #[test]

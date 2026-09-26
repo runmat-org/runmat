@@ -17,6 +17,7 @@ pub(crate) mod gradient;
 pub(crate) mod integer_native;
 pub(crate) mod integration_common;
 mod logical;
+mod resident_results;
 pub(crate) mod max;
 pub(crate) mod mean;
 pub(crate) mod median;
