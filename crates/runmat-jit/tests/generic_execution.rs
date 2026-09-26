@@ -2907,7 +2907,7 @@ fn member_assignment_fixture_with_input(
         MirOperand::Local(MirLocalId(0)),
         span,
         if omitted_formal {
-            vec![MirLocalId(0)]
+            vec![BindingId(0)]
         } else {
             vec![]
         },
@@ -3298,7 +3298,7 @@ fn lower_body_with_inputs(
     statements: Vec<MirStmt>,
     returned: MirOperand,
     span: Span,
-    fixed_inputs: Vec<MirLocalId>,
+    fixed_inputs: Vec<BindingId>,
 ) -> runmat_native_codegen::NativeAssembly {
     let function = FunctionId(0);
     let mir = MirAssembly {
@@ -3307,7 +3307,7 @@ fn lower_body_with_inputs(
             MirBody {
                 function,
                 abi: FunctionAbi {
-                    fixed_inputs,
+                    fixed_inputs: fixed_inputs.clone(),
                     varargin: None,
                     fixed_outputs: Vec::new(),
                     varargout: None,
@@ -3317,8 +3317,12 @@ fn lower_body_with_inputs(
                 locals: (0..local_count)
                     .map(|id| MirLocal {
                         id: MirLocalId(id),
-                        binding: None,
-                        kind: MirLocalKind::Temporary,
+                        binding: fixed_inputs.get(id).copied(),
+                        kind: if id < fixed_inputs.len() {
+                            MirLocalKind::Parameter
+                        } else {
+                            MirLocalKind::Temporary
+                        },
                         span,
                     })
                     .collect(),
@@ -3360,7 +3364,13 @@ fn lower_body_with_inputs(
         mir: &mir,
         analysis: &analysis,
         manifest: &manifest,
-        binding_names: None,
+        binding_names: Some(
+            &fixed_inputs
+                .iter()
+                .enumerate()
+                .map(|(index, binding)| (*binding, format!("input{index}")))
+                .collect(),
+        ),
         target: NativeTarget::current(),
     })
     .unwrap()
