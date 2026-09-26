@@ -22,5 +22,11 @@ pub(crate) use spec::{
     builtin_path = "crate::builtins::cells::core::cell2mat"
 )]
 async fn cell2mat_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::CELL2MAT_DESCRIPTOR,
+        &runmat_builtins::CELL2MAT_ERROR_TOO_MANY_OUTPUTS,
+        "cell2mat",
+    )?;
+
     implementation::execute(value).await
 }

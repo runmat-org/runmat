@@ -25,6 +25,12 @@ fn cell2struct_builtin(
     fields: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::CELL2STRUCT_DESCRIPTOR,
+        &runmat_builtins::CELL2STRUCT_ERROR_TOO_MANY_OUTPUTS,
+        "cell2struct",
+    )?;
+
     if rest.len() > 1 {
         return Err(error::invalid("expected C, fields, and optional dim"));
     }

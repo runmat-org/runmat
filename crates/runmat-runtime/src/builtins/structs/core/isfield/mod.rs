@@ -23,6 +23,12 @@ pub(super) const BUILTIN_NAME: &str = "isfield";
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
 async fn isfield_builtin(target: Value, names: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::ISFIELD_DESCRIPTOR,
+        &runmat_builtins::ISFIELD_ERROR_TOO_MANY_OUTPUTS,
+        "isfield",
+    )?;
+
     execution::execute(&target, names)
 }
 

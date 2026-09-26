@@ -78,6 +78,7 @@ pub const MAT2CELL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     message: "mat2cell: internal error",
 };
 const ERRORS: &[BuiltinErrorDescriptor] = &[
+    MAT2CELL_ERROR_TOO_MANY_OUTPUTS,
     MAT2CELL_ERROR_INVALID_INPUT,
     MAT2CELL_ERROR_INVALID_PARTITION,
     MAT2CELL_ERROR_SIZE_EXCEEDED,
@@ -108,3 +109,10 @@ pub const MAT2CELL_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
     BuiltinIntegerCapabilityDescriptor { form: "C = mat2cell(integer_A, dim1dist, ...)", inputs: DATA_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::PreserveInput, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Automatic residency gathers before host cell construction; explicit resident input is unsupported." },
     BuiltinIntegerCapabilityDescriptor { form: "C = mat2cell(A, integer_dim1dist, ...)", inputs: PARTITION_INPUT, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::GpuRestricted, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The RunMat-only typed form validates exact partition values before block construction." },
 ];
+
+pub const MAT2CELL_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MAT2CELL.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:mat2cell:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "mat2cell: too many output arguments",
+};

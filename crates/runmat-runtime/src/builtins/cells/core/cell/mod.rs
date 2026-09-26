@@ -15,8 +15,17 @@ pub(crate) use spec::{
     __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
 };
 
-#[runtime_builtin(name = "cell",
-    binding_variant = "default", builtin_path = "crate::builtins::cells::core::cell")]
+#[runtime_builtin(
+    name = "cell",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::cells::core::cell"
+)]
 async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::CELL_DESCRIPTOR,
+        &runmat_builtins::CELL_ERROR_TOO_MANY_OUTPUTS,
+        "cell",
+    )?;
+
     allocation::build(arguments::parse(args).await?)
 }

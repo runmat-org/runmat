@@ -44,6 +44,7 @@ pub const CELLSTR_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
     message: "cellstr: internal shape error",
 };
 const ERRORS: &[BuiltinErrorDescriptor] = &[
+    CELLSTR_ERROR_TOO_MANY_OUTPUTS,
     CELLSTR_ERROR_INVALID_INPUT,
     CELLSTR_ERROR_INVALID_CONTENTS,
     CELLSTR_ERROR_INTERNAL,
@@ -79,3 +80,10 @@ pub const CELLSTR_EXTENSIONS: &[BuiltinExtensionDescriptor] = &[
     CELLSTR_CELL_INPUT_EXTENSION,
     CELLSTR_SYMBOLIC_INPUT_EXTENSION,
 ];
+
+pub const CELLSTR_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CELLSTR.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:cellstr:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "cellstr: too many output arguments",
+};

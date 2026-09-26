@@ -19,5 +19,11 @@ pub(crate) use spec::{
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::CELLSTR_DESCRIPTOR,
+        &runmat_builtins::CELLSTR_ERROR_TOO_MANY_OUTPUTS,
+        "cellstr",
+    )?;
+
     conversion::convert(value)
 }

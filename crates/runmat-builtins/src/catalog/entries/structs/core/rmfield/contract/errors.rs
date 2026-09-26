@@ -38,6 +38,7 @@ pub const RMFIELD_ERROR_REBUILD_FAILED: BuiltinErrorDescriptor = BuiltinErrorDes
 };
 
 pub(super) const ERRORS: &[BuiltinErrorDescriptor] = &[
+    RMFIELD_ERROR_TOO_MANY_OUTPUTS,
     RMFIELD_ERROR_NOT_ENOUGH_INPUTS,
     RMFIELD_ERROR_INVALID_TARGET,
     RMFIELD_ERROR_FIELD_NAME_TYPE,
@@ -45,3 +46,10 @@ pub(super) const ERRORS: &[BuiltinErrorDescriptor] = &[
     RMFIELD_ERROR_MISSING_FIELD,
     RMFIELD_ERROR_REBUILD_FAILED,
 ];
+
+pub const RMFIELD_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RMFIELD.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:rmfield:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "rmfield: too many output arguments",
+};

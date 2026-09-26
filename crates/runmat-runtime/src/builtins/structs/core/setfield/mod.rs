@@ -34,6 +34,12 @@ pub(crate) use spec::{
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SETFIELD_DESCRIPTOR,
+        &runmat_builtins::SETFIELD_ERROR_TOO_MANY_OUTPUTS,
+        "setfield",
+    )?;
+
     if rest.len() < 2 {
         return Err(errors::with_message(
             SETFIELD_ERROR_NOT_ENOUGH_INPUTS.message,

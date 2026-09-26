@@ -55,7 +55,11 @@ pub const NUM2CELL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescript
     when: "An internal shape or storage invariant is inconsistent.",
     message: "num2cell: internal shape error",
 };
-const ERRORS: &[BuiltinErrorDescriptor] = &[NUM2CELL_ERROR_INVALID_INPUT, NUM2CELL_ERROR_INTERNAL];
+const ERRORS: &[BuiltinErrorDescriptor] = &[
+    NUM2CELL_ERROR_TOO_MANY_OUTPUTS,
+    NUM2CELL_ERROR_INVALID_INPUT,
+    NUM2CELL_ERROR_INTERNAL,
+];
 
 pub const NUM2CELL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
@@ -92,3 +96,10 @@ pub const NUM2CELL_INTEGER_CAPABILITIES: &[BuiltinIntegerCapabilityDescriptor] =
         overload: BuiltinIntegerOverloadKind::Multiple,
         notes: "Cell construction preserves exact native storage; resident input is gathered before partitioning.",
     }];
+
+pub const NUM2CELL_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.NUM2CELL.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:num2cell:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "num2cell: too many output arguments",
+};

@@ -22,6 +22,12 @@ pub(super) const BUILTIN_NAME: &str = "rmfield";
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 async fn rmfield_builtin(target: Value, fields: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::RMFIELD_DESCRIPTOR,
+        &runmat_builtins::RMFIELD_ERROR_TOO_MANY_OUTPUTS,
+        "rmfield",
+    )?;
+
     execution::execute(target, fields)
 }
 

@@ -157,7 +157,8 @@ struct_error!(
     "Field name is not a valid identifier.",
     "struct: field names must be valid MATLAB identifiers"
 );
-const ERRORS: [BuiltinErrorDescriptor; 14] = [
+const ERRORS: [BuiltinErrorDescriptor; 15] = [
+    STRUCT_ERROR_TOO_MANY_OUTPUTS,
     STRUCT_ERROR_INVALID_SINGLE_INPUT,
     STRUCT_ERROR_NAME_VALUE_PAIRS,
     STRUCT_ERROR_DUPLICATE_FIELD,
@@ -178,4 +179,11 @@ pub const STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
+};
+
+pub const STRUCT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.STRUCT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:struct:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "struct: too many output arguments",
 };
