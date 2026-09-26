@@ -18,8 +18,10 @@ const STATE_LIMITS: CanonicalLimits =
 
 mod field_validation;
 mod thermal;
+mod thermal_transfer;
 use field_validation::{structural_state_field_ids, validate_portable_fields};
 pub use thermal::CanonicalThermalStatePayload;
+pub use thermal_transfer::BoundThermalStateTransfer;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -508,13 +510,6 @@ impl CanonicalSemanticStatePayload {
             | Self::StructuralLinearization { .. }
             | Self::StructuralResponseEnvelope { .. }
             | Self::StructuralRandomStatistics { .. } => None,
-        }
-    }
-
-    pub fn thermal(&self) -> Option<&CanonicalThermalStatePayload> {
-        match self {
-            Self::Thermal { state } => Some(state),
-            _ => None,
         }
     }
 

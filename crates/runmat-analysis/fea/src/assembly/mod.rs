@@ -20,7 +20,7 @@ pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
 mod structural_loads;
-mod thermoelastic_load;
+pub(crate) mod thermoelastic_load;
 
 use std::{collections::BTreeMap, fmt};
 

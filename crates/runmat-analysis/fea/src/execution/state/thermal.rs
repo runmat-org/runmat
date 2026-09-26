@@ -60,6 +60,15 @@ impl CanonicalThermalStatePayload {
     }
 }
 
+impl CanonicalSemanticStatePayload {
+    pub fn thermal(&self) -> Option<&CanonicalThermalStatePayload> {
+        match self {
+            Self::Thermal { state } => Some(state),
+            _ => None,
+        }
+    }
+}
+
 impl CanonicalSemanticState {
     /// Publishes the terminal field of a completed physical thermal solve. The producer and
     /// source-result identities are derived from the authored step and solver output, not supplied
@@ -242,8 +251,11 @@ mod tests {
         fixtures::{fixture_model, FixtureId},
     };
     use runmat_analysis_core::{
-        AnalysisConstraint, AnalysisSequence, PrescribedValue, ProcedureStep, RegionTarget,
-        Temperature, ThermalConstraint, ThermalConstraintKind, ThermalDomain,
+        AnalysisConstraint, AnalysisSequence, CoupledPhysicsFamily, InitialStateConflictPolicy,
+        PrescribedValue, ProcedureStep, ReferenceStatePolicy, RegionTarget,
+        SequenceDependencyReason, StateInput, StateSource, StateTransition, StateTransitionMethod,
+        StateUse, Temperature, ThermalConstraint, ThermalConstraintKind, ThermalDomain,
+        ThermoMechanicalDomain, TopologyTransitionPolicy, TransitionId,
     };
     use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
@@ -365,5 +377,118 @@ mod tests {
         assert_eq!(state.payload.thermal().unwrap().sample_time_s, 0.0);
         assert_eq!(result.residual_norms.len(), 1);
         assert_eq!(state.payload.thermal().unwrap().temperature.shape, vec![4]);
+    }
+
+    #[test]
+    fn completed_thermal_state_binds_authored_static_thermoelastic_reuse() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.thermal = Some(ThermalDomain {
+            reference_temperature: Temperature::new(293.15),
+        });
+        model.thermo_mechanical = Some(ThermoMechanicalDomain {
+            reference_temperature: Temperature::new(293.15),
+        });
+        let producer = ProcedureStep::thermal_transient("thermal_step");
+        let mut consumer = ProcedureStep::coupled(
+            "thermoelastic_step",
+            CoupledPhysicsFamily::Thermomechanical,
+            AnalysisProcedure::Static,
+        );
+        consumer.state_inputs.push(StateInput {
+            input_id: "solved_temperature".into(),
+            required_kind: StateKind::Thermal,
+            source: StateSource::Upstream {
+                producer_step: producer.step_id.clone(),
+                state_id: producer.state_outputs[0].state_id.clone(),
+            },
+            use_as: StateUse::Prestress,
+            conflict: InitialStateConflictPolicy::Reject,
+        });
+        let consumer_step_id = consumer.step_id.clone();
+        model.sequence = AnalysisSequence::from_steps(
+            "thermal_to_thermoelastic",
+            vec![producer.clone(), consumer],
+        );
+        model.sequence.dependencies[0].reason = SequenceDependencyReason::StateTransfer;
+        model.sequence.transitions.push(StateTransition {
+            transition_id: TransitionId("solved_temperature_reuse".into()),
+            producer_step: producer.step_id,
+            consumer_step: consumer_step_id.clone(),
+            state_id: producer.state_outputs[0].state_id.clone(),
+            method: StateTransitionMethod::Reuse,
+            topology: TopologyTransitionPolicy::RequireIdentical,
+            reference: ReferenceStatePolicy::Preserve,
+        });
+        let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let result = crate::run_thermal_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            ThermalSolveOptions {
+                formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+                procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 4 },
+                solver_mesh: Some(mesh.clone()),
+                ..ThermalSolveOptions::default()
+            },
+        )
+        .unwrap();
+        let source = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();
+        let bound = super::super::BoundThermalStateTransfer::bind(
+            &model,
+            &consumer_step_id,
+            &source,
+            &mesh,
+        )
+        .unwrap();
+        assert_eq!(
+            bound.nodal_temperature_k,
+            source
+                .payload
+                .thermal()
+                .unwrap()
+                .temperature
+                .as_host_f64()
+                .unwrap()
+        );
+        assert_eq!(bound.transition.source_state, source.identity);
+        assert_eq!(bound.reference_temperature_k, 293.15);
+        assert_eq!(
+            bound.physical_nodal_load_n.len(),
+            mesh.topology.nodes.len() * 3
+        );
+        assert!(bound
+            .physical_nodal_load_n
+            .iter()
+            .all(|force| force.is_finite()));
+
+        let mut wrong_reference = model.clone();
+        wrong_reference
+            .thermo_mechanical
+            .as_mut()
+            .unwrap()
+            .reference_temperature = Temperature::new(300.0);
+        assert!(super::super::BoundThermalStateTransfer::bind(
+            &wrong_reference,
+            &consumer_step_id,
+            &source,
+            &mesh,
+        )
+        .is_err());
+        let other_mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+        assert!(super::super::BoundThermalStateTransfer::bind(
+            &model,
+            &consumer_step_id,
+            &source,
+            &other_mesh,
+        )
+        .is_err());
+        let mut missing_capability = model.clone();
+        missing_capability.materials[0].thermal = None;
+        assert!(super::super::BoundThermalStateTransfer::bind(
+            &missing_capability,
+            &consumer_step_id,
+            &source,
+            &mesh,
+        )
+        .is_err());
     }
 }

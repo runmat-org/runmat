@@ -183,9 +183,9 @@ pub use solve::{
     StructuralLinearWorkload, StructuralLinearWorkloadResult,
 };
 pub use state::{
-    CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
-    CanonicalStateTransition, CanonicalStateTransitionInput, SemanticStatePublicationRequest,
-    SemanticStatePublicationSource,
+    BoundThermalStateTransfer, CanonicalSemanticState, CanonicalSemanticStateInput,
+    CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
+    SemanticStatePublicationRequest, SemanticStatePublicationSource,
 };
 pub use study_workloads::{
     StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,

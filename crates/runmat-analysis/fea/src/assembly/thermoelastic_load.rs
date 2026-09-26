@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Debug, Error)]
-pub(super) enum ThermoelasticLoadError {
+pub(crate) enum ThermoelasticLoadError {
     #[error("thermoelastic element projection is invalid: {0}")]
     Projection(String),
     #[error("thermoelastic solid element {0} has no compiled material owner")]
@@ -25,6 +25,8 @@ pub(super) enum ThermoelasticLoadError {
     DuplicateRegion(String),
     #[error("thermoelastic temperature targets region {0} absent from the solver mesh")]
     UnknownRegion(String),
+    #[error("solved thermoelastic temperature field is incomplete or inconsistent with the mesh")]
+    InvalidNodalField,
 }
 
 pub(super) fn validate_temperature_regions(
@@ -146,6 +148,76 @@ pub(super) fn assemble_prescribed_temperature_load(
     Ok(load)
 }
 
+/// Integrate the transferred nodal solution as a physical temperature field at each solid
+/// quadrature point. No element-average or ordinal region proxy replaces the field interpolation.
+pub(crate) fn assemble_solved_temperature_load(
+    mesh: &SolverMeshArtifact,
+    properties: &CompiledPropertyMap,
+    nodal_temperature_k: &[f64],
+) -> Result<Vec<f64>, ThermoelasticLoadError> {
+    let projection = AnalysisProjection::derive(mesh)
+        .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+    if projection.nodes.len() != nodal_temperature_k.len()
+        || projection.nodes.len() != mesh.topology.nodes.len()
+        || projection
+            .nodes
+            .iter()
+            .zip(&mesh.topology.nodes)
+            .any(|(projected, canonical)| projected.node_id != canonical.node_id)
+        || nodal_temperature_k
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+    {
+        return Err(ThermoelasticLoadError::InvalidNodalField);
+    }
+    let mut load = vec![0.0; projection.nodes.len() * 3];
+    for element in &projection.elements {
+        let owner = properties
+            .solid_material(element.stable_identity)
+            .ok_or(ThermoelasticLoadError::MissingOwner(element.element_id))?;
+        let mechanical = owner
+            .material
+            .require_mechanical()
+            .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
+        let thermal = owner
+            .material
+            .require_thermal()
+            .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
+        let coefficient = mechanical.youngs_modulus_pa * thermal.expansion_coefficient_per_k
+            / (1.0 - 2.0 * mechanical.poisson_ratio);
+        if !coefficient.is_finite() {
+            return Err(ThermoelasticLoadError::InvalidConstitutive(
+                element.element_id,
+            ));
+        }
+        projection
+            .visit_element_quadrature(element, |point| {
+                let temperature_k = element
+                    .node_indices
+                    .iter()
+                    .zip(point.shape_values())
+                    .map(|(&node_index, &shape)| shape * nodal_temperature_k[node_index])
+                    .sum::<f64>();
+                let stress_pa = coefficient * (temperature_k - thermal.reference_temperature_k);
+                for (&node_index, gradient) in element
+                    .node_indices
+                    .iter()
+                    .zip(point.physical_shape_gradients())
+                {
+                    for axis in 0..3 {
+                        load[node_index * 3 + axis] +=
+                            stress_pa * gradient[axis] * point.volume_weight_m3;
+                    }
+                }
+            })
+            .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
+    }
+    if load.iter().any(|value| !value.is_finite()) {
+        return Err(ThermoelasticLoadError::InvalidNodalField);
+    }
+    Ok(load)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,6 +278,55 @@ mod tests {
             let resultant = load.chunks_exact(3).map(|force| force[axis]).sum::<f64>();
             assert!(resultant.abs() <= stress.abs() * 1.0e-12);
         }
+    }
+
+    #[test]
+    fn solved_linear_tet4_temperature_integrates_closed_form_thermal_force() {
+        let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .expansion_coefficient_per_k = 1.0e-5;
+        let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
+        let temperature = mesh
+            .topology
+            .nodes
+            .iter()
+            .map(|node| {
+                293.15 + 10.0 * node.coordinates_m[0] + 20.0 * node.coordinates_m[1]
+                    - 5.0 * node.coordinates_m[2]
+            })
+            .collect::<Vec<_>>();
+        let force = assemble_solved_temperature_load(&mesh, &properties, &temperature).unwrap();
+        let mechanical = model.materials[0].require_mechanical().unwrap();
+        let average_delta = 0.25 * (10.0 + 20.0 - 5.0);
+        let hydrostatic_stress = mechanical.youngs_modulus_pa * 1.0e-5 * average_delta
+            / (1.0 - 2.0 * mechanical.poisson_ratio);
+        let expected = [
+            -hydrostatic_stress / 6.0,
+            -hydrostatic_stress / 6.0,
+            -hydrostatic_stress / 6.0,
+            hydrostatic_stress / 6.0,
+            0.0,
+            0.0,
+            0.0,
+            hydrostatic_stress / 6.0,
+            0.0,
+            0.0,
+            0.0,
+            hydrostatic_stress / 6.0,
+        ];
+        for (actual, reference) in force.iter().zip(expected) {
+            assert!((actual - reference).abs() <= hydrostatic_stress.abs() * 1.0e-12);
+        }
+        let mut invalid = temperature;
+        invalid[0] = -1.0;
+        assert!(matches!(
+            assemble_solved_temperature_load(&mesh, &properties, &invalid),
+            Err(ThermoelasticLoadError::InvalidNodalField)
+        ));
     }
 
     #[test]
