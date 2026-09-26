@@ -52,7 +52,11 @@ macro_rules! define_logical_reduction_entry {
             [INPUT_A, INPUT_DIM, INPUT_NANFLAG];
         const INPUTS_NANFLAG_DIM: [crate::BuiltinParamDescriptor; 3] =
             [INPUT_A, INPUT_NANFLAG, INPUT_DIM];
-        const SIGNATURES: [crate::BuiltinSignatureDescriptor; 6] = [
+        const INPUTS_OPTIONS: [crate::BuiltinParamDescriptor; 2] = [INPUT_A, crate::BuiltinParamDescriptor {
+            name: "options", ty: crate::BuiltinParamType::Any, arity: crate::BuiltinParamArity::Variadic,
+            default: None, description: "Existing option grammar: empty dimension placeholders, at most one nonempty dimension selector or all selector, and at most one NaN flag.",
+        }];
+        const SIGNATURES: [crate::BuiltinSignatureDescriptor; 7] = [
             crate::BuiltinSignatureDescriptor {
                 label: concat!("B = ", $name, "(A)"),
                 inputs: &INPUTS_CORE,
@@ -81,6 +85,11 @@ macro_rules! define_logical_reduction_entry {
             crate::BuiltinSignatureDescriptor {
                 label: concat!("B = ", $name, "(A, nanflag, dim)"),
                 inputs: &INPUTS_NANFLAG_DIM,
+                outputs: &OUTPUTS,
+            },
+            crate::BuiltinSignatureDescriptor {
+                label: concat!("B = ", $name, "(A, options...)"),
+                inputs: &INPUTS_OPTIONS,
                 outputs: &OUTPUTS,
             },
         ];
@@ -116,7 +125,15 @@ macro_rules! define_logical_reduction_entry {
                 capabilities: &[],
             },
             placement: crate::BuiltinPlacementContract {
-                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+                preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+                    id: crate::BuiltinPreparationFormId(0), binding_variant: "default",
+                    signatures: &[0, 1, 2, 3, 4, 5, 6], data_arguments: &[0],
+                    operation: crate::BuiltinPreparationOperation::Reduction(match $kind {
+                        crate::LogicalReductionKind::All => crate::BuiltinPreparationReduction::All,
+                        crate::LogicalReductionKind::Any => crate::BuiltinPreparationReduction::Any,
+                    }),
+                    provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+                }]),
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::Host,

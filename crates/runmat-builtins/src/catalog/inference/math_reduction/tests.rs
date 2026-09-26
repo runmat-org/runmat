@@ -3,6 +3,32 @@ use runmat_types::{
     LiteralContext, NumericClass, NumericDomain, NumericFact, OutputSelection, RequestedOutputCount,
 };
 
+#[test]
+fn variadic_empty_placeholders_preserve_dimension_and_default_inference() {
+    for selector in [LiteralValue::Number(2.0), LiteralValue::Vector(vec![])] {
+        let expected = if matches!(selector, LiteralValue::Number(_)) {
+            vec![Some(2), Some(1)]
+        } else {
+            vec![Some(1), Some(3)]
+        };
+        let result = infer_logical(
+            &request(
+                ShapeFact::from(vec![Some(2), Some(3)]),
+                vec![
+                    LiteralValue::Unknown,
+                    LiteralValue::Vector(vec![]),
+                    selector,
+                    LiteralValue::Vector(vec![]),
+                ],
+            ),
+            &crate::ALL_CATALOG_ENTRY,
+            LogicalReductionKind::All,
+        );
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].shape, ShapeFact::from(expected));
+    }
+}
+
 fn request(shape: ShapeFact, literals: Vec<LiteralValue>) -> runmat_types::CallRequest {
     let argument_count = literals.len().max(1);
     let input = ValueFact::proven(

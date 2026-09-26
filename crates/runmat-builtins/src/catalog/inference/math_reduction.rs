@@ -21,13 +21,6 @@ pub(super) fn infer_logical(
             diagnostics,
         );
     };
-    if request.arguments.len() > 3 {
-        diagnostics.push(argument_error(
-            "RM-CATALOG-LOGICAL-REDUCTION-ARITY",
-            format!("{} accepts at most three inputs", entry.identity.name),
-            3,
-        ));
-    }
 
     if !matches!(
         input.kind,
@@ -100,6 +93,7 @@ fn reduced_shape(
                 }
                 nan_mode_seen = true;
             }
+            LiteralValue::Vector(values) if values.is_empty() => {}
             LiteralValue::Vector(_) => {
                 selected = request.literals.numeric_vector_at(index);
             }
@@ -118,7 +112,12 @@ fn reduced_shape(
     }
     let selected = match selected {
         Some(values) => values,
-        None if request.arguments.len() > 1 && !nan_mode_seen => {
+        None if request.arguments.len() > 1
+            && !nan_mode_seen
+            && !request.literals.literal_args.iter().skip(1).all(
+                |literal| matches!(literal, LiteralValue::Vector(values) if values.is_empty()),
+            ) =>
+        {
             return ShapeFact::Ranked {
                 rank: dimensions.len(),
             };

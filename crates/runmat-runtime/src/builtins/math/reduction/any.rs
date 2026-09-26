@@ -13,7 +13,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-const CONFIG: super::logical::LogicalReductionConfig = super::logical::LogicalReductionConfig {
+pub(super) const CONFIG: super::logical::LogicalReductionConfig = super::logical::LogicalReductionConfig {
     entry: &ANY_CATALOG_ENTRY,
     kind: LogicalReductionKind::Any,
     invalid_argument: &ANY_ERROR_INVALID_ARGUMENT,
