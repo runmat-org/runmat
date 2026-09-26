@@ -130,6 +130,23 @@ pub trait RuntimeErrorService {
 
 pub trait RuntimeAccelerationService {
     fn supports_operation(&self, operation: &str) -> bool;
+
+    /// Called only after the owning domain has admitted the complete call.
+    /// Controls and parsed options remain in that domain, never in this service.
+    /// Implementations must guard fresh resources across preparation itself:
+    /// errors or cancellation before returning the owned carrier must release
+    /// those resources without releasing borrowed inputs.
+    fn prepare_admitted(
+        &self,
+        _context: super::RuntimeContext,
+        request: super::preparation::AdmittedBuiltinPreparation,
+    ) -> RuntimeServiceFuture<Result<super::preparation::PreparedBuiltinOperands, RuntimeError>> {
+        Box::pin(async move {
+            Ok(super::preparation::PreparedBuiltinOperands::passthrough(
+                request.into_operands(),
+            ))
+        })
+    }
 }
 
 /// Session-owned execution-placement authority. The runtime exposes only
