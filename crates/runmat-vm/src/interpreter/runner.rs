@@ -61,6 +61,19 @@ fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
     initial.extend_from_slice(vars);
 }
 
+fn check_cancelled_with_residency_cleanup(stack: &[Value], vars: &[Value]) -> VmResult<()> {
+    let result = interp_engine::check_cancelled();
+    #[cfg(feature = "native-accel")]
+    if result.is_err() {
+        for value in stack.iter().chain(vars) {
+            clear_residency(value);
+        }
+    }
+    #[cfg(not(feature = "native-accel"))]
+    let _ = (stack, vars);
+    result
+}
+
 fn ensure_workspace_resolver_registered() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
@@ -765,18 +778,7 @@ async fn run_interpreter_inner(
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
-        if let Err(err) = interp_engine::check_cancelled() {
-            #[cfg(feature = "native-accel")]
-            {
-                for value in &stack {
-                    clear_residency(value);
-                }
-                for value in &vars {
-                    clear_residency(value);
-                }
-            }
-            return Err(err);
-        }
+        check_cancelled_with_residency_cleanup(&stack, &vars)?;
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) = (active_group_plan_clone(), fusion_accel_graph.as_ref())
         {
@@ -860,15 +862,7 @@ async fn run_interpreter_inner(
                             // the observation first so cancellation retires the
                             // selected ticket as failure, even for a one-instruction
                             // CPU region that could otherwise complete this turn.
-                            if let Err(err) = interp_engine::check_cancelled() {
-                                for value in &stack {
-                                    clear_residency(value);
-                                }
-                                for value in &vars {
-                                    clear_residency(value);
-                                }
-                                return Err(err);
-                            }
+                            check_cancelled_with_residency_cleanup(&stack, &vars)?;
                         }
                         Err(err) => {
                             trace.event(
