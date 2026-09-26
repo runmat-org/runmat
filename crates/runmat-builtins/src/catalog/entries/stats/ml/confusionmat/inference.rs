@@ -27,7 +27,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             .get(index)
             .and_then(literal_text)
         {
-            Some(name) if canonical(name) == "order" => {
+            Some(name) if canonical(&name) == "order" => {
                 order_source = request.arguments.get(index + 1);
                 explicit = true;
             }
