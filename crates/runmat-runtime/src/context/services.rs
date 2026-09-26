@@ -122,6 +122,15 @@ pub trait RuntimeHostService {
     ) -> RuntimeServiceFuture<Result<crate::interaction::InteractionResponse, RuntimeError>>;
 
     fn warning(&self, warning: RuntimeWarning);
+
+    /// Complete only after the application host accepts the requested document
+    /// interaction. Hosts without an editor/viewer must return an error.
+    fn open_document(
+        &self,
+        _request: super::HostDocumentRequest,
+    ) -> RuntimeServiceFuture<Result<(), RuntimeError>> {
+        Box::pin(async { Err(super::host_document::unavailable()) })
+    }
 }
 
 pub trait RuntimeErrorService {

@@ -5,6 +5,9 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod host_document;
+#[cfg(test)]
+pub(crate) mod document_test_support;
 mod runtime;
 mod scope;
 mod services;
@@ -14,6 +17,7 @@ pub mod legacy;
 pub mod preparation;
 
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
+pub use host_document::{HostDocumentRequest, HostTextLocation, HostTextSelection};
 pub use runtime::{
     ProgramExecutionAssignmentGuard, ProgramExecutionJobGuard, RuntimeContext,
     RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard, RuntimeLanguageMode,

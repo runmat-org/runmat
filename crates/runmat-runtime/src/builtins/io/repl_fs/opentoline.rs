@@ -265,22 +265,45 @@ async fn opentoline_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(column) = args.get(2) {
         gate_position_extensions(column, &INTEGER_COLUMN_EXTENSION)?;
     }
-    let filename = filename_arg(&args[0]).await?;
+    let filename = filename_arg(&args[0])?;
     if filename.is_empty() {
         return Err(opentoline_error(
             &ERROR_FILENAME,
             "opentoline: filename must not be empty",
         ));
     }
-    let _path = resolve_file(&filename).await?;
-    let _line = positive_integer_arg(&args[1], "line").await?;
-    let _column = match args.get(2) {
-        Some(value) => positive_integer_arg(value, "column").await?,
+    let line = admit_position(&args[1], "line")?;
+    let column = args
+        .get(2)
+        .map(|value| admit_position(value, "column"))
+        .transpose()?;
+    if let Some(option) = args.get(3) {
+        parse_option(option)?;
+    }
+
+    let line = resolve_position(line, "line").await?;
+    let column = match column {
+        Some(value) => resolve_position(value, "column").await?,
         None => 1,
     };
-    if let Some(option) = args.get(3) {
-        parse_option(option).await?;
-    }
+    let path = resolve_file(&filename).await?;
+    let location = crate::context::HostTextLocation {
+        line: std::num::NonZeroUsize::new(line)
+            .ok_or_else(|| opentoline_error(&ERROR_POSITION, ERROR_POSITION.message))?,
+        column: std::num::NonZeroUsize::new(column)
+            .ok_or_else(|| opentoline_error(&ERROR_POSITION, ERROR_POSITION.message))?,
+        selection: if args.len() == 4 {
+            crate::context::HostTextSelection::Select
+        } else {
+            crate::context::HostTextSelection::Caret
+        },
+    };
+    crate::context::legacy::request_document(crate::context::HostDocumentRequest::Navigate {
+        path,
+        location,
+    })
+    .await
+    .map_err(|err| opentoline_flow_error("opentoline", err))?;
 
     Ok(empty_array())
 }
@@ -302,17 +325,13 @@ fn gate_position_extensions(
     Ok(())
 }
 
-async fn filename_arg(value: &Value) -> BuiltinResult<String> {
-    match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        _ => Err(opentoline_error(&ERROR_FILENAME, ERROR_FILENAME.message)),
-    }
+fn filename_arg(value: &Value) -> BuiltinResult<String> {
+    super::file_dialog::try_scalar_text(value)
+        .ok_or_else(|| opentoline_error(&ERROR_FILENAME, ERROR_FILENAME.message))
 }
-
-async fn parse_option(value: &Value) -> BuiltinResult<()> {
-    let option = text_arg(value, &ERROR_OPTION).await?;
+fn parse_option(value: &Value) -> BuiltinResult<()> {
+    let option = super::file_dialog::try_scalar_text(value)
+        .ok_or_else(|| opentoline_error(&ERROR_OPTION, ERROR_OPTION.message))?;
     if option.eq_ignore_ascii_case("select") {
         Ok(())
     } else {
@@ -322,24 +341,43 @@ async fn parse_option(value: &Value) -> BuiltinResult<()> {
         ))
     }
 }
-
-async fn text_arg(value: &Value, error: &'static BuiltinErrorDescriptor) -> BuiltinResult<String> {
+enum AdmittedPosition {
+    Host(usize),
+    Resident(Value),
+}
+fn admit_position(value: &Value, label: &str) -> BuiltinResult<AdmittedPosition> {
+    if let Value::GpuTensor(handle) = value {
+        if handle
+            .shape
+            .iter()
+            .try_fold(1usize, |count, dim| count.checked_mul(*dim))
+            != Some(1)
+        {
+            return Err(opentoline_error(
+                &ERROR_POSITION,
+                format!("opentoline: {label} must be a scalar"),
+            ));
+        }
+        return Ok(AdmittedPosition::Resident(value.clone()));
+    }
+    host_position(value, label).map(AdmittedPosition::Host)
+}
+async fn resolve_position(value: AdmittedPosition, label: &str) -> BuiltinResult<usize> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        _ => Err(opentoline_error(error, error.message)),
+        AdmittedPosition::Host(position) => Ok(position),
+        AdmittedPosition::Resident(value) => {
+            let gathered = gather_if_needed_async(&value)
+                .await
+                .map_err(|err| opentoline_flow_error("opentoline", err))?;
+            host_position(&gathered, label)
+        }
     }
 }
-
-async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize> {
-    if let Some(text) = text_without_gather(value) {
+fn host_position(value: &Value, label: &str) -> BuiltinResult<usize> {
+    if let Some(text) = super::file_dialog::try_scalar_text(value) {
         return parse_positive_integer_text(&text, label);
     }
-    let gathered = gather_if_needed_async(value)
-        .await
-        .map_err(|err| opentoline_flow_error("opentoline", err))?;
-    if let Value::Int(integer) = &gathered {
+    if let Value::Int(integer) = value {
         return integer
             .try_to_usize()
             .filter(|position| *position > 0)
@@ -350,10 +388,10 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
                 )
             });
     }
-    let Some(position) = (match gathered {
-        Value::Num(value) => position_value_to_usize(value),
+    let Some(position) = (match value {
+        Value::Num(value) => position_value_to_usize(*value),
         Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
-            position_tensor_to_usize(&tensor)
+            position_tensor_to_usize(tensor)
         }
         _ => {
             return Err(opentoline_error(
@@ -368,15 +406,6 @@ async fn positive_integer_arg(value: &Value, label: &str) -> BuiltinResult<usize
         ));
     };
     Ok(position)
-}
-
-fn text_without_gather(value: &Value) -> Option<String> {
-    match value {
-        Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        _ => None,
-    }
 }
 
 fn parse_positive_integer_text(text: &str, label: &str) -> BuiltinResult<usize> {
@@ -475,7 +504,74 @@ mod tests {
     use tempfile::tempdir;
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(opentoline_builtin(args))
+        let outputs = crate::output_count::current_output_count();
+        let (context, _) = crate::context::document_test_support::recording_context();
+        block_on(context.scope(async move {
+            let _outputs = crate::output_count::push_output_count(outputs);
+            opentoline_builtin(args).await
+        }))
+    }
+
+    #[test]
+    fn navigation_delivers_exact_typed_position_and_requires_host_support() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("navigate.m");
+        std::fs::write(&path, "value = 1;\n").unwrap();
+        let args = vec![
+            Value::from(path.to_string_lossy().into_owned()),
+            Value::Num(12.0),
+            Value::Num(4.0),
+            Value::from("select"),
+        ];
+        assert_eq!(
+            block_on(opentoline_builtin(args.clone()))
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:host:DocumentInteractionUnavailable")
+        );
+        let (context, recorder) = crate::context::document_test_support::recording_context();
+        block_on(context.scope(opentoline_builtin(args))).unwrap();
+        assert_eq!(
+            *recorder.requests.borrow(),
+            vec![crate::context::HostDocumentRequest::Navigate {
+                path: std::fs::canonicalize(path).unwrap(),
+                location: crate::context::HostTextLocation {
+                    line: std::num::NonZeroUsize::new(12).unwrap(),
+                    column: std::num::NonZeroUsize::new(4).unwrap(),
+                    selection: crate::context::HostTextSelection::Select,
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn option_and_host_position_admission_precede_any_resident_download() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+            shape: vec![1, 1],
+            device_id: u32::MAX,
+            buffer_id: u64::MAX,
+            descriptor: Default::default(),
+        });
+        let args = vec![
+            Value::from("missing.m"),
+            resident.clone(),
+            Value::Num(1.0),
+            Value::from("bad-option"),
+        ];
+        assert_eq!(
+            block_on(opentoline_builtin(args)).unwrap_err().identifier(),
+            ERROR_OPTION.identifier
+        );
+        let args = vec![Value::from("missing.m"), resident, Value::Num(-1.0)];
+        assert_eq!(
+            block_on(opentoline_builtin(args)).unwrap_err().identifier(),
+            ERROR_POSITION.identifier
+        );
+        let pages = Value::CharArray(
+            runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap(),
+        );
+        assert!(filename_arg(&pages).is_err());
     }
 
     #[test]
@@ -496,17 +592,14 @@ mod tests {
     #[test]
     fn opentoline_typed_positions_preserve_integer_bounds() {
         assert_eq!(
-            block_on(positive_integer_arg(&Value::Int(IntValue::U16(7)), "line")).unwrap(),
+            host_position(&Value::Int(IntValue::U16(7)), "line").unwrap(),
             7
         );
-        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::I8(-1)), "line")).is_err());
-        assert!(block_on(positive_integer_arg(&Value::Int(IntValue::U8(0)), "column")).is_err());
+        assert!(host_position(&Value::Int(IntValue::I8(-1)), "line").is_err());
+        assert!(host_position(&Value::Int(IntValue::U8(0)), "column").is_err());
 
         let large = 9_007_199_254_740_993_u64;
-        let parsed = block_on(positive_integer_arg(
-            &Value::Int(IntValue::U64(large)),
-            "line",
-        ));
+        let parsed = host_position(&Value::Int(IntValue::U64(large)), "line");
         if usize::BITS == 64 {
             assert_eq!(parsed.unwrap(), large as usize);
         } else {
@@ -516,17 +609,13 @@ mod tests {
 
     #[test]
     fn opentoline_double_positions_reject_unrepresentable_platform_bounds() {
-        let boundary = block_on(positive_integer_arg(&Value::Num(usize::MAX as f64), "line"));
+        let boundary = host_position(&Value::Num(usize::MAX as f64), "line");
         if usize::BITS == 64 {
             assert!(boundary.is_err());
         } else {
             assert_eq!(boundary.unwrap(), usize::MAX);
         }
-        assert!(block_on(positive_integer_arg(
-            &Value::Num((usize::MAX as f64) + 1.0),
-            "line"
-        ))
-        .is_err());
+        assert!(host_position(&Value::Num((usize::MAX as f64) + 1.0), "line").is_err());
     }
 
     #[test]
@@ -534,14 +623,11 @@ mod tests {
         let line =
             Tensor::new_integer(runmat_value::IntegerStorage::U64(vec![9]), vec![1, 1]).unwrap();
 
-        assert_eq!(
-            block_on(positive_integer_arg(&Value::Tensor(line), "line")).unwrap(),
-            9
-        );
+        assert_eq!(host_position(&Value::Tensor(line), "line").unwrap(), 9);
 
         let zero =
             Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![0]), vec![1, 1]).unwrap();
-        assert!(block_on(positive_integer_arg(&Value::Tensor(zero), "line")).is_err());
+        assert!(host_position(&Value::Tensor(zero), "line").is_err());
     }
 
     #[test]

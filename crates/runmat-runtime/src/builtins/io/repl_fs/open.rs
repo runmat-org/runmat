@@ -19,7 +19,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "open";
 
@@ -166,12 +166,17 @@ async fn open_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
 
-    let name = open_name(&args[0]).await?;
+    let name = open_name(&args[0])?;
     if name.is_empty() {
         return Err(open_error(&OPEN_ERROR_NAME, "open: name must not be empty"));
     }
 
     if !should_treat_as_path(&name) && crate::workspace::lookup(&name).is_some() {
+        crate::context::legacy::request_document(
+            crate::context::HostDocumentRequest::OpenVariable { name },
+        )
+        .await
+        .map_err(|err| open_flow_error("open", err))?;
         return Ok(empty_array());
     }
 
@@ -205,6 +210,11 @@ async fn open_path(path: &Path) -> BuiltinResult<Value> {
     }
 
     if is_viewer_or_editor_extension(&extension) {
+        crate::context::legacy::request_document(crate::context::HostDocumentRequest::OpenFile {
+            path: path.to_path_buf(),
+        })
+        .await
+        .map_err(|err| open_flow_error("open", err))?;
         return Ok(empty_array());
     }
 
@@ -218,13 +228,15 @@ async fn open_path(path: &Path) -> BuiltinResult<Value> {
     ))
 }
 
-async fn open_name(value: &Value) -> BuiltinResult<String> {
-    let gathered = gather_if_needed_async(value)
-        .await
-        .map_err(|err| open_flow_error("open", err))?;
-    match gathered {
-        Value::String(text) => Ok(text),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect::<String>()),
+fn open_name(value: &Value) -> BuiltinResult<String> {
+    match value {
+        Value::String(text) => Ok(text.clone()),
+        Value::CharArray(chars)
+            if chars.rows == 1
+                && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+        {
+            Ok(chars.data.iter().collect::<String>())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(open_error(&OPEN_ERROR_NAME, OPEN_ERROR_NAME.message)),
     }
@@ -291,7 +303,7 @@ async fn call_extension_handler(extension: &str, path: &Path) -> BuiltinResult<O
         .and_then(|sequence| {
             let mut values = sequence.into_values();
             match values.len() {
-                0 => Ok(None),
+                0 => Ok(Some(empty_array())),
                 1 => Ok(values.pop()),
                 count => Err(crate::runtime_error::semantic_error(
                     "RunMat:OpenHandlerOutputCount",
@@ -462,7 +474,12 @@ mod tests {
     }
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(open_builtin(args))
+        let outputs = crate::output_count::current_output_count();
+        let (context, _) = crate::context::document_test_support::recording_context();
+        block_on(context.scope(async move {
+            let _outputs = crate::output_count::push_output_count(outputs);
+            open_builtin(args).await
+        }))
     }
 
     #[test]
@@ -489,14 +506,70 @@ mod tests {
     }
 
     #[test]
-    fn open_variable_name_is_noop_editor_open() {
+    fn open_variable_name_requests_host_editor() {
         let _guard = workspace_guard();
         ensure_test_resolver();
         set_workspace(&[("answer", Value::Num(42.0))]);
 
-        let result = call(vec![Value::from("answer")]).expect("open variable");
+        let (context, recorder) = crate::context::document_test_support::recording_context();
+        let result = block_on(context.scope(open_builtin(vec![Value::from("answer")])))
+            .expect("open variable");
 
         assert_eq!(result, empty_array());
+        assert_eq!(
+            *recorder.requests.borrow(),
+            vec![crate::context::HostDocumentRequest::OpenVariable {
+                name: "answer".into()
+            }]
+        );
+    }
+
+    #[test]
+    fn editor_file_requires_a_host_and_delivers_the_resolved_path() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("editor.m");
+        std::fs::write(&path, "value = 1;\n").unwrap();
+        let args = vec![Value::from(path.to_string_lossy().into_owned())];
+        let error = block_on(open_builtin(args.clone())).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:host:DocumentInteractionUnavailable")
+        );
+        let (context, recorder) = crate::context::document_test_support::recording_context();
+        block_on(context.scope(open_builtin(args))).unwrap();
+        assert_eq!(
+            *recorder.requests.borrow(),
+            vec![crate::context::HostDocumentRequest::OpenFile {
+                path: std::fs::canonicalize(path).unwrap()
+            }]
+        );
+    }
+
+    #[test]
+    fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
+        let _guard = workspace_guard();
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("custom.audit");
+        std::fs::write(&path, "fixture").unwrap();
+        let _resolver =
+            crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
+                (name == "openaudit").then_some(88)
+            })));
+        let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+            |_, _, requested| {
+                assert_eq!(requested, 0);
+                Box::pin(async { Ok(runmat_value::ValueSequence::empty()) })
+            },
+        )));
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _semantic_outputs = crate::output_context::push_output_count(0);
+        assert_eq!(
+            block_on(open_builtin(vec![Value::from(
+                path.to_string_lossy().into_owned()
+            )]))
+            .unwrap(),
+            empty_array()
+        );
     }
 
     #[test]
