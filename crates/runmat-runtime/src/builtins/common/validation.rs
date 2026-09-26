@@ -26,7 +26,6 @@ use runmat_value::{
 use crate::builtins::common::identifiers::is_valid_varname;
 use crate::builtins::common::tensor;
 use crate::builtins::introspection::class::class_name_for_value;
-use crate::builtins::introspection::underlying_type::underlying_type_matches;
 use crate::builtins::logical::rel::integer_comparison::integer_f64_order;
 use crate::builtins::logical::rel::integer_comparison::{
     try_complex_ordering_comparison, try_real_ordering_comparison, IntegerComparisonError,

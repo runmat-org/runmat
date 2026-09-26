@@ -35,7 +35,7 @@ pub fn value_is_empty(value: &Value) -> bool {
         Value::ComplexTensor(t) => tensor::complex_tensor_element_len(t) == 0,
         Value::LogicalArray(a) => a.data.is_empty(),
         Value::StringArray(s) => s.data.is_empty(),
-        Value::CharArray(c) => c.rows == 0 || c.cols == 0,
+        Value::CharArray(c) => c.shape.contains(&0),
         Value::Cell(c) => c.data.is_empty(),
         Value::StructArray(array) => array.is_empty(),
         Value::GpuTensor(handle) => handle.shape.contains(&0),
@@ -44,8 +44,21 @@ pub fn value_is_empty(value: &Value) -> bool {
 }
 
 pub fn value_is_scalar_or_empty(value: &Value) -> bool {
-    let (rows, cols) = value_shape_2d(value);
-    (rows == 1 && cols == 1) || rows == 0 || cols == 0
+    let shape: &[usize] = match value {
+        Value::Tensor(value) => &value.shape,
+        Value::ComplexTensor(value) => &value.shape,
+        Value::LogicalArray(value) => &value.shape,
+        Value::StringArray(value) => &value.shape,
+        Value::Cell(value) => &value.shape,
+        Value::StructArray(value) => value.shape(),
+        Value::CharArray(value) => &value.shape,
+        Value::GpuTensor(handle) => &handle.shape,
+        _ => {
+            let (rows, cols) = value_shape_2d(value);
+            return (rows == 1 && cols == 1) || rows == 0 || cols == 0;
+        }
+    };
+    shape.contains(&0) || shape.iter().all(|extent| *extent == 1)
 }
 
 pub fn value_is_column(value: &Value) -> bool {
