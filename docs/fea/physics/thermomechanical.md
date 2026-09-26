@@ -333,6 +333,26 @@ certified error bound or general curved-element qualification. Spatial convergen
 cross-mesh projection, portable execution/persistence, and downstream thermal-prestress procedures
 are not qualified by these tests. Production admission remains closed.
 
+## Shared numerical transport memory evidence
+
+Numerical-object chunk preparation hashes borrowed partitions incrementally rather than
+concatenating them into an additional payload buffer. Closure verification checks existing chunks,
+partition digests and the complete digest directly, without gathering and rechunking. Canonical
+chunk boundaries and payload identity are unchanged. Invalid inventories are rejected before indexing.
+
+Run the Rust-heap diagnostic with:
+
+```sh
+cargo run --release -p runmat-analysis-fea --example numerical_chunk_memory
+```
+
+For sixteen partitions and 64 KiB chunks, an 8 MiB payload required 8,400,432 B additional
+Rust heap during preparation, and a 32 MiB payload required 33,593,904 B. Verification required
+1,200 B for both cases (partition-identity metadata). Input construction is excluded; preparation
+includes the owned output chunks. This is not a complete producer/transport memory bound:
+thermal result serialization, bridge import/materialization, retained producer payloads and
+portable thermal Solve routing remain separate work. Reported process RSS is contextual only.
+
 ## Why is my thermal stress wrong?
 
 Check coefficient-of-expansion units, reference temperature, material coverage, restraint realism,
