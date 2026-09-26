@@ -5,6 +5,28 @@ use runmat_plot::plots::figure::YDirection;
 #[path = "axes_modes/tests.rs"]
 mod tests;
 
+pub fn axis_color_limits_snapshot_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<runmat_plot::plots::surface::ScalarColorRange, FigureError> {
+    let reg = registry();
+    let state = reg
+        .figures
+        .get(&handle)
+        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+    validate_axes_index(state, axes_index)?;
+    if let Some((lower, upper)) = state
+        .figure
+        .axes_metadata(axes_index)
+        .and_then(|meta| meta.color_limits)
+    {
+        return Ok(runmat_plot::plots::surface::ScalarColorRange::Known(
+            lower, upper,
+        ));
+    }
+    Ok(state.figure.axes_scalar_color_range(axes_index))
+}
+
 /// Z limits exist for represented 3-D content or an explicitly configured Z
 /// range. Camera angles do not change the dimensionality of the data.
 pub fn axis_z_limits_snapshot_for_axes(

@@ -3,8 +3,9 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::cmd_parsing::as_lower_str;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, axis_z_limits_snapshot_for_axes,
-    current_axes_state, current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
+    axes_metadata_snapshot, axis_color_limits_snapshot_for_axes,
+    axis_display_bounds_snapshot_for_axes, axis_z_limits_snapshot_for_axes, current_axes_state,
+    current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
     set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime, set_z_limits,
     FigureHandle,
 };
@@ -52,9 +53,6 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                         .flatten()
                 })
                 .unwrap_or((0.0, 1.0, 0.0, 1.0));
-            let meta = state
-                .as_ref()
-                .and_then(|state| axes_metadata_snapshot(state.handle, state.active_index).ok());
             let x = axis_limit_pair(values[0], values[1], bounds.0, bounds.1)?;
             let y = axis_limit_pair(values[2], values[3], bounds.2, bounds.3)?;
             let z = if values.len() >= 6 {
@@ -70,10 +68,23 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
                 None
             };
             let c = if values.len() == 8 {
-                let c_auto = meta
-                    .as_ref()
-                    .and_then(|meta| meta.color_limits)
-                    .unwrap_or((0.0, 1.0));
+                let c_auto = if values[6] == f64::NEG_INFINITY || values[7] == f64::INFINITY {
+                    let range = state
+                        .as_ref()
+                        .map(|state| {
+                            axis_color_limits_snapshot_for_axes(state.handle, state.active_index)
+                        })
+                        .transpose()
+                        .map_err(|_| axis_invalid_argument())?
+                        .unwrap_or(runmat_plot::plots::surface::ScalarColorRange::Empty);
+                    match range {
+                        runmat_plot::plots::surface::ScalarColorRange::Known(lower, upper) => (lower, upper),
+                        runmat_plot::plots::surface::ScalarColorRange::Empty | runmat_plot::plots::surface::ScalarColorRange::NotMapped => (0., 1.),
+                        runmat_plot::plots::surface::ScalarColorRange::Unavailable => return Err(cmd_error_with_message("axis", "axis: automatic color limits are unavailable for this resident plot", &AXIS_ERROR_INVALID_ARGUMENT)),
+                    }
+                } else {
+                    (0., 1.)
+                };
                 Some(axis_limit_pair(values[6], values[7], c_auto.0, c_auto.1)?)
             } else {
                 None

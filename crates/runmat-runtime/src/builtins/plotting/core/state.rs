@@ -38,8 +38,8 @@ pub use clear_axes::{clear_axes_target, clear_current_axes};
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
 pub use axes_modes::{
-    axis_z_limits_snapshot_for_axes, lock_axes_limits, set_hidden_line_removal_for_axes,
-    set_y_direction_for_axes,
+    axis_color_limits_snapshot_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
+    set_hidden_line_removal_for_axes, set_y_direction_for_axes,
 };
 pub use colorbar::{
     colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,

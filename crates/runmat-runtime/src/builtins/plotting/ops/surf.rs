@@ -672,7 +672,8 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         .map_err(|_| plotting_error(name, format!("{name}: LOD Y size overflowed")))?;
     let mut surface =
         SurfacePlot::from_gpu_buffer(lod_x_len, lod_y_len, gpu_vertices, vertex_count, bounds)
-            .with_gpu_source(gpu_source);
+            .with_gpu_source(gpu_source)
+            .with_scalar_color_extent(min_z as f64, max_z as f64);
     surface.colormap = colormap;
     surface.alpha = alpha;
     surface.flatten_z = flatten_z;

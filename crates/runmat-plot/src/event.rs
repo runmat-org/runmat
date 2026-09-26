@@ -437,6 +437,8 @@ pub enum ScenePlot {
         #[serde(default)]
         image_mode: bool,
         #[serde(default)]
+        color_mapping: crate::plots::surface::SurfaceColorMapping,
+        #[serde(default)]
         color_grid_rgba: Option<Vec<Vec<[f32; 4]>>>,
         #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
         color_limits: Option<[f64; 2]>,
@@ -2217,6 +2219,7 @@ impl ScenePlot {
                     wireframe: surface.wireframe,
                     alpha: surface.alpha,
                     flatten_z: surface.flatten_z,
+                    color_mapping: surface.color_mapping,
                     image_mode: surface.image_mode,
                     color_grid_rgba: color_grid.as_ref().map(|grid| {
                         grid.iter()
@@ -2752,6 +2755,7 @@ impl ScenePlot {
                 wireframe: surface.wireframe,
                 alpha: surface.alpha,
                 flatten_z: surface.flatten_z,
+                color_mapping: surface.color_mapping,
                 image_mode: surface.image_mode,
                 color_grid_rgba: surface.color_grid.as_ref().map(|grid| {
                     grid.iter()
@@ -3249,6 +3253,7 @@ impl ScenePlot {
                 alpha,
                 flatten_z,
                 image_mode,
+                color_mapping,
                 color_grid_rgba,
                 color_limits,
                 axes_index,
@@ -3284,6 +3289,7 @@ impl ScenePlot {
                 surface.alpha = alpha.clamp(0.0, 1.0);
                 surface.flatten_z = flatten_z;
                 surface.image_mode = image_mode;
+                surface.color_mapping = color_mapping;
                 surface.color_grid = color_grid_rgba.map(|grid| {
                     grid.into_iter()
                         .map(|row| row.into_iter().map(rgba_to_vec4).collect())
@@ -4062,6 +4068,7 @@ mod tests {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            color_mapping: Default::default(),
             color_grid_rgba: Some(vec![
                 vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
                 vec![[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
@@ -4089,6 +4096,7 @@ mod tests {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            color_mapping: Default::default(),
             color_grid_rgba: None,
             color_limits: None,
             axes_index: 0,
@@ -4123,6 +4131,7 @@ mod tests {
                 alpha: 1.0,
                 flatten_z: true,
                 image_mode: true,
+                color_mapping: Default::default(),
                 color_grid_rgba: Some(vec![
                     vec![
                         [1.0, 0.0, 0.0, 1.0],
@@ -5052,6 +5061,7 @@ mod tests {
                 alpha: 1.0,
                 flatten_z: false,
                 image_mode: false,
+                color_mapping: Default::default(),
                 color_grid_rgba: None,
                 color_limits: None,
                 axes_index: 0,

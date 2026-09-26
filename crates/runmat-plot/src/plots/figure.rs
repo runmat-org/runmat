@@ -17,6 +17,8 @@ use std::collections::HashMap;
 mod axes_reset;
 #[path = "figure/colormap.rs"]
 mod colormap;
+#[path = "figure/color_range.rs"]
+mod color_range;
 #[path = "figure/y_direction.rs"]
 mod y_direction;
 pub use y_direction::YDirection;
@@ -1181,7 +1183,9 @@ impl Figure {
                 continue;
             }
             if let PlotElement::Surface(surface) = plot {
-                surface.set_color_limits(limits);
+                if surface.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                    surface.set_color_limits(limits);
+                }
             }
         }
         if axes_index == self.active_axes_index {
@@ -1651,7 +1655,9 @@ impl Figure {
                 .unwrap_or(true);
             if let PlotElement::Surface(s) = p {
                 if let Some(meta) = self.axes_metadata.get(axes_index) {
-                    s.set_color_limits(meta.color_limits);
+                    if s.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
+                        s.set_color_limits(meta.color_limits);
+                    }
                     *s = s.clone().with_colormap(meta.colormap.clone());
                 }
             }

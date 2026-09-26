@@ -11,6 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
 "`axis()` returns the current x and y limits as a four-element double vector, adding z limits when the axes contain 3-D data or have explicit z limits. Automatic z limits come from the plotted data, including before `axis manual` is called. `axis(ax)` queries the specified axes.",
 "Four-, six-, and eight-element vectors set x/y, x/y/z, or x/y/z/color limits respectively. A `-Inf` lower endpoint or `Inf` upper endpoint retains the current data-fitted endpoint.",
+"Automatic color endpoints use the scalar surface and scaled-image data governed by axes color limits. Direct-indexed and true-color images do not contribute. Scatter and mesh retain their separate color policies, and contour colors are already encoded in their vertices. Resident surfaces use retained range metadata; unavailable metadata produces an error before changing limits rather than downloading plot data.",
 "Limit vectors accept all eight integer classes. Authoritative integer storage is validated before one deliberate conversion into host double graphics state, and later limit queries return double.",
 "`axis('on')`, `axis('off')`, logical scalars, and numeric zero or one control axes visibility. Numeric visibility accepts all eight integer classes.",
 "`axis equal` enables equal aspect behavior on the current axes.",

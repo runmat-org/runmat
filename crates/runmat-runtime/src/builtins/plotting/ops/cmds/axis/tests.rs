@@ -4,6 +4,61 @@ use crate::builtins::plotting::get::get_builtin;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn automatic_color_endpoints_use_scaled_color_data_not_spatial_coordinates() {
+    let _guard = setup();
+    let mut figure = runmat_plot::plots::Figure::new();
+    figure.add_surface_plot(
+        runmat_plot::plots::SurfacePlot::new(
+            vec![100., 200.],
+            vec![300.],
+            vec![vec![20.], vec![40.]],
+        )
+        .unwrap()
+        .with_image_mode(true)
+        .with_flatten_z(true),
+    );
+    let handle = crate::builtins::plotting::state::import_figure(figure);
+    axis_builtin(vec![Value::Tensor(
+        Tensor::new(
+            vec![1., 2., 3., 4., 5., 6., f64::NEG_INFINITY, f64::INFINITY],
+            vec![1, 8],
+        )
+        .unwrap(),
+    )])
+    .unwrap();
+    assert_eq!(
+        axes_metadata_snapshot(handle, 0).unwrap().color_limits,
+        Some((20., 40.))
+    );
+}
+
+#[test]
+fn unavailable_resident_color_extent_rejects_before_any_limit_mutation() {
+    let _guard = setup();
+    let mut figure = runmat_plot::plots::Figure::new();
+    let mut surface =
+        runmat_plot::plots::SurfacePlot::new(vec![1.], vec![1.], vec![vec![20.]]).unwrap();
+    // Missing retained extent is explicit; resolving limits cannot trigger readback.
+    surface.z_data = None;
+    figure.add_surface_plot(surface);
+    let handle = crate::builtins::plotting::state::import_figure(figure);
+    let before = axes_metadata_snapshot(handle, 0).unwrap();
+    assert!(axis_builtin(vec![Value::Tensor(
+        Tensor::new(
+            vec![1., 2., 3., 4., 5., 6., f64::NEG_INFINITY, f64::INFINITY],
+            vec![1, 8]
+        )
+        .unwrap()
+    )])
+    .is_err());
+    let after = axes_metadata_snapshot(handle, 0).unwrap();
+    assert_eq!(after.x_limits, before.x_limits);
+    assert_eq!(after.y_limits, before.y_limits);
+    assert_eq!(after.z_limits, before.z_limits);
+    assert_eq!(after.color_limits, before.color_limits);
+}
+
+#[test]
 fn automatic_three_dimensional_queries_and_infinite_endpoints_share_z_bounds() {
     let _guard = setup();
     let mut figure = runmat_plot::plots::Figure::new();

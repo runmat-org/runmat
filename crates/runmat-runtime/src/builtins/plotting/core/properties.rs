@@ -5255,6 +5255,11 @@ fn apply_image_property(
             })
         };
         super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
+            surface.color_mapping = if mapping == "direct" {
+                runmat_plot::plots::surface::SurfaceColorMapping::Direct
+            } else {
+                runmat_plot::plots::surface::SurfaceColorMapping::Scaled
+            };
             surface.set_color_limits(renderer_limits);
         })
         .map_err(|err| map_figure_error(builtin, err))?;
