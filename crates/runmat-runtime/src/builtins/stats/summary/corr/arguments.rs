@@ -173,8 +173,7 @@ pub(super) async fn value_to_weights(
 
 pub(super) fn matrix_shape(tensor: &Tensor) -> (usize, usize) {
     let len = tensor.len();
-    let shape = tensor::default_shape_for(&tensor.shape, len);
-    match shape.as_slice() {
+    match tensor.shape.as_slice() {
         [] => (1, 1),
         [_] => (len, 1),
         [rows, cols, ..] => (*rows, *cols),

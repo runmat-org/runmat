@@ -155,5 +155,5 @@ fn gaussian_shape_factor(params: GauspulsParams) -> f64 {
 }
 
 fn db_to_log_amplitude(db: f64) -> f64 {
-    10.0_f64.powf(db / 20.0).ln()
+    db * (std::f64::consts::LN_10 / 20.0)
 }

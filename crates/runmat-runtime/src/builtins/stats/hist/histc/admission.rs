@@ -10,7 +10,8 @@ pub(super) fn ensure_histc_input_extensions(value: &Value) -> BuiltinResult<()> 
     let wide = matches!(
         value,
         Value::Int(runmat_value::IntValue::I64(_) | runmat_value::IntValue::U64(_))
-    ) || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::I64 | NumericDType::U64));
+    ) || matches!(value, Value::Tensor(tensor) if matches!(tensor.numeric_dtype(), NumericDType::I64 | NumericDType::U64))
+        || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some_and(|storage| matches!(storage.real.numeric_dtype(), NumericDType::I64 | NumericDType::U64)));
     if wide {
         crate::compatibility::ensure_builtin_extension_enabled(
             &HISTC_WIDE_INTEGER_EXTENSION,

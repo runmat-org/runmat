@@ -1,5 +1,16 @@
 use super::*;
 use runmat_types::*;
+
+#[test]
+fn tolerant_fractional_dimension_remains_conservative_without_false_rejection() {
+    let result = infer(
+        shape(&[1, 2]),
+        shape(&[1, 2]),
+        Some(LiteralValue::Number(1.0000001)),
+    );
+    assert!(result.diagnostics.is_empty());
+    assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+}
 fn number(shape: ShapeFact) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

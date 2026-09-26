@@ -4,6 +4,22 @@ use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
 #[test]
+fn empty_observations_preserve_variable_count_and_row_mismatch() {
+    let output = block_on(corr_builtin(tensor(vec![], vec![0, 3]), vec![])).unwrap();
+    let Value::Tensor(output) = output else {
+        panic!("matrix")
+    };
+    assert_eq!(output.shape, vec![3, 3]);
+    assert!(output.materialize_f64().iter().all(|value| value.is_nan()));
+    let error = block_on(corr_builtin(
+        tensor(vec![], vec![2, 0]),
+        vec![tensor(vec![], vec![3, 0])],
+    ))
+    .unwrap_err();
+    assert!(error.message.contains("same number of observations"));
+}
+
+#[test]
 fn empty_observation_matrix_checks_result_dimension_overflow() {
     let input = tensor(vec![], vec![0, usize::MAX]);
     let error = block_on(corr_builtin(input, vec![])).unwrap_err();

@@ -7,6 +7,21 @@ use runmat_builtins::{
 use runmat_value::{CharArray, IntValue, IntegerStorage, NumericStorage};
 
 #[test]
+fn extreme_finite_db_levels_do_not_underflow_before_logarithm() {
+    let cutoff = gauspuls_cutoff(default_params(), -10000.);
+    assert!(cutoff.is_finite() && cutoff > 0.);
+    let params = GauspulsParams {
+        fc: 1.,
+        bw: 1.,
+        bwr: -10000.,
+    };
+    let value = gauspuls_scalar(1., params);
+    assert!(value.is_finite() && value > 0. && value < 1.);
+    let ordinary = gauspuls_cutoff(default_params(), -60.);
+    assert!((cutoff / ordinary - (10000_f64 / 60.).sqrt()).abs() < 1e-12);
+}
+
+#[test]
 fn discarded_samples_still_validate_representation_and_exactness() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _outputs = crate::output_count::push_output_count(Some(0));

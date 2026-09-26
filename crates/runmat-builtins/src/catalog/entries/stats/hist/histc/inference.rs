@@ -41,12 +41,18 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             && (1.0..=super::HISTC_MAX_DIMENSION as f64).contains(&d)
         {
             Some(d as usize - 1)
-        } else {
+        } else if !d.is_finite() || !(1.0..=super::HISTC_MAX_DIMENSION as f64).contains(&d.round())
+        {
             diagnostics.push(argument_error(
                 "RM-CATALOG-HISTC-DIM",
                 "histc dim must be an integer from 1 through 32",
                 2,
             ));
+            None
+        } else {
+            // Runtime dimension admission permits a small fractional tolerance.
+            // Without a shared floating admission policy, retain an unknown axis
+            // rather than issuing an incorrect rejection or guessing its shape.
             None
         }
     });
@@ -75,7 +81,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let edges = request.arguments.get(1).and_then(|v| known_shape(&v.shape));
     let edge_count = edges.as_ref().and_then(|shape| checked_count(shape));
     let edge_rows = edges.as_ref().and_then(|shape| {
-        if vector(shape) {
+        if checked_count(shape) == Some(0) || vector(shape) {
             checked_count(shape)
         } else {
             shape.first().copied()

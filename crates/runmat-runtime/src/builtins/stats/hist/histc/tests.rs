@@ -3,6 +3,61 @@ use futures::executor::block_on;
 use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
 #[test]
+fn empty_literal_edges_accept_vector_and_matrix_data() {
+    for (shape, expected) in [(vec![1, 3], vec![0, 0]), (vec![3, 2], vec![0, 2])] {
+        let count = shape.iter().product();
+        let result = block_on(evaluate(
+            tensor(vec![1.; count], shape),
+            tensor(vec![], vec![0, 0]),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(result.counts.shape, expected);
+        assert_eq!(result.indices.shape, vec![0, 0]);
+    }
+}
+
+#[test]
+fn floating_dimension_tolerance_remains_accepted() {
+    let result = block_on(histc_builtin(
+        tensor(vec![0., 1.], vec![1, 2]),
+        tensor(vec![0., 1.], vec![1, 2]),
+        vec![Value::Num(1.0000001)],
+    ))
+    .unwrap();
+    let Value::Tensor(counts) = result else {
+        panic!("counts")
+    };
+    assert_eq!(counts.shape, vec![2, 2]);
+}
+
+#[test]
+fn wide_complex_integer_data_and_edges_obey_compatibility_gate() {
+    let value = Value::ComplexTensor(
+        ComplexTensor::new_integer(
+            IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![1, 2]),
+                IntegerStorage::U64(vec![0, 0]),
+            )
+            .unwrap(),
+            vec![1, 2],
+        )
+        .unwrap(),
+    );
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    for (data, edges) in [
+        (value.clone(), tensor(vec![0., 2.], vec![1, 2])),
+        (tensor(vec![1., 2.], vec![1, 2]), value),
+    ] {
+        let error = block_on(evaluate(data, edges, None)).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            HISTC_WIDE_INTEGER_EXTENSION.error_identifier
+        );
+    }
+}
+
+#[test]
 fn excess_outputs_and_zero_dimension_fail_before_provider_access() {
     let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
         vec![2, 1],
