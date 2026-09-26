@@ -37,7 +37,7 @@ paragraphs:&[
 
 "Integer handle storage is decoded exactly and must represent valid existing axes. Resident or sparse handles are unsupported; no automatic upload or download is introduced. Linked state and handle identities are local to the graphics host, not implicitly transferable to workers or foreign runtimes.",
 
-"Interpreter, JIT and AOT use the same typed binding and shared linked-limit owner. Host figure updates can invoke observers. ",
+"Host figure updates can invoke observers.",
 
 ]},
 BuiltinDocumentationSection{
@@ -116,7 +116,7 @@ kind:BuiltinEvidenceKind::IntegrationTest,
 label:"VM linked axes",
 location:"runmat-vm plotting::linkaxes_propagates_limits_and_supports_off_mode"}],
 notes:&[
-"State-only unit tests do not prove visible rendering; actual BrowserGraphics and Desktop presentation remain integration gates.",
+"Interpreter, JIT and AOT use the same typed binding and shared linked-limit owner. State-only unit tests do not prove visible rendering; actual BrowserGraphics and Desktop presentation remain integration gates.",
 
 "All legacy prose, FAQs and links preserved; unlink example now supplies its own prerequisite axes/link and semantic assertions. Legacy empty string output was an implementation carrier, not a documented public result; typed adaptation now returns an empty output sequence."]},
 introduced:None,
