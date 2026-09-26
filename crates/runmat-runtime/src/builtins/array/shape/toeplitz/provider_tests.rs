@@ -13,10 +13,19 @@ struct Provider {
 }
 impl AccelProvider for Provider {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+    fn upload_numeric(
+        &self,
+        host: &runmat_accelerate_api::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        // Inject at the actual boundary consumed by restoration. The default
+        // adapter owns validation/cleanup of its legacy upload result, so
+        // overriding only upload would hide malformed results from the runtime.
         if let Some(handle) = self.result.lock().unwrap().as_ref() {
             return Ok(handle.clone());
         }
-        self.inner.upload(host)
+        self.inner.upload_numeric(host)
     }
     fn download<'a>(
         &'a self,
@@ -66,6 +75,8 @@ fn rejected_uploads_preserve_both_operands_and_release_fresh_results() {
             shape: &[1, 1],
         })
         .unwrap();
+    let column_metadata = gpu_helpers::snapshot_handle_metadata(&c);
+    let row_metadata = gpu_helpers::snapshot_handle_metadata(&r);
     for (result, expected_frees) in [(&c, 0), (&r, 0), (&malformed, 1)] {
         *provider.result.lock().unwrap() = Some(result.clone());
         let error = block_on(toeplitz_builtin(vec![
@@ -75,6 +86,8 @@ fn rejected_uploads_preserve_both_operands_and_release_fresh_results() {
         .unwrap_err();
         assert_eq!(error.identifier(), ERROR_INTERNAL.identifier);
         assert_eq!(provider.frees.load(Ordering::SeqCst), expected_frees);
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&c), column_metadata);
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&r), row_metadata);
         assert!(block_on(provider.download(&c)).is_ok());
         assert!(block_on(provider.download(&r)).is_ok());
     }
