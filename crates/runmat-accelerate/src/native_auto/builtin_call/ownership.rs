@@ -6,22 +6,31 @@ use std::collections::BTreeSet;
 pub(super) struct OwnedUploads {
     provider: &'static dyn AccelProvider,
     borrowed: BTreeSet<(u32, u64)>,
+    borrowed_handles: Vec<GpuTensorHandle>,
     owned: Vec<GpuTensorHandle>,
 }
 
 impl OwnedUploads {
     pub(super) fn new(provider: &'static dyn AccelProvider, args: &[Value]) -> Self {
         let mut borrowed = BTreeSet::new();
+        let mut borrowed_handles = Vec::new();
         for value in args {
             runmat_runtime::dispatcher::visit_gpu_handles(value, &mut |handle| {
-                borrowed.insert((handle.device_id, handle.buffer_id));
+                if borrowed.insert((handle.device_id, handle.buffer_id)) {
+                    borrowed_handles.push(handle.clone());
+                }
             });
         }
         Self {
             provider,
             borrowed,
+            borrowed_handles,
             owned: Vec::new(),
         }
+    }
+
+    pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
+        self.borrowed_handles.iter().chain(&self.owned).collect()
     }
 
     pub(super) fn track(&mut self, value: &Value) {

@@ -139,8 +139,12 @@ impl NativeAutoOffload {
         let mut uploads = super::ownership::OwnedUploads::new(self.provider, args);
         if evaluation.recommend_gpu {
             for value in processed.iter_mut().take(operation.count()) {
-                *value =
-                    self.promote_tensor_if_large_observed(value, 1, observation.trace.as_ref())?;
+                *value = self.promote_tensor_protecting(
+                    value,
+                    1,
+                    observation.trace.as_ref(),
+                    &uploads.protected(),
+                )?;
                 uploads.track(value);
             }
             if !processed

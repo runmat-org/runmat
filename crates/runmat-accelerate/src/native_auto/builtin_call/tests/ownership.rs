@@ -11,8 +11,25 @@ struct CounterProvider {
     fail_on: Option<u64>,
     freed: Mutex<Vec<u64>>,
     device: u32,
+    alias_on: Mutex<Option<(u64, u64)>>,
 }
 impl AccelProvider for CounterProvider {
+    fn upload_numeric(
+        &self,
+        view: &runmat_accelerate_api::HostNumericTensorView<'_>,
+    ) -> Result<GpuTensorHandle> {
+        let id = self.next.fetch_add(1, Ordering::Relaxed);
+        if self.fail_on == Some(id) {
+            return Err(anyhow!("selected upload failure"));
+        }
+        if let Some((at, alias)) = *self.alias_on.lock().unwrap() {
+            if at == id {
+                return Ok(GpuTensorHandle::new(vec![99], self.device, alias));
+            }
+        }
+        Ok(GpuTensorHandle::new(view.shape.to_vec(), self.device, id)
+            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real))
+    }
     fn upload(&self, view: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
         if self.fail_on == Some(id) {
@@ -54,7 +71,29 @@ fn provider(fail_on: Option<u64>) -> &'static CounterProvider {
         fail_on,
         freed: Mutex::new(vec![]),
         device: DEVICE.fetch_add(1, Ordering::Relaxed),
+        alias_on: Mutex::new(None),
     }))
+}
+
+#[test]
+fn malformed_upload_alias_cannot_free_nested_borrowed_input() {
+    let provider = provider(None);
+    *provider.alias_on.lock().unwrap() = Some((1, 900));
+    let borrowed = Value::GpuTensor(
+        GpuTensorHandle::new(vec![1, 2], provider.device, 900)
+            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real),
+    );
+    let args = [host(), host(), Value::OutputList(vec![borrowed])];
+    assert!(prepare(provider, &args).is_err());
+    assert!(provider.freed.lock().unwrap().is_empty());
+}
+
+#[test]
+fn second_upload_alias_releases_first_allocation_exactly_once() {
+    let provider = provider(None);
+    *provider.alias_on.lock().unwrap() = Some((2, 1));
+    assert!(prepare(provider, &[host(), host()]).is_err());
+    assert_eq!(*provider.freed.lock().unwrap(), vec![1]);
 }
 fn host() -> Value {
     Value::Tensor(Tensor::new(vec![1.; 2], vec![1, 2]).unwrap())

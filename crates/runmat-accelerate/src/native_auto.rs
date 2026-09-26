@@ -22,8 +22,8 @@ use futures::lock::Mutex as AsyncMutex;
 use log::{debug, info, trace, warn};
 use once_cell::sync::{Lazy, OnceCell};
 use runmat_accelerate_api::{
-    AccelProvider, ApiDeviceInfo, HostTensorView, ProviderOperationFamily, ProviderPrecision,
-    ProviderRejectionCode, ProviderWorkload,
+    AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorView, ProviderOperationFamily,
+    ProviderPrecision, ProviderRejectionCode, ProviderWorkload,
 };
 use runmat_builtins::{builtin_functions, AccelTag};
 use runmat_execution::{
@@ -980,6 +980,16 @@ impl NativeAutoOffload {
         threshold: usize,
         trace: Option<&PlacementTraceContext>,
     ) -> Result<Value> {
+        self.promote_tensor_protecting(value, threshold, trace, &[])
+    }
+
+    fn promote_tensor_protecting(
+        &self,
+        value: &Value,
+        threshold: usize,
+        trace: Option<&PlacementTraceContext>,
+        protected: &[&GpuTensorHandle],
+    ) -> Result<Value> {
         match value {
             Value::GpuTensor(_) => Ok(value.clone()),
             Value::Tensor(t) => {
@@ -1001,7 +1011,7 @@ impl NativeAutoOffload {
                         )
                     });
                     let started = Instant::now();
-                    match self.tensor_to_gpu(t) {
+                    match self.tensor_to_gpu(t, protected) {
                         Ok(value) => {
                             if let Some(trace) = trace {
                                 trace.event(
@@ -1055,10 +1065,13 @@ impl NativeAutoOffload {
         }
     }
 
-    fn tensor_to_gpu(&self, tensor: &Tensor) -> Result<Value> {
-        let mut handle =
-            runmat_runtime::builtins::common::gpu_helpers::upload_tensor(self.provider, tensor)
-                .map_err(|error| anyhow!(error))?;
+    fn tensor_to_gpu(&self, tensor: &Tensor, protected: &[&GpuTensorHandle]) -> Result<Value> {
+        let mut handle = runmat_runtime::builtins::common::gpu_helpers::upload_tensor_protecting(
+            self.provider,
+            tensor,
+            protected,
+        )
+        .map_err(|error| anyhow!(error))?;
         runmat_accelerate_api::mark_handle_automatic(&mut handle);
         Ok(Value::GpuTensor(handle))
     }
