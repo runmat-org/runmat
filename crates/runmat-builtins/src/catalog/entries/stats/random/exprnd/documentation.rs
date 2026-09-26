@@ -1,8 +1,10 @@
-use crate::{BuiltinDocumentation, BuiltinDocumentationAuthority, BuiltinDocumentationEvidence,
+use crate::{
+    BuiltinDocumentation, BuiltinDocumentationAuthority, BuiltinDocumentationEvidence,
     BuiltinDocumentationFaq, BuiltinDocumentationLink, BuiltinDocumentationLinkTarget,
     BuiltinDocumentationSection, BuiltinDocumentationStatus, BuiltinEvidenceKind,
     BuiltinEvidenceReference, BuiltinExample, BuiltinExampleCompatibility, BuiltinExampleFixture,
-    BuiltinExampleHarness, BuiltinExampleRequirements, BuiltinExampleVerification};
+    BuiltinExampleHarness, BuiltinExampleRequirements, BuiltinExampleVerification,
+};
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
 "`exprnd(mu)` returns one sample per element of `mu` and preserves the shape and single/double precision of `mu`.",

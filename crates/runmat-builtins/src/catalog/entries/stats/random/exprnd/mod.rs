@@ -10,14 +10,13 @@ use crate::{
     BuiltinLinkContract, BuiltinLinkPolicy, BuiltinOutputMode, BuiltinParamArity,
     BuiltinParamDescriptor, BuiltinParamType, BuiltinPlacementContract, BuiltinPortability,
     BuiltinPurity, BuiltinReachability, BuiltinResidencyPolicy, BuiltinSemanticKind,
-    BuiltinSignatureDescriptor, StatsInferenceRule, StatsRandomInferenceRule,
+    BuiltinSignatureDescriptor, IdentityInferenceRule,
 };
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 mod documentation;
 mod inference;
 use documentation::EXPRND_DOCUMENTATION;
-pub(crate) use inference::infer as infer_exprnd;
 
 pub const EXPRND_INTEGER_MU_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "exprnd-integer-mean",
@@ -181,8 +180,8 @@ pub const EXPRND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &EXPRND_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Stats(StatsInferenceRule::Random(
-            StatsRandomInferenceRule::Exponential,
+        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
+            inference::infer,
         )),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
