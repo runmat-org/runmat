@@ -25,6 +25,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "getfield",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::getfield"
 )]
 async fn getfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -15,6 +15,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "cellstr",
+    binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::cellstr"
 )]
 fn cellstr_builtin(value: Value) -> crate::BuiltinResult<Value> {

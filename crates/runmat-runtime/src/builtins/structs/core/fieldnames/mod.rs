@@ -18,6 +18,7 @@ pub(super) const BUILTIN_NAME: &str = "fieldnames";
 
 #[runtime_builtin(
     name = "fieldnames",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::fieldnames"
 )]
 async fn fieldnames_builtin(value: Value) -> crate::BuiltinResult<Value> {

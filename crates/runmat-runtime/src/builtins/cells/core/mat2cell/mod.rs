@@ -20,6 +20,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "mat2cell",
+    binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::mat2cell"
 )]
 async fn mat2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

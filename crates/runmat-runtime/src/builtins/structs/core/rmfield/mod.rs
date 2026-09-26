@@ -18,6 +18,7 @@ pub(super) const BUILTIN_NAME: &str = "rmfield";
 
 #[runtime_builtin(
     name = "rmfield",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::rmfield"
 )]
 async fn rmfield_builtin(target: Value, fields: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -17,6 +17,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "cell2struct",
+    binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::cell2struct"
 )]
 fn cell2struct_builtin(

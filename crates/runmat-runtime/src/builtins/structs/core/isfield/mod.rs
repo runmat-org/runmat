@@ -19,6 +19,7 @@ pub(super) const BUILTIN_NAME: &str = "isfield";
 
 #[runtime_builtin(
     name = "isfield",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::isfield"
 )]
 async fn isfield_builtin(target: Value, names: Value) -> crate::BuiltinResult<Value> {

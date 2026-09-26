@@ -18,6 +18,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "num2cell",
+    binding_variant = "default",
     builtin_path = "crate::builtins::cells::core::num2cell"
 )]
 async fn num2cell_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

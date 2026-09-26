@@ -30,6 +30,7 @@ pub(crate) use spec::{
 
 #[runtime_builtin(
     name = "setfield",
+    binding_variant = "default",
     builtin_path = "crate::builtins::structs::core::setfield"
 )]
 async fn setfield_builtin(base: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
