@@ -132,7 +132,8 @@ fn floating(value: f64) -> Result<Option<usize>, ()> {
     if value < 0.0 {
         return Ok(Some(0));
     }
-    if value.fract() != 0.0 || value >= usize::MAX as f64 {
+    let fits_usize = value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64);
+    if value.fract() != 0.0 || !fits_usize {
         return Err(());
     }
     Ok(Some(value as usize))
@@ -181,6 +182,7 @@ mod tests {
     }
     #[test]
     fn size_errors_and_exact_wide_dimensions() {
+        assert_eq!(floating(usize::MAX as f64).is_ok(), usize::BITS < 64);
         assert!(dimensions(&[LiteralValue::Number(2.0)], 1).is_err());
         assert!(dimension(&LiteralValue::Number(0.5)).is_err());
         assert_eq!(dimension(&LiteralValue::Number(-0.5)), Ok(Some(0)));

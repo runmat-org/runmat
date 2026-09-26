@@ -3,7 +3,8 @@ use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 use runmat_builtins::{
-    BuiltinErrorDescriptor, EMPTY_ERRORS, EMPTY_ERROR_TOO_MANY_OUTPUTS,
+    BuiltinErrorDescriptor, EMPTY_ERROR_INTERNAL, EMPTY_ERROR_INVALID_DIMS,
+    EMPTY_ERROR_NON_EMPTY_SHAPE, EMPTY_ERROR_TOO_MANY_OUTPUTS, EMPTY_ERROR_UNSUPPORTED_CLASS,
     EMPTY_GLOBAL_CALL_EXTENSION, EMPTY_RESIDENT_SIZE_EXTENSION, EMPTY_TYPENAME_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
@@ -32,10 +33,16 @@ enum EmptyClass {
     GpuArray,
 }
 
-fn empty_error(message: impl Into<String>) -> crate::RuntimeError {
-    build_runtime_error(message).with_builtin(LABEL).build()
+fn invalid_dimensions(message: impl Into<String>) -> crate::RuntimeError {
+    empty_descriptor_error(&EMPTY_ERROR_INVALID_DIMS, message)
 }
 
+fn unsupported_class(message: impl Into<String>) -> crate::RuntimeError {
+    empty_descriptor_error(&EMPTY_ERROR_UNSUPPORTED_CLASS, message)
+}
+fn internal_error(message: impl Into<String>) -> crate::RuntimeError {
+    empty_descriptor_error(&EMPTY_ERROR_INTERNAL, message)
+}
 fn empty_descriptor_error(
     descriptor: &'static BuiltinErrorDescriptor,
     message: impl Into<String>,
@@ -179,7 +186,7 @@ fn split_class_arg(mut args: Vec<Value>) -> BuiltinResult<(EmptyClass, Vec<Value
             .as_deref()
             .is_some_and(|keyword| keyword == "like")
     }) {
-        return Err(empty_error(
+        return Err(unsupported_class(
             "empty: the global 'like' shorthand is not supported; use ClassName.empty",
         ));
     }
@@ -217,7 +224,7 @@ async fn parse_shape(args: &[Value]) -> BuiltinResult<Vec<usize>> {
     }
     if !shape.contains(&0) {
         return Err(empty_descriptor_error(
-            &EMPTY_ERRORS[1],
+            &EMPTY_ERROR_NON_EMPTY_SHAPE,
             "empty: at least one dimension must be zero to construct an empty array",
         ));
     }
@@ -233,7 +240,7 @@ async fn host_size_value(value: &Value) -> BuiltinResult<Value> {
         )?;
         return gather_if_needed_async(value)
             .await
-            .map_err(|err| empty_error(format!("empty: failed to gather size control: {err}")));
+            .map_err(|err| internal_error(format!("empty: failed to gather size control: {err}")));
     }
     Ok(value.clone())
 }
@@ -245,7 +252,7 @@ fn parse_single_size_argument(value: &Value) -> BuiltinResult<Vec<usize>> {
             Ok(vec![dim, dim])
         }
         Value::Tensor(tensor) => parse_size_tensor(tensor),
-        other => Err(empty_error(format!(
+        other => Err(invalid_dimensions(format!(
             "empty: size input must be a numeric scalar or row vector, got {other:?}"
         ))),
     }
@@ -265,7 +272,7 @@ fn parse_size_tensor(value: &Tensor) -> BuiltinResult<Vec<usize>> {
             .map(|index| {
                 storage
                     .value_at(index)
-                    .ok_or_else(|| empty_error("empty: inconsistent integer size storage"))
+                    .ok_or_else(|| internal_error("empty: inconsistent integer size storage"))
                     .and_then(|value| parse_integer_dimension(&value))
             })
             .collect();
@@ -284,7 +291,9 @@ fn validate_row_or_scalar_shape(shape: &[usize]) -> BuiltinResult<()> {
     if valid {
         Ok(())
     } else {
-        Err(empty_error("empty: size vector must be a row vector"))
+        Err(invalid_dimensions(
+            "empty: size vector must be a row vector",
+        ))
     }
 }
 
@@ -302,7 +311,7 @@ fn parse_size_scalar(value: &Value) -> BuiltinResult<usize> {
                 parse_numeric_dimension(tensor::tensor_value_f64(tensor, 0))
             }
         }
-        other => Err(empty_error(format!(
+        other => Err(invalid_dimensions(format!(
             "empty: each dimension must be a numeric scalar, got {other:?}"
         ))),
     }
@@ -319,19 +328,21 @@ fn parse_integer_dimension(value: &IntValue) -> BuiltinResult<usize> {
         IntValue::U32(value) => usize::try_from(*value as u64),
         IntValue::U64(value) => usize::try_from(*value),
     };
-    result.map_err(|_| empty_error("empty: dimension exceeds the supported platform range"))
+    result.map_err(|_| invalid_dimensions("empty: dimension exceeds the supported platform range"))
 }
 
 fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
     if !value.is_finite() {
-        return Err(empty_error("empty: dimensions must be finite integers"));
+        return Err(invalid_dimensions(
+            "empty: dimensions must be finite integers",
+        ));
     }
     if value < 0.0 {
         return Ok(0);
     }
     let fits_usize = value < usize::MAX as f64 || (usize::BITS < 64 && value == usize::MAX as f64);
     if value.fract() != 0.0 || !fits_usize {
-        return Err(empty_error(
+        return Err(invalid_dimensions(
             "empty: dimension must be an integer within the supported platform range",
         ));
     }
@@ -342,10 +353,10 @@ async fn build_empty(class: EmptyClass, shape: Vec<usize>) -> BuiltinResult<Valu
     match class {
         EmptyClass::Double => Tensor::new(Vec::new(), shape)
             .map(tensor::tensor_into_value)
-            .map_err(empty_error),
+            .map_err(internal_error),
         EmptyClass::Single => Tensor::new_with_dtype(Vec::new(), shape, NumericDType::F32)
             .map(tensor::tensor_into_value)
-            .map_err(empty_error),
+            .map_err(internal_error),
         EmptyClass::Int8 => integer_empty(IntegerStorage::I8(Vec::new()), shape),
         EmptyClass::Int16 => integer_empty(IntegerStorage::I16(Vec::new()), shape),
         EmptyClass::Int32 => integer_empty(IntegerStorage::I32(Vec::new()), shape),
@@ -357,31 +368,31 @@ async fn build_empty(class: EmptyClass, shape: Vec<usize>) -> BuiltinResult<Valu
         EmptyClass::Logical => Ok(Value::LogicalArray(LogicalArray::zeros(shape))),
         EmptyClass::Char => {
             if shape.len() != 2 {
-                return Err(empty_error(
+                return Err(invalid_dimensions(
                     "empty: character arrays must be two-dimensional",
                 ));
             }
             CharArray::new(Vec::new(), shape[0], shape[1])
                 .map(Value::CharArray)
-                .map_err(empty_error)
+                .map_err(internal_error)
         }
         EmptyClass::String => StringArray::new(Vec::new(), shape)
             .map(Value::StringArray)
-            .map_err(empty_error),
-        EmptyClass::Cell => make_cell_with_shape(Vec::new(), shape).map_err(empty_error),
-        EmptyClass::Struct => Err(empty_error(
+            .map_err(internal_error),
+        EmptyClass::Cell => make_cell_with_shape(Vec::new(), shape).map_err(internal_error),
+        EmptyClass::Struct => Err(unsupported_class(
             "empty: shaped struct empties require first-class struct-array storage",
         )),
         EmptyClass::GpuArray => {
             let provider = runmat_accelerate_api::provider()
-                .ok_or_else(|| empty_error("empty: no acceleration provider is available"))?;
+                .ok_or_else(|| internal_error("empty: no acceleration provider is available"))?;
             let dtype = match provider.precision() {
                 runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
                 runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
             };
-            let host = Tensor::new_with_dtype(Vec::new(), shape, dtype).map_err(empty_error)?;
+            let host = Tensor::new_with_dtype(Vec::new(), shape, dtype).map_err(internal_error)?;
             let mut handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)
-                .map_err(|err| empty_error(format!("empty: {err}")))?;
+                .map_err(|err| internal_error(format!("empty: {err}")))?;
             runmat_accelerate_api::mark_handle_explicit(&mut handle);
             Ok(Value::GpuTensor(handle))
         }
@@ -391,7 +402,7 @@ async fn build_empty(class: EmptyClass, shape: Vec<usize>) -> BuiltinResult<Valu
 fn integer_empty(storage: IntegerStorage, shape: Vec<usize>) -> BuiltinResult<Value> {
     Tensor::new_integer(storage, shape)
         .map(tensor::tensor_into_value)
-        .map_err(empty_error)
+        .map_err(internal_error)
 }
 
 #[cfg(test)]

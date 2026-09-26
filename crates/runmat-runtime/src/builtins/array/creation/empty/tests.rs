@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn failures_use_the_declared_boundary_identifiers() {
+    let size = futures::executor::block_on(int8_empty_builtin(vec![Value::Num(0.5)])).unwrap_err();
+    assert_eq!(size.identifier(), Some("RunMat:empty:InvalidSize"));
+    let unsupported =
+        futures::executor::block_on(build_empty(EmptyClass::Struct, vec![0, 0])).unwrap_err();
+    assert_eq!(
+        unsupported.identifier(),
+        Some("RunMat:empty:UnsupportedClass")
+    );
+    // Invalid internal assembly input exercises the storage-construction boundary.
+    let assembly =
+        futures::executor::block_on(build_empty(EmptyClass::Double, vec![2, 2])).unwrap_err();
+    assert_eq!(assembly.identifier(), Some("RunMat:empty:Internal"));
+    assert_eq!(
+        parse_numeric_dimension(usize::MAX as f64).is_ok(),
+        usize::BITS < 64
+    );
+}
+
+#[test]
 fn explicit_gpu_empty_keeps_shape_and_device_intent() {
     crate::builtins::common::test_support::with_test_provider(|_| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);

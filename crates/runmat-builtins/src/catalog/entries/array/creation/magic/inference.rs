@@ -64,7 +64,8 @@ fn order(value: &LiteralValue) -> Result<Option<usize>, ()> {
 
 fn floating(value: f64) -> Result<Option<usize>, ()> {
     let n = value.floor();
-    if !n.is_finite() || n < 0.0 || n >= usize::MAX as f64 {
+    let fits_usize = n < usize::MAX as f64 || (usize::BITS < 64 && n == usize::MAX as f64);
+    if !n.is_finite() || n < 0.0 || !fits_usize {
         return Err(());
     }
     Ok(Some(n as usize))
@@ -111,6 +112,7 @@ mod tests {
     }
     #[test]
     fn integer_order_never_rounds_through_double() {
+        assert_eq!(floating(usize::MAX as f64).is_ok(), usize::BITS < 64);
         let exact = 9_007_199_254_740_993_u64;
         let result = order(&LiteralValue::Integer {
             text: exact.to_string(),

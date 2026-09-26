@@ -47,31 +47,35 @@ pub const EMPTY_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDes
     when: "More than one output is requested.",
     message: "empty: too many output arguments",
 };
+pub const EMPTY_ERROR_INVALID_DIMS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EMPTY.INVALID_DIMS",
+    identifier: Some("RunMat:empty:InvalidSize"),
+    when: "Size arguments are not integer-valued numeric scalars or one row size vector.",
+    message: "empty: invalid size arguments",
+};
+pub const EMPTY_ERROR_NON_EMPTY_SHAPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EMPTY.NON_EMPTY_SHAPE",
+    identifier: Some("RunMat:empty:NonEmptyShape"),
+    when: "Every normalized dimension is nonzero.",
+    message: "empty: at least one dimension must be zero",
+};
+pub const EMPTY_ERROR_UNSUPPORTED_CLASS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EMPTY.UNSUPPORTED_CLASS",
+    identifier: Some("RunMat:empty:UnsupportedClass"),
+    when: "The selected shorthand class cannot be represented as a shaped empty value.",
+    message: "empty: unsupported output class",
+};
+pub const EMPTY_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.EMPTY.INTERNAL",
+    identifier: Some("RunMat:empty:Internal"),
+    when: "The empty value cannot be assembled.",
+    message: "empty: internal error",
+};
 pub const EMPTY_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    BuiltinErrorDescriptor {
-        code: "RM.EMPTY.INVALID_DIMS",
-        identifier: Some("RunMat:empty:InvalidSize"),
-        when: "Size arguments are not integer-valued numeric scalars or one row size vector.",
-        message: "empty: invalid size arguments",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EMPTY.NON_EMPTY_SHAPE",
-        identifier: Some("RunMat:empty:NonEmptyShape"),
-        when: "Every normalized dimension is nonzero.",
-        message: "empty: at least one dimension must be zero",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EMPTY.UNSUPPORTED_CLASS",
-        identifier: Some("RunMat:empty:UnsupportedClass"),
-        when: "The selected shorthand class cannot be represented as a shaped empty value.",
-        message: "empty: unsupported output class",
-    },
-    BuiltinErrorDescriptor {
-        code: "RM.EMPTY.INTERNAL",
-        identifier: Some("RunMat:empty:Internal"),
-        when: "The empty value cannot be assembled.",
-        message: "empty: internal error",
-    },
+    EMPTY_ERROR_INVALID_DIMS,
+    EMPTY_ERROR_NON_EMPTY_SHAPE,
+    EMPTY_ERROR_UNSUPPORTED_CLASS,
+    EMPTY_ERROR_INTERNAL,
     EMPTY_ERROR_TOO_MANY_OUTPUTS,
 ];
 
