@@ -7,13 +7,16 @@ pub const EMPTY_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "Empty array preserving the receiver class.",
 }];
 pub const EMPTY_NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-pub const EMPTY_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "dimensions",
-    ty: BuiltinParamType::SizeArg,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Integer scalar dimensions; at least one dimension must be zero.",
-}];
+const fn dimension_parameter() -> BuiltinParamDescriptor {
+    BuiltinParamDescriptor {
+        name: "dimensions",
+        ty: BuiltinParamType::SizeArg,
+        arity: BuiltinParamArity::Variadic,
+        default: None,
+        description: "Integer scalar dimensions; at least one dimension must be zero.",
+    }
+}
+pub const EMPTY_DIMS_INPUTS: [BuiltinParamDescriptor; 1] = [dimension_parameter()];
 pub const EMPTY_SIZE_VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "sizeVector",
     ty: BuiltinParamType::SizeArg,
@@ -80,7 +83,7 @@ pub const EMPTY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 
 const GLOBAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    EMPTY_DIMS_INPUTS[0],
+    dimension_parameter(),
     BuiltinParamDescriptor {
         name: "typename",
         ty: BuiltinParamType::StringScalar,
