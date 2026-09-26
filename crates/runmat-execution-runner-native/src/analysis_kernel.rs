@@ -511,7 +511,8 @@ fn execute_result_publication(
     let resource_usage_manifest_identity = resource_usage.manifest.logical_identity;
     let resource_usage = ResourceUsageEvidence::from_canonical_bytes(&resource_usage.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    validate_resource_usage_evidence(&resource_plan, &resource_usage)
+    let source_plan = resource_usage.primary_plan()?;
+    validate_resource_usage_evidence(source_plan, &resource_usage)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if request.identity().digest() != request_manifest_identity
         || request.producer != invocation.host.workload.step
@@ -522,6 +523,13 @@ fn execute_result_publication(
         || request.source_observations != accuracy.source_observations
         || request.source_observations.is_some() != observations.is_some()
         || resource_plan.identity.digest() != resource_plan_manifest_identity
+        || resource_plan
+            != runmat_analysis_execution::build_prepared_result_publication_resource_plan(
+                &request,
+                &accuracy,
+                &resource_usage,
+                invocation.inputs,
+            )?
         || resource_usage.identity().digest() != resource_usage_manifest_identity
         || resource_usage.result_digest != request.source_result.digest()
         || !resource_usage.overruns.is_empty()
@@ -548,19 +556,14 @@ fn execute_result_publication(
     if let Some(observations) = &observations {
         validate_observation_resource_usage(observations, &resource_usage)?;
     }
-    let expected_request = ResultPublicationRequest::new(
-        &accuracy,
-        observations.as_ref(),
-        &resource_plan,
-        &resource_usage,
-    )?;
+    let expected_request =
+        ResultPublicationRequest::new(&accuracy, observations.as_ref(), &resource_usage)?;
     if expected_request != request {
         return Err(AnalysisBridgeError::Identity(
             "publication request does not converge from its source artifacts",
         ));
     }
-    let result =
-        PublishedAnalysisResult::new(&request, &accuracy, &resource_plan, &resource_usage)?;
+    let result = PublishedAnalysisResult::new(&request, &accuracy, &resource_usage)?;
     Ok(vec![AnalysisKernelOutput::whole(
         AnalysisNumericalObjectKind::PublishedResult,
         result.identity().digest(),

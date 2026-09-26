@@ -3,8 +3,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use runmat_analysis_execution::{
-    prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
-    ImportedSemanticState, ImportedStructuralModalResult, ImportedStructuralRandomResponseResult,
+    complete_result_publication_resource_usage, prepare_planned_resource_graph_usage,
+    AnalysisOutputPolicy, ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState,
+    ImportedStructuralModalResult, ImportedStructuralRandomResponseResult,
     PlannedResourceUsageGraph, PreparedResourceUsage, StructuralRandomResponseStudyCoordinator,
     StructuralRandomResponseStudyPreparation,
 };
@@ -26,6 +27,7 @@ pub struct CompletedStructuralRandomResponseStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralRandomResponseWorkload,
     pub response: ImportedStructuralRandomResponseResult,
     pub accuracy: ImportedAccuracy,
+    pub publication_baseline_usage: PreparedResourceUsage,
     pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub statistics_state: ImportedSemanticState,
@@ -254,6 +256,7 @@ async fn execute_with_pool(
     .map_err(protocol)?;
     pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
+    let publication_baseline_usage = resource_usage.clone();
     let publication = coordinator
         .prepare_publication(resource_usage)
         .map_err(protocol)?;
@@ -262,7 +265,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &publication.host,
             program: &publication.program,
-            resource_plan: None,
+            resource_plan: Some(&publication.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![statistics_dependency],
         }],
@@ -271,9 +274,24 @@ async fn execute_with_pool(
     .await?
     .try_into()
     .map_err(|_| protocol("random-response publication returned an invalid task inventory"))?;
+    let publication_attempt =
+        planned_resource_attempt(&publication.resource_plan, &executed_publication)?;
     coordinator
         .complete_publication(pool, executed_publication.response, &publication)
         .map_err(protocol)?;
+    let published = coordinator
+        .publication()
+        .cloned()
+        .ok_or_else(|| protocol("random-response publication is absent"))?;
+    let resource_usage = complete_result_publication_resource_usage(
+        &publication,
+        &published,
+        &publication_baseline_usage,
+        &publication_attempt,
+        AnalysisOutputPolicy::new(chunk_bytes, inventory_limits).map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     Ok(CompletedStructuralRandomResponseStudy {
         modal: coordinator
@@ -296,14 +314,9 @@ async fn execute_with_pool(
             .accuracy()
             .cloned()
             .ok_or_else(|| protocol("random-response accuracy is absent"))?,
-        resource_usage: coordinator
-            .resource_usage()
-            .cloned()
-            .ok_or_else(|| protocol("random-response resource usage is absent"))?,
-        publication: coordinator
-            .publication()
-            .cloned()
-            .ok_or_else(|| protocol("random-response publication is absent"))?,
+        publication_baseline_usage,
+        resource_usage,
+        publication: published,
         statistics_state: coordinator
             .statistics_state()
             .cloned()

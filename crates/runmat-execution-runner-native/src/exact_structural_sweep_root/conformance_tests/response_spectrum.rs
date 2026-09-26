@@ -92,7 +92,10 @@ async fn response_spectrum_fields_reach_an_admitted_result_over_encrypted_quic()
     ));
     capabilities.insert(Capability::ProcessIsolation);
     let resources = ResourceRequest {
-        cpu_millicores: 500,
+        cpu_millicores: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+            .checked_cpu_millicores()
+            .unwrap()
+            .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
         accelerator_count: 0,
@@ -263,6 +266,11 @@ async fn verify_response_spectrum_result(
         ) => {
             assert_eq!(result.modal_workload.step_id().as_str(), "modes");
             assert_eq!(result.response_workload.step_id().as_str(), "spectrum");
+            assert_terminal_publication_usage(
+                &result.response_publication,
+                &result.response_publication_baseline_usage,
+                &result.response_resource_usage,
+            );
             result
                 .response_numerical_receipt
                 .validate_against(
@@ -281,6 +289,11 @@ async fn verify_response_spectrum_result(
         ) => {
             assert_eq!(result.modal_workload.step_id().as_str(), "modes");
             assert_eq!(result.response_workload.step_id().as_str(), "random");
+            assert_terminal_publication_usage(
+                &result.response_publication,
+                &result.response_publication_baseline_usage,
+                &result.response_resource_usage,
+            );
             result
                 .response_numerical_receipt
                 .validate_against(
@@ -302,4 +315,42 @@ async fn verify_response_spectrum_result(
         }
         _ => panic!("encrypted modal-consumer study returned another result kind"),
     }
+}
+
+fn assert_terminal_publication_usage(
+    publication: &runmat_analysis_execution::ImportedPublishedResult,
+    baseline: &runmat_analysis_execution::PreparedResourceUsage,
+    terminal: &runmat_analysis_execution::PreparedResourceUsage,
+) {
+    assert_ne!(baseline.evidence.identity(), terminal.evidence.identity());
+    assert_eq!(
+        publication.result.source_resource_usage,
+        baseline.evidence.identity()
+    );
+    runmat_analysis_execution::validate_result_publication_resource_usage(
+        &publication.result,
+        &baseline.evidence,
+        &terminal.evidence,
+    )
+    .unwrap();
+
+    let added = terminal
+        .evidence
+        .attempts
+        .iter()
+        .filter(|attempt| !baseline.evidence.attempts.contains(attempt))
+        .collect::<Vec<_>>();
+    assert_eq!(added.len(), 1);
+    let publication_plan = terminal
+        .evidence
+        .plans
+        .iter()
+        .find(|plan| plan.identity == added[0].plan)
+        .unwrap();
+    assert_eq!(
+        publication_plan.input.phase,
+        runmat_analysis_fea::planning::resource::FeaResourcePhase::ResultPublication(
+            publication.result.request,
+        )
+    );
 }

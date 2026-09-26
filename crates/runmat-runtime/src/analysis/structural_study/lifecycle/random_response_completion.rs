@@ -307,6 +307,7 @@ pub(in crate::analysis) fn complete_random_response_study(
             numerical.response_result.assembly().identity(),
         ),
         &numerical.response_accuracy,
+        &numerical.response_publication_baseline_usage,
         &numerical.response_resource_usage,
         &numerical.response_publication,
     )

@@ -180,6 +180,8 @@ enum StructuralStudyNumericalEvidence {
             runmat_analysis_fea::execution::StructuralModalResponseSpectrumNumericalReceipt,
         response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
         response_resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+        response_publication_baseline_usage:
+            runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
         response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
         basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
         envelope_state: runmat_analysis_fea::execution::CanonicalSemanticState,
@@ -193,6 +195,8 @@ enum StructuralStudyNumericalEvidence {
             runmat_analysis_fea::execution::StructuralRandomResponseNumericalReceipt,
         response_accuracy: runmat_analysis_fea::results::accuracy::AccuracyArtifact,
         response_resource_usage: runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
+        response_publication_baseline_usage:
+            runmat_analysis_fea::planning::resource::ResourceUsageEvidence,
         response_publication: runmat_analysis_fea::results::publication::PublishedAnalysisResult,
         basis_state: runmat_analysis_fea::execution::CanonicalSemanticState,
         statistics_state: runmat_analysis_fea::execution::CanonicalSemanticState,
@@ -300,6 +304,9 @@ impl StructuralStudyNumericalEvidence {
                     response_numerical_receipt: result.response_numerical_receipt.clone(),
                     response_accuracy: result.response_accuracy.clone(),
                     response_resource_usage: result.response_resource_usage.clone(),
+                    response_publication_baseline_usage: result
+                        .response_publication_baseline_usage
+                        .clone(),
                     response_publication: result.response_publication.clone(),
                     basis_state: result.basis_state.clone(),
                     envelope_state: result.envelope_state.clone(),
@@ -314,6 +321,9 @@ impl StructuralStudyNumericalEvidence {
                     response_numerical_receipt: result.response_numerical_receipt.clone(),
                     response_accuracy: result.response_accuracy.clone(),
                     response_resource_usage: result.response_resource_usage.clone(),
+                    response_publication_baseline_usage: result
+                        .response_publication_baseline_usage
+                        .clone(),
                     response_publication: result.response_publication.clone(),
                     basis_state: result.basis_state.clone(),
                     statistics_state: result.statistics_state.clone(),

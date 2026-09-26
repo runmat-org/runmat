@@ -5,6 +5,7 @@ impl FeaResourcePlanningInput {
         match &self.demand {
             // Accuracy is scoped to the semantic numerical result, not a mesh operation.
             FeaResourceDemand::AccuracyEvaluation(demand) => demand.source_result.digest(),
+            FeaResourceDemand::ResultPublication(demand) => demand.source_result.digest(),
             FeaResourceDemand::ThermalSolve(demand) => demand.topology_digest,
             FeaResourceDemand::SemanticStatePublication(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.operator.topology_digest,
@@ -45,6 +46,7 @@ impl FeaResourcePlanningInput {
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
+            FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => {
@@ -87,6 +89,7 @@ impl FeaResourcePlanningInput {
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => &PartitioningPolicy::Monolithic,
+            FeaResourceDemand::ResultPublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::SemanticStatePublication(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.operator.partitioning,
@@ -132,6 +135,7 @@ impl FeaResourcePlanningInput {
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
+            FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.operator),
@@ -162,6 +166,7 @@ impl FeaResourcePlanningInput {
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
             FeaResourceDemand::AccuracyEvaluation(_) => None,
+            FeaResourceDemand::ResultPublication(_) => None,
             FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::SemanticStatePublication(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&mut demand.operator),

@@ -291,24 +291,26 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         )
         .unwrap();
         assert_eq!(usage.evidence.attempts.len(), 3);
-        // Solve, accuracy and state attempts are measured. The final result-publication
-        // task's own interval remains outside this evidence; this is not whole-study cost.
+        // The receipt names this immutable baseline. Completed accounting then adds the
+        // publication interval without making the receipt depend on its own future cost.
         let result_publication = runmat_analysis_execution::prepare_result_publication(
             runmat_analysis_execution::ResultPublicationPreparation {
                 accuracy_host: accuracy.host.clone(),
                 source_accuracy: report.objects,
-                source_resource_plan: prepared.inputs.iter().find(|input| {
-                    input.manifest.kind == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ResourcePlan
-                }).unwrap().clone(),
-                source_resource_usage: usage.objects,
+                source_resource_usage: usage.objects.clone(),
                 source_observations: None,
                 program_revision: revision.clone(),
                 chunk_bytes: limits.chunk_bytes,
                 inventory_limits: limits.inventory,
             },
-        ).unwrap();
+        )
+        .unwrap();
         let response = driver
-            .execute(&result_publication.host, &result_publication.program, None)
+            .execute(
+                &result_publication.host,
+                &result_publication.program,
+                Some(&result_publication.resource_plan),
+            )
             .await;
         let published = runmat_analysis_execution::import_published_result(
             driver.store(),
@@ -316,8 +318,27 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             &result_publication,
             limits.inventory,
         )
-        .unwrap()
-        .result;
+        .unwrap();
+        let terminal = runmat_analysis_execution::complete_result_publication_resource_usage(
+            &result_publication,
+            &published,
+            &usage,
+            &runmat_analysis_execution::PlannedResourceUsageAttempt {
+                plan: result_publication.resource_plan.clone(),
+                accounting: response.resources,
+            },
+            output_policy,
+        )
+        .unwrap();
+        assert_eq!(terminal.evidence.attempts.len(), 4);
+        runmat_analysis_execution::validate_result_publication_resource_usage(
+            &published.result,
+            &usage.evidence,
+            &terminal.evidence,
+        )
+        .unwrap();
+        assert_ne!(terminal.evidence.identity(), usage.evidence.identity());
+        let published = published.result;
         assert_eq!(published.source_result, process.manifest.identity());
         assert_eq!(published.source_resource_usage, usage.evidence.identity());
         assert_eq!(

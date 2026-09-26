@@ -3,9 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use runmat_analysis_execution::{
-    prepare_planned_resource_graph_usage, ImportedAccuracy, ImportedPublishedResult,
-    ImportedSemanticState, ImportedStructuralModalResponseSpectrumResult,
-    ImportedStructuralModalResult, PlannedResourceUsageGraph, PreparedResourceUsage,
+    complete_result_publication_resource_usage, prepare_planned_resource_graph_usage,
+    AnalysisOutputPolicy, ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState,
+    ImportedStructuralModalResponseSpectrumResult, ImportedStructuralModalResult,
+    PlannedResourceUsageGraph, PreparedResourceUsage,
     StructuralModalResponseSpectrumStudyCoordinator,
     StructuralModalResponseSpectrumStudyPreparation,
 };
@@ -27,6 +28,7 @@ pub struct CompletedStructuralModalResponseSpectrumStudy {
     pub resolved_workload: runmat_analysis_fea::execution::StructuralModalResponseSpectrumWorkload,
     pub response: ImportedStructuralModalResponseSpectrumResult,
     pub accuracy: ImportedAccuracy,
+    pub publication_baseline_usage: PreparedResourceUsage,
     pub resource_usage: PreparedResourceUsage,
     pub publication: ImportedPublishedResult,
     pub envelope_state: ImportedSemanticState,
@@ -253,6 +255,7 @@ async fn execute_with_pool(
     .map_err(protocol)?;
     pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
+    let publication_baseline_usage = resource_usage.clone();
     let publication = coordinator
         .prepare_publication(resource_usage)
         .map_err(protocol)?;
@@ -261,7 +264,7 @@ async fn execute_with_pool(
         vec![PreparedAnalysisTask {
             host: &publication.host,
             program: &publication.program,
-            resource_plan: None,
+            resource_plan: Some(&publication.resource_plan),
             fallback_resources: policy.resources.clone(),
             dependencies: vec![envelope_dependency],
         }],
@@ -270,9 +273,24 @@ async fn execute_with_pool(
     .await?
     .try_into()
     .map_err(|_| protocol("response-spectrum publication returned an invalid task inventory"))?;
+    let publication_attempt =
+        planned_resource_attempt(&publication.resource_plan, &executed_publication)?;
     coordinator
         .complete_publication(pool, executed_publication.response, &publication)
         .map_err(protocol)?;
+    let published = coordinator
+        .publication()
+        .cloned()
+        .ok_or_else(|| protocol("response-spectrum publication is absent"))?;
+    let resource_usage = complete_result_publication_resource_usage(
+        &publication,
+        &published,
+        &publication_baseline_usage,
+        &publication_attempt,
+        AnalysisOutputPolicy::new(chunk_bytes, inventory_limits).map_err(protocol)?,
+    )
+    .map_err(protocol)?;
+    pool.register_result_objects(&resource_usage.objects, &publication_access)?;
 
     Ok(CompletedStructuralModalResponseSpectrumStudy {
         modal: coordinator
@@ -295,14 +313,9 @@ async fn execute_with_pool(
             .accuracy()
             .cloned()
             .ok_or_else(|| protocol("response-spectrum accuracy is absent"))?,
-        resource_usage: coordinator
-            .resource_usage()
-            .cloned()
-            .ok_or_else(|| protocol("response-spectrum resource usage is absent"))?,
-        publication: coordinator
-            .publication()
-            .cloned()
-            .ok_or_else(|| protocol("response-spectrum publication is absent"))?,
+        publication_baseline_usage,
+        resource_usage,
+        publication: published,
         envelope_state: coordinator
             .envelope_state()
             .cloned()

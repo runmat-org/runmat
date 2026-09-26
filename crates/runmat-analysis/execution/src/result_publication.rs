@@ -25,7 +25,6 @@ use crate::{
 pub struct ResultPublicationPreparation {
     pub accuracy_host: AnalysisHostWorkload,
     pub source_accuracy: PreparedAnalysisObjects,
-    pub source_resource_plan: PreparedAnalysisObjects,
     pub source_resource_usage: PreparedAnalysisObjects,
     pub source_observations: Option<ImportedObservations>,
     pub program_revision: ProgramRevision,
@@ -38,6 +37,7 @@ pub struct PreparedResultPublication {
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
     pub inputs: Vec<PreparedAnalysisObjects>,
+    pub resource_plan: FeaResourcePlan,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,8 +54,6 @@ pub fn prepare_result_publication(
         || preparation.accuracy_host.workload.outputs
             != vec![AnalysisNumericalObjectKind::AccuracyReport]
         || preparation.source_accuracy.manifest.kind != AnalysisNumericalObjectKind::AccuracyReport
-        || preparation.source_resource_plan.manifest.kind
-            != AnalysisNumericalObjectKind::ResourcePlan
         || preparation.source_resource_usage.manifest.kind
             != AnalysisNumericalObjectKind::ResourceUsage
         || preparation.chunk_bytes == 0
@@ -67,17 +65,14 @@ pub fn prepare_result_publication(
     }
     let accuracy = AccuracyArtifact::from_canonical_bytes(&preparation.source_accuracy.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let resource_plan =
-        FeaResourcePlan::from_canonical_bytes(&preparation.source_resource_plan.payload())
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_usage =
         ResourceUsageEvidence::from_canonical_bytes(&preparation.source_resource_usage.payload())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    validate_resource_usage_evidence(&resource_plan, &resource_usage)
+    let source_plan = resource_usage.primary_plan()?;
+    validate_resource_usage_evidence(source_plan, &resource_usage)
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if resource_plan.identity.digest() != preparation.source_resource_plan.manifest.logical_identity
-        || resource_usage.identity().digest()
-            != preparation.source_resource_usage.manifest.logical_identity
+    if resource_usage.identity().digest()
+        != preparation.source_resource_usage.manifest.logical_identity
         || resource_usage.result_digest != accuracy.source_result.digest()
         || !resource_usage.overruns.is_empty()
     {
@@ -124,12 +119,7 @@ pub fn prepare_result_publication(
             Ok(observations.manifest.clone())
         })
         .transpose()?;
-    let request = ResultPublicationRequest::new(
-        &accuracy,
-        observations.as_ref(),
-        &resource_plan,
-        &resource_usage,
-    )?;
+    let request = ResultPublicationRequest::new(&accuracy, observations.as_ref(), &resource_usage)?;
     let request_bytes = request.canonical_bytes()?;
     let request_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::PublicationRequest,
@@ -142,7 +132,6 @@ pub fn prepare_result_publication(
     let mut inputs = vec![
         (request_objects, ValueRefKind::DriverObject),
         (preparation.source_accuracy, ValueRefKind::ResultObject),
-        (preparation.source_resource_plan, ValueRefKind::DriverObject),
         (
             preparation.source_resource_usage,
             ValueRefKind::ResultObject,
@@ -165,7 +154,7 @@ pub fn prepare_result_publication(
             ValueRefKind::DriverObject,
         ));
     }
-    let workload_inputs = inputs
+    let mut workload_inputs: Vec<AnalysisWorkloadInput> = inputs
         .iter()
         .map(|(input, reference_kind)| AnalysisWorkloadInput {
             kind: input.manifest.kind,
@@ -176,10 +165,33 @@ pub fn prepare_result_publication(
             reference_kind: *reference_kind,
         })
         .collect();
-    let inputs = inputs
+    let mut inputs = inputs
         .into_iter()
         .map(|(input, _)| input)
         .collect::<Vec<_>>();
+    let resource_plan = crate::build_prepared_result_publication_resource_plan(
+        &request,
+        &accuracy,
+        &resource_usage,
+        &inputs,
+    )?;
+    let plan_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::ResourcePlan,
+        resource_plan.identity.digest(),
+        &resource_plan.canonical_bytes()?,
+        preparation.chunk_bytes,
+        ObjectNamespace::InputValue,
+        preparation.inventory_limits,
+    )?;
+    workload_inputs.push(AnalysisWorkloadInput {
+        kind: plan_objects.manifest.kind,
+        logical_identity: plan_objects.manifest.logical_identity,
+        payload_digest: plan_objects.manifest.payload_digest,
+        manifest_digest: plan_objects.root.digest,
+        manifest_encoded_length: plan_objects.root.encoded_length,
+        reference_kind: ValueRefKind::DriverObject,
+    });
+    inputs.push(plan_objects);
     let workload = AnalysisWorkloadRequest::new(
         preparation.accuracy_host.workload.study,
         preparation.accuracy_host.workload.step,
@@ -198,6 +210,7 @@ pub fn prepare_result_publication(
         host,
         program,
         inputs,
+        resource_plan,
     })
 }
 
@@ -207,8 +220,64 @@ pub fn import_published_result(
     prepared: &PreparedResultPublication,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedPublishedResult> {
+    prepared.request.validate()?;
+    let unique = |kind| -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
+        let mut inputs = prepared
+            .inputs
+            .iter()
+            .filter(|input| input.manifest.kind == kind);
+        let input = inputs.next().ok_or_else(|| {
+            AnalysisBridgeError::Invalid(format!("publication import omits {kind:?}"))
+        })?;
+        if inputs.next().is_some() {
+            return Err(AnalysisBridgeError::Invalid(format!(
+                "publication import repeats {kind:?}"
+            )));
+        }
+        Ok(input)
+    };
+    let accuracy = AccuracyArtifact::from_canonical_bytes(
+        &unique(AnalysisNumericalObjectKind::AccuracyReport)?.payload(),
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let usage = ResourceUsageEvidence::from_canonical_bytes(
+        &unique(AnalysisNumericalObjectKind::ResourceUsage)?.payload(),
+    )?;
+    let request = ResultPublicationRequest::from_canonical_bytes(
+        &unique(AnalysisNumericalObjectKind::PublicationRequest)?.payload(),
+    )?;
+    let admitted = FeaResourcePlan::from_canonical_bytes(
+        &unique(AnalysisNumericalObjectKind::ResourcePlan)?.payload(),
+    )?;
+    let expected_plan = crate::build_prepared_result_publication_resource_plan(
+        &prepared.request,
+        &accuracy,
+        &usage,
+        &prepared.inputs,
+    )?;
+    if request != prepared.request
+        || admitted != prepared.resource_plan
+        || expected_plan != prepared.resource_plan
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "publication import admission differs from its exact prepared sources",
+        ));
+    }
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response, &prepared.host)?;
+    let output_set_bound =
+        expected_plan
+            .input
+            .output_set
+            .as_ref()
+            .ok_or(AnalysisBridgeError::Identity(
+                "publication admission omits output-set envelope",
+            ))?;
+    if output_set.root.encoded_length > output_set_bound.encoded_bytes_upper_bound.0 {
+        return Err(AnalysisBridgeError::Invalid(
+            "publication output set exceeds its admitted envelope".into(),
+        ));
+    }
     let [output] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
             "result publication must return exactly one published-result root".into(),
@@ -223,6 +292,14 @@ pub fn import_published_result(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let output_bound = expected_plan
+        .input
+        .demand
+        .output_facts(AnalysisNumericalObjectKind::PublishedResult)
+        .ok_or(AnalysisBridgeError::Identity(
+            "publication admission omits receipt envelope",
+        ))?;
+    crate::object::validate_prepared_output_resource_facts(&imported, output_bound)?;
     let mut expected =
         imported.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
     expected.push(output_set.root);
@@ -232,6 +309,7 @@ pub fn import_published_result(
         ));
     }
     let result = PublishedAnalysisResult::from_canonical_bytes(&imported.payload())?;
+    result.validate_sources(&accuracy, &usage)?;
     if result.identity().digest() != output.logical_identity
         || result.request != prepared.request.identity()
         || result.producer != prepared.request.producer

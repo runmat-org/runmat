@@ -73,7 +73,6 @@ pub struct StructuralModalResponseSpectrumStudyCoordinator {
     basis_state: Option<ImportedSemanticState>,
     directions: Vec<ImportedStructuralModalResponseSpectrumDirection>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
-    assembly_resource_plan_objects: Option<crate::PreparedAnalysisObjects>,
     result: Option<ImportedStructuralModalResponseSpectrumResult>,
     accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
@@ -138,7 +137,6 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             basis_state: None,
             directions: Vec::new(),
             assembly_host: None,
-            assembly_resource_plan_objects: None,
             result: None,
             accuracy_host: None,
             accuracy: None,
@@ -383,7 +381,6 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
-        self.assembly_resource_plan_objects = Some(task.resource_plan_objects.clone());
         self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -460,11 +457,6 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
                 .as_ref()
                 .ok_or_else(|| invalid("response-spectrum accuracy is absent"))?
                 .objects
-                .clone(),
-            source_resource_plan: self
-                .assembly_resource_plan_objects
-                .as_ref()
-                .ok_or_else(|| invalid("response-spectrum assembly resource plan is absent"))?
                 .clone(),
             source_resource_usage: resource_usage.objects.clone(),
             source_observations: None,

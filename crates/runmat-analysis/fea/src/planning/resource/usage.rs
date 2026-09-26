@@ -14,7 +14,7 @@ use super::{
 };
 
 const RESOURCE_USAGE_PREFIX: &[u8] = b"runmat-fea-resource-usage/v1\0";
-const RESOURCE_USAGE_LIMITS: CanonicalLimits =
+pub(super) const RESOURCE_USAGE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -174,6 +174,15 @@ impl TryFrom<ResourceUsageEvidenceWire> for ResourceUsageEvidence {
 }
 
 impl ResourceUsageEvidence {
+    /// One source-plan authority: the exact primary plan inside validated usage evidence.
+    pub fn primary_plan(&self) -> Result<&FeaResourcePlan, ResourcePlanningError> {
+        self.validate_identity()?;
+        self.plans
+            .binary_search_by_key(&self.primary_plan, |plan| plan.identity)
+            .map(|index| &self.plans[index])
+            .map_err(|_| ResourcePlanningError::Identity)
+    }
+
     pub(crate) fn build(
         primary_plan: FeaResourcePlanIdentity,
         mut plans: Vec<FeaResourcePlan>,

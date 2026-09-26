@@ -500,6 +500,9 @@ pub async fn execute_structural_workloads_locally(
                             response_result: completed.response.result,
                             response_numerical_receipt: completed.response.numerical_receipt,
                             response_accuracy: completed.accuracy.artifact,
+                            response_publication_baseline_usage: completed
+                                .publication_baseline_usage
+                                .evidence,
                             response_resource_usage: completed.resource_usage.evidence,
                             response_publication: completed.publication.result,
                             field_recovery: completed.response.field_recovery,
@@ -538,6 +541,9 @@ pub async fn execute_structural_workloads_locally(
                         response_result: completed.response.result,
                         response_numerical_receipt: completed.response.numerical_receipt,
                         response_accuracy: completed.accuracy.artifact,
+                        response_publication_baseline_usage: completed
+                            .publication_baseline_usage
+                            .evidence,
                         response_resource_usage: completed.resource_usage.evidence,
                         response_publication: completed.publication.result,
                         statistics_state: completed.statistics_state.state,

@@ -28,6 +28,7 @@ pub(super) struct ResponseSpectrumResultImport<'a, Source> {
     pub response_result_root: ValueRef,
     pub response_receipt_root: ValueRef,
     pub response_accuracy_root: ValueRef,
+    pub response_publication_baseline_usage_root: ValueRef,
     pub response_resource_usage_root: ValueRef,
     pub response_publication_root: ValueRef,
     pub field_recovery_root: ValueRef,
@@ -98,12 +99,16 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             AnalysisNumericalObjectKind::AccuracyReport,
         ),
         (
-            &input.response_resource_usage_root,
+            &input.response_publication_baseline_usage_root,
             AnalysisNumericalObjectKind::ResourceUsage,
         ),
         (
             &input.response_publication_root,
             AnalysisNumericalObjectKind::PublishedResult,
+        ),
+        (
+            &input.response_resource_usage_root,
+            AnalysisNumericalObjectKind::ResourceUsage,
         ),
         (
             &input.field_recovery_root,
@@ -132,7 +137,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
         &input.objects,
         input.access,
     )?;
-    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, response_resource_usage_objects, response_publication_objects, field_recovery_objects, envelope_state_objects] =
+    let [modal_result_objects, modal_receipt_objects, basis_state_objects, response_result_objects, response_receipt_objects, response_accuracy_objects, response_publication_baseline_usage_objects, response_publication_objects, response_resource_usage_objects, field_recovery_objects, envelope_state_objects] =
         imported.as_slice()
     else {
         return Err(protocol("response-spectrum result closure is incomplete"));
@@ -242,8 +247,9 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
             "response-spectrum accuracy differs from its exact numerical source",
         ));
     }
-    let (response_resource_usage, response_publication) =
+    let (response_publication_baseline_usage, response_resource_usage, response_publication) =
         super::specialized_publication_import::import_specialized_publication(
+            response_publication_baseline_usage_objects,
             response_resource_usage_objects,
             response_publication_objects,
             response_workload.identity().digest(),
@@ -323,6 +329,7 @@ pub(super) fn import_response_spectrum_result<Source: CacheImport>(
                 response_result: Box::new(response_result),
                 response_numerical_receipt,
                 response_accuracy,
+                response_publication_baseline_usage,
                 response_resource_usage,
                 response_publication,
                 field_recovery,

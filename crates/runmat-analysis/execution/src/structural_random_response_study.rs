@@ -71,7 +71,6 @@ pub struct StructuralRandomResponseStudyCoordinator {
     basis_state: Option<ImportedSemanticState>,
     intervals: Vec<ImportedStructuralRandomResponseInterval>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
-    assembly_resource_plan_objects: Option<crate::PreparedAnalysisObjects>,
     result: Option<ImportedStructuralRandomResponseResult>,
     accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
@@ -135,7 +134,6 @@ impl StructuralRandomResponseStudyCoordinator {
             basis_state: None,
             intervals: Vec::new(),
             assembly_host: None,
-            assembly_resource_plan_objects: None,
             result: None,
             accuracy_host: None,
             accuracy: None,
@@ -374,7 +372,6 @@ impl StructuralRandomResponseStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
-        self.assembly_resource_plan_objects = Some(task.resource_plan_objects.clone());
         self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -448,11 +445,6 @@ impl StructuralRandomResponseStudyCoordinator {
                 .as_ref()
                 .ok_or_else(|| invalid("random-response accuracy is absent"))?
                 .objects
-                .clone(),
-            source_resource_plan: self
-                .assembly_resource_plan_objects
-                .as_ref()
-                .ok_or_else(|| invalid("random-response assembly resource plan is absent"))?
                 .clone(),
             source_resource_usage: resource_usage.objects.clone(),
             source_observations: None,

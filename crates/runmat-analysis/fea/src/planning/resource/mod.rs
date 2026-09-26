@@ -1,7 +1,10 @@
 //! Checked FEA resource estimation, worker admission, and usage reconciliation.
 
 mod accuracy;
+mod result_publication;
 mod state_publication;
+pub use contract::ResultPublicationResourceDemand;
+pub use result_publication::build_result_publication_resource_plan;
 mod static_profiles;
 pub use contract::SemanticStatePublicationResourceDemand;
 pub use contract::StructuralLinearPipelineResourceDemand;

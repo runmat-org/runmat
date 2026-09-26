@@ -85,16 +85,10 @@ where
             )
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    // Result publication consumes the source numerical plan as audit evidence. It is not the
-    // publication task's execution plan and therefore cannot govern the receipt output envelope.
-    let resource_plan_inputs = if host.workload.kind == AnalysisWorkKind::PublishResult {
-        Vec::new()
-    } else {
-        inputs
-            .iter()
-            .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
-            .collect::<Vec<_>>()
-    };
+    let resource_plan_inputs = inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .collect::<Vec<_>>();
     if resource_plan_inputs.len() > 1 {
         return Err(AnalysisBridgeError::Invalid(
             "analysis execution has more than one resource plan".into(),

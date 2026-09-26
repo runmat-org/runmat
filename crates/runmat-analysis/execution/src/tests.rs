@@ -2410,7 +2410,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     assert!(prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
-        source_resource_plan: prepared.inputs[3].clone(),
         source_resource_usage: overrun_usage.objects,
         source_observations: Some(imported_observations.clone()),
         program_revision: revision(),
@@ -2418,10 +2417,9 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
     })
     .is_err());
-    let publication_prepared = prepare_result_publication(ResultPublicationPreparation {
+    let mut publication_prepared = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),
-        source_resource_plan: prepared.inputs[3].clone(),
         source_resource_usage: resource_usage.objects.clone(),
         source_observations: Some(imported_observations.clone()),
         program_revision: revision(),
@@ -2433,10 +2431,32 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::execution::ResultPublicationRequest::new(
             &accuracy_artifact,
             Some(&imported_observations.manifest),
-            &prepared.resource_plan,
             &alternate_resource_usage.evidence,
         )
         .unwrap();
+    let admission_inputs: Vec<_> = publication_prepared
+        .inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .collect();
+    assert_eq!(admission_inputs.len(), 1);
+    assert_eq!(
+        admission_inputs[0].manifest.logical_identity,
+        publication_prepared.resource_plan.identity.digest()
+    );
+    assert_ne!(
+        publication_prepared.resource_plan.identity,
+        resource_usage.evidence.primary_plan
+    );
+    let mut duplicate_plan_inputs = publication_prepared.inputs.clone();
+    duplicate_plan_inputs.push((*admission_inputs[0]).clone());
+    assert!(crate::build_prepared_result_publication_resource_plan(
+        &publication_prepared.request,
+        &accuracy_artifact,
+        &resource_usage.evidence,
+        &duplicate_plan_inputs,
+    )
+    .is_err());
     assert_ne!(
         publication_prepared.request.identity(),
         alternate_publication_request.identity()
@@ -2445,7 +2465,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::results::publication::PublishedAnalysisResult::new(
             &publication_prepared.request,
             &accuracy_artifact,
-            &prepared.resource_plan,
             &alternate_resource_usage.evidence,
         )
         .is_err()
@@ -2453,7 +2472,6 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let published_result = runmat_analysis_fea::results::publication::PublishedAnalysisResult::new(
         &publication_prepared.request,
         &accuracy_artifact,
-        &prepared.resource_plan,
         &resource_usage.evidence,
     )
     .unwrap();
@@ -2472,12 +2490,65 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .program_response();
     let imported_publication = import_published_result(
         &store,
-        publication_response,
+        publication_response.clone(),
         &publication_prepared,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
     assert_eq!(imported_publication.result, published_result);
+
+    // Admission is independently recomputed by the importer, not trusted from the driver.
+    let exact_publication_plan = publication_prepared.resource_plan.clone();
+    publication_prepared.resource_plan = resource_usage.evidence.primary_plan().unwrap().clone();
+    assert!(import_published_result(
+        &store,
+        publication_response.clone(),
+        &publication_prepared,
+        ObjectInventoryLimits::default()
+    )
+    .is_err());
+    publication_prepared.resource_plan = exact_publication_plan;
+    let duplicate = publication_prepared
+        .inputs
+        .iter()
+        .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::AccuracyReport)
+        .unwrap()
+        .clone();
+    publication_prepared.inputs.push(duplicate);
+    assert!(import_published_result(
+        &store,
+        publication_response,
+        &publication_prepared,
+        ObjectInventoryLimits::default()
+    )
+    .is_err());
+    publication_prepared.inputs.pop();
+
+    // Gate metadata is not part of PublicationIdentity. This altered receipt is canonical
+    // and keeps every source ID, but cannot replace the gate derived from source accuracy.
+    let mut substituted_gate = published_result.clone();
+    substituted_gate.gate.governing_criterion_id = Some("foreign-criterion".into());
+    assert_eq!(substituted_gate.identity(), published_result.identity());
+    substituted_gate.canonical_bytes().unwrap();
+    let forged_completed = execute_serial_analysis(
+        &publication_prepared.program.request,
+        &mut store,
+        &PublicationKernel(substituted_gate),
+        4096,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let forged_response =
+        AnalysisHostResponse::completed(&publication_prepared.host, &forged_completed)
+            .unwrap()
+            .program_response();
+    assert!(import_published_result(
+        &store,
+        forged_response,
+        &publication_prepared,
+        ObjectInventoryLimits::default()
+    )
+    .is_err());
 
     let mut substituted_result = completed.outputs[0].clone();
     substituted_result.manifest.logical_identity = digest("substituted-solver-result");

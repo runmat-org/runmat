@@ -1,5 +1,6 @@
 mod accuracy;
 mod common;
+mod result_publication;
 mod state_publication;
 use common::validate_common;
 mod demand_validation;
@@ -49,6 +50,12 @@ pub fn build_resource_plan(
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     validate_common(&input)?;
     match (&input.phase, &input.demand) {
+        (
+            FeaResourcePhase::ResultPublication(request),
+            FeaResourceDemand::ResultPublication(demand),
+        ) if *request == demand.request => {
+            result_publication::build_result_publication_plan(input.clone(), demand)
+        }
         (
             FeaResourcePhase::SemanticStatePublication(request),
             FeaResourceDemand::SemanticStatePublication(demand),

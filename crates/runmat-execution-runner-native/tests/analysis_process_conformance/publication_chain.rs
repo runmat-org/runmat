@@ -30,7 +30,7 @@ use runmat_execution_runner_native::{
     FilesystemObjectStore, NativeProgramSession, RemotePoolDriver,
 };
 
-use super::{analysis_resources, analysis_submission, wait_for_native_task};
+use super::{analysis_resources, analysis_submission, capabilities, wait_for_native_task};
 
 pub(super) trait PublicationChainDriver {
     type Store: CacheImport;
@@ -90,15 +90,6 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
             input.manifest.kind == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::Mesh
         })
         .cloned();
-    let resource_plan_objects = solve
-        .inputs
-        .iter()
-        .find(|input| {
-            input.manifest.kind
-                == runmat_analysis_fea::execution::AnalysisNumericalObjectKind::ResourcePlan
-        })
-        .unwrap()
-        .clone();
     let accelerator_requests = resource_usage
         .evidence
         .plans
@@ -319,8 +310,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let publication = prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy.host.clone(),
         source_accuracy: imported_accuracy.objects,
-        source_resource_plan: resource_plan_objects,
-        source_resource_usage: resource_usage.objects,
+        source_resource_usage: resource_usage.objects.clone(),
         source_observations: Some(imported_observations),
         program_revision,
         chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
@@ -328,16 +318,43 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     })
     .unwrap();
     let publication_response = driver
-        .execute(&publication.host, &publication.program, None)
+        .execute(
+            &publication.host,
+            &publication.program,
+            Some(&publication.resource_plan),
+        )
         .await;
-    import_published_result(
+    let published = import_published_result(
         driver.store(),
         publication_response.response,
         &publication,
         limits,
     )
-    .unwrap()
-    .result
+    .unwrap();
+    let terminal = runmat_analysis_execution::complete_result_publication_resource_usage(
+        &publication,
+        &published,
+        &resource_usage,
+        &runmat_analysis_execution::PlannedResourceUsageAttempt {
+            plan: publication.resource_plan.clone(),
+            accounting: publication_response.resources,
+        },
+        runmat_analysis_execution::AnalysisOutputPolicy::new(DEFAULT_ANALYSIS_CHUNK_BYTES, limits)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(terminal.evidence.attempts.len(), expected_attempt_count + 2);
+    assert_eq!(
+        published.result.source_resource_usage,
+        resource_usage.evidence.identity()
+    );
+    runmat_analysis_execution::validate_result_publication_resource_usage(
+        &published.result,
+        &resource_usage.evidence,
+        &terminal.evidence,
+    )
+    .unwrap();
+    published.result
 }
 
 #[derive(Clone)]
@@ -484,12 +501,21 @@ impl PublicationChainDriver for DurableDriver {
 
     fn execute<'a>(
         &'a mut self,
-        _host: &'a AnalysisHostWorkload,
+        host: &'a AnalysisHostWorkload,
         program: &'a PreparedAnalysisProgram,
         resource_plan: Option<&'a runmat_analysis_fea::planning::resource::FeaResourcePlan>,
     ) -> Pin<Box<dyn Future<Output = MeteredProgramResponse> + 'a>> {
         Box::pin(async move {
             program.write_to(&mut self.store).unwrap();
+            // The durable supervisor accepts generic programs, so this driver must carry
+            // the same host requirements that analysis task submission normally adds.
+            let mut allocation = resource_plan
+                .map(|plan| plan.request.clone())
+                .unwrap_or_else(analysis_resources);
+            allocation.required_capabilities.extend(capabilities());
+            allocation
+                .required_capabilities
+                .extend(host.workload.generic_capabilities().unwrap());
             self.submission_sequence += 1;
             let idempotency_key =
                 format!("analysis-publication-chain-{}", self.submission_sequence);
@@ -498,9 +524,7 @@ impl PublicationChainDriver for DurableDriver {
                 .submit_program(
                     runmat_execution_runner_native::supervisor::ProgramBatchSubmission::from_request(
                         program.request.clone(),
-                        resource_plan
-                            .map(|plan| plan.request.clone())
-                            .unwrap_or_else(analysis_resources),
+                        allocation.clone(),
                         Some(idempotency_key),
                         runmat_execution_runner_native::supervisor::MIN_RETENTION_MILLIS,
                     ),
@@ -521,10 +545,7 @@ impl PublicationChainDriver for DurableDriver {
                             "durable analysis task must retain generic resource accounting",
                         );
                         resources.validate().unwrap();
-                        let expected = resource_plan
-                            .map(|plan| plan.request.clone())
-                            .unwrap_or_else(analysis_resources);
-                        assert_eq!(resources.resources.allocation, expected);
+                        assert_eq!(resources.resources.allocation, allocation);
                         let response = attachment.response.unwrap_or_else(|| {
                             panic!(
                                 "durable analysis failed without response: {:?}",

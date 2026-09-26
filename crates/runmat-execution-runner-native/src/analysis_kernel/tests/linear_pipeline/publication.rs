@@ -147,14 +147,9 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
         1,
     )
     .unwrap();
-    let publication_request = ResultPublicationRequest::new(
-        &accuracy,
-        Some(observations),
-        &solved.prepared.resource_plan,
-        &resource_usage,
-    )
-    .unwrap();
-    let publication_request = runmat_analysis_execution::prepare_analysis_objects(
+    let publication_request =
+        ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).unwrap();
+    let publication_request_objects = runmat_analysis_execution::prepare_analysis_objects(
         AnalysisNumericalObjectKind::PublicationRequest,
         publication_request.identity().digest(),
         &publication_request.canonical_bytes().unwrap(),
@@ -163,7 +158,7 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let resource_usage = runmat_analysis_execution::prepare_analysis_objects(
+    let resource_usage_objects = runmat_analysis_execution::prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourceUsage,
         resource_usage.identity().digest(),
         &resource_usage.canonical_bytes().unwrap(),
@@ -172,19 +167,41 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    let publication_inputs = vec![
-        publication_request,
+    let mut publication_inputs = vec![
+        publication_request_objects,
         accuracy_artifact,
-        solved.prepared.inputs[3].clone(),
-        resource_usage,
+        resource_usage_objects,
         accuracy_inputs[2].clone(),
     ];
+    let admission_plan =
+        runmat_analysis_execution::build_prepared_result_publication_resource_plan(
+            &publication_request,
+            &accuracy,
+            &resource_usage,
+            &publication_inputs,
+        )
+        .unwrap();
+    assert_ne!(
+        admission_plan.identity,
+        solved.prepared.resource_plan.identity
+    );
+    publication_inputs.push(
+        runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            admission_plan.identity.digest(),
+            &admission_plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+    );
     let publication_host = test_host_for_input_references(
         host,
         AnalysisWorkKind::PublishResult,
         &publication_inputs,
         vec![AnalysisNumericalObjectKind::PublishedResult],
-        &[1, 3],
+        &[1, 2],
     );
     let publication_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
@@ -201,6 +218,41 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     assert_eq!(published.source_result, solved.source_result);
     assert_eq!(published.source_observations, Some(observations.identity));
     assert_eq!(published.source_accuracy, accuracy.identity());
+
+    // Neither the source solve's valid plan nor a self-consistently rehashed publication
+    // plan is authority for this task: the worker must independently derive its exact plan.
+    let mut altered_input = admission_plan.input.clone();
+    altered_input.worker.fixed_memory_bytes.0 += 1;
+    let altered_plan =
+        runmat_analysis_fea::planning::resource::build_resource_plan(altered_input).unwrap();
+    for substituted_plan in [&solved.prepared.resource_plan, &altered_plan] {
+        let mut substituted_inputs = publication_inputs.clone();
+        substituted_inputs[4] = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            substituted_plan.identity.digest(),
+            &substituted_plan.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let substituted_host = test_host_for_input_references(
+            host,
+            AnalysisWorkKind::PublishResult,
+            &substituted_inputs,
+            vec![AnalysisNumericalObjectKind::PublishedResult],
+            &[1, 2],
+        );
+        let error = NativeAnalysisKernel
+            .execute(AnalysisKernelInvocation {
+                output_policy: output_policy(),
+                kind: AnalysisWorkKind::PublishResult,
+                host: &substituted_host,
+                inputs: &substituted_inputs,
+            })
+            .unwrap_err();
+        assert!(error.to_string().contains("publication inputs differ"));
+    }
 
     let mut substituted_accuracy_inputs = accuracy_inputs;
     substituted_accuracy_inputs[2].manifest.logical_identity = digest("substituted-observations");

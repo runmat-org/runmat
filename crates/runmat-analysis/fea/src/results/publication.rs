@@ -7,8 +7,7 @@ use crate::execution::{
     PublicationRequestIdentity, ResultPublicationRequest, SolverResultIdentity, StepIdentity,
 };
 use crate::planning::resource::{
-    validate_resource_usage_evidence, FeaResourcePlan, FeaResourcePlanIdentity,
-    ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
+    FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
 };
 
 use super::accuracy::{
@@ -21,8 +20,13 @@ const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v1\0";
 const PUBLICATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
 
+mod profile;
+mod usage;
+pub use profile::published_result_encoding_profile;
+pub use usage::validate_result_publication_resource_usage;
+
 /// Immutable terminal receipt for a result set admitted by its typed accuracy policy.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "PublishedAnalysisResultWire")]
 pub struct PublishedAnalysisResult {
     pub schema_version: u16,
@@ -83,25 +87,9 @@ impl PublishedAnalysisResult {
     pub fn new(
         request: &ResultPublicationRequest,
         accuracy: &AccuracyArtifact,
-        resource_plan: &FeaResourcePlan,
         resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<Self> {
-        request.validate()?;
-        accuracy
-            .validate()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        if request.producer != accuracy.producer
-            || request.source_result != accuracy.source_result
-            || request.source_observations != accuracy.source_observations
-            || request.accuracy_request != accuracy.evaluation_request
-            || request.source_accuracy != accuracy.identity()
-            || request.source_resource_plan != resource_plan.identity
-            || request.source_resource_usage != resource_usage.identity()
-        {
-            return Err(AnalysisExecutionError::Identity(
-                "published result sources differ from the admitted request",
-            ));
-        }
+        profile::validate_sources(request, accuracy, resource_usage)?;
         let identity = PublicationIdentity::new(
             request.identity(),
             request.source_result,
@@ -127,7 +115,6 @@ impl PublishedAnalysisResult {
             gate: accuracy.gate().clone(),
         };
         result.validate()?;
-        result.validate_sources(accuracy, resource_plan, resource_usage)?;
         Ok(result)
     }
 
@@ -161,16 +148,19 @@ impl PublishedAnalysisResult {
     pub fn validate_sources(
         &self,
         accuracy: &AccuracyArtifact,
-        resource_plan: &FeaResourcePlan,
         resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         accuracy
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        validate_resource_usage_evidence(resource_plan, resource_usage)
+        let resource_plan = resource_usage
+            .primary_plan()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if self.producer != accuracy.producer
+            || self.formulation_requirement != accuracy.formulation_requirement
+            || self.accuracy_status != accuracy.evaluation().report().status
+            || &self.gate != accuracy.gate()
             || self.source_result != accuracy.source_result
             || self.source_observations != accuracy.source_observations
             || self.source_accuracy != accuracy.identity()

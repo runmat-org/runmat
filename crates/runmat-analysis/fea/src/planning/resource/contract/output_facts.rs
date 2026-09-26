@@ -8,6 +8,9 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::ResultPublication(demand), AnalysisNumericalObjectKind::PublishedResult) => {
+                Some(&demand.output)
+            }
             (
                 Self::StructuralLinearPipeline(demand),
                 AnalysisNumericalObjectKind::StatePublicationProfiles,

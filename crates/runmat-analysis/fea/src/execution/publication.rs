@@ -2,7 +2,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::planning::resource::{
-    FeaResourcePlan, FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
+    FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
 };
 use crate::results::accuracy::{AccuracyArtifact, AccuracyArtifactIdentity};
 use crate::results::observation::{ObservationArtifactIdentity, ObservationArtifactManifest};
@@ -68,7 +68,6 @@ impl ResultPublicationRequest {
     pub fn new(
         accuracy: &AccuracyArtifact,
         observations: Option<&ObservationArtifactManifest>,
-        resource_plan: &FeaResourcePlan,
         resource_usage: &ResourceUsageEvidence,
     ) -> AnalysisExecutionResult<Self> {
         accuracy
@@ -96,11 +95,8 @@ impl ResultPublicationRequest {
                 ))
             }
         };
-        resource_plan
-            .validate_identity()
-            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-        resource_usage
-            .validate_identity()
+        let resource_plan = resource_usage
+            .primary_plan()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
         if resource_usage.primary_plan != resource_plan.identity
             || resource_usage.result_digest != accuracy.source_result.digest()

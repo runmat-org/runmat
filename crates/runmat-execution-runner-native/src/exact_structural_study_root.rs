@@ -43,11 +43,11 @@ const ROOT_PREFIX: &[u8] = b"runmat-exact-structural-study-root/v1\0";
 const ROOT_DOMAIN: &str = "exact-structural-study-root";
 const ROOT_MEDIA_TYPE: &str = "application/vnd.runmat.exact-structural-study-root+cbor";
 const ROOT_VALUE_SCHEMA: &str = "runmat.analysis.exact-structural-study-root";
-const PUBLICATION_PREFIX: &[u8] = b"runmat-exact-structural-study-publication/v1\0";
-const PUBLICATION_DOMAIN: &str = "exact-structural-study-publication";
+const PUBLICATION_PREFIX: &[u8] = b"runmat-exact-structural-study-publication/v2\0";
+const PUBLICATION_DOMAIN: &str = "exact-structural-study-publication-v2";
 const PUBLICATION_MEDIA_TYPE: &str =
-    "application/vnd.runmat.exact-structural-study-publication+cbor";
-const PUBLICATION_VALUE_SCHEMA: &str = "runmat.analysis.exact-structural-study-publication";
+    "application/vnd.runmat.exact-structural-study-publication.v2+cbor";
+const PUBLICATION_VALUE_SCHEMA: &str = "runmat.analysis.exact-structural-study-publication.v2";
 const REGION_RESOLUTION_PREFIX: &[u8] = b"runmat-topology-region-resolution/v1\0";
 const REGION_RESOLUTION_DOMAIN: &str = "topology-region-resolution";
 const CONTRACT_LIMITS: CanonicalLimits =
