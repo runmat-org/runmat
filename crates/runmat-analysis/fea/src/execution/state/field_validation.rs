@@ -11,28 +11,43 @@ pub(in crate::execution) fn validate_portable_fields(
 ) -> AnalysisExecutionResult<()> {
     let mut field_ids = BTreeSet::new();
     for field in fields {
-        let AnalysisFieldValues::HostF64(values) = &field.values else {
-            return Err(AnalysisExecutionError::Invalid(
-                "portable semantic state cannot contain a device-local field reference".into(),
-            ));
-        };
-        let expected = field
-            .shape
-            .iter()
-            .try_fold(1_usize, |count, extent| count.checked_mul(*extent));
-        if field.field_id.trim().is_empty()
-            || !field_ids.insert(field.field_id.as_str())
-            || expected != Some(values.len())
-            || values.is_empty()
-            || values.iter().any(|value| !value.is_finite())
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "semantic state fields must be unique, finite, non-empty host arrays with exact shapes"
-                    .into(),
-            ));
+        validate_portable_field(field)?;
+        if !field_ids.insert(field.field_id.as_str()) {
+            return Err(invalid_field());
         }
     }
     Ok(())
+}
+
+/// Checks one field without allocating success-path scratch. Callers validating an inventory
+/// must additionally establish uniqueness, either generically or from exact ordinal identities.
+pub(in crate::execution) fn validate_portable_field(
+    field: &AnalysisField,
+) -> AnalysisExecutionResult<()> {
+    let AnalysisFieldValues::HostF64(values) = &field.values else {
+        return Err(AnalysisExecutionError::Invalid(
+            "portable semantic state cannot contain a device-local field reference".into(),
+        ));
+    };
+    let expected = field
+        .shape
+        .iter()
+        .try_fold(1_usize, |count, extent| count.checked_mul(*extent));
+    if field.field_id.trim().is_empty()
+        || expected != Some(values.len())
+        || values.is_empty()
+        || values.iter().any(|value| !value.is_finite())
+    {
+        return Err(invalid_field());
+    }
+    Ok(())
+}
+
+fn invalid_field() -> AnalysisExecutionError {
+    AnalysisExecutionError::Invalid(
+        "semantic state fields must be unique, finite, non-empty host arrays with exact shapes"
+            .into(),
+    )
 }
 
 pub(super) fn structural_state_field_ids(
@@ -45,3 +60,6 @@ pub(super) fn structural_state_field_ids(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests;

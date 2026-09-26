@@ -172,6 +172,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
             + facts.solver_admission().resident_bytes_upper_bound.0
             + history.retained_field_bytes.0
             + history.retained_metadata_bytes.0
+            + history.validation_scratch_bytes.0
             + 8 * (rows + 1 + entries)
             + facts.workspace().reservation_bytes().unwrap().0
             + ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)

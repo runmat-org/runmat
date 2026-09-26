@@ -1,5 +1,5 @@
 //! Portable thermal result validation, independent of runtime storage and caller context.
-use super::state::field_validation::validate_portable_fields;
+use super::state::field_validation::{validate_portable_field, validate_portable_fields};
 use super::{AnalysisExecutionError, AnalysisExecutionResult, SolverResultIdentity};
 use crate::contracts::{
     fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
@@ -9,13 +9,16 @@ use crate::contracts::{
 use runmat_analysis_core::{AnalysisField, AnalysisProcedure, PhysicsFamily};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
-use std::collections::BTreeSet;
 
 const PREFIX: &[u8] = b"runmat-thermal-solver-result/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
 #[path = "thermal_result_fields.rs"]
 mod fields;
+
+#[cfg(test)]
+#[path = "thermal_result_validation_tests.rs"]
+mod tests;
 
 impl FeaThermalRunResult {
     pub(super) fn metadata(&self) -> ThermalResultMetadata<'_> {
@@ -94,8 +97,24 @@ impl FeaThermalRunResult {
         Ok(())
     }
 }
-fn unique_nonempty(ids: &[u64]) -> bool {
-    !ids.is_empty() && ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
+fn unique_nonempty(ids: &[u64]) -> AnalysisExecutionResult<bool> {
+    if ids.is_empty() {
+        return Ok(false);
+    }
+    // Canonical producer order is usually ascending. Arbitrary unique declared order remains
+    // supported without mutating that order or imposing quadratic duplicate detection.
+    if ids.windows(2).all(|pair| pair[0] < pair[1]) {
+        return Ok(true);
+    }
+    let mut sorted = Vec::new();
+    sorted.try_reserve_exact(ids.len()).map_err(|error| {
+        AnalysisExecutionError::Invalid(format!(
+            "cannot reserve thermal entity validation: {error}"
+        ))
+    })?;
+    sorted.extend_from_slice(ids);
+    sorted.sort_unstable();
+    Ok(sorted.windows(2).all(|pair| pair[0] != pair[1]))
 }
 fn validate_history(
     fields: &[AnalysisField],
@@ -103,7 +122,10 @@ fn validate_history(
     shape: &[usize],
     field_id: fn(usize) -> String,
 ) -> AnalysisExecutionResult<()> {
-    validate_portable_fields(fields)?;
+    for field in fields {
+        validate_portable_field(field)?;
+    }
+    // The exact ordinal-derived identities below imply uniqueness without a history-sized set.
     if fields.len() != samples
         || fields
             .iter()
@@ -155,8 +177,8 @@ impl ThermalResultMetadata<'_> {
             .and_then(|count| count.checked_sub(initial.authored_and_prescribed_node_count))
             .and_then(|count| count.checked_add(initial.reference_node_count));
         if self.run.identity.family() != PhysicsFamily::Thermal
-            || !unique_nonempty(self.ordered_node_ids)
-            || !unique_nonempty(self.ordered_element_ids)
+            || !unique_nonempty(self.ordered_node_ids)?
+            || !unique_nonempty(self.ordered_element_ids)?
             || !self.reference_temperature_k.is_finite()
             || self.reference_temperature_k <= 0.0
             || self.initial_state.reference_temperature_k != self.reference_temperature_k

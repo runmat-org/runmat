@@ -417,8 +417,14 @@ one in-flight record, including inline vector slots. Accepted records are valida
 of the current solve into a lazily reserved inventory; CPU-only execution allocates no inventory.
 This removes duplicate retained evidence in the last solve. Fixed-width typed IDs can allocate
 temporary strings during profiling. These are evidence-metadata bounds, not accelerator device
-memory qualification. Validation scratch and overlapping transport construction remain separate
-open admission work.
+memory qualification. Producer result validation now reserves one entity-ID scratch vector sized
+to the larger node/element inventory. The sequential uniqueness checks preserve arbitrary declared
+order, sorting a fallibly allocated copy only when IDs are not already ascending. Thermal histories
+reuse shared single-field validation and exact ordinal-derived identifiers, which establish
+uniqueness without a history-sized set. The generic portable-field inventory validator still checks
+arbitrary imported inventories separately; the thermal producer emits no additional `run.fields`.
+This does not claim allocation-free validation: expected-ID formatting and rejection messages can
+allocate. Manifest validation and overlapping transport construction remain open admission work.
 
 Post-solve thermal preparation now profiles actual manifest metadata and hypothetical field
 partition shapes through the same serializers used for retained fields. No dummy numerical arrays

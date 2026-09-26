@@ -10,6 +10,8 @@ pub struct ThermalHistoryResourceFacts {
     pub recovered_element_values: Count,
     pub retained_field_bytes: ByteCount,
     pub retained_metadata_bytes: ByteCount,
+    /// One fallibly reserved entity-ID copy; node/element checks are sequential.
+    pub validation_scratch_bytes: ByteCount,
 }
 
 impl ThermalHistoryResourceFacts {
@@ -34,6 +36,16 @@ impl ThermalHistoryResourceFacts {
                 .map_err(|_| ResourcePlanningError::Overflow("thermal history cardinality"))
         };
         let samples = count(samples)?;
+        let validation_scratch_bytes = if nodes.max(elements) == 0 {
+            0
+        } else {
+            count(nodes.max(elements))?
+                .checked_mul(std::mem::size_of::<u64>() as u64)
+                .and_then(|bytes| bytes.checked_add(std::mem::size_of::<Vec<u64>>() as u64))
+                .ok_or(ResourcePlanningError::Overflow(
+                    "thermal validation scratch",
+                ))?
+        };
         let temperature_values =
             count(nodes)?
                 .checked_mul(samples)
@@ -67,6 +79,7 @@ impl ThermalHistoryResourceFacts {
             recovered_element_values: Count(recovered_element_values),
             retained_field_bytes: ByteCount(retained_field_bytes),
             retained_metadata_bytes: ByteCount(retained_metadata_bytes),
+            validation_scratch_bytes: ByteCount(validation_scratch_bytes),
         })
     }
 
@@ -74,6 +87,7 @@ impl ThermalHistoryResourceFacts {
         self.retained_field_bytes
             .0
             .checked_add(self.retained_metadata_bytes.0)
+            .and_then(|bytes| bytes.checked_add(self.validation_scratch_bytes.0))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal history reservation",
@@ -106,13 +120,25 @@ mod tests {
         assert!(facts.retained_metadata_bytes.0 >= 5 * 4 * FIELD_METADATA_BYTES);
         assert_eq!(
             facts.reservation_bytes().unwrap().0,
-            facts.retained_field_bytes.0 + facts.retained_metadata_bytes.0
+            facts.retained_field_bytes.0
+                + facts.retained_metadata_bytes.0
+                + facts.validation_scratch_bytes.0
         );
         let mut overflowing = facts;
         overflowing.retained_metadata_bytes = ByteCount(u64::MAX);
         assert!(overflowing.reservation_bytes().is_err());
         assert!(facts.require_fits(679).is_err());
         assert!(facts.require_fits(680).is_ok());
+        assert_eq!(
+            facts.validation_scratch_bytes.0,
+            (10 * std::mem::size_of::<u64>() + std::mem::size_of::<Vec<u64>>()) as u64
+        );
+        let element_dominant = ThermalHistoryResourceFacts::from_counts(2, 100, 1).unwrap();
+        assert_eq!(
+            element_dominant.validation_scratch_bytes.0,
+            (100 * std::mem::size_of::<u64>() + std::mem::size_of::<Vec<u64>>()) as u64
+        );
+        assert!(ThermalHistoryResourceFacts::from_counts(usize::MAX, 1, 1).is_err());
         assert!(
             ThermalHistoryResourceFacts::from_counts(usize::MAX, usize::MAX, usize::MAX).is_err()
         );
