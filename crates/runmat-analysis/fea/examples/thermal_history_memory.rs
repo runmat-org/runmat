@@ -14,6 +14,7 @@ use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
     planning::resource::{
         ThermalHistoryResourceFacts, ThermalObservationResourceFacts, ThermalOperatorResourceFacts,
+        ThermalSourceEvidenceResourceFacts,
     },
     ComputeBackend, ThermalProcedureControl,
 };
@@ -23,9 +24,9 @@ use runmat_meshing_core::fixtures::{
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 3 || !matches!(args[2].as_str(), "history" | "fields") {
+    if !(3..=4).contains(&args.len()) || !matches!(args[2].as_str(), "history" | "fields") {
         return Err(
-            "usage: thermal_history_memory <tet4|tet10> <2..8193 samples> <fields|history>".into(),
+            "usage: thermal_history_memory <tet4|tet10> <2..8193 samples> <fields|history> [0..128 heat sources]".into(),
         );
     }
     let mesh = match args[0].as_str() {
@@ -37,10 +38,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !(2..=8193).contains(&samples) {
         return Err("samples must be in 2..8193".into());
     }
+    let source_count: usize = args
+        .get(3)
+        .map(|value| value.parse())
+        .transpose()?
+        .unwrap_or(0);
+    if source_count > 128 {
+        return Err("heat source count must be in 0..128".into());
+    }
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(293.15),
     });
+    let material = model.materials.first().ok_or("missing fixture material")?;
+    let volumetric_capacity = material.mass_density_kg_per_m3.ok_or("missing density")?
+        * material
+            .thermal
+            .as_ref()
+            .ok_or("missing thermal material")?
+            .specific_heat_j_per_kgk;
+    // Keep the total heating fixed at 1 K/s, split equally among genuine typed sources.
+    // The zero-source case remains the original constant-temperature reference.
+    let total_heat_generation = if source_count == 0 {
+        0.0
+    } else {
+        volumetric_capacity
+    };
+    add_heat_sources(&mut model, source_count, total_heat_generation);
     let mut step = ProcedureStep::thermal_transient("insulated");
     step.accuracy.resources.maximum_samples = samples;
     if args[2] == "history" {
@@ -84,17 +108,32 @@ fn main() -> Result<(), Box<dyn Error>> {
         },
         residual_target: 1e-4,
     };
-    let history = ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule()?)?;
+    let schedule = workload.solve_schedule()?;
+    let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule)?;
+    let source_evidence = ThermalSourceEvidenceResourceFacts::derive(
+        &workload.model,
+        &workload.model.sequence.steps[0],
+        &schedule,
+    )?;
+    let expected_evidence = samples
+        .checked_mul(source_count)
+        .ok_or("evidence count overflow")?;
+    if source_evidence.retained_records.0 != u64::try_from(expected_evidence)? {
+        return Err("planned source evidence cardinality failed".into());
+    }
     let operators = ThermalOperatorResourceFacts::derive(&mesh)?;
     let observations =
         ThermalObservationResourceFacts::derive(&mesh, &workload.model.sequence.steps[0])?;
+    let source_evidence_bytes = source_evidence.reservation_bytes()?.0;
     let reservation = operators
         .numerical_reservation_bytes(&history)?
         .0
         .checked_add(observations.reservation_bytes()?.0)
+        .and_then(|bytes| bytes.checked_add(source_evidence_bytes))
         .ok_or("reservation overflow")?;
     // Do not retain the diagnostic planner's support during measured execution.
     drop(operators);
+    drop(schedule);
     let baseline = peak_allocator::begin_measurement();
     let start = Instant::now();
     let result = workload.execute(&mesh);
@@ -102,6 +141,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     let growth = peak_allocator::end_measurement().saturating_sub(baseline);
     let result = result?;
     result.validate_complete()?;
+    if result.run.spatial_projection_evidence.len() != expected_evidence
+        || result
+            .run
+            .spatial_projection_evidence
+            .iter()
+            .any(|evidence| !evidence.accepted)
+    {
+        return Err("actual source evidence cardinality or conservation failed".into());
+    }
     let retained_samples: usize = result
         .run
         .observation_histories
@@ -122,17 +170,79 @@ fn main() -> Result<(), Box<dyn Error>> {
     let max_error = result
         .temperature_snapshots
         .iter()
-        .flat_map(|field| field.as_host_f64().expect("CPU host field"))
-        .map(|temperature| (temperature - 293.15).abs())
+        .zip(&result.time_points_s)
+        .flat_map(|(field, time)| {
+            let expected = 293.15 + total_heat_generation * time / volumetric_capacity;
+            field
+                .as_host_f64()
+                .expect("CPU host field")
+                .iter()
+                .map(move |temperature| (temperature - expected).abs())
+        })
         .fold(0.0_f64, f64::max);
-    println!("order={} nodes={} elements={} samples={} mode={} reservation_bytes={} rust_heap_growth_bytes={} process_peak_rss_bytes={:?} max_temperature_error_k={max_error:e} elapsed_s={:.6}",
+    // Nonzero heating performs iterative solves: relative equation convergence is not an
+    // absolute temperature guarantee. Require a millikelvin reference (0.1% of the 1 K rise),
+    // retaining the original tighter constant-temperature check when no sources are present.
+    let reference_tolerance_k = if source_count == 0 { 1e-8 } else { 1e-3 };
+    println!("order={} nodes={} elements={} samples={} mode={} sources={source_count} total_heat_generation_w_per_m3={total_heat_generation} source_evidence_records={expected_evidence} reservation_bytes={} rust_heap_growth_bytes={} process_peak_rss_bytes={:?} max_temperature_error_k={max_error:e} reference_tolerance_k={reference_tolerance_k:e} elapsed_s={:.6}",
         args[0], mesh.topology.nodes.len(), mesh.topology.volume_elements.len(), samples, args[2],
         reservation, growth, peak_allocator::process_peak_rss_bytes(), elapsed.as_secs_f64());
-    if max_error > 1e-8 || result.temperature_snapshots.len() != samples {
+    if max_error > reference_tolerance_k || result.temperature_snapshots.len() != samples {
         return Err("insulated reference or snapshot cardinality failed".into());
     }
     if growth > reservation {
         return Err("measured Rust heap growth exceeds partial thermal reservation".into());
     }
     Ok(())
+}
+
+fn add_heat_sources(model: &mut AnalysisModel, count: usize, total_w_per_m3: f64) {
+    model.signals.clear();
+    model.excitations.clear();
+    model.excitation_cases.clear();
+    for index in 0..count {
+        let signal_id = SignalId(format!("heat_{index}.signal"));
+        let excitation_id = ExcitationId(format!("heat_{index}"));
+        model
+            .signals
+            .push(PhysicalSignal::HeatGenerationDensity(Signal {
+                signal_id: signal_id.clone(),
+                shape: SignalShape::Scalar,
+                frame: None,
+                representation: SignalRepresentation::Constant(SignalValue::Scalar(
+                    HeatGenerationDensity::new(total_w_per_m3 / count as f64),
+                )),
+                precision: SignalPrecision::Real64,
+                evidence: SignalApproximationEvidence {
+                    max_absolute_error: Some(0.0),
+                    max_relative_error: Some(0.0),
+                    derivative_max_absolute_error: None,
+                    sample_count: 1,
+                },
+                provenance: SignalProvenance::Authored,
+            }));
+        model
+            .excitations
+            .push(ExcitationAction::HeatGeneration(AnalysisExcitation {
+                excitation_id: excitation_id.clone(),
+                target: ExcitationTarget::WholeModel,
+                frame: CoordinateFrame::Global,
+                direction: None,
+                distribution: ExcitationDistribution::IntensityPerVolume,
+                kinematics: ExcitationKinematics::FixedFrame,
+                signal_id,
+                active_step_ids: vec!["insulated".into()],
+                combination_group: None,
+                projection: ProjectionRequirement {
+                    preserve_resultant: true,
+                    preserve_moment: false,
+                    relative_tolerance: 1e-12,
+                },
+            }));
+        model.excitation_cases.push(ExcitationCase {
+            case_id: ExcitationCaseId(format!("heat_{index}.case")),
+            action_ids: vec![excitation_id],
+            activation: ExcitationCaseActivation::Always,
+        });
+    }
 }

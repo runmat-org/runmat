@@ -95,15 +95,15 @@ impl ThermalObservationResourceFacts {
 
     pub(crate) fn require_fits(
         &self,
-        numerical: ByteCount,
+        producer: ByteCount,
         maximum: u64,
     ) -> Result<(), ResourcePlanningError> {
-        let required = numerical.0.checked_add(self.reservation_bytes()?.0).ok_or(
+        let required = producer.0.checked_add(self.reservation_bytes()?.0).ok_or(
             ResourcePlanningError::Overflow("thermal producer observation reservation"),
         )?;
         if required > maximum {
             return Err(ResourcePlanningError::AccuracyCeiling {
-                resource: "thermal numerics and observation reservation",
+                resource: "thermal producer and observation reservation",
                 required,
                 maximum,
             });

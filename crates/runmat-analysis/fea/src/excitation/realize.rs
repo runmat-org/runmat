@@ -4,7 +4,7 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 
 use super::{
     action::realize_kind,
-    activation::active_case_ids,
+    activation::active_actions,
     model::{RealizedExcitation, RealizedExcitationPolicy, RealizedExcitations},
     sample::ExcitationSamplePoint,
     target::realize_target,
@@ -60,41 +60,14 @@ fn realize_excitations_for_step(
     step: Option<&ProcedureStep>,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<RealizedExcitations, RealizationError> {
-    let step_id = step.map(|step| step.step_id.as_str());
     let signals = model
         .signals
         .iter()
         .map(|signal| (signal.signal_id().0.as_str(), signal))
         .collect::<HashMap<_, _>>();
-    let active_cases = active_case_ids(model, step_id)?;
     let mut entries = Vec::new();
-    for action in &model.excitations {
+    for (action, case_ids) in active_actions(model, step)? {
         let excitation = action.excitation();
-        let case_ids = model
-            .excitation_cases
-            .iter()
-            .filter(|case| {
-                active_cases.contains(case.case_id.0.as_str())
-                    && case.action_ids.contains(&excitation.excitation_id)
-            })
-            .map(|case| case.case_id.clone())
-            .collect::<Vec<_>>();
-        if case_ids.is_empty()
-            || step.is_some_and(|step| {
-                !step.object_is_active(&runmat_analysis_core::StepObjectRef::Excitation(
-                    excitation.excitation_id.0.clone(),
-                ))
-            })
-            || (!excitation.active_step_ids.is_empty()
-                && step_id.is_none_or(|step| {
-                    !excitation
-                        .active_step_ids
-                        .iter()
-                        .any(|active| active == step)
-                }))
-        {
-            continue;
-        }
         let signal = signals
             .get(excitation.signal_id.0.as_str())
             .ok_or_else(|| {

@@ -93,8 +93,19 @@ fn execute_validated_model(
     history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
     let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)?;
     operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
+    let evidence = crate::planning::resource::ThermalSourceEvidenceResourceFacts::derive(
+        model, step, &schedule,
+    )?;
+    let producer_bytes = operators
+        .numerical_reservation_bytes(&history)?
+        .0
+        .checked_add(evidence.reservation_bytes()?.0)
+        .map(crate::planning::resource::ByteCount)
+        .ok_or(crate::planning::resource::ResourcePlanningError::Overflow(
+            "thermal producer reservation",
+        ))?;
     crate::planning::resource::ThermalObservationResourceFacts::derive(mesh, step)?.require_fits(
-        operators.numerical_reservation_bytes(&history)?,
+        producer_bytes,
         step.accuracy.resources.maximum_resident_bytes,
     )?;
     physical::run(model, backend, options, mesh, step, &schedule, &operators)

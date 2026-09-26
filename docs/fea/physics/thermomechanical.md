@@ -201,15 +201,42 @@ cargo run --release -p runmat-analysis-fea --example thermal_history_memory -- t
 cargo run --release -p runmat-analysis-fea --example thermal_history_memory -- tet10 4097 history
 ```
 
-On macOS aarch64, the connected four-element Tet4 case with 257 samples originally measured
+At revision `c9af12687` on macOS aarch64, the connected four-element Tet4 case with 257 samples measured
 274,415 B additional Rust heap against a 136,943 B reservation, demonstrating the omitted
 metadata. With metadata included its reservation is 4,372,303 B. The Tet10 4,097-sample case
 measured 4,538,879 B against 69,353,421 B without observations, and 23,488,847 B against
 1,084,098,813 B with nodal temperature history. All twelve combinations of Tet4/Tet10,
 3/257/4,097 samples and fields/history passed, preserving 293.15 K to reported zero error.
 This is a small spatial fixture stressed in sample count, not a spatial convergence or throughput
-claim. Dynamic excitation/source evidence, arbitrary model metadata, provider allocations,
-allocator overhead and transport remain outside a complete producer admission guarantee.
+claim. Arbitrary model metadata, provider allocations, allocator overhead and transport remain
+outside a complete producer admission guarantee.
+
+`ThermalSourceEvidenceResourceFacts` now reserves the accumulated source-projection evidence:
+one record per active heat-generation or heat-flux action per solved sample (including the
+initial sample and zero-valued sources). Preflight and realization share lazy case/step selection;
+membership in multiple active cases does not duplicate an action. The estimate includes owned
+identifier bytes, initial/current assembly and extension-copy records, and allowances for geometric
+Vec growth and minimum small-vector capacity. This joins the numerical and observation reservation
+before assembly. It does not include complete authored-model ownership, realization and projection
+scratch, provider memory or transport.
+
+The memory diagnostic accepts an optional fourth argument for 0–128 uniform heat sources:
+
+```sh
+cargo run --release -p runmat-analysis-fea --example thermal_history_memory -- tet10 257 fields 128
+```
+
+Nonzero sources share a fixed total `q = rho * c`, giving the independent insulated energy-balance
+reference `T(t) = 293.15 + q*t/(rho*c)` (1 K rise over 1 s). The diagnostic checks the full history,
+source conservation and exact evidence cardinality, with a printed 1 mK temperature criterion
+(0.1% of that rise); the no-source criterion remains 1e-8 K. The old no-source criterion failed
+for heated iterative solves at errors around 4e-5 K and was not silently retained as a passing claim.
+Sixteen Tet4/Tet10 × 3/257 samples × fields/history × 2/128-source cases passed on macOS aarch64.
+For Tet10, 257 samples and 128 sources without observation history, 32,896 evidence records were
+retained and measured Rust heap growth was 28,547,143 B against a 33,861,357 B reservation. Its
+maximum temperature error was 6.22e-5 K. A separate Tet10 4,097-sample two-source history case
+retained 8,194 records and measured 30,463,370 B against 1,091,239,469 B, with 3.89e-6 K error.
+These remain small-spatial-fixture evidence, not general worker/native allocation guarantees.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate

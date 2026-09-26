@@ -13,6 +13,8 @@ mod target;
 mod time_grid;
 mod waveform;
 
+pub(crate) use activation::active_actions;
+
 pub(crate) use coupling::realize_coupling_contexts;
 pub use evidence::{
     ProjectionSample, ProjectionScalar, ProjectionVector3, SpatialIntegrationRule,
