@@ -353,6 +353,14 @@ includes the owned output chunks. This is not a complete producer/transport memo
 thermal result serialization, bridge import/materialization, retained producer payloads and
 portable thermal Solve routing remain separate work. Reported process RSS is contextual only.
 
+Bridge whole-object and selected-partition imports also hash their retained chunks directly,
+without a verification-only aggregate buffer. Exact chunk lengths and validated manifest sums
+prove aggregate lengths; full import verifies every partition and the total digest, while partial
+import verifies only the selected partition and does not read unrelated chunks. Import still owns
+the selected chunks. Explicit `payload()` calls and canonical resource-profile materialization
+still gather bytes; this change does not establish a whole-pipeline memory bound. Segmented import
+does not require the aggregate length to fit one contiguous `usize` allocation.
+
 ## Why is my thermal stress wrong?
 
 Check coefficient-of-expansion units, reference temperature, material coverage, restraint realism,

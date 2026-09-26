@@ -730,6 +730,9 @@ impl runmat_execution_artifact::cache::CacheExport for MemoryObjects {
     }
 }
 
+#[path = "object_import_tests.rs"]
+mod object_import_tests;
+
 struct RecordingObjects {
     objects: BTreeMap<Digest, Vec<u8>>,
     reads: RefCell<Vec<Digest>>,

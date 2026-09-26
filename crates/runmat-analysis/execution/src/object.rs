@@ -312,10 +312,6 @@ pub fn import_analysis_objects(
     }
     let mut objects = Vec::with_capacity(manifest.chunks.len() + 1);
     objects.push(manifest_object);
-    let mut payload =
-        Vec::with_capacity(usize::try_from(manifest.encoded_length).map_err(|_| {
-            AnalysisBridgeError::Invalid("analysis payload length is not representable".into())
-        })?);
     for chunk in &manifest.chunks {
         if chunk.encoded_length > limits.max_object_bytes {
             return Err(AnalysisBridgeError::Invalid(
@@ -330,7 +326,6 @@ pub fn import_analysis_objects(
                 "analysis chunk bytes differ from their descriptor",
             ));
         }
-        payload.extend_from_slice(&bytes);
         objects.push(logical_object(
             namespace,
             &format!("analysis/chunks/{:08}", chunk.ordinal),
@@ -338,8 +333,9 @@ pub fn import_analysis_objects(
             bytes,
         )?);
     }
-    if payload.len() as u64 != manifest.encoded_length
-        || Digest::sha256(&payload) != manifest.payload_digest
+    // Every chunk length was checked above; the manifest validates their total.
+    if Digest::sha256_parts(objects.iter().skip(1).map(|object| &object.bytes))
+        != manifest.payload_digest
     {
         return Err(AnalysisBridgeError::Identity(
             "analysis object closure differs from its payload identity",
@@ -422,13 +418,9 @@ pub fn import_analysis_partition(
             bytes,
         )?);
     }
-    let payload = objects
-        .iter()
-        .skip(1)
-        .flat_map(|object| object.bytes.iter().copied())
-        .collect::<Vec<_>>();
-    if payload.len() as u64 != partition.encoded_length
-        || Digest::sha256(&payload) != partition.payload_digest
+    // The selected interval and exact chunk lengths prove the partition byte count.
+    if Digest::sha256_parts(objects.iter().skip(1).map(|object| &object.bytes))
+        != partition.payload_digest
     {
         return Err(AnalysisBridgeError::Identity(
             "selected analysis payload differs from its semantic descriptor",
@@ -708,12 +700,8 @@ fn validate_partition_payloads(
     for partition in &manifest.partitions {
         let start = partition.first_chunk_ordinal as usize + 1;
         let end = start + partition.chunk_count as usize;
-        let payload = objects[start..end]
-            .iter()
-            .flat_map(|object| object.bytes.iter().copied())
-            .collect::<Vec<_>>();
-        if payload.len() as u64 != partition.encoded_length
-            || Digest::sha256(&payload) != partition.payload_digest
+        if Digest::sha256_parts(objects[start..end].iter().map(|object| &object.bytes))
+            != partition.payload_digest
         {
             return Err(AnalysisBridgeError::Identity(
                 "analysis payload partition differs from its descriptor",

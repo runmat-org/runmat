@@ -14,6 +14,16 @@ impl Digest {
         Self(Sha256::digest(bytes.as_ref()).into())
     }
 
+    /// Hash ordered byte segments as one byte stream, without concatenating them.
+    /// Segment boundaries are not part of the identity.
+    pub fn sha256_parts(parts: impl IntoIterator<Item = impl AsRef<[u8]>>) -> Self {
+        let mut hash = Sha256::new();
+        for part in parts {
+            hash.update(part.as_ref());
+        }
+        Self(hash.finalize().into())
+    }
+
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
@@ -76,5 +86,33 @@ impl<'de> Deserialize<'de> for Digest {
         String::deserialize(deserializer)?
             .parse()
             .map_err(serde::de::Error::custom)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Digest;
+
+    #[test]
+    fn segmented_hash_is_boundary_independent_and_order_sensitive() {
+        let bytes = (0_u8..=255).collect::<Vec<_>>();
+        for width in [1, 3, 64, 255, 256, 257] {
+            assert_eq!(
+                Digest::sha256_parts(bytes.chunks(width)),
+                Digest::sha256(&bytes)
+            );
+        }
+        assert_eq!(
+            Digest::sha256_parts([b"".as_slice(), b"abc", b""]),
+            Digest::sha256(b"abc")
+        );
+        assert_eq!(
+            Digest::sha256_parts(std::iter::empty::<&[u8]>()),
+            Digest::sha256(b"")
+        );
+        assert_ne!(
+            Digest::sha256_parts([b"abc", b"def"]),
+            Digest::sha256_parts([b"def", b"abc"])
+        );
     }
 }
