@@ -31,8 +31,16 @@ fn z_limits_for_state_axes(state: &mut FigureState, axes_index: usize) -> Option
     if !state.figure.axes_has_3d_content(axes_index) {
         return None;
     }
+    let bounds = display_bounds_3d_for_state_axes(state, axes_index);
+    Some((bounds.min.z as f64, bounds.max.z as f64))
+}
+
+fn display_bounds_3d_for_state_axes(
+    state: &mut FigureState,
+    axes_index: usize,
+) -> runmat_plot::core::BoundingBox {
     let bounds = state.figure.data_bounds_for_axes(axes_index);
-    Some(finite_span(bounds.min.z as f64, bounds.max.z as f64))
+    runmat_plot::plots::figure::display_bounds_3d(bounds, state.figure.axes_metadata(axes_index))
 }
 
 pub fn set_hidden_line_removal_for_axes(
@@ -87,13 +95,25 @@ pub fn lock_axes_limits(handle: FigureHandle, axes_index: usize) -> Result<(), F
             .get_mut(&handle)
             .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
         validate_axes_index(state, axes_index)?;
-        let (x0, x1, y0, y1) =
-            display_bounds_for_state_axes(state, axes_index).unwrap_or((0., 1., 0., 1.));
-        let x = finite_span(x0, x1);
-        let y = finite_span(y0, y1);
-        if let Some(z) = z_limits_for_state_axes(state, axes_index) {
-            state.figure.set_axes_z_limits(axes_index, Some(z));
-        }
+        let has_z = state.figure.axes_has_3d_content(axes_index)
+            || state
+                .figure
+                .axes_metadata(axes_index)
+                .is_some_and(|meta| meta.z_limits.is_some());
+        let (x, y) = if has_z {
+            let bounds = display_bounds_3d_for_state_axes(state, axes_index);
+            state
+                .figure
+                .set_axes_z_limits(axes_index, Some((bounds.min.z as f64, bounds.max.z as f64)));
+            (
+                (bounds.min.x as f64, bounds.max.x as f64),
+                (bounds.min.y as f64, bounds.max.y as f64),
+            )
+        } else {
+            let (x0, x1, y0, y1) =
+                display_bounds_for_state_axes(state, axes_index).unwrap_or((0., 1., 0., 1.));
+            (finite_span(x0, x1), finite_span(y0, y1))
+        };
         set_axes_limits_with_links(&mut reg, handle, axes_index, Some(x), Some(y))?
     };
     notify_figure_updates(updates);

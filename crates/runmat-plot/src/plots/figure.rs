@@ -24,7 +24,7 @@ pub use y_direction::YDirection;
 mod dimensionality;
 #[path = "figure/limits.rs"]
 mod limits;
-pub use limits::positive_log_bounds;
+pub use limits::{display_bounds_3d, positive_log_bounds};
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];

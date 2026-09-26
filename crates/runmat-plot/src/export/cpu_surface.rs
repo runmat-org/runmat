@@ -666,53 +666,20 @@ fn choose_axes_bounds_3d(
         }
     }
 
-    let (mut min, mut max) = if !min.x.is_finite() || !max.x.is_finite() {
+    let (min, max) = if !min.x.is_finite() || !max.x.is_finite() {
         (
             Vec3::new(bounds_2d.0, bounds_2d.2, -1.0),
             Vec3::new(bounds_2d.1, bounds_2d.3, 1.0),
         )
     } else {
-        if (max.z - min.z).abs() < 1e-6 {
-            min.z -= 0.5;
-            max.z += 0.5;
-        }
         (min, max)
     };
 
-    if let Some(meta) = figure.axes_metadata(axes_index) {
-        if let Some((lo, hi)) = meta.x_limits {
-            min.x = lo as f32;
-            max.x = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.y_limits {
-            min.y = lo as f32;
-            max.y = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.z_limits {
-            min.z = lo as f32;
-            max.z = hi as f32;
-        }
-        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
-        }
-    }
-    (min, max)
-}
-
-fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
-    let aspect = Vec3::new(
-        ratio[0].abs().max(1.0e-12) as f32,
-        ratio[1].abs().max(1.0e-12) as f32,
-        ratio[2].abs().max(1.0e-12) as f32,
+    let bounds = crate::plots::figure::display_bounds_3d(
+        crate::core::BoundingBox { min, max },
+        figure.axes_metadata(axes_index),
     );
-    let center = (min + max) * 0.5;
-    let span = (max - min).abs().max(Vec3::splat(0.1));
-    let units = (span.x / aspect.x)
-        .max(span.y / aspect.y)
-        .max(span.z / aspect.z)
-        .max(0.1);
-    let next = aspect * units;
-    (center - next * 0.5, center + next * 0.5)
+    (bounds.min, bounds.max)
 }
 
 fn default_3d_camera_for_bounds(min: Vec3, max: Vec3) -> Camera {

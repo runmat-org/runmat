@@ -3,6 +3,38 @@ use runmat_plot::plots::LinePlot;
 use runmat_value::Value;
 
 #[test]
+fn manual_three_dimensional_limits_capture_the_shared_display_box() {
+    let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+    reset_plot_state();
+    let mut figure = Figure::new();
+    figure.add_line3_plot(
+        runmat_plot::plots::Line3Plot::new(vec![0., 0.1], vec![0., 0.1], vec![0., 0.]).unwrap(),
+    );
+    figure.set_axis_equal(true);
+    figure.set_axes_y_direction(0, YDirection::Reverse);
+    let expected = runmat_plot::plots::figure::display_bounds_3d(
+        figure.data_bounds_for_axes(0),
+        figure.axes_metadata(0),
+    );
+    let handle = import_figure(figure);
+    lock_axes_limits(handle, 0).unwrap();
+    let metadata = axes_metadata_snapshot(handle, 0).unwrap();
+    assert_eq!(
+        metadata.x_limits,
+        Some((expected.min.x as f64, expected.max.x as f64))
+    );
+    assert_eq!(
+        metadata.y_limits,
+        Some((expected.min.y as f64, expected.max.y as f64))
+    );
+    assert_eq!(
+        metadata.z_limits,
+        Some((expected.min.z as f64, expected.max.z as f64))
+    );
+    assert_eq!(metadata.y_direction, YDirection::Reverse);
+}
+
+#[test]
 fn direction_property_and_axis_tokens_share_state_without_reordering_limits() {
     let _guard = crate::builtins::plotting::tests::lock_plot_registry();
     reset_plot_state();

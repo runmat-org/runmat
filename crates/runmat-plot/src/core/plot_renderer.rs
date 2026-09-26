@@ -991,27 +991,10 @@ impl PlotRenderer {
         figure: Option<&Figure>,
         axes_index: usize,
     ) -> BoundingBox {
-        let Some(meta) = figure.and_then(|fig| fig.axes_metadata(axes_index)) else {
-            return bounds;
-        };
-        let mut min = bounds.min;
-        let mut max = bounds.max;
-        if let Some((lo, hi)) = meta.x_limits {
-            min.x = lo as f32;
-            max.x = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.y_limits {
-            min.y = lo as f32;
-            max.y = hi as f32;
-        }
-        if let Some((lo, hi)) = meta.z_limits {
-            min.z = lo as f32;
-            max.z = hi as f32;
-        }
-        if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-            (min, max) = data_aspect_adjusted_bounds_3d(min, max, meta.data_aspect_ratio);
-        }
-        BoundingBox { min, max }
+        crate::plots::figure::display_bounds_3d(
+            bounds,
+            figure.and_then(|fig| fig.axes_metadata(axes_index)),
+        )
     }
 
     fn bounds_are_finite(bounds: BoundingBox) -> bool {
@@ -4145,22 +4128,6 @@ fn data_aspect_adjusted_bounds(
         cy - next_y * 0.5,
         cy + next_y * 0.5,
     )
-}
-
-fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
-    let aspect = Vec3::new(
-        ratio[0].abs().max(1.0e-12) as f32,
-        ratio[1].abs().max(1.0e-12) as f32,
-        ratio[2].abs().max(1.0e-12) as f32,
-    );
-    let center = (min + max) * 0.5;
-    let span = (max - min).abs().max(Vec3::splat(0.1));
-    let units = (span.x / aspect.x)
-        .max(span.y / aspect.y)
-        .max(span.z / aspect.z)
-        .max(0.1);
-    let next = aspect * units;
-    (center - next * 0.5, center + next * 0.5)
 }
 
 #[cfg(test)]
