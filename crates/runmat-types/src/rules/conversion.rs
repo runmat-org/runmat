@@ -11,11 +11,11 @@ use crate::{
 /// alias facts must not be copied from the source expression.
 pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> FactInference {
     let domain = match source.kind {
-        ValueKindFact::Numeric(numeric) => numeric.domain,
+        ValueKindFact::Numeric(numeric) => Some(numeric.domain),
         ValueKindFact::Logical | ValueKindFact::Character | ValueKindFact::Symbolic => {
-            NumericDomain::Real
+            Some(NumericDomain::Real)
         }
-        ValueKindFact::Unknown => NumericDomain::Real,
+        ValueKindFact::Unknown => None,
         _ => {
             return FactInference {
                 fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
@@ -31,11 +31,18 @@ pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> Fac
     };
 
     let mut output = source.clone();
-    output.kind = ValueKindFact::Numeric(NumericFact {
-        class: target,
-        domain,
+    // NumericFact couples class and domain. Until the input domain is known,
+    // retaining the target class would incorrectly assert real or complex.
+    output.kind = domain.map_or(ValueKindFact::Unknown, |domain| {
+        ValueKindFact::Numeric(NumericFact {
+            class: target,
+            domain,
+        })
     });
-    output.storage = conversion_storage(&source.shape, source.storage);
+    if domain.is_none() && !matches!(output.certainty, crate::CertaintyFact::Dynamic(_)) {
+        output.certainty = crate::CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
+    }
+    output.storage = conversion_storage(&source.shape, source.storage, domain, target);
     output.layout = match output.storage {
         StorageFact::Scalar | StorageFact::Dense | StorageFact::Sparse => LayoutFact::ColumnMajor,
         StorageFact::Unknown | StorageFact::Opaque => LayoutFact::Unknown,
@@ -50,8 +57,22 @@ pub fn infer_numeric_conversion(source: &ValueFact, target: NumericClass) -> Fac
     FactInference::exact(output)
 }
 
-fn conversion_storage(shape: &ShapeFact, source: StorageFact) -> StorageFact {
+fn conversion_storage(
+    shape: &ShapeFact,
+    source: StorageFact,
+    domain: Option<NumericDomain>,
+    target: NumericClass,
+) -> StorageFact {
+    if source == StorageFact::Sparse {
+        return StorageFact::Sparse;
+    }
     if shape.element_count() == Some(1) {
+        if domain.is_none() {
+            return StorageFact::Unknown;
+        }
+        if domain == Some(NumericDomain::Complex) && target.integer_class().is_some() {
+            return StorageFact::Dense;
+        }
         return StorageFact::Scalar;
     }
     match source {
@@ -82,11 +103,11 @@ mod tests {
             provider: Some("test".into()),
         };
 
-        let output = infer_numeric_conversion(&source, NumericClass::UInt64).fact;
+        let output = infer_numeric_conversion(&source, NumericClass::Double).fact;
         assert_eq!(
             output.kind,
             ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::UInt64,
+                class: NumericClass::Double,
                 domain: NumericDomain::Complex,
             })
         );
@@ -99,16 +120,10 @@ mod tests {
     }
 
     #[test]
-    fn numeric_conversion_retains_target_class_when_input_shape_is_dynamic() {
+    fn numeric_conversion_does_not_invent_a_real_domain_for_unknown_input() {
         let source = ValueFact::unknown(DynamicReason::RuntimeValue);
         let output = infer_numeric_conversion(&source, NumericClass::Int16).fact;
-        assert_eq!(
-            output.kind,
-            ValueKindFact::Numeric(NumericFact {
-                class: NumericClass::Int16,
-                domain: NumericDomain::Real,
-            })
-        );
+        assert_eq!(output.kind, ValueKindFact::Unknown);
         assert_eq!(output.shape, ShapeFact::Unknown);
         assert_eq!(output.storage, StorageFact::Unknown);
     }
@@ -132,5 +147,56 @@ mod tests {
         );
         assert_eq!(output.fact.shape, source.shape);
         assert_eq!(output.fact.storage, StorageFact::Dense);
+    }
+
+    #[test]
+    fn numeric_conversion_preserves_scalar_representation_distinctions() {
+        for (domain, storage, expected) in [
+            (NumericDomain::Real, StorageFact::Dense, StorageFact::Scalar),
+            (
+                NumericDomain::Complex,
+                StorageFact::Dense,
+                StorageFact::Dense,
+            ),
+            (
+                NumericDomain::Real,
+                StorageFact::Sparse,
+                StorageFact::Sparse,
+            ),
+        ] {
+            let source = ValueFact::proven(
+                ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain,
+                }),
+                ShapeFact::from(vec![Some(1), Some(1)]),
+                storage,
+            );
+            let output = infer_numeric_conversion(&source, NumericClass::Int8).fact;
+            assert_eq!(output.storage, expected);
+            assert_eq!(output.shape, source.shape);
+            assert_eq!(output.numeric().unwrap().domain, domain);
+        }
+    }
+
+    #[test]
+    fn unknown_domain_retains_independent_facts_and_dynamic_reason() {
+        let mut source = ValueFact::unknown(DynamicReason::ConflictingControlFlow);
+        source.shape = ShapeFact::from(vec![Some(2), Some(3)]);
+        source.storage = StorageFact::Dense;
+        source.residency = ResidencyFact::Host;
+        let output = infer_numeric_conversion(&source, NumericClass::UInt64).fact;
+        assert_eq!(output.kind, ValueKindFact::Unknown);
+        assert_eq!(output.shape, source.shape);
+        assert_eq!(output.storage, StorageFact::Dense);
+        assert_eq!(output.residency, source.residency);
+        assert_eq!(output.certainty, source.certainty);
+        source.shape = ShapeFact::Scalar;
+        assert_eq!(
+            infer_numeric_conversion(&source, NumericClass::UInt64)
+                .fact
+                .storage,
+            StorageFact::Unknown
+        );
     }
 }

@@ -31,6 +31,27 @@ pub(in crate::catalog::inference) fn infer_numeric_conversion_call(
             1,
         ));
     }
+    if target.integer_class().is_some()
+        && input.storage == runmat_types::StorageFact::Sparse
+        && input
+            .numeric()
+            .is_some_and(|numeric| numeric.domain == NumericDomain::Complex)
+    {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INTEGER-CONVERSION-COMPLEX-SPARSE",
+            format!(
+                "{} does not support complex sparse inputs",
+                entry.identity.name
+            ),
+            0,
+        ));
+        return finish_fixed(
+            entry,
+            request,
+            ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
+            diagnostics,
+        );
+    }
     let mut inference = infer_numeric_conversion(input, target);
     diagnostics.append(&mut inference.diagnostics);
     finish_fixed(entry, request, inference.fact, diagnostics)
