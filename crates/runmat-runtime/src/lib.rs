@@ -479,58 +479,6 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
     make_cell_with_shape(values, vec![rows, cols])
 }
 
-fn to_string_scalar(v: &Value) -> Result<String, String> {
-    let s: String = v.try_into()?;
-    Ok(s)
-}
-
-fn to_string_array(v: &Value) -> Result<runmat_value::StringArray, String> {
-    match v {
-        Value::String(s) => {
-            runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).map_err(|e| e.to_string())
-        }
-        Value::StringArray(sa) => Ok(sa.clone()),
-        Value::CharArray(ca) => {
-            // Convert each row to a string; treat as column vector
-            let mut out: Vec<String> = Vec::with_capacity(ca.rows);
-            for r in 0..ca.rows {
-                let mut s = String::with_capacity(ca.cols);
-                for c in 0..ca.cols {
-                    s.push(ca.data[r * ca.cols + c]);
-                }
-                out.push(s);
-            }
-            runmat_value::StringArray::new(out, vec![ca.rows, 1]).map_err(|e| e.to_string())
-        }
-        other => Err(format!("cannot convert to string array: {other:?}")),
-    }
-}
-
-pub(crate) async fn strjoin_rowwise(a: Value, delim: Value) -> crate::BuiltinResult<Value> {
-    let d = to_string_scalar(&delim)?;
-    let sa = to_string_array(&a)?;
-    let rows = *sa.shape.first().unwrap_or(&sa.data.len());
-    let cols = *sa.shape.get(1).unwrap_or(&1);
-    if rows == 0 || cols == 0 {
-        return Ok(Value::StringArray(
-            runmat_value::StringArray::new(Vec::new(), vec![0, 0]).unwrap(),
-        ));
-    }
-    let mut out: Vec<String> = Vec::with_capacity(rows);
-    for r in 0..rows {
-        let mut s = String::new();
-        for c in 0..cols {
-            if c > 0 {
-                s.push_str(&d);
-            }
-            s.push_str(&sa.data[r + c * rows]);
-        }
-        out.push(s);
-    }
-    Ok(Value::StringArray(
-        runmat_value::StringArray::new(out, vec![rows, 1]).map_err(|e| format!("strjoin: {e}"))?,
-    ))
-}
 
 pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count().unwrap_or(1);
