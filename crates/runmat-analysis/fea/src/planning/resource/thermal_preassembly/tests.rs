@@ -66,6 +66,45 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
 }
 
 #[test]
+fn producer_metadata_is_bounded_and_verified_against_actual_initial_state() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let mut workload = workload();
+        let base = super::super::ThermalMetadataResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+        )
+        .unwrap();
+        let long_id = "thermal_long_step".repeat(256);
+        workload.step_id = runmat_analysis_core::ProcedureStepId(long_id.clone());
+        workload.model.sequence.steps[0].step_id = workload.step_id.clone();
+        let grown = super::super::ThermalMetadataResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+        )
+        .unwrap();
+        assert!(
+            grown.initial_state.encoded_bytes_upper_bound
+                > base.initial_state.encoded_bytes_upper_bound
+        );
+        assert!(
+            grown.physical_diagnostics.encoded_bytes_upper_bound
+                > base.physical_diagnostics.encoded_bytes_upper_bound
+        );
+        let result = workload.execute(&mesh).unwrap();
+        grown.verify_initial_state(&result.initial_state).unwrap();
+        let mut substituted = result.initial_state.clone();
+        substituted.procedure_step_id.push_str(&long_id);
+        assert!(grown.verify_initial_state(&substituted).is_err());
+        let mut too_many = result.initial_state.clone();
+        too_many
+            .applied_initial_condition_ids
+            .push("undeclared".into());
+        assert!(grown.verify_initial_state(&too_many).is_err());
+    }
+}
+
+#[test]
 fn model_materialization_is_composed_and_enforced_before_assembly() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
@@ -99,6 +138,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.sources.reservation_bytes().unwrap().0
                 + grown.observations.reservation_bytes().unwrap().0
                 + grown.realization.reservation_bytes().unwrap().0
+                + grown.metadata.reservation_bytes().unwrap().0
                 + grown.property_compilation_bytes.0
         );
         workload.model.sequence.steps[0]

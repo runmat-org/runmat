@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::FeaRunResult;
 
 mod energy;
+mod initial_evidence;
 pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -71,7 +72,7 @@ pub struct FeaThermalRunResult {
     pub initial_state: ThermalInitialStateEvidence,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalInitialStateEvidence {
     pub procedure_step_id: String,

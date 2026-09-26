@@ -2,10 +2,12 @@
 
 use super::*;
 use crate::diagnostics::{
-    builders::material_assignment_diagnostics, FeaDiagnostic, FeaDiagnosticSeverity,
+    builders::material_assignment_diagnostics, thermal::ThermalDiagnosticMessage, FeaDiagnostic,
+    FeaDiagnosticSeverity,
 };
 
 pub(super) struct ThermalDiagnosticsInput<'a> {
+    pub(super) metadata: &'a crate::planning::resource::ThermalMetadataResourceFacts,
     pub(super) model: &'a AnalysisModel,
     pub(super) initial: &'a crate::contracts::ThermalInitialStateEvidence,
     pub(super) assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
@@ -16,8 +18,11 @@ pub(super) struct ThermalDiagnosticsInput<'a> {
     pub(super) residual_target: f64,
 }
 
-pub(super) fn diagnostics(input: ThermalDiagnosticsInput<'_>) -> Vec<FeaDiagnostic> {
+pub(super) fn diagnostics(
+    input: ThermalDiagnosticsInput<'_>,
+) -> Result<Vec<FeaDiagnostic>, FeaRunError> {
     let ThermalDiagnosticsInput {
+        metadata,
         model,
         initial,
         assembly,
@@ -54,81 +59,69 @@ pub(super) fn diagnostics(input: ThermalDiagnosticsInput<'_>) -> Vec<FeaDiagnost
             relative_residual: 0.0,
         });
     let constitutive = assembly.constitutive_stats;
-    let mut diagnostics = vec![
-        FeaDiagnostic {
-            code: "FEA_THERMAL_INITIAL_STATE".into(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "procedure_step_id={} reference_temperature_k={} applied_initial_condition_count={} authored_node_count={} prescribed_node_count={} authored_and_prescribed_node_count={} reference_node_count={} minimum_temperature_k={} maximum_temperature_k={}",
-                initial.procedure_step_id,
+    let thermal = [
+        ThermalDiagnosticMessage::Initial {
+            step: &initial.procedure_step_id,
+            temperatures: [
                 initial.reference_temperature_k,
+                initial.minimum_temperature_k,
+                initial.maximum_temperature_k,
+            ],
+            counts: [
                 initial.applied_initial_condition_ids.len(),
                 initial.authored_node_count,
                 initial.prescribed_node_count,
                 initial.authored_and_prescribed_node_count,
                 initial.reference_node_count,
-                initial.minimum_temperature_k,
-                initial.maximum_temperature_k,
-            ),
-        },
-        FeaDiagnostic {
-            code: "FEA_THERMAL_STABILITY".into(),
-            severity: if maximum_residual <= residual_target {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!(
-                "all_linear_solves_converged=true max_relative_residual_norm={} residual_target={} minimum_temperature_k={} maximum_temperature_k={}",
-                maximum_residual,
-                residual_target,
-                minimum_temperature_k,
-                maximum_temperature_k,
-            ),
-        },
-        FeaDiagnostic {
-            code: "FEA_THERMAL_CONSTITUTIVE".into(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "property_semantic_digest={} conductivity_mean={} heat_capacity_mean={} density_mean={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
-                assembly.property_identity.semantic_digest,
+            ],
+        }
+        .diagnostic(FeaDiagnosticSeverity::Info),
+        ThermalDiagnosticMessage::Stability([
+            maximum_residual,
+            residual_target,
+            minimum_temperature_k,
+            maximum_temperature_k,
+        ])
+        .diagnostic(if maximum_residual <= residual_target {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        }),
+        ThermalDiagnosticMessage::Constitutive {
+            digest: assembly.property_identity.semantic_digest,
+            values: [
                 constitutive.conductivity_mean,
                 constitutive.heat_capacity_mean,
                 constitutive.density_mean,
                 constitutive.conductivity_spread_ratio,
                 constitutive.heat_capacity_spread_ratio,
-            ),
-        },
-        FeaDiagnostic {
-            code: "FEA_THERMAL_ENERGY_BALANCE".into(),
-            severity: if maximum_energy_residual <= residual_target {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Error
-            },
-            message: format!(
-                "storage_rate_w={} boundary_loss_w={} applied_power_w={} prescribed_boundary_power_w={} residual_w={} final_relative_residual={} max_relative_residual={}",
-                final_energy.storage_rate_w,
-                final_energy.boundary_loss_w,
-                final_energy.applied_power_w,
-                final_energy.prescribed_boundary_power_w,
-                final_energy.residual_w,
-                final_energy.relative_residual,
-                maximum_energy_residual,
-            ),
-        },
-        FeaDiagnostic {
-            code: "FEA_THERMAL_FIELD_RECOVERY".into(),
-            severity: FeaDiagnosticSeverity::Info,
-            message: format!(
-                "basis=physical_quadrature node_count={} element_count={} boundary_face_count={}",
-                assembly.projection.nodes.len(),
-                assembly.projection.elements.len(),
-                assembly.projection.boundary_faces.len(),
-            ),
-        },
+            ],
+        }
+        .diagnostic(FeaDiagnosticSeverity::Info),
+        ThermalDiagnosticMessage::Energy([
+            final_energy.storage_rate_w,
+            final_energy.boundary_loss_w,
+            final_energy.applied_power_w,
+            final_energy.prescribed_boundary_power_w,
+            final_energy.residual_w,
+            final_energy.relative_residual,
+            maximum_energy_residual,
+        ])
+        .diagnostic(if maximum_energy_residual <= residual_target {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Error
+        }),
+        ThermalDiagnosticMessage::Recovery([
+            assembly.projection.nodes.len(),
+            assembly.projection.elements.len(),
+            assembly.projection.boundary_faces.len(),
+        ])
+        .diagnostic(FeaDiagnosticSeverity::Info),
     ];
+    metadata.verify_physical_diagnostics(&thermal)?;
+    let mut diagnostics = Vec::from(thermal);
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     diagnostics.extend(last_solve.diagnostics.clone());
-    diagnostics
+    Ok(diagnostics)
 }

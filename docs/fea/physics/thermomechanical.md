@@ -395,6 +395,19 @@ from a single borrowed Serde traversal, without constructing encoded bytes or a 
 separately encoded field partition needs its own contract envelope. Thermal producer metadata and
 overlapping output construction still need domain-owned sizing before portable worker admission;
 a generic manifest schema limit is not a demonstrated useful thermal execution envelope.
+
+Preassembly now reserves shared-codec materialization estimates for initial-state evidence and
+the five producer-owned physical diagnostics. Initial evidence projection and realization share
+the authored temperature-condition selector and one serialization schema. Projection borrows IDs;
+the shared step-applicability check can still allocate a transient object-reference ID. Diagnostic
+projection and reporting share one wire schema and message templates. Finite floats use roundtrip
+17-significant-digit scientific formatting, bounded by 24 bytes; integer widths use `usize::MAX`
+and the concrete digest formatter supplies its 71-byte representation. This traversal creates no
+dummy numerical arrays or retained message strings. Actual initial evidence and physical messages
+are checked against their projected encoded and resident estimates. These are size checks, not
+independent semantic validation. Material-assignment and solver diagnostics, backend evidence,
+validation scratch, and overlapping transport construction remain separate open admission work.
+
 Post-solve thermal preparation now profiles actual manifest metadata and hypothetical field
 partition shapes through the same serializers used for retained fields. No dummy numerical arrays
 are allocated. The profile counts each canonical contract, sums encoded-size bounds, and records

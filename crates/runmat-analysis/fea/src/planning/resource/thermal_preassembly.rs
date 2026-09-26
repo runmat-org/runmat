@@ -1,7 +1,7 @@
 //! Composition of thermal preassembly component estimates; not whole-process admission.
 use super::{
-    ByteCount, ResourcePlanningError, ThermalHistoryResourceFacts, ThermalObservationResourceFacts,
-    ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
+    ByteCount, ResourcePlanningError, ThermalHistoryResourceFacts, ThermalMetadataResourceFacts,
+    ThermalObservationResourceFacts, ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
     ThermalSourceEvidenceResourceFacts,
 };
 use crate::execution::ThermalSolveSchedule;
@@ -17,6 +17,7 @@ pub struct ThermalPreassemblyResourceFacts {
     pub sources: ThermalSourceEvidenceResourceFacts,
     pub observations: ThermalObservationResourceFacts,
     pub realization: ThermalRealizationResourceFacts,
+    pub metadata: ThermalMetadataResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
@@ -64,6 +65,7 @@ impl ThermalPreassemblyResourceFacts {
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
         let observations = ThermalObservationResourceFacts::derive(mesh, step)?;
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
+        let metadata = ThermalMetadataResourceFacts::derive(model, step)?;
         let base = component_bytes(
             &history,
             &operators,
@@ -71,6 +73,7 @@ impl ThermalPreassemblyResourceFacts {
             &observations,
             &realization,
             model_materialization_bytes,
+            &metadata,
         )?;
         let maximum = step.accuracy.resources.maximum_resident_bytes;
         require_ceiling(base, maximum)?;
@@ -107,6 +110,7 @@ impl ThermalPreassemblyResourceFacts {
             sources,
             observations,
             realization,
+            metadata,
             model_materialization_bytes,
         })
     }
@@ -119,6 +123,7 @@ impl ThermalPreassemblyResourceFacts {
             &self.observations,
             &self.realization,
             self.model_materialization_bytes,
+            &self.metadata,
         )?
         .checked_add(self.property_compilation_bytes.0)
         .map(ByteCount)
@@ -139,9 +144,11 @@ fn component_bytes(
     observations: &ThermalObservationResourceFacts,
     realization: &ThermalRealizationResourceFacts,
     model: ByteCount,
+    metadata: &ThermalMetadataResourceFacts,
 ) -> Result<u64, ResourcePlanningError> {
     let observations = observations.reservation_bytes()?.0;
     let realization = realization.reservation_bytes()?.0;
+    let metadata = metadata.reservation_bytes()?.0;
     operators
         .numerical_reservation_bytes(history)?
         .0
@@ -149,6 +156,7 @@ fn component_bytes(
         .and_then(|bytes| bytes.checked_add(model.0))
         .and_then(|bytes| bytes.checked_add(observations))
         .and_then(|bytes| bytes.checked_add(realization))
+        .and_then(|bytes| bytes.checked_add(metadata))
         .ok_or(ResourcePlanningError::Overflow(
             "thermal preassembly components",
         ))

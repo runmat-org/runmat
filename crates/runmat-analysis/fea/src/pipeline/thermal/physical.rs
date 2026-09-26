@@ -99,6 +99,7 @@ pub(super) fn run(
         &initial_assembly.prescribed_temperature_k,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+    facts.metadata.verify_initial_state(&initial.evidence)?;
 
     emit_phase(
         "fea.run_thermal",
@@ -160,6 +161,7 @@ pub(super) fn run(
     );
 
     let diagnostics = diagnostics(ThermalDiagnosticsInput {
+        metadata: &facts.metadata,
         model,
         initial: &initial.evidence,
         assembly: &initial_assembly,
@@ -168,7 +170,7 @@ pub(super) fn run(
         residual_norms: &outcome.residual_norms,
         energy_balances: &outcome.energy_balances,
         residual_target: options.residual_target,
-    });
+    })?;
     let device_apply_ratio = if outcome.device_apply_attempt_count == 0 {
         0.0
     } else {

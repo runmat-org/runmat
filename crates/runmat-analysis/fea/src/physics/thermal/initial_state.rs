@@ -2,6 +2,8 @@ use runmat_analysis_core::{
     AnalysisModel, EntityDimension, ExpectedTopology, InitialCondition, InitialConditionTarget,
     InitialValue, PhysicalSignal, SignalRepresentation, TabulatedSignalDomain,
 };
+use runmat_canonical_codec::{CanonicalCodecError, SerializedCanonicalProfile};
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 use thiserror::Error;
 
 use crate::{
@@ -52,6 +54,53 @@ pub(crate) enum ThermalInitialStateError {
     UnmaterializedField { initial_condition_id: String },
 }
 
+fn selected_conditions<'a>(
+    model: &'a AnalysisModel,
+    step: &'a runmat_analysis_core::ProcedureStep,
+) -> impl Iterator<
+    Item = &'a runmat_analysis_core::InitialConditionValue<runmat_analysis_core::Temperature>,
+> + Clone {
+    model
+        .initial_conditions
+        .iter()
+        .filter_map(move |condition| {
+            if !condition.applies_to_step(step) {
+                return None;
+            }
+            match condition {
+                InitialCondition::Temperature(value) => Some(value),
+                _ => None,
+            }
+        })
+}
+
+/// Profiles the producer's selected IDs without retaining copies or realizing temperature arrays.
+/// The shared applies_to_step selection may allocate a temporary object-reference ID.
+pub(crate) fn evidence_profile(
+    model: &AnalysisModel,
+    step: &runmat_analysis_core::ProcedureStep,
+) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
+    struct SelectedIds<'a> {
+        model: &'a AnalysisModel,
+        step: &'a runmat_analysis_core::ProcedureStep,
+    }
+    impl Serialize for SelectedIds<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let selected = selected_conditions(self.model, self.step);
+            let mut sequence = serializer.serialize_seq(Some(selected.clone().count()))?;
+            for condition in selected {
+                sequence.serialize_element(condition.initial_condition_id.as_str())?;
+            }
+            sequence.end()
+        }
+    }
+    ThermalInitialStateEvidence::projected_profile(
+        step.step_id.as_str(),
+        &SelectedIds { model, step },
+        crate::execution::THERMAL_WORKLOAD_LIMITS,
+    )
+}
+
 pub(crate) fn realize(
     model: &AnalysisModel,
     projection: &AnalysisProjection,
@@ -68,13 +117,7 @@ pub(crate) fn realize(
 
     let mut assigned = vec![None; projection.nodes.len()];
     let mut applied_condition_ids = Vec::new();
-    for initial_condition in &model.initial_conditions {
-        if !initial_condition.applies_to_step(step) {
-            continue;
-        }
-        let InitialCondition::Temperature(condition) = initial_condition else {
-            continue;
-        };
+    for condition in selected_conditions(model, step) {
         let value = realize_value(model, condition)?;
         if value < 0.0 {
             return Err(ThermalInitialStateError::InvalidTemperature {
@@ -258,6 +301,7 @@ fn target_nodes(
 
 #[cfg(test)]
 mod tests {
+    mod profile;
     use runmat_analysis_core::{
         AnalysisSequence, CoordinateFrame, InitialConditionValue, InitialFieldArtifactRef,
         ProcedureStep, RegionTarget, Temperature, ThermalDomain,

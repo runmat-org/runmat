@@ -21,6 +21,8 @@ mod solve_policy;
 mod structural_facts;
 mod symbolic;
 mod thermal_history;
+mod thermal_metadata;
+pub use thermal_metadata::ThermalMetadataResourceFacts;
 mod thermal_observations;
 pub use thermal_observations::ThermalObservationResourceFacts;
 mod thermal_operator;
