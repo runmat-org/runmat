@@ -142,9 +142,9 @@ pub use modal_task::{
 pub use object::{
     analysis_object_references, import_analysis_objects, import_analysis_partition,
     prepare_analysis_objects, prepare_partitioned_analysis_objects, prepared_input_resource_facts,
-    prepared_input_resource_facts_without_resource_plan, projected_output_resource_facts,
-    projected_output_set_resource_facts, AnalysisPartitionImport, ImportedAnalysisPartition,
-    PreparedAnalysisObjects,
+    prepared_input_resource_facts_without_resource_plan, projected_chunked_output_resource_facts,
+    projected_output_resource_facts, projected_output_set_resource_facts, AnalysisPartitionImport,
+    ImportedAnalysisPartition, PreparedAnalysisObjects,
 };
 pub use observation_assembly::{
     import_structural_observation_assembly, prepare_structural_observation_assembly,

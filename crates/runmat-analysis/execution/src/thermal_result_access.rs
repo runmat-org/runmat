@@ -24,12 +24,13 @@ pub fn prepare_thermal_solver_result_objects(
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
     let manifest = ThermalSolverResultManifest::from_result(result)?;
     let plan = manifest.transport_plan(chunk_bytes)?;
+    let output = crate::projected_chunked_output_resource_facts(&plan)?;
     let transport = plan.transport_profile();
     // Reject the complete projected output closure before allocating output chunks.
     // Manifest construction above already encodes field and partition identities.
     // Root/chunk inventory validation remains authoritative after transport construction;
     // this early guard is not a complete process-residency or pre-solve admission claim.
-    if transport.total_bytes_upper_bound > limits.max_total_bytes
+    if output.transport_closure_bytes_upper_bound.0 > limits.max_total_bytes
         || transport.chunk_count_upper_bound >= limits.max_objects as u64
         || transport.largest_chunk_bytes_upper_bound > limits.max_object_bytes
         || transport.root.encoded_bytes_upper_bound > limits.max_object_bytes

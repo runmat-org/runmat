@@ -538,7 +538,7 @@ also preserves earlier error precedence; for a manifest with multiple simultaneo
 reported defect may change. These components exclude error strings, allocator overhead and RSS.
 The isolated manifest-validation test measures 8, 512 and 32,768 requested heap bytes for
 1, 64 and 4,096 partitions on the tested 64-bit host, exactly matching the reserved reference slots.
-Object-conversion overlap remains separate admission work.
+Object-conversion overlap is included in the planned bridge projection described below.
 
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Its constructor consumes an `AnalysisPayloadPlan` with unique ordered
@@ -558,10 +558,24 @@ generated input buffers and retained output chunks. With 512 KiB partitions and 
 the test now compares peak requested heap against the checked plan reservation plus one generated
 source partition, replacing a fixed metadata allowance. The plan exists before the measurement
 baseline, so including its retained capacity in the tested bound is conservative. This is not full
-thermal serialization, producer residency or an enforced caller heap ceiling. Root conversion and
-pre-solve whole-lifetime admission remain separate work.
+thermal serialization, producer residency or an enforced caller heap ceiling. Pre-solve
+whole-lifetime admission remains separate work.
 The checked-plan implementation measured 8,923,712 B for 8,388,608 output bytes and 34,121,408 B
 for 33,554,432 output bytes on the tested host; both fit that composed bound.
+
+The execution bridge's `projected_chunked_output_resource_facts` composes the payload plan with
+retained `LogicalObject` slots, logical-name/media strings, the root descriptor copy, root canonical
+encoding/materialization and borrowed inventory-validation keys. Conversion reserves strings and
+inventory vectors fallibly; chunk byte buffers move without copying. Canonical names and bytes
+remain unchanged. Thermal output preflight uses these shared facts, but does not yet enforce their
+resident component against a pre-solve caller budget. Source fields and their canonical encoding,
+allocator overhead and native/process memory are excluded.
+
+`cargo test -p runmat-analysis-execution --test object_conversion_residency -- --nocapture`
+measures the public bulk preparation path above caller-owned input buffers. For 16 and 64 partitions
+of 512 KiB, with 64 KiB chunks, peak requested growth was 8,560,281 and 34,237,545 B against
+8,697,944 and 34,582,712 B reservations on the tested host. It also checks the root encoding and
+legacy logical-name/media identity. These fixtures are not whole-process memory qualification.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

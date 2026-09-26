@@ -16,6 +16,11 @@ use runmat_execution_artifact::{ArtifactAccess, LogicalObject, ObjectDescriptor,
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
+mod conversion;
+use conversion::logical_object;
+pub(crate) use conversion::prepare_chunked_analysis_objects;
+pub use conversion::projected_chunked_output_resource_facts;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedAnalysisObjects {
     pub manifest: AnalysisObjectManifest,
@@ -563,63 +568,6 @@ pub fn prepare_partitioned_analysis_objects(
     let chunked =
         chunk_partitioned_numerical_payload(kind, logical_identity, partitions, chunk_bytes)?;
     prepare_chunked_analysis_objects(chunked, namespace, limits)
-}
-
-pub(crate) fn prepare_chunked_analysis_objects(
-    chunked: ChunkedAnalysisPayload,
-    namespace: ObjectNamespace,
-    limits: ObjectInventoryLimits,
-) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    let mut objects = Vec::with_capacity(chunked.chunks.len() + 1);
-    let manifest_object = logical_object(
-        namespace,
-        "analysis/manifests",
-        ANALYSIS_MANIFEST_MEDIA_TYPE,
-        chunked.manifest.canonical_bytes()?,
-    )?;
-    let root = manifest_object.descriptor.clone();
-    objects.push(manifest_object);
-    for (descriptor, bytes) in chunked.manifest.chunks.iter().zip(chunked.chunks) {
-        if descriptor.digest != Digest::sha256(&bytes)
-            || descriptor.encoded_length != bytes.len() as u64
-        {
-            return Err(AnalysisBridgeError::Identity(
-                "analysis chunk differs from its manifest descriptor",
-            ));
-        }
-        objects.push(logical_object(
-            namespace,
-            &format!("analysis/chunks/{:08}", descriptor.ordinal),
-            ANALYSIS_CHUNK_MEDIA_TYPE,
-            bytes,
-        )?);
-    }
-    validate_inventory(&objects, limits)?;
-    Ok(PreparedAnalysisObjects {
-        manifest: chunked.manifest,
-        root,
-        objects,
-    })
-}
-
-fn logical_object(
-    namespace: ObjectNamespace,
-    prefix: &str,
-    media_type: &str,
-    bytes: Vec<u8>,
-) -> AnalysisBridgeResult<LogicalObject> {
-    let digest = Digest::sha256(&bytes);
-    let suffix = digest
-        .bytes()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    Ok(LogicalObject::new(
-        namespace,
-        format!("{prefix}/{suffix}"),
-        media_type,
-        bytes,
-    )?)
 }
 
 struct ImportedManifest {
