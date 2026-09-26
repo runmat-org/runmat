@@ -124,7 +124,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         requirements: BuiltinExampleRequirements::NONE,
 
         verification: BuiltinExampleVerification::ExpectedError {
-            identifier: "RunMat:logical:ConversionNotPossible",
+            identifier: "MATLAB:logical:ConversionNotPossible",
         },
     },
     BuiltinExample {
