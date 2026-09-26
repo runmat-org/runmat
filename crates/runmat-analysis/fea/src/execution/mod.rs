@@ -202,7 +202,8 @@ pub use solve::{
 pub use state::{
     BoundThermalStateTransfer, CanonicalSemanticState, CanonicalSemanticStateInput,
     CanonicalSemanticStatePayload, CanonicalStateTransition, CanonicalStateTransitionInput,
-    SemanticStatePublicationRequest, SemanticStatePublicationSource,
+    SemanticStatePublicationProfileSource, SemanticStatePublicationRequest,
+    SemanticStatePublicationSource,
 };
 pub use study_workloads::{
     StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,

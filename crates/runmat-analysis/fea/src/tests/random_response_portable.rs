@@ -117,6 +117,34 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
     )
     .unwrap();
 
+    let basis_publication = SemanticStatePublicationRequest::new(
+        SemanticStatePublicationSource::ModalBasis,
+        producer,
+        modal.state_outputs[0].clone(),
+        topology_digest,
+        source_result,
+    )
+    .unwrap();
+    let basis_profile = basis_publication
+        .encoding_profile(
+            crate::execution::SemanticStatePublicationProfileSource::ModalBasis(
+                modal_result.basis(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        basis_profile,
+        runmat_canonical_codec::profile_serialized(
+            &basis_state,
+            runmat_canonical_codec::CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
+        )
+        .unwrap()
+    );
+    assert!(
+        basis_state.canonical_bytes().unwrap().len() as u64
+            <= basis_profile.encoded_bytes_upper_bound
+    );
+
     let (one, one_task_workspace) = execute_with_group_size(
         &model,
         &response,
@@ -184,6 +212,22 @@ fn portable_interval_tasks_are_grouping_invariant_and_bind_receipt() {
     )
     .unwrap();
     assert!(state.payload.structural_random_statistics().is_some());
+    let profile = publication
+        .encoding_profile(
+            crate::execution::SemanticStatePublicationProfileSource::StructuralRandomStatistics(
+                &grouped,
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        profile,
+        runmat_canonical_codec::profile_serialized(
+            &state,
+            runmat_canonical_codec::CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
+        )
+        .unwrap()
+    );
+    assert!(state.canonical_bytes().unwrap().len() as u64 <= profile.encoded_bytes_upper_bound);
     assert_eq!(
         CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap()).unwrap(),
         state

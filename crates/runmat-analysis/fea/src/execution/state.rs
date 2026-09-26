@@ -17,115 +17,16 @@ const STATE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
 pub(super) mod field_validation;
+mod resource_profile;
+pub use resource_profile::SemanticStatePublicationProfileSource;
 mod thermal;
 mod thermal_transfer;
-use field_validation::{structural_state_field_ids, validate_portable_fields};
+use field_validation::{select_structural_state_fields, validate_portable_fields};
 pub use thermal::CanonicalThermalStatePayload;
 pub use thermal_transfer::BoundThermalStateTransfer;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SemanticStatePublicationRequest {
-    pub schema_version: u16,
-    pub source: SemanticStatePublicationSource,
-    pub producer: StepIdentity,
-    pub declaration: StateOutput,
-    pub topology_digest: Digest,
-    pub source_result: SolverResultIdentity,
-}
-
-/// Typed interpretation of the solver result consumed by state publication.
-///
-/// `SolverResult` is deliberately a generic transport object kind. This discriminator prevents a
-/// worker from guessing its schema or accepting one procedure's result as another state kind.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SemanticStatePublicationSource {
-    StructuralPrimaryFields,
-    ThermalPrimaryField,
-    StructuralLinearization,
-    ModalBasis,
-    StructuralResponseEnvelope,
-    StructuralRandomStatistics,
-}
-
-impl SemanticStatePublicationRequest {
-    pub fn new(
-        source: SemanticStatePublicationSource,
-        producer: StepIdentity,
-        declaration: StateOutput,
-        topology_digest: Digest,
-        source_result: SolverResultIdentity,
-    ) -> AnalysisExecutionResult<Self> {
-        let request = Self {
-            schema_version: 1,
-            source,
-            producer,
-            declaration,
-            topology_digest,
-            source_result,
-        };
-        request.validate()?;
-        Ok(request)
-    }
-
-    pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        if self.schema_version != 1
-            || self.declaration.state_id.0.trim().is_empty()
-            || self.declaration.completeness != StateCompleteness::Complete
-            || self.declaration.persistence == StatePersistence::CheckpointOnly
-            || !matches!(
-                (self.source, self.declaration.kind),
-                (
-                    SemanticStatePublicationSource::StructuralPrimaryFields,
-                    StateKind::StructuralPrimary
-                ) | (
-                    SemanticStatePublicationSource::ThermalPrimaryField,
-                    StateKind::Thermal
-                ) | (
-                    SemanticStatePublicationSource::StructuralLinearization,
-                    StateKind::GeometricStiffness
-                ) | (
-                    SemanticStatePublicationSource::ModalBasis,
-                    StateKind::ModalBasis
-                ) | (
-                    SemanticStatePublicationSource::StructuralResponseEnvelope,
-                    StateKind::StructuralResponseEnvelope
-                ) | (
-                    SemanticStatePublicationSource::StructuralRandomStatistics,
-                    StateKind::StructuralRandomStatistics
-                )
-            )
-        {
-            return Err(AnalysisExecutionError::Invalid(
-                "semantic-state publication source does not match its complete persisted declaration"
-                    .into(),
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
-        self.validate()?;
-        Ok(encode_contract(
-            STATE_PREFIX,
-            "semantic-state-publication-request",
-            self,
-            STATE_LIMITS,
-        )?)
-    }
-
-    pub fn from_canonical_bytes(bytes: &[u8]) -> AnalysisExecutionResult<Self> {
-        let request: Self = decode_contract(
-            STATE_PREFIX,
-            "semantic-state-publication-request",
-            bytes,
-            STATE_LIMITS,
-        )?;
-        request.validate()?;
-        Ok(request)
-    }
-}
+mod publication_request;
+pub use publication_request::{SemanticStatePublicationRequest, SemanticStatePublicationSource};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -189,28 +90,10 @@ impl CanonicalSemanticState {
                 "field state publication requires a structural-primary source".into(),
             ));
         }
-        let mut by_id = std::collections::BTreeMap::new();
-        for field in fields {
-            if by_id.insert(field.field_id.as_str(), field).is_some() {
-                return Err(AnalysisExecutionError::Invalid(format!(
-                    "solver result contains duplicate state field `{}`",
-                    field.field_id
-                )));
-            }
-        }
-        let selected = structural_state_field_ids(request.declaration.kind)?
-            .iter()
-            .map(|field_id| {
-                by_id
-                    .get(*field_id)
-                    .map(|field| (*field).clone())
-                    .ok_or_else(|| {
-                        AnalysisExecutionError::Invalid(format!(
-                            "solver result does not contain state field `{field_id}`"
-                        ))
-                    })
-            })
-            .collect::<AnalysisExecutionResult<Vec<_>>>()?;
+        let selected = select_structural_state_fields(request.declaration.kind, fields)?
+            .into_iter()
+            .cloned()
+            .collect();
         Self::new(CanonicalSemanticStateInput {
             producer: request.producer,
             declaration: request.declaration.clone(),

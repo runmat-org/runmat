@@ -684,6 +684,16 @@ tasks still lack corresponding FEA phase plans, so this is not complete study-gr
 Publication's own final interval must ultimately live in workflow-completion accounting, not in
 the prebuilt source-usage object consumed by that same publication attempt.
 
+Semantic-state output sizing now has borrowed encoding projections for all six supported
+publication sources. Thermal sizing reads the result manifest and terminal field shape, not
+temperature partitions; structural sizing borrows the producing worker's existing typed result.
+The projections use the shared canonical profiler and are checked against actual state encoding
+for primary displacement, linearization, modal basis, response envelope, random statistics and
+Tet4/Tet10 thermal states. Primary field selection is shared with actual publication. These facts
+bound canonical output construction only: they do not yet provide source-bound transport metadata,
+scheduler admission, source-decoding residency, state validation scratch or complete attempt usage.
+Structural planners must not decode full results on the driver merely to obtain these profiles.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

@@ -61,5 +61,33 @@ pub(super) fn structural_state_field_ids(
     }
 }
 
+/// One selection authority for publication and its borrowed encoding projection.
+pub(super) fn select_structural_state_fields(
+    kind: StateKind,
+    fields: &[AnalysisField],
+) -> AnalysisExecutionResult<Vec<&AnalysisField>> {
+    let mut by_id = std::collections::BTreeMap::new();
+    for field in fields {
+        if by_id.insert(field.field_id.as_str(), field).is_some() {
+            return Err(AnalysisExecutionError::Invalid(format!(
+                "solver result contains duplicate state field `{}`",
+                field.field_id
+            )));
+        }
+    }
+    structural_state_field_ids(kind)?
+        .iter()
+        .map(|field_id| {
+            let field = by_id.get(*field_id).copied().ok_or_else(|| {
+                AnalysisExecutionError::Invalid(format!(
+                    "solver result does not contain state field `{field_id}`"
+                ))
+            })?;
+            validate_portable_field(field)?;
+            Ok(field)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

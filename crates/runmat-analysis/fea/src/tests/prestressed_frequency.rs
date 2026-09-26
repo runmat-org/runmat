@@ -116,6 +116,30 @@ fn direct_case(
         Digest::from_bytes(*mesh.canonical_digest.bytes()),
     )
     .unwrap();
+    let publication = crate::execution::SemanticStatePublicationRequest::new(
+        crate::execution::SemanticStatePublicationSource::StructuralLinearization,
+        producer,
+        model.sequence.steps[0].state_outputs[1].clone(),
+        state.topology_digest,
+        source_result,
+    )
+    .unwrap();
+    let profile = publication
+        .encoding_profile(
+            crate::execution::SemanticStatePublicationProfileSource::StructuralLinearization(
+                state.payload.structural_linearization().unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        profile,
+        runmat_canonical_codec::profile_serialized(
+            &state,
+            runmat_canonical_codec::CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
+        )
+        .unwrap()
+    );
+    assert!(state.canonical_bytes().unwrap().len() as u64 <= profile.encoded_bytes_upper_bound);
     let workload = StructuralPrestressedFrequencyTemplate {
         schema_version: 1,
         model,

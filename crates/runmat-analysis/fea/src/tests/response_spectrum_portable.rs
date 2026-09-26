@@ -150,6 +150,41 @@ fn portable_direction_tasks_reassemble_in_authored_order_and_bind_receipt() {
     let generic_workload = AnalysisWorkloadIdentity::for_test("modal-spectrum").unwrap();
     let receipt =
         StructuralModalResponseSpectrumNumericalReceipt::new(generic_workload, &result).unwrap();
+    let step = workload.procedure_step().unwrap();
+    let producer = StepIdentity::from_solver_contract(
+        SequenceIdentity::from_solver_contract(&workload.model().sequence).unwrap(),
+        step,
+    )
+    .unwrap();
+    let publication = crate::execution::SemanticStatePublicationRequest::new(
+        crate::execution::SemanticStatePublicationSource::StructuralResponseEnvelope,
+        producer,
+        step.state_outputs[0].clone(),
+        result.assembly().scope().topology_digest(),
+        receipt.source_result(),
+    )
+    .unwrap();
+    let state = CanonicalSemanticState::from_structural_response_envelope_publication(
+        &publication,
+        &result,
+    )
+    .unwrap();
+    let profile = publication
+        .encoding_profile(
+            crate::execution::SemanticStatePublicationProfileSource::StructuralResponseEnvelope(
+                &result,
+            ),
+        )
+        .unwrap();
+    assert_eq!(
+        profile,
+        runmat_canonical_codec::profile_serialized(
+            &state,
+            runmat_canonical_codec::CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
+        )
+        .unwrap()
+    );
+    assert!(state.canonical_bytes().unwrap().len() as u64 <= profile.encoded_bytes_upper_bound);
     receipt
         .validate_against(receipt.source_result(), &result)
         .unwrap();
