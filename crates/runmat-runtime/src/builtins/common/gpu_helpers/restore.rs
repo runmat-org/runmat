@@ -87,6 +87,9 @@ pub fn restore_class_preserving_value_protecting(
         .iter()
         .map(|handle| HandleMetadataRestoreGuard::new(handle))
         .collect::<Vec<_>>();
+    let explicit = protected
+        .iter()
+        .any(|handle| runmat_accelerate_api::handle_is_explicit(handle));
 
     let (
         mut output,
@@ -113,12 +116,7 @@ pub fn restore_class_preserving_value_protecting(
             };
             let output = match provider.upload_numeric(&transfer) {
                 Ok(output) => output,
-                Err(_)
-                    if expected_integer.is_none()
-                        && !runmat_accelerate_api::handle_is_explicit(source) =>
-                {
-                    return Ok(value)
-                }
+                Err(_) if expected_integer.is_none() && !explicit => return Ok(value),
                 Err(error) => {
                     return Err(build_runtime_error(format!(
                         "{builtin}: failed to restore GPU result: {error}"
@@ -194,12 +192,7 @@ pub fn restore_class_preserving_value_protecting(
             };
             let output = match provider.upload_numeric(&transfer) {
                 Ok(output) => output,
-                Err(_)
-                    if expected_integer.is_none()
-                        && !runmat_accelerate_api::handle_is_explicit(source) =>
-                {
-                    return Ok(value)
-                }
+                Err(_) if expected_integer.is_none() && !explicit => return Ok(value),
                 Err(error) => {
                     return Err(build_runtime_error(format!(
                         "{builtin}: failed to restore GPU result: {error}"
@@ -256,10 +249,14 @@ pub fn restore_class_preserving_value_protecting(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build());
     }
-    let provenance = source_guard
-        .snapshot
-        .provenance
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    let provenance = if explicit {
+        runmat_accelerate_api::GpuHandleProvenance::Explicit
+    } else {
+        source_guard
+            .snapshot
+            .provenance
+            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+    };
     output.descriptor.provenance = Some(provenance);
     runmat_accelerate_api::mark_residency(&output);
     Ok(Value::GpuTensor(output))

@@ -1022,6 +1022,36 @@ mod preserving_download_tests {
     }
 
     #[test]
+    fn protected_restore_retains_explicit_intent_from_any_operand() {
+        test_support::with_test_provider(|provider| {
+            let host = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
+            let source = upload_tensor(provider, &host)
+                .unwrap()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let other = upload_tensor(provider, &host)
+                .unwrap()
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let before = snapshot_handle_metadata(&other);
+            let restored = restore_class_preserving_value_protecting(
+                &source,
+                Value::Tensor(host),
+                "test",
+                &[&other],
+            )
+            .unwrap();
+            let Value::GpuTensor(output) = restored else {
+                panic!("resident output")
+            };
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            assert_eq!(snapshot_handle_metadata(&other), before);
+            for handle in [&output, &other, &source] {
+                provider.free(handle).unwrap();
+                runmat_accelerate_api::clear_handle_metadata(handle);
+            }
+        });
+    }
+
+    #[test]
     fn protected_numeric_and_complex_uploads_preserve_borrowed_aliases() {
         test_support::with_test_provider(|owner| {
             let real = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();

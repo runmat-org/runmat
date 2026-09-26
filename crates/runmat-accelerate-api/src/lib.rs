@@ -2233,8 +2233,8 @@ pub trait AccelProvider: Send + Sync {
 
     /// Exponentially-distributed random values with mean `mu`.
     fn random_exponential(&self, _mu: f64, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "random_exponential not supported by provider"
+        Err(unsupported_provider_operation(
+            "random_exponential not supported by provider",
         ))
     }
 
