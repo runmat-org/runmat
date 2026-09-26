@@ -65,6 +65,23 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         .unwrap();
         facts.verify_matrix(&assembly.conductivity).unwrap();
         facts.verify_matrix(&assembly.capacity).unwrap();
+        let live_assembly_arrays = std::mem::size_of_val(assembly.source.as_slice())
+            + std::mem::size_of_val(assembly.positive_robin_weight.as_slice())
+            + std::mem::size_of_val(assembly.prescribed_temperature_k.as_slice())
+            + std::mem::size_of_val(assembly.element_conductivity_w_per_mk.as_slice())
+            + std::mem::size_of_val(assembly.element_volumetric_capacity_j_per_m3k.as_slice());
+        let construction_property_arrays = 2 * projection.elements.len() * 8;
+        assert_eq!(
+            facts.workspace().assembly_vector_bytes.0,
+            (2 * live_assembly_arrays + construction_property_arrays) as u64
+        );
+        assert_eq!(
+            facts.workspace().projection_estimated_bytes.0,
+            2 * crate::planning::resource::TopologyResourceFacts::from_projection(&projection)
+                .unwrap()
+                .estimated_resident_bytes
+                .0
+        );
         for operator in [
             assembly.steady_operator().unwrap(),
             assembly
@@ -132,6 +149,7 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
             + facts.solver_admission().resident_bytes_upper_bound.0
             + history.retained_field_bytes.0
             + 8 * (rows + 1 + entries)
+            + facts.workspace().reservation_bytes().unwrap().0
     );
     assert!(required > history.retained_field_bytes.0);
     workload.model.sequence.steps[0]

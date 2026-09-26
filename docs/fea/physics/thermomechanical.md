@@ -164,9 +164,13 @@ after cancellation and reserves its output buffers once with fallible allocation
 growth during builder-to-CSR conversion. This covers the counted simultaneous logical matrix
 payloads (including a possible accelerator prepared-system clone), not spare capacities in other
 construction paths, allocator rounding, or
-provider-owned storage. Sparse assembly builders, numerical
-vectors, model/projection/evidence metadata, observations, and transport are still outside this
-partial reservation. Passing it is not whole-process memory admission or GPU qualification.
+provider-owned storage. `ThermalWorkspaceResourceFacts` adds the audited live host vector payload:
+12 nodal f64 vectors and three masks for solve/driver work; two assemblies' source, Robin,
+prescribed-value and material arrays plus construction property arrays; six element f64 values
+of recovery scratch. It also reuses `TopologyResourceFacts` for the two live projections. That
+topology figure is the shared estimate, not a measured or exact metadata bound. Sparse assembly
+builders, model/property/evidence metadata, observations, and transport still require admission.
+Passing this partial reservation is not whole-process memory admission or GPU qualification.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate

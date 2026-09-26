@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     symbolic::pattern_from_rows, ByteCount, Count, ResourcePlanningError,
-    SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts,
+    SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
 };
 
 /// Material-independent support, including every volume and boundary coupling and each diagonal.
@@ -23,12 +23,14 @@ pub struct ThermalOperatorResourceFacts {
     admission: SolverAdmissionResourcePolicy,
     csr_payload_bytes: ByteCount,
     support_payload_bytes: ByteCount,
+    workspace: ThermalWorkspaceResourceFacts,
 }
 
 impl ThermalOperatorResourceFacts {
     pub fn derive(mesh: &SolverMeshArtifact) -> Result<Self, ResourcePlanningError> {
         let projection = AnalysisProjection::derive(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let workspace = ThermalWorkspaceResourceFacts::derive(&projection)?;
         let mut rows = (0..projection.nodes.len())
             .map(|index| BTreeSet::from([index]))
             .collect::<Vec<_>>();
@@ -76,6 +78,7 @@ impl ThermalOperatorResourceFacts {
             admission,
             csr_payload_bytes: ByteCount(csr_payload_bytes),
             support_payload_bytes: ByteCount(pattern_bytes(rows, entries)?),
+            workspace,
         })
     }
 
@@ -87,6 +90,9 @@ impl ThermalOperatorResourceFacts {
     }
     pub fn solver_admission(&self) -> &SolverAdmissionResourcePolicy {
         &self.admission
+    }
+    pub fn workspace(&self) -> &ThermalWorkspaceResourceFacts {
+        &self.workspace
     }
     /// Logical row-offset, column-index and value lengths, not allocation capacities.
     /// Sparse-builder storage is an additional allocation.
@@ -100,11 +106,13 @@ impl ThermalOperatorResourceFacts {
         &self,
         history: &ThermalHistoryResourceFacts,
     ) -> Result<ByteCount, ResourcePlanningError> {
+        let workspace = self.workspace.reservation_bytes()?.0;
         self.csr_payload_bytes
             .0
             .checked_add(self.admission.resident_bytes_upper_bound.0)
             .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))
             .and_then(|bytes| bytes.checked_add(history.retained_field_bytes.0))
+            .and_then(|bytes| bytes.checked_add(workspace))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal numerical reservation",
@@ -119,7 +127,7 @@ impl ThermalOperatorResourceFacts {
         let required = self.numerical_reservation_bytes(history)?.0;
         if required > maximum {
             return Err(ResourcePlanningError::AccuracyCeiling {
-                resource: "thermal CSR, proof and retained-field reservation",
+                resource: "thermal numerical and topology reservation",
                 required,
                 maximum,
             });
