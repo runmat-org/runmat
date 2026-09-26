@@ -3,7 +3,10 @@
 //! Domain owners supply a stable prefix, domain string, limits, and semantic validation. This
 //! crate owns only deterministic serde-value projection and hostile-input decoding rules.
 
+mod serialized_profile;
 mod value;
+
+pub use serialized_profile::serialized_materialization_resident_bytes_estimate;
 
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -36,6 +39,16 @@ pub fn canonical_payload_materialization_resident_bytes_estimate(
     encoded: &[u8],
 ) -> Result<u64, CanonicalCodecError> {
     let profile = value::materialization_profile(encoded)?;
+    let encoded_bytes = u64::try_from(encoded.len()).map_err(|_| {
+        CanonicalCodecError::invalid("materialization estimate", "payload bytes overflow")
+    })?;
+    materialization_resident_bytes_estimate(profile, encoded_bytes)
+}
+
+fn materialization_resident_bytes_estimate(
+    profile: value::MaterializationProfile,
+    encoded_bytes: u64,
+) -> Result<u64, CanonicalCodecError> {
     let value_bytes = profile
         .value_nodes
         .checked_mul(std::mem::size_of::<serde_json::Value>() as u64)
@@ -56,12 +69,9 @@ pub fn canonical_payload_materialization_resident_bytes_estimate(
     let string_bytes = profile.string_bytes.checked_mul(2).ok_or_else(|| {
         CanonicalCodecError::invalid("materialization estimate", "string bytes overflow")
     })?;
-    let encoded_bytes = u64::try_from(encoded.len())
-        .ok()
-        .and_then(|bytes| bytes.checked_mul(2))
-        .ok_or_else(|| {
-            CanonicalCodecError::invalid("materialization estimate", "payload bytes overflow")
-        })?;
+    let encoded_bytes = encoded_bytes.checked_mul(2).ok_or_else(|| {
+        CanonicalCodecError::invalid("materialization estimate", "payload bytes overflow")
+    })?;
     value_bytes
         .checked_add(map_entry_bytes)
         .and_then(|bytes| bytes.checked_add(string_bytes))

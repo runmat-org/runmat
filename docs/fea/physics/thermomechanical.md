@@ -238,6 +238,22 @@ maximum temperature error was 6.22e-5 K. A separate Tet10 4,097-sample two-sourc
 retained 8,194 records and measured 30,463,370 B against 1,091,239,469 B, with 3.89e-6 K error.
 These remain small-spatial-fixture evidence, not general worker/native allocation guarantees.
 
+`ThermalPreassemblyResourceFacts` composes those component estimates with authored-model
+materialization under one checked resident ceiling. The shared canonical codec profiles borrowed
+Serde input without constructing a value tree, encoded buffer or copied strings, reusing the
+existing materialization cost policy. Its conservative byte/depth limits can reject input before
+canonical encoding would; custom serializers may allocate independently. The model allowance
+reserves the authored model and a possible filtered constraint copy. Unchanged thermal/modal
+constraint views now borrow the original model; structural transient preparation still owns its
+prepared view. This is an estimate, not an exact typed-model heap bound.
+
+With this composition and borrowed view, the Tet10 257-sample/128-source fields case measured
+28,419,674 B additional Rust heap against 36,237,881 B reserved; the Tet10 4,097-sample/two-source
+history case measured 30,426,688 B against 1,092,144,217 B. Their reference errors remained
+6.22e-5 K and 3.89e-6 K. The zero-source Tet4 257-sample case measured 270,327 B against
+4,559,307 B and reported zero temperature error. Realization/projection scratch, provider memory,
+and result materialization/transport still prevent a whole-producer admission claim.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

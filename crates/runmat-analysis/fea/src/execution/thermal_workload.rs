@@ -13,7 +13,8 @@ use crate::{ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalProcedureCo
 use super::{AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity};
 
 const PREFIX: &[u8] = b"runmat-thermal-workload/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
+pub(crate) const LIMITS: CanonicalLimits =
+    CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 /// Placement and solver mesh are separate from authored numerical intent. This local numerical
 /// entry is not a scheduler admission, a distributed solve, or a production qualification.

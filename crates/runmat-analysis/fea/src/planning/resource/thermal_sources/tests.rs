@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     execution::ThermalWorkload,
     fixtures::{fixture_model, FixtureId},
-    planning::resource::{ThermalHistoryResourceFacts, ThermalOperatorResourceFacts},
+    planning::resource::ThermalPreassemblyResourceFacts,
 };
 use runmat_analysis_core::*;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
@@ -196,24 +196,28 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
             .iter()
             .all(|evidence| evidence.accepted));
         let schedule = workload.solve_schedule().unwrap();
-        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
-        let numerical = ThermalOperatorResourceFacts::derive(&mesh)
-            .unwrap()
-            .numerical_reservation_bytes(&history)
-            .unwrap()
-            .0;
+        let total = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            &mesh,
+            &schedule,
+        )
+        .unwrap()
+        .reservation_bytes()
+        .unwrap()
+        .0;
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = numerical;
+            .maximum_resident_bytes = total - source.reservation_bytes().unwrap().0;
         assert!(
             matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required, .. }))
-            if required == numerical + source.reservation_bytes().unwrap().0)
+            if required == total)
         );
         workload.model.sequence.steps[0]
             .accuracy
             .resources
-            .maximum_resident_bytes = numerical + source.reservation_bytes().unwrap().0;
+            .maximum_resident_bytes = total;
         workload.execute(&mesh).unwrap();
     }
 }

@@ -113,7 +113,7 @@ fn impossible_sample_or_retained_memory_ceilings_fail_before_thermal_assembly() 
 #[test]
 fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
     use crate::planning::resource::{
-        ThermalObservationResourceFacts, ThermalOperatorResourceFacts,
+        ThermalObservationResourceFacts, ThermalPreassemblyResourceFacts,
     };
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mut workload = workload();
@@ -139,12 +139,16 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
             .map(|history| history.samples().len())
             .sum();
         assert_eq!(retained_samples as u64, shared.retained_sample_count.0);
-        let history =
-            ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap())
-                .unwrap();
-        let operators = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
-        let numerical = operators.numerical_reservation_bytes(&history).unwrap();
-        let total = numerical.0 + observations.reservation_bytes().unwrap().0;
+        let total = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            step,
+            &mesh,
+            &workload.solve_schedule().unwrap(),
+        )
+        .unwrap()
+        .reservation_bytes()
+        .unwrap()
+        .0;
         workload.model.sequence.steps[0]
             .accuracy
             .resources

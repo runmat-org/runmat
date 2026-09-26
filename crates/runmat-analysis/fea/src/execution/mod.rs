@@ -47,6 +47,7 @@ mod thermal_schedule;
 pub use thermal_schedule::ThermalSolveSchedule;
 mod thermal_workload;
 pub use thermal_workload::ThermalWorkload;
+pub(crate) use thermal_workload::LIMITS as THERMAL_WORKLOAD_LIMITS;
 mod transient_block;
 mod transient_checkpoint;
 mod transient_coordinates;

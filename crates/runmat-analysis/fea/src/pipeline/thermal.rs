@@ -89,26 +89,19 @@ fn execute_validated_model(
     mesh.validate_canonical()
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
-    let history = crate::planning::resource::ThermalHistoryResourceFacts::derive(mesh, &schedule)?;
-    history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
-    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)?;
-    operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
-    let evidence = crate::planning::resource::ThermalSourceEvidenceResourceFacts::derive(
-        model, step, &schedule,
+    let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
+        model, step, mesh, &schedule,
     )?;
-    let producer_bytes = operators
-        .numerical_reservation_bytes(&history)?
-        .0
-        .checked_add(evidence.reservation_bytes()?.0)
-        .map(crate::planning::resource::ByteCount)
-        .ok_or(crate::planning::resource::ResourcePlanningError::Overflow(
-            "thermal producer reservation",
-        ))?;
-    crate::planning::resource::ThermalObservationResourceFacts::derive(mesh, step)?.require_fits(
-        producer_bytes,
-        step.accuracy.resources.maximum_resident_bytes,
-    )?;
-    physical::run(model, backend, options, mesh, step, &schedule, &operators)
+    facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
+    physical::run(
+        model,
+        backend,
+        options,
+        mesh,
+        step,
+        &schedule,
+        &facts.operators,
+    )
 }
 
 pub(crate) fn validate_controls(

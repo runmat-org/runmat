@@ -118,7 +118,7 @@ pub(crate) fn prepare_transient_preassembly(
     )?;
     Ok(PreparedTransientPreassembly {
         execution_step,
-        active_model,
+        active_model: active_model.into_owned(),
         motions,
         schedule,
         step_boundaries,

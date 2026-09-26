@@ -12,10 +12,7 @@ use runmat_analysis_core::*;
 use runmat_analysis_fea::{
     execution::ThermalWorkload,
     fixtures::{fixture_model, FixtureId},
-    planning::resource::{
-        ThermalHistoryResourceFacts, ThermalObservationResourceFacts, ThermalOperatorResourceFacts,
-        ThermalSourceEvidenceResourceFacts,
-    },
+    planning::resource::ThermalPreassemblyResourceFacts,
     ComputeBackend, ThermalProcedureControl,
 };
 use runmat_meshing_core::fixtures::{
@@ -109,30 +106,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         residual_target: 1e-4,
     };
     let schedule = workload.solve_schedule()?;
-    let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule)?;
-    let source_evidence = ThermalSourceEvidenceResourceFacts::derive(
+    let facts = ThermalPreassemblyResourceFacts::derive(
         &workload.model,
         &workload.model.sequence.steps[0],
+        &mesh,
         &schedule,
     )?;
     let expected_evidence = samples
         .checked_mul(source_count)
         .ok_or("evidence count overflow")?;
-    if source_evidence.retained_records.0 != u64::try_from(expected_evidence)? {
+    if facts.sources.retained_records.0 != u64::try_from(expected_evidence)? {
         return Err("planned source evidence cardinality failed".into());
     }
-    let operators = ThermalOperatorResourceFacts::derive(&mesh)?;
-    let observations =
-        ThermalObservationResourceFacts::derive(&mesh, &workload.model.sequence.steps[0])?;
-    let source_evidence_bytes = source_evidence.reservation_bytes()?.0;
-    let reservation = operators
-        .numerical_reservation_bytes(&history)?
-        .0
-        .checked_add(observations.reservation_bytes()?.0)
-        .and_then(|bytes| bytes.checked_add(source_evidence_bytes))
-        .ok_or("reservation overflow")?;
+    let reservation = facts.reservation_bytes()?.0;
     // Do not retain the diagnostic planner's support during measured execution.
-    drop(operators);
+    drop(facts);
     drop(schedule);
     let baseline = peak_allocator::begin_measurement();
     let start = Instant::now();

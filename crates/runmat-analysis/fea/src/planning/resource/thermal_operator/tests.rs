@@ -174,6 +174,16 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
             + facts.workspace().reservation_bytes().unwrap().0
     );
     assert!(required > history.retained_field_bytes.0);
+    let required = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
+        &workload.model,
+        &workload.model.sequence.steps[0],
+        &mesh,
+        &workload.solve_schedule().unwrap(),
+    )
+    .unwrap()
+    .reservation_bytes()
+    .unwrap()
+    .0;
     // The old payload-only reservation must no longer admit a solve with missing metadata.
     workload.model.sequence.steps[0]
         .accuracy

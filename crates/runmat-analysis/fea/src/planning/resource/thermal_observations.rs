@@ -92,24 +92,6 @@ impl ThermalObservationResourceFacts {
                 "thermal observation reservation",
             ))
     }
-
-    pub(crate) fn require_fits(
-        &self,
-        producer: ByteCount,
-        maximum: u64,
-    ) -> Result<(), ResourcePlanningError> {
-        let required = producer.0.checked_add(self.reservation_bytes()?.0).ok_or(
-            ResourcePlanningError::Overflow("thermal producer observation reservation"),
-        )?;
-        if required > maximum {
-            return Err(ResourcePlanningError::AccuracyCeiling {
-                resource: "thermal producer and observation reservation",
-                required,
-                maximum,
-            });
-        }
-        Ok(())
-    }
 }
 
 fn invalid(error: impl std::fmt::Display) -> ResourcePlanningError {
