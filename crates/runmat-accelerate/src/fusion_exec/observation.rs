@@ -10,6 +10,9 @@ pub enum FusionExecutionOutcome<T> {
     SharedRuntime(FusionCpuObservation),
 }
 
+/// Measures completion of a shared-runtime bytecode region on the host.
+/// Inner calls may submit provider work; this elapsed time is not evidence of
+/// completion of that device work and must not be assigned to a GPU candidate.
 pub struct FusionCpuObservation {
     feedback: Option<LocalPlacementFeedback>,
     started: Instant,
@@ -24,6 +27,7 @@ impl FusionCpuObservation {
     }
 
     /// Only the owner of the complete bytecode region may report success.
+    /// Success means host bytecode exited, not that nested GPU queues drained.
     pub fn complete(mut self) {
         self.observe(true);
     }

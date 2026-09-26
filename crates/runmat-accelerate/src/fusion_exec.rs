@@ -751,7 +751,7 @@ pub fn execute_reduction(
     num_slices: usize,
     workgroup_size: u32,
 ) -> Result<Value> {
-    match execute_reduction_with_shape(
+    match execute_reduction_with_shape_placed(
         request,
         reduce_len,
         num_slices,
@@ -765,7 +765,30 @@ pub fn execute_reduction(
     }
 }
 
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
 pub fn execute_reduction_with_shape(
+    request: FusionExecutionRequest<'_>,
+    reduce_len: usize,
+    num_slices: usize,
+    output_shape: &[usize],
+    workgroup_size: u32,
+) -> Result<Value> {
+    match execute_reduction_with_shape_placed(
+        request,
+        reduce_len,
+        num_slices,
+        output_shape,
+        workgroup_size,
+    )? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub fn execute_reduction_with_shape_placed(
     request: FusionExecutionRequest<'_>,
     reduce_len: usize,
     num_slices: usize,
@@ -939,7 +962,18 @@ pub fn execute_reduction_with_shape(
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
-pub async fn execute_centered_gram(
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
+pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_centered_gram_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_centered_gram_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
@@ -998,7 +1032,18 @@ pub async fn execute_centered_gram(
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
-pub async fn execute_power_step_normalize(
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
+pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_power_step_normalize_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_power_step_normalize_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
@@ -1068,7 +1113,18 @@ pub async fn execute_power_step_normalize(
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
-pub async fn execute_explained_variance(
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
+pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_explained_variance_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_explained_variance_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
@@ -1230,7 +1286,18 @@ pub async fn execute_explained_variance(
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(diag)))
 }
 
-pub async fn execute_image_normalize(
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
+pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_image_normalize_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_image_normalize_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
@@ -1343,7 +1410,18 @@ pub async fn execute_image_normalize(
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
 }
 
-pub async fn execute_matmul_epilogue(
+/// Direct provider execution retaining the established value-returning API.
+/// Executors that can run shared bytecode use the placement-aware entrypoint.
+pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
+    match execute_matmul_epilogue_placed(request).await? {
+        FusionExecutionOutcome::Executed(value) => Ok(value),
+        FusionExecutionOutcome::SharedRuntime(_) => {
+            Err(anyhow!("direct fusion request selected shared runtime"))
+        }
+    }
+}
+
+pub async fn execute_matmul_epilogue_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
     crate::ensure_residency_hooks();
@@ -1617,6 +1695,35 @@ pub async fn execute_matmul_epilogue(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_direct_execution_signatures_remain_value_returning() {
+        let _: for<'a, 'b> fn(
+            FusionExecutionRequest<'a>,
+            usize,
+            usize,
+            &'b [usize],
+            u32,
+        ) -> Result<Value> = execute_reduction_with_shape;
+        let _: for<'a> fn(FusionExecutionRequest<'a>, usize, usize, u32) -> Result<Value> =
+            execute_reduction;
+        let _: for<'a> fn(FusionExecutionRequest<'a>) -> Result<ElementwiseExecutionResult> =
+            execute_elementwise;
+
+        fn require_value_future(_: impl std::future::Future<Output = Result<Value>>) {}
+        fn check_async_signatures(request: FusionExecutionRequest<'_>, which: usize) {
+            match which {
+                0 => require_value_future(execute_centered_gram(request)),
+                1 => require_value_future(execute_power_step_normalize(request)),
+                2 => require_value_future(execute_explained_variance(request)),
+                3 => require_value_future(execute_image_normalize(request)),
+                _ => require_value_future(execute_matmul_epilogue(request)),
+            }
+        }
+        // Type-check every public future without invoking a provider or creating
+        // a runtime request. Existing direct-GPU parity tests execute the APIs.
+        let _: for<'a> fn(FusionExecutionRequest<'a>, usize) = check_async_signatures;
+    }
     use runmat_value::IntValue;
 
     #[test]

@@ -6,9 +6,10 @@ use crate::interpreter::errors::mex;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
-    execute_centered_gram, execute_elementwise_placed, execute_explained_variance,
-    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction_with_shape, FusionExecutionOutcome, FusionExecutionRequest,
+    execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
+    execute_image_normalize_placed, execute_matmul_epilogue_placed,
+    execute_power_step_normalize_placed, execute_reduction_with_shape_placed,
+    FusionExecutionOutcome, FusionExecutionRequest,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -517,7 +518,7 @@ pub async fn execute_fusion_special_kind(
     stack_guard: StackSliceGuard<'_>,
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
     match kind {
-        FusionKind::CenteredGram => match execute_centered_gram(request).await {
+        FusionKind::CenteredGram => match execute_centered_gram_placed(request).await {
             Ok(FusionExecutionOutcome::Executed(result)) => {
                 stack_guard.commit();
                 Ok(FusionExecutionOutcome::Executed(result))
@@ -527,19 +528,21 @@ pub async fn execute_fusion_special_kind(
             }
             Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         },
-        FusionKind::PowerStepNormalize => match execute_power_step_normalize(request).await {
-            Ok(FusionExecutionOutcome::Executed(result)) => {
-                stack_guard.commit();
-                Ok(FusionExecutionOutcome::Executed(result))
+        FusionKind::PowerStepNormalize => {
+            match execute_power_step_normalize_placed(request).await {
+                Ok(FusionExecutionOutcome::Executed(result)) => {
+                    stack_guard.commit();
+                    Ok(FusionExecutionOutcome::Executed(result))
+                }
+                Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+                    Ok(FusionExecutionOutcome::SharedRuntime(observation))
+                }
+                Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
             }
-            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
-                Ok(FusionExecutionOutcome::SharedRuntime(observation))
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        },
+        }
         FusionKind::ExplainedVariance => {
             log::debug!("explained variance plan inputs {:?}", plan_inputs);
-            match execute_explained_variance(request).await {
+            match execute_explained_variance_placed(request).await {
                 Ok(FusionExecutionOutcome::Executed(result)) => {
                     stack_guard.commit();
                     Ok(FusionExecutionOutcome::Executed(result))
@@ -553,7 +556,7 @@ pub async fn execute_fusion_special_kind(
                 }
             }
         }
-        FusionKind::MatmulEpilogue => match execute_matmul_epilogue(request).await {
+        FusionKind::MatmulEpilogue => match execute_matmul_epilogue_placed(request).await {
             Ok(FusionExecutionOutcome::Executed(result)) => {
                 stack_guard.commit();
                 Ok(FusionExecutionOutcome::Executed(result))
@@ -563,7 +566,7 @@ pub async fn execute_fusion_special_kind(
             }
             Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         },
-        FusionKind::ImageNormalize => match execute_image_normalize(request).await {
+        FusionKind::ImageNormalize => match execute_image_normalize_placed(request).await {
             Ok(FusionExecutionOutcome::Executed(result)) => {
                 stack_guard.commit();
                 Ok(FusionExecutionOutcome::Executed(result))
@@ -1067,7 +1070,7 @@ pub fn execute_fusion_reduction(
     context: &ExecutionContext,
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
     let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;
-    match execute_reduction_with_shape(
+    match execute_reduction_with_shape_placed(
         request,
         geom.reduce_len,
         geom.num_slices,
