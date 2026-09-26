@@ -145,7 +145,14 @@ pub const LOGICAL_CATALOG_ENTRY: crate::BuiltinCatalogEntry = crate::BuiltinCata
         capabilities: &[],
     },
     placement: crate::BuiltinPlacementContract {
-        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+        preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::Unary,
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]),
         portability: crate::BuiltinPortability::NativeAndWasm,
         accelerator: crate::BuiltinAcceleratorPolicy::Optional,
         residency: crate::BuiltinResidencyPolicy::PreserveInputs,

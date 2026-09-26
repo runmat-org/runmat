@@ -24,6 +24,8 @@ use crate::builtins::common::{
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod preparation;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::logical::ops")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "logical",
@@ -85,7 +87,15 @@ async fn logical_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
             &LOGICAL_ERROR_TOO_MANY_INPUTS,
         ));
     }
-    convert_value_to_logical(value).await
+    match value {
+        Value::Tensor(tensor) => {
+            validate_tensor(&tensor)?;
+            preparation::execute(tensor).await
+        }
+        // Specialized sparse, symbolic, text, scalar and explicit-resident
+        // routes retain their existing conversion/provider admission.
+        value => convert_value_to_logical(value).await,
+    }
 }
 
 async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
@@ -147,13 +157,17 @@ async fn convert_value_to_logical(value: Value) -> BuiltinResult<Value> {
 }
 
 fn logical_from_tensor(tensor: Tensor) -> BuiltinResult<Value> {
+    validate_tensor(&tensor)?;
+    logical_buffer_to_host(LogicalBuffer::from_real_tensor(&tensor))
+}
+
+fn validate_tensor(tensor: &Tensor) -> BuiltinResult<()> {
     if tensor.integer_storage().is_none()
         && tensor.materialize_f64().iter().any(|value| value.is_nan())
     {
         return Err(conversion_error("NaN"));
     }
-    let buffer = LogicalBuffer::from_real_tensor(&tensor);
-    logical_buffer_to_host(buffer)
+    Ok(())
 }
 
 fn logical_from_sparse_tensor(sparse: runmat_value::SparseTensor) -> BuiltinResult<Value> {

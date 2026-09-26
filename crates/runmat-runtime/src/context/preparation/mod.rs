@@ -61,3 +61,28 @@ where
 {
     execute_prepared(prepare_admitted(context, request).await?, execute).await
 }
+
+/// Transitional adapter for the existing args-only builtin ABI. S2/L23 owns
+/// eliminating this single ambient lookup when bindings carry explicit context.
+/// No context or session is fabricated for direct runtime calls.
+pub async fn execute_current_invocation<F, Fut>(
+    admission: BuiltinPreparationAdmission,
+    operands: Vec<Value>,
+    execute: F,
+) -> Result<Value, RuntimeError>
+where
+    F: FnOnce(Vec<Value>) -> Fut,
+    Fut: Future<Output = Result<Value, RuntimeError>>,
+{
+    let request = AdmittedBuiltinPreparation::new(admission, operands)?;
+    match super::legacy::active() {
+        Some(context) => execute_admitted(&context, request, execute).await,
+        None => {
+            execute_prepared(
+                PreparedBuiltinOperands::passthrough(request.into_operands()),
+                execute,
+            )
+            .await
+        }
+    }
+}
