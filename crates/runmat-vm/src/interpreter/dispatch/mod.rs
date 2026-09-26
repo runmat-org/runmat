@@ -39,12 +39,7 @@ pub use stack::{
     load_local, load_string, load_var, store_local, store_var,
 };
 
-fn builtin_constant_value(name: &str) -> Option<Value> {
-    runmat_builtins::constants()
-        .into_iter()
-        .find(|constant| constant.name == name)
-        .map(|constant| constant.value.clone())
-}
+use runmat_runtime::builtin::builtin_constant_value;
 
 pub enum DispatchHandled {
     Generic(DispatchDecision),

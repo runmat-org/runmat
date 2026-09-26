@@ -420,7 +420,11 @@ pub(super) fn evaluate_operand(
                     Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
                 }
                 MirConstant::String(text) => Value::String(text.runtime_text()),
-                MirConstant::Symbol(symbol) => Value::String(symbol.0.clone()),
+                MirConstant::Symbol(symbol) => {
+                    runmat_runtime::builtin::builtin_constant_value(&symbol.0).ok_or_else(|| {
+                        NativeExecutorError::Host(format!("unknown MIR constant {}", symbol.0))
+                    })?
+                }
                 MirConstant::Bool(value) => Value::Bool(*value),
                 MirConstant::EmptyArray => Value::Tensor(
                     runmat_value::Tensor::new(Vec::new(), vec![0, 0])

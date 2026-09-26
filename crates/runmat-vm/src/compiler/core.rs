@@ -4198,15 +4198,12 @@ impl Compiler {
             }
             MirOperand::Constant(MirConstant::Symbol(name)) => {
                 let name = &name.0;
-                let constants = runmat_builtins::constants();
-                let constant = constants
-                    .iter()
-                    .find(|constant| constant.name == name)
-                    .ok_or_else(|| {
+                let constant =
+                    runmat_runtime::builtin::builtin_constant_value(name).ok_or_else(|| {
                         self.compile_error(format!("unknown constant {name}"))
                             .with_identifier(IDENT_MIR_CONSTANT_UNKNOWN)
                     })?;
-                match &constant.value {
+                match &constant {
                     runmat_value::Value::Num(value) => self.emit(Instr::LoadConst(*value)),
                     runmat_value::Value::Complex(re, im) => self.emit(Instr::LoadComplex(*re, *im)),
                     runmat_value::Value::Bool(value) => self.emit(Instr::LoadBool(*value)),

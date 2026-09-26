@@ -210,6 +210,85 @@ fn forced_generic_entry_executes_literal_assignment_and_transactional_return() {
 }
 
 #[test]
+fn native_symbol_constants_match_registered_values_in_generic_and_linked_entries() {
+    let constants = runmat_builtins::constants();
+    assert!(!constants.is_empty(), "runtime constants must be registered");
+    for constant in constants {
+        let assembly = constant_fixture(MirConstant::Symbol(runmat_hir::SymbolName(
+            constant.name.into(),
+        )));
+        let generic = compile_executor(assembly.clone()).unwrap();
+        let linked_owner = GenericCompiler::compile(&assembly).unwrap();
+        let function = ProgramFunctionId(0);
+        let linked = NativeExecutor::bind(
+            assembly,
+            NativeExecutable::linked(BTreeMap::from([(
+                function,
+                linked_owner.entrypoint(function).unwrap(),
+            )]))
+            .unwrap(),
+            NativeExecutorOptions::default(),
+        )
+        .unwrap();
+        for executor in [&generic, &linked] {
+            let execution = executor
+                .invoke(function, Vec::new(), 1, runtime_context())
+                .unwrap();
+            assert_eq!(execution.outputs.len(), 1, "{}", constant.name);
+            // Float bits also check NaN payloads, for which PartialEq is false.
+            match (&execution.outputs[0], &constant.value) {
+                (Value::Num(actual), Value::Num(expected)) => {
+                    assert_eq!(actual.to_bits(), expected.to_bits(), "{}", constant.name);
+                }
+                (Value::Complex(ar, ai), Value::Complex(er, ei)) => {
+                    assert_eq!(ar.to_bits(), er.to_bits(), "{}", constant.name);
+                    assert_eq!(ai.to_bits(), ei.to_bits(), "{}", constant.name);
+                }
+                (actual, expected) => assert_eq!(actual, expected, "{}", constant.name),
+            }
+        }
+    }
+}
+
+#[test]
+fn native_unknown_symbol_is_rejected_but_string_literal_is_preserved() {
+    let executor = compile_executor(constant_fixture(MirConstant::Symbol(
+        runmat_hir::SymbolName("definitely_missing_constant".into()),
+    )))
+    .unwrap();
+    let error = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .expect_err("an unknown constant must not become a string");
+    assert!(error
+        .to_string()
+        .contains("unknown MIR constant definitely_missing_constant"));
+
+    let executor = compile_executor(constant_fixture(MirConstant::String(StringLiteral(
+        "\"NaN\"".into(),
+    ))))
+    .unwrap();
+    let execution = executor
+        .invoke(ProgramFunctionId(0), Vec::new(), 1, runtime_context())
+        .unwrap();
+    assert_eq!(execution.outputs, vec![Value::String("NaN".into())]);
+}
+
+fn constant_fixture(constant: MirConstant) -> runmat_native_codegen::NativeAssembly {
+    let span = Span { start: 0, end: 2 };
+    lower_body(
+        "constant",
+        1,
+        vec![statement(
+            0,
+            MirRvalue::Use(MirOperand::Constant(constant)),
+            span,
+        )],
+        MirOperand::Local(MirLocalId(0)),
+        span,
+    )
+}
+
+#[test]
 fn linked_static_entrypoint_uses_the_same_invocation_host() {
     let assembly = fixture();
     let linked_owner = GenericCompiler::compile(&assembly).unwrap();
