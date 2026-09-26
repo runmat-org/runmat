@@ -5,6 +5,28 @@ use runmat_types::MemberAccess;
 use runmat_value::{CharArray, HandleRef, ObjectInstance, StringArray, Tensor};
 use std::collections::HashMap;
 
+#[test]
+fn inferred_storage_matches_runtime_cell_storage() {
+    use runmat_types::{
+        CallRequest, LiteralContext, LiteralValue, OutputSelection, RequestedOutputCount,
+        StorageFact,
+    };
+    let (_, _, child) = register_hierarchy("StorageOracle");
+    for name in [child, "uint64".to_string()] {
+        let input = Value::String(name.clone());
+        let request = CallRequest {
+            arguments: vec![crate::value_fact::value_fact(&input)],
+            literals: LiteralContext::new(vec![LiteralValue::String(name)]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let entry = runmat_builtins::builtin_catalog_entry_by_name("superclasses").unwrap();
+        let inferred = runmat_builtins::infer_catalog_call(entry, &request);
+        let actual = crate::value_fact::value_fact(&superclasses_builtin(input).unwrap());
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Dense);
+        assert_eq!(inferred.outputs[0].storage, actual.storage);
+    }
+}
+
 fn method(name: &str) -> crate::class_registry::RuntimeMethod {
     crate::class_registry::RuntimeMethod {
         name: name.into(),

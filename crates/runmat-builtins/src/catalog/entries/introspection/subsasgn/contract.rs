@@ -37,25 +37,16 @@ const SUBSASGN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDe
     outputs: &SUBSASGN_OUTPUT,
 }];
 
-pub const SUBSASGN_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSASGN.RECEIVER_INVALID",
-    identifier: Some("RunMat:InvalidObjectDispatch"),
-    when: "Receiver is not an object or handle object.",
-    message: "subsasgn: requires object receiver",
+pub const SUBSASGN_ERROR_PATH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSASGN.INVALID_PATH",
+    identifier: Some("RunMat:InvalidObjectSubscriptPath"),
+    when: "S is not a nonempty standard substruct-compatible path.",
+    message: "invalid subscript path",
 };
 
-pub const SUBSASGN_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSASGN.METHOD_MISSING",
-    identifier: Some("RunMat:MissingSubsasgn"),
-    when: "Target class does not implement subsasgn.",
-    message: "subsasgn: class does not define subsasgn for indexed assignment",
-};
-
-pub const SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    SUBSASGN_ERROR_OUTPUTS,
-    SUBSASGN_ERROR_RECEIVER_INVALID,
-    SUBSASGN_ERROR_METHOD_MISSING,
-];
+// Default assignment and class-overload failures retain their original identities.
+pub const SUBSASGN_ERRORS: [BuiltinErrorDescriptor; 2] =
+    [SUBSASGN_ERROR_OUTPUTS, SUBSASGN_ERROR_PATH];
 
 pub const SUBSASGN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SUBSASGN_SIGNATURES,

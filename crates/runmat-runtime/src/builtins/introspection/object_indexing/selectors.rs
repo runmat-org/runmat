@@ -67,12 +67,17 @@ pub(super) fn brace_selection_count(target: &Value, subs: &Value) -> crate::Buil
         return Ok(0);
     }
     if subscripts.data.len() == 1 {
-        return single_subscript_count(target, &subscripts.data[0], 0, true);
+        return single_subscript_count(target, &subscripts.data[0], 0, 1);
     }
     let mut count = 1usize;
     for (dim, subscript) in subscripts.data.iter().enumerate() {
         count = count
-            .checked_mul(single_subscript_count(target, subscript, dim, false)?)
+            .checked_mul(single_subscript_count(
+                target,
+                subscript,
+                dim,
+                subscripts.data.len(),
+            )?)
             .ok_or_else(|| {
                 num_args_error(
                     &NUM_ARGUMENTS_ERROR_SUBSTRUCT,
@@ -87,17 +92,17 @@ pub(super) fn single_subscript_count(
     target: &Value,
     subscript: &Value,
     dim: usize,
-    linear_indexing: bool,
+    selector_count: usize,
 ) -> crate::BuiltinResult<usize> {
     match subscript {
         Value::String(value) if value.trim() == ":" => {
-            target_colon_extent(target, dim, linear_indexing)
+            target_colon_extent(target, dim, selector_count)
         }
         Value::CharArray(chars) if chars.data.iter().collect::<String>().trim() == ":" => {
-            target_colon_extent(target, dim, linear_indexing)
+            target_colon_extent(target, dim, selector_count)
         }
         Value::StringArray(array) if array.data.len() == 1 && array.data[0].trim() == ":" => {
-            target_colon_extent(target, dim, linear_indexing)
+            target_colon_extent(target, dim, selector_count)
         }
         Value::Bool(flag) => Ok(usize::from(*flag)),
         Value::Num(value) => {
@@ -194,21 +199,11 @@ pub(super) fn checked_shape_element_count(shape: &[usize]) -> crate::BuiltinResu
 pub(super) fn target_colon_extent(
     target: &Value,
     dim: usize,
-    linear_indexing: bool,
+    selector_count: usize,
 ) -> crate::BuiltinResult<usize> {
-    if linear_indexing {
-        default_target_numel(target)
-    } else {
-        Ok(target_shape(target)
-            .and_then(|shape| {
-                if shape.is_empty() {
-                    None
-                } else {
-                    Some(shape.get(dim).copied().unwrap_or(1))
-                }
-            })
-            .unwrap_or(1))
-    }
+    let shape = target_shape(target).unwrap_or_else(|| vec![1, 1]);
+    crate::indexing::shape::selector_extent(&shape, selector_count, dim)
+        .map_err(|error| num_args_error(&NUM_ARGUMENTS_ERROR_SUBSTRUCT, error.message()))
 }
 
 pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
@@ -221,17 +216,10 @@ pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
         Value::LogicalArray(array) => Some(array.shape.clone()),
         Value::StringArray(array) => Some(array.shape.clone()),
         Value::SparseTensor(sparse) => Some(sparse.shape()),
-        Value::CharArray(chars) => Some(vec![chars.rows, chars.cols]),
+        Value::CharArray(chars) => Some(chars.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
         Value::Object(_) | Value::HandleObject(_) => Some(vec![1, 1]),
         _ => None,
-    }
-}
-
-pub(super) fn default_target_numel(target: &Value) -> crate::BuiltinResult<usize> {
-    match target_shape(target) {
-        Some(shape) => checked_shape_element_count(&shape),
-        None => Ok(1),
     }
 }
 

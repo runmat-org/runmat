@@ -30,22 +30,33 @@ const SUBSREF_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDes
     outputs: &SUBSREF_OUTPUT,
 }];
 
-pub const SUBSREF_ERROR_RECEIVER_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSREF.RECEIVER_INVALID",
-    identifier: Some("RunMat:InvalidObjectDispatch"),
-    when: "Receiver is not an object or handle object.",
-    message: "subsref: requires object receiver",
+pub const SUBSREF_ERROR_PATH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSREF.INVALID_PATH",
+    identifier: Some("RunMat:InvalidObjectSubscriptPath"),
+    when: "S is not a nonempty standard substruct-compatible path.",
+    message: "invalid subscript path",
 };
 
-pub const SUBSREF_ERROR_METHOD_MISSING: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SUBSREF.METHOD_MISSING",
-    identifier: Some("RunMat:MissingSubsref"),
-    when: "Target class does not implement subsref.",
-    message: "subsref: class does not define subsref for indexing operation",
+pub const SUBSREF_ERROR_SHORTAGE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSREF.OUTPUT_SHORTAGE",
+    identifier: Some("RunMat:CommaSeparatedListOutputShortage"),
+    when: "Indexing produces fewer values than explicitly requested.",
+    message: "not enough values for requested outputs",
 };
 
-pub const SUBSREF_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [SUBSREF_ERROR_RECEIVER_INVALID, SUBSREF_ERROR_METHOD_MISSING];
+pub const SUBSREF_ERROR_SINGLE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.SUBSREF.SINGLE_VALUE_REQUIRED",
+    identifier: Some("RunMat:CommaSeparatedListRequiresSingleValue"),
+    when: "An implicit single-value read produces zero or multiple values.",
+    message: "a single value is required",
+};
+
+// Default indexing and class-overload failures retain their original identities.
+pub const SUBSREF_ERRORS: [BuiltinErrorDescriptor; 3] = [
+    SUBSREF_ERROR_PATH,
+    SUBSREF_ERROR_SHORTAGE,
+    SUBSREF_ERROR_SINGLE,
+];
 
 pub const SUBSREF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SUBSREF_SIGNATURES,

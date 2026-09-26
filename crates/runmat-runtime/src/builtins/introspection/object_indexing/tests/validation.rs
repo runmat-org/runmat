@@ -2,17 +2,12 @@ use super::*;
 #[test]
 fn typed_scalar_subscripts_do_not_round_or_saturate() {
     assert_eq!(
-        single_subscript_count(
-            &Value::Num(0.0),
-            &Value::Int(IntValue::U64(u64::MAX)),
-            0,
-            true
-        )
-        .expect("positive uint64 subscript"),
+        single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::U64(u64::MAX)), 0, 1)
+            .expect("positive uint64 subscript"),
         1
     );
     assert!(
-        single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::I64(-1)), 0, true).is_err()
+        single_subscript_count(&Value::Num(0.0), &Value::Int(IntValue::I64(-1)), 0, 1).is_err()
     );
 }
 

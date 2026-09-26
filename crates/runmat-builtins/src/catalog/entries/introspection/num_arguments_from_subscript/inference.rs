@@ -11,7 +11,13 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
 
-    if let Some(path) = request.arguments.get(1) {
+    let default_route = request.arguments.first().is_some_and(|target| {
+        !matches!(
+            target.kind,
+            ValueKindFact::Object(_) | ValueKindFact::Unknown
+        )
+    });
+    if let Some(path) = request.arguments.get(1).filter(|_| default_route) {
         if !matches!(path.kind, ValueKindFact::Unknown | ValueKindFact::Struct(_))
             || path.shape.element_count() == Some(0)
         {

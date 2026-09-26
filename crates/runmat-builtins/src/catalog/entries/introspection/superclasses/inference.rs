@@ -27,7 +27,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             elements_complete: false,
         }),
         ShapeFact::from(vec![Some(1), None]),
-        StorageFact::Opaque,
+        StorageFact::Dense,
     );
     output
         .invalidation
