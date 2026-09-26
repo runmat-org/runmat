@@ -13,7 +13,7 @@ BuiltinDocumentationSection { heading: "Placement and execution", paragraphs: &[
 "`hold` only mutates plotting state and does not affect array residency.",
 "`hold` performs no provider dispatch; it updates per-axes plotting state in the host-side registry.",
 "Numeric controls must already be host values. No legacy automatic promotion or gathering was declared for this identity. Handle numbers refer to local graphics state; copying a handle does not transfer graphics ownership to workers or foreign runtimes.",
-"Interpreter, JIT and AOT share the typed runtime binding. Explicitly requested outputs reject before state changes; implicit statement calls and zero outputs execute normally. The operation may notify shared figure observers when an explicit target becomes current, but does not itself prove pixel presentation.",
+"Explicitly requested outputs reject before state changes; implicit statement calls and zero outputs execute normally. The operation may notify shared figure observers when an explicit target becomes current, but does not itself prove pixel presentation.",
 "Empty character or string text also toggles the state. The literal word toggle is not accepted. Numeric states are validated exactly as zero or one; complex, sparse, resident arrays and dense logical-array representations are unsupported.",
 ]},
 ],examples: &[
@@ -29,4 +29,6 @@ BuiltinDocumentationLink { label: "plot", target: BuiltinDocumentationLinkTarget
 BuiltinDocumentationLink { label: "cla", target: BuiltinDocumentationLinkTarget::Builtin("cla") },
 BuiltinDocumentationLink { label: "clf", target: BuiltinDocumentationLinkTarget::Builtin("clf") },
 BuiltinDocumentationLink { label: "subplot", target: BuiltinDocumentationLinkTarget::Builtin("subplot") },
-BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/hold.rs") }], media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[], verification: &[BuiltinEvidenceReference {kind: BuiltinEvidenceKind::UnitTest,label: "Hold state and output admission",location: "builtins::plotting::hold::tests"}], notes: &["Legacy renderer integration reference: runmat-plot/tests/renderer_tests.rs. State-only tests do not establish Browser or Desktop presentation; typed graphics examples and native engine witnesses require separate integration execution."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable) };
+BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/hold.rs") }], media: &[], evidence: BuiltinDocumentationEvidence { implementation: &[], verification: &[BuiltinEvidenceReference {kind: BuiltinEvidenceKind::UnitTest,label: "Hold state and output admission",location: "builtins::plotting::hold::tests"}], notes: &[
+"Interpreter, JIT and AOT share the typed runtime binding.",
+"Legacy renderer integration reference: runmat-plot/tests/renderer_tests.rs. State-only tests do not establish Browser or Desktop presentation; typed graphics examples and native engine witnesses require separate integration execution."] }, introduced: None, status: Some(BuiltinDocumentationStatus::Stable) };

@@ -1605,6 +1605,13 @@ fn apply_legend_property(
     Ok(())
 }
 
+/// The camera stores binary32 angles; finite host input must remain finite
+/// after crossing that representation boundary.
+pub(crate) fn finite_camera_angle(value: f64) -> Option<f32> {
+    let angle = value as f32;
+    angle.is_finite().then_some(angle)
+}
+
 fn apply_axes_property(
     handle: FigureHandle,
     axes_index: usize,
@@ -1638,17 +1645,20 @@ fn apply_axes_property(
             let tensor = runmat_value::Tensor::try_from(value)
                 .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
             let data = tensor::tensor_values_f64(&tensor);
-            if data.len() != 2 || !data[0].is_finite() || !data[1].is_finite() {
+            if data.len() != 2
+                || finite_camera_angle(data[0]).is_none()
+                || finite_camera_angle(data[1]).is_none()
+            {
                 return Err(plotting_error(
                     builtin,
-                    format!("{builtin}: View must be a 2-element finite numeric vector"),
+                    format!("{builtin}: View must be a 2-element numeric vector finite in single-precision camera state"),
                 ));
             }
             crate::builtins::plotting::state::set_view_for_axes(
                 handle,
                 axes_index,
-                data[0] as f32,
-                data[1] as f32,
+                finite_camera_angle(data[0]).expect("validated camera angle"),
+                finite_camera_angle(data[1]).expect("validated camera angle"),
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())

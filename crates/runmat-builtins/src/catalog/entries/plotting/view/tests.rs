@@ -2,6 +2,23 @@ use super::*;
 use runmat_types::*;
 
 #[test]
+fn view_inference_rejects_nonfinite_camera_literals() {
+    for value in [f64::NAN, f64::INFINITY, f64::MAX] {
+        let request = CallRequest {
+            arguments: vec![ValueFact::unknown(DynamicReason::RuntimeValue); 2],
+            literals: LiteralContext::new(vec![
+                LiteralValue::Number(value),
+                LiteralValue::Number(0.),
+            ]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(0)),
+        };
+        assert!(!inference::infer(&request, &VIEW_CATALOG_ENTRY)
+            .diagnostics
+            .is_empty());
+    }
+}
+
+#[test]
 fn view_inference_tracks_output_dependent_shape_and_effects() {
     for count in [0, 1, 2, 3] {
         let request = CallRequest {

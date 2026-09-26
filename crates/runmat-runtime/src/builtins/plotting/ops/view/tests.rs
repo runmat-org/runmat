@@ -8,6 +8,55 @@ use crate::builtins::plotting::{
 use runmat_value::IntegerStorage;
 
 #[test]
+fn view_rejects_nonfinite_and_overflowed_angles_before_axes_creation() {
+    use crate::builtins::plotting::state;
+    let _guard = lock_plot_registry();
+    state::reset_plot_state();
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
+        for args in [
+            vec![Value::Num(invalid), Value::Num(0.)],
+            vec![Value::Tensor(
+                Tensor::new(vec![0., invalid], vec![1, 2]).unwrap(),
+            )],
+        ] {
+            assert_eq!(
+                view_builtin(args).unwrap_err().identifier(),
+                Some("RunMat:view:InvalidArgument")
+            );
+            assert!(state::current_figure_handle_if_exists().is_none());
+        }
+    }
+    assert!(view_builtin(vec![Value::Num(f32::MAX as f64), Value::Num(0.)]).is_ok());
+}
+
+#[test]
+fn view_property_rejects_camera_overflow_without_changing_existing_state() {
+    let _guard = lock_plot_registry();
+    ensure_plot_test_env();
+    let ax = crate::builtins::plotting::axes::axes_builtin(vec![]).unwrap();
+    let values = |data| Value::Tensor(Tensor::new(data, vec![1, 2]).unwrap());
+    set_builtin(vec![
+        Value::Num(ax),
+        Value::from("View"),
+        values(vec![45., 20.]),
+    ])
+    .unwrap();
+    for invalid in [f64::MAX, f64::NAN, f64::INFINITY] {
+        assert!(set_builtin(vec![
+            Value::Num(ax),
+            Value::from("View"),
+            values(vec![invalid, 10.])
+        ])
+        .is_err());
+        assert_eq!(
+            get_builtin(vec![Value::Num(ax), Value::from("View")]).unwrap(),
+            values(vec![45., 20.])
+        );
+    }
+}
+
+#[test]
 fn view_two_outputs_share_query_and_set_state_in_matlab_mode() {
     let _guard = lock_plot_registry();
     ensure_plot_test_env();

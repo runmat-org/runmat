@@ -12,6 +12,26 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         ));
     }
     for (index, argument) in request.arguments.iter().enumerate() {
+        let nonfinite = request
+            .literals
+            .numeric_at(index)
+            .is_some_and(|n| !(n as f32).is_finite())
+            || request
+                .literals
+                .literal_vector_at(index)
+                .is_some_and(|values| {
+                    values
+                        .iter()
+                        .filter_map(LiteralContext::numeric_from_literal)
+                        .any(|n| !(n as f32).is_finite())
+                });
+        if nonfinite {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-VIEW-FINITE",
+                "view angles must remain finite in single-precision camera state",
+                index,
+            ));
+        }
         if !matches!(
             argument.kind,
             ValueKindFact::Unknown | ValueKindFact::Numeric(_)

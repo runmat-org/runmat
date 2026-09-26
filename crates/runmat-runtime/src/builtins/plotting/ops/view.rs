@@ -99,8 +99,8 @@ fn view_value_f32(tensor: &Tensor, index: usize) -> crate::BuiltinResult<f32> {
         .numeric_value_at(index)
         .ok_or_else(|| view_error(&VIEW_ERROR_INVALID_ARGUMENT))?;
     match value {
-        NumericScalar::F64(value) => Ok(value as f32),
-        NumericScalar::F32(value) => Ok(value),
+        NumericScalar::F64(value) => finite_angle(value),
+        NumericScalar::F32(value) => finite_angle(value as f64),
         integer => {
             let integer = integer
                 .into_int_value()
@@ -113,6 +113,15 @@ fn view_value_f32(tensor: &Tensor, index: usize) -> crate::BuiltinResult<f32> {
             })
         }
     }
+}
+
+fn finite_angle(value: f64) -> crate::BuiltinResult<f32> {
+    super::properties::finite_camera_angle(value).ok_or_else(|| {
+        view_error_with_message(
+            "view: angles must be finite in single-precision camera state",
+            &VIEW_ERROR_INVALID_ARGUMENT,
+        )
+    })
 }
 
 fn exact_integer_f32(value: IntValue) -> Option<f32> {
