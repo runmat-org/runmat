@@ -2,6 +2,9 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::RefCell;
 
+mod validation;
+pub(crate) use validation::validate_fixed_outputs;
+
 runmat_thread_local! {
     static OUTPUT_COUNT_STACK: RefCell<Vec<Option<usize>>> = const { RefCell::new(Vec::new()) };
 }

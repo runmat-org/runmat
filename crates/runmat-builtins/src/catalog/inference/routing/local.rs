@@ -10,7 +10,6 @@ pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
         BuiltinInferenceRule::Acceleration(rule) => {
             super::acceleration::infer(rule, request, entry)
         }
-        BuiltinInferenceRule::Aggregate(rule) => super::aggregate::infer(rule, request, entry),
         BuiltinInferenceRule::Introspection(rule) => {
             super::introspection::infer(rule, request, entry)
         }

@@ -2,7 +2,6 @@ use super::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest};
 
 mod acceleration_semantics;
-mod aggregate_semantics;
 mod array;
 mod distributed;
 pub(in crate::catalog) mod field_path;

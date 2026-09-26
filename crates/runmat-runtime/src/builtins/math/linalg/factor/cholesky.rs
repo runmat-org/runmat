@@ -60,10 +60,8 @@ pub(super) fn factor_upper(
                 upper[i * order + i] = Complex64::new(sum.re.sqrt(), 0.0);
             } else {
                 let denominator = upper[i * order + i];
-                if denominator.norm() <= EPS {
-                    info = i + 1;
-                    break 'columns;
-                }
+                // Earlier diagonal steps already proved this real pivot positive.
+                // An absolute tolerance here rejects valid small-scale matrices.
                 upper[i * order + j] = sum / denominator;
             }
         }
@@ -146,5 +144,18 @@ mod tests {
             factor_upper(usize::MAX, |_, _| panic!("overflow input read")),
             Err(CholeskyError::SizeOverflow)
         ));
+    }
+
+    #[test]
+    fn positive_diagonal_matrices_are_scale_independent() {
+        for scale in [1.0e-26, 1.0, 1.0e26] {
+            let factor = factor_upper(2, |r, c| {
+                Complex64::new(if r == c { scale } else { 0.0 }, 0.0)
+            })
+            .unwrap();
+            assert_eq!(factor.info, 0);
+            assert_eq!(factor.upper[0].re, scale.sqrt());
+            assert_eq!(factor.upper[3].re, scale.sqrt());
+        }
     }
 }

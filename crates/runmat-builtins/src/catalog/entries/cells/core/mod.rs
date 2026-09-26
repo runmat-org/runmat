@@ -1,3 +1,9 @@
+pub use cell::CELL_ERROR_TOO_MANY_OUTPUTS;
+pub use cell2mat::CELL2MAT_ERROR_TOO_MANY_OUTPUTS;
+pub use cell2struct::CELL2STRUCT_ERROR_TOO_MANY_OUTPUTS;
+pub use cellstr::CELLSTR_ERROR_TOO_MANY_OUTPUTS;
+pub use mat2cell::MAT2CELL_ERROR_TOO_MANY_OUTPUTS;
+pub use num2cell::NUM2CELL_ERROR_TOO_MANY_OUTPUTS;
 pub(in crate::catalog) mod cell;
 pub(in crate::catalog) mod cell2mat;
 pub(in crate::catalog) mod cell2struct;

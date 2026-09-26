@@ -2,7 +2,6 @@
 // Projection schema: runmat-builtin-module-composition-projection/v5
 
 pub(in crate::catalog) mod acceleration;
-mod aggregate;
 mod aggregation;
 mod array;
 pub(in crate::catalog) mod cells;
@@ -16,7 +15,6 @@ mod stats;
 pub(in crate::catalog) mod structs;
 
 pub use acceleration::*;
-pub use aggregate::*;
 use aggregation::extend_groups;
 pub use array::*;
 pub use cells::*;
@@ -30,7 +28,6 @@ pub use structs::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(values);
-    aggregate::extend_entries(values);
     array::extend_entries(values);
     cells::extend_entries(values);
     introspection::extend_entries(values);
