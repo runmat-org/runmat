@@ -14,6 +14,8 @@ use super::{
     SolverAdmissionResourcePolicy, ThermalHistoryResourceFacts, ThermalWorkspaceResourceFacts,
 };
 
+mod preparation;
+
 /// Material-independent support, including every volume and boundary coupling and each diagonal.
 /// This is numerical component accounting, not a worker or whole-process resource plan.
 #[derive(Clone, Debug)]
@@ -24,10 +26,12 @@ pub struct ThermalOperatorResourceFacts {
     csr_payload_bytes: ByteCount,
     support_payload_bytes: ByteCount,
     workspace: ThermalWorkspaceResourceFacts,
+    planning_resident_bytes: ByteCount,
 }
 
 impl ThermalOperatorResourceFacts {
     pub fn derive(mesh: &SolverMeshArtifact) -> Result<Self, ResourcePlanningError> {
+        let planning_resident_bytes = Self::derivation_resident_bytes_estimate(mesh)?;
         let projection = AnalysisProjection::derive(mesh)
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         let workspace = ThermalWorkspaceResourceFacts::derive(&projection)?;
@@ -79,6 +83,7 @@ impl ThermalOperatorResourceFacts {
             csr_payload_bytes: ByteCount(csr_payload_bytes),
             support_payload_bytes: ByteCount(pattern_bytes(rows, entries)?),
             workspace,
+            planning_resident_bytes,
         })
     }
 
@@ -114,6 +119,7 @@ impl ThermalOperatorResourceFacts {
             .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))
             .and_then(|bytes| bytes.checked_add(history_bytes))
             .and_then(|bytes| bytes.checked_add(workspace))
+            .and_then(|bytes| bytes.checked_add(self.planning_resident_bytes.0))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal numerical reservation",

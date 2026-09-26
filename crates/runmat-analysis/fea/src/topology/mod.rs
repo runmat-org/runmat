@@ -8,6 +8,7 @@ mod flow;
 mod identity;
 mod point_location;
 pub(crate) mod quadrature;
+mod resources;
 
 pub use contract::{
     AnalysisProjection, AnalysisProjectionError, AnalysisProjectionPolicy,

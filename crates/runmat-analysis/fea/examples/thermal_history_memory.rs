@@ -12,7 +12,7 @@ use runmat_analysis_core::*;
 use runmat_analysis_fea::{
     execution::ThermalWorkload,
     fixtures::{fixture_model, FixtureId},
-    planning::resource::ThermalPreassemblyResourceFacts,
+    planning::resource::{ThermalOperatorResourceFacts, ThermalPreassemblyResourceFacts},
     ComputeBackend, ThermalProcedureControl,
 };
 use runmat_meshing_core::fixtures::{
@@ -43,6 +43,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("mesh validation Rust heap exceeds its estimated reservation".into());
     }
     println!("mesh_validation_reservation_bytes={validation_reservation} mesh_validation_rust_heap_growth_bytes={validation_growth}");
+    let planning_reservation =
+        ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)?.0;
+    let baseline = peak_allocator::begin_measurement();
+    let planning = ThermalOperatorResourceFacts::derive(&mesh);
+    let planning_growth = peak_allocator::end_measurement().saturating_sub(baseline);
+    drop(planning?);
+    if planning_growth > planning_reservation {
+        return Err("thermal support construction Rust heap exceeds estimate".into());
+    }
+    println!("operator_planning_reservation_bytes={planning_reservation} operator_planning_rust_heap_growth_bytes={planning_growth}");
     let samples: usize = args[1].parse()?;
     if !(2..=8193).contains(&samples) {
         return Err("samples must be in 2..8193".into());

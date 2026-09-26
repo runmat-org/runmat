@@ -174,6 +174,9 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
             + history.retained_metadata_bytes.0
             + 8 * (rows + 1 + entries)
             + facts.workspace().reservation_bytes().unwrap().0
+            + ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)
+                .unwrap()
+                .0
     );
     assert!(required > history.retained_field_bytes.0);
     let required = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(

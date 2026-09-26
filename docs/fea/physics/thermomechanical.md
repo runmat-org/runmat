@@ -305,9 +305,15 @@ and canonical identity encoding. Validation indexes are released before that enc
 phases use their maximum; the compiler conservatively adds it to its other phases. Profiling may
 reject malformed serialization before resource admission. Thermal preassembly also checks this
 estimate before operator planning derives its validated projection; the thermal entry point no
-longer performs an unadmitted duplicate validation ahead of preassembly. This is not admission of
-all projection/symbolic-builder allocations or every validation call in other execution paths.
-Whole-producer and result-transport admission remain open.
+longer performs an unadmitted duplicate validation ahead of preassembly. That early gate now also
+includes projection construction (cloned metadata, connectivity, lookup/neighbor indexes, coordinate
+and curved-boundary quadrature scratch) and thermal sparse-support construction (row trees, growing
+CSR storage and the shared coercivity graph-count tree). Raw coupling counts bound these allocations
+without constructing the graphs to estimate them. Geometry validation still runs through the same
+projection constructor. The final numerical reservation retains this conservative planning estimate;
+it is not an exact lifetime-minimized total. Direct planner calls without an authored ceiling return
+facts rather than enforce admission. Other execution paths, result transport, and whole-producer
+admission remain open.
 
 Property owner/section matching streams candidates without per-element candidate arrays, while
 retaining exact coverage counts and missing/duplicate-section rejection. Semantic/audit identity

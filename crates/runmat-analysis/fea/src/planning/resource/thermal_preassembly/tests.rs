@@ -127,6 +127,57 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
 }
 
 #[test]
+fn planning_ceiling_precedes_geometric_projection_at_exact_boundary() {
+    use runmat_meshing_core::CanonicalMeshingContract;
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut mesh = canonical_tetrahedron_solver_mesh(order);
+        // Canonical connectivity remains valid, but physical projection must reject zero volume.
+        for node in &mut mesh.topology.nodes {
+            node.coordinates_m = [0.0; 3];
+        }
+        mesh.seal_canonical_digest().unwrap();
+        mesh.validate_canonical().unwrap();
+        let mut workload = workload();
+        let schedule = workload.solve_schedule().unwrap();
+        let history = ThermalHistoryResourceFacts::derive(&mesh, &schedule).unwrap();
+        let model_bytes =
+            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
+                &workload.model,
+                crate::execution::THERMAL_WORKLOAD_LIMITS,
+            )
+            .unwrap()
+                * 2;
+        let planning = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(&mesh)
+            .unwrap()
+            .0;
+        let required = history.reservation_bytes().unwrap().0 + model_bytes + planning;
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required - 1;
+        assert!(
+            matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(
+            ResourcePlanningError::AccuracyCeiling { required: actual, maximum, .. }
+        )) if actual == required && maximum == required - 1)
+        );
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required;
+        let expected = crate::topology::AnalysisProjectionError::InvalidElementGeometry {
+            element_id: mesh.topology.volume_elements[0].element_id,
+        }
+        .to_string();
+        assert!(matches!(
+            workload.execute(&mesh),
+            Err(crate::FeaRunError::Resource(
+                ResourcePlanningError::Invalid(message)
+            )) if message == expected
+        ));
+    }
+}
+
+#[test]
 fn oversized_input_strings_fail_the_shared_codec_limit() {
     let mut workload = workload();
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);

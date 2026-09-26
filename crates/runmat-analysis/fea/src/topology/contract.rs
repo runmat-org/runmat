@@ -251,6 +251,8 @@ pub enum BoundaryNormalOrientation {
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum AnalysisProjectionError {
+    #[error("analysis projection resource estimate failed: {0}")]
+    ResourceEstimate(String),
     #[error("canonical solver mesh is invalid: {0}")]
     InvalidMesh(String),
     #[error("analysis projection identity encoding failed: {0}")]

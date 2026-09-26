@@ -46,18 +46,15 @@ impl ThermalPreassemblyResourceFacts {
             model_materialization_bytes.0,
             step.accuracy.resources.maximum_resident_bytes,
         )?;
-        // Projection derives only after admitting the canonical validation it performs. The
-        // compiler later includes this same scratch in the final composed envelope; do not add
-        // it twice there. This early gate also protects direct callers of resource derivation.
-        let validation = mesh
-            .validation_resident_bytes_estimate()
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        // Admit projection, canonical validation and support construction before deriving them.
+        // Operator facts retain this estimate in the final composed numerical envelope.
+        let planning = ThermalOperatorResourceFacts::derivation_resident_bytes_estimate(mesh)?;
         let before_projection = history
             .reservation_bytes()?
             .0
             .checked_add(model_materialization_bytes.0)
-            .and_then(|bytes| bytes.checked_add(validation))
-            .ok_or(ResourcePlanningError::Overflow("thermal mesh validation"))?;
+            .and_then(|bytes| bytes.checked_add(planning.0))
+            .ok_or(ResourcePlanningError::Overflow("thermal operator planning"))?;
         require_ceiling(
             before_projection,
             step.accuracy.resources.maximum_resident_bytes,
