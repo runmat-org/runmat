@@ -118,16 +118,13 @@ impl RunMatSession {
             .collect::<BTreeMap<_, _>>();
         let bindings = local_names
             .iter()
-            .map(|(binding, name)| (*binding, name.clone()))
-            .filter_map(|(binding, name)| {
-                values.get(&name).cloned().map(|value| {
-                    runmat_native_executor::execute::NativeWorkspaceBinding {
-                        binding,
-                        name,
-                        value,
-                    }
-                })
-            })
+            .filter(|(_, name)| values.contains_key(*name))
+            .map(
+                |(binding, name)| runmat_native_executor::execute::NativeWorkspaceBinding {
+                    binding: *binding,
+                    name: name.clone(),
+                },
+            )
             .collect();
         let workspace = runmat_native_executor::execute::NativeWorkspaceInput {
             values,

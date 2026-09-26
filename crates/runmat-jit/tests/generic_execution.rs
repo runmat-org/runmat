@@ -1292,7 +1292,6 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
                 bindings: vec![NativeWorkspaceBinding {
                     binding: BindingId(0),
                     name: "counter".into(),
-                    value: Value::Num(41.0),
                 }],
             }),
         })

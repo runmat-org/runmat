@@ -19,11 +19,12 @@ use super::state::HostState;
 ///
 /// Binding identity selects the exact Native IR local. The retained name is
 /// the MATLAB workspace identity used by dynamic workspace builtins.
+/// The value lives only in `NativeWorkspaceInput::values`; metadata must not
+/// duplicate payloads or compare language values to validate caller identity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeWorkspaceBinding {
     pub binding: BindingId,
     pub name: String,
-    pub value: Value,
 }
 
 /// Transactional interactive workspace input for one native invocation.
@@ -76,7 +77,7 @@ impl NativeWorkspaceState {
             })
             .collect::<BTreeMap<_, _>>();
         let mut seen_bindings = BTreeSet::new();
-        let mut values = input.values;
+        let values = input.values;
         for supplied in input.bindings {
             if !seen_bindings.insert(supplied.binding) {
                 return Err(NativeExecutorError::Host(
@@ -101,15 +102,11 @@ impl NativeWorkspaceState {
                     supplied.name
                 )));
             }
-            if let Some(ambient) = values.get(&supplied.name) {
-                if ambient != &supplied.value {
-                    return Err(NativeExecutorError::Host(format!(
-                        "native workspace binding '{}' disagrees with the caller snapshot",
-                        supplied.name
-                    )));
-                }
-            } else {
-                values.insert(supplied.name, supplied.value);
+            if !values.contains_key(&supplied.name) {
+                return Err(NativeExecutorError::Host(format!(
+                    "native workspace binding '{}' is missing from the caller snapshot",
+                    supplied.name
+                )));
             }
         }
         Ok(Self {
@@ -165,6 +162,10 @@ impl NativeWorkspaceState {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "workspace_tests.rs"]
+mod tests;
 
 struct NativeWorkspaceService {
     values: Rc<RefCell<BTreeMap<String, Value>>>,
