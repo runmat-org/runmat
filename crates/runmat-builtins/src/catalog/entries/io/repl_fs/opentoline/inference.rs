@@ -107,7 +107,10 @@ mod tests {
         CallRequest {
             arguments: vec![
                 ValueFact::scalar(ValueKindFact::String),
-                ValueFact::scalar(ValueKindFact::NumericReal(NumericClass::Double)),
+                ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                    class: NumericClass::Double,
+                    domain: NumericDomain::Real,
+                })),
             ],
             literals: LiteralContext::new(vec![LiteralValue::String("editor.m".into()), position]),
             outputs: OutputSelection::new(RequestedOutputCount::Exactly(outputs)),
