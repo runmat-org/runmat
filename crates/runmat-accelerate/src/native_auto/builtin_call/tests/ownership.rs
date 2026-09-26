@@ -116,6 +116,40 @@ fn inaccessible_borrowed_graph_fails_before_any_upload() {
 }
 
 #[test]
+fn cpu_selection_preserves_inaccessible_control_and_result() {
+    runmat_gc::gc_test_context(|| {
+        let provider = provider(None);
+        let probe = Rc::new(Probe::default());
+        let target = runmat_gc::gc_allocate(Value::Num(1.)).unwrap();
+        let value = Value::HandleObject(runmat_value::HandleRef {
+            class_name: "OwnershipFixture".into(),
+            target,
+            valid: true,
+        });
+        runmat_gc::gc_with_value_mut(&target, |_| {
+            let prepared = NativeAutoOffload::new(provider, ThresholdConfig::default())
+                .prepare_operation(
+                    "owned.binary.test",
+                    &[host(), host(), value.clone()],
+                    Some(&runtime(&probe)),
+                    ArgumentOperation::Binary(BinaryOp::Elementwise),
+                )
+                .unwrap();
+            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }));
+            assert!(result.is_ok());
+        })
+        .unwrap();
+        assert_eq!(provider.next.load(Ordering::Relaxed), 1);
+        assert!(provider.freed.lock().unwrap().is_empty());
+        assert!(probe
+            .feedback
+            .borrow()
+            .iter()
+            .all(|sample| !sample.succeeded));
+    });
+}
+
+#[test]
 fn inaccessible_result_graph_fails_without_publishing_and_releases_uploads() {
     runmat_gc::gc_test_context(|| {
         let provider = provider(None);

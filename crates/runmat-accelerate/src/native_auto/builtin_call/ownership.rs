@@ -51,6 +51,9 @@ impl OwnedUploads {
     }
 
     pub(super) fn adopt(&mut self, value: &Value) -> Result<(), RuntimeError> {
+        if self.owned.is_empty() {
+            return Ok(());
+        }
         let mut retained = BTreeSet::new();
         runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
             retained.insert((handle.device_id, handle.buffer_id));

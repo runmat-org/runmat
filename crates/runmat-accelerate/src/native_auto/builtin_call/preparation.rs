@@ -136,9 +136,16 @@ impl NativeAutoOffload {
         let mut observation =
             BuiltinCallObservation::new(feedback, trace, evaluation.recommend_gpu, args);
         let mut processed = args.to_vec();
-        let mut uploads = super::ownership::OwnedUploads::new(self.provider, args)?;
+        let mut uploads = None;
         if evaluation.recommend_gpu {
             for value in processed.iter_mut().take(operation.count()) {
+                if !matches!(value, Value::Tensor(tensor) if tensor.len() > 0) {
+                    continue;
+                }
+                if uploads.is_none() {
+                    uploads = Some(super::ownership::OwnedUploads::new(self.provider, args)?);
+                }
+                let uploads = uploads.as_mut().expect("initialized before upload");
                 *value = self.promote_tensor_protecting(
                     value,
                     1,
@@ -159,7 +166,7 @@ impl NativeAutoOffload {
         Ok(PreparedBuiltinCall {
             args: processed,
             observation: Some(observation),
-            uploads: Some(uploads),
+            uploads,
         })
     }
 }
