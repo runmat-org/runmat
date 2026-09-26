@@ -1616,10 +1616,14 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
             runmat_accelerate::placement::PlacementEventKind::Compile,
             runmat_accelerate::placement::PlacementEventKind::Queue,
             runmat_accelerate::placement::PlacementEventKind::Kernel,
-            runmat_accelerate::placement::PlacementEventKind::Complete,
         ] {
             assert!(kinds.contains(&required), "missing {required:?}: {kinds:?}");
         }
+        assert!(!kinds.contains(&runmat_accelerate::placement::PlacementEventKind::Complete));
+        assert!(trace
+            .events
+            .iter()
+            .any(|event| event.reason.as_deref() == Some("provider_submission")));
         let queue = trace
             .events
             .iter()
@@ -1641,7 +1645,7 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
 }
 
 #[test]
-fn fusion_execution_updates_the_session_owned_placement_profile() {
+fn fusion_submission_does_not_train_completed_provider_execution() {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
@@ -1666,13 +1670,14 @@ fn fusion_execution_updates_the_session_owned_placement_profile() {
         .expect("session-owned fusion execution");
 
         let profile = placement.profile_snapshot();
-        let provider = profile
-            .feedback
-            .iter()
-            .find(|series| series.candidate.contains("fusion.elementwise"))
-            .expect("provider feedback series");
-        assert_eq!(provider.samples, 1);
-        assert_eq!(provider.failures, 0);
+        assert!(
+            !profile.feedback.iter().any(|series| {
+                series.candidate.starts_with("provider.")
+                    && series.candidate.contains("fusion.elementwise")
+                    && series.samples > 0
+            }),
+            "provider enqueue must not become a completed-execution sample"
+        );
     });
 }
 
@@ -1689,7 +1694,27 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
             y = sin(x) .* x + 2;
             "#,
         );
-        interpret(&bytecode).expect("shared-runtime fallback");
+        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_placement(placement.clone()),
+        );
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        block_on(runmat_vm::interpret_with_vars_in_context(
+            &bytecode, &mut vars, None, runtime,
+        ))
+        .expect("shared-runtime selection");
+        let profile = placement.profile_snapshot();
+        let cpu = profile
+            .feedback
+            .iter()
+            .find(|series| series.candidate == "cpu.shared.fusion.elementwise")
+            .expect("completed CPU-region feedback");
+        assert_eq!(cpu.samples, 1);
+        assert_eq!(cpu.failures, 0);
 
         let report = runmat_accelerate::placement_report();
         let trace = report
@@ -1703,8 +1728,14 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
                     == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
                 && event.reason.as_deref() == Some("complete_cost")
         }));
-        assert!(trace.events.iter().any(|event| {
+        assert!(!trace.events.iter().any(|event| {
             event.kind == runmat_accelerate::placement::PlacementEventKind::Fallback
+        }));
+        assert!(trace.events.iter().any(|event| {
+            event.kind == runmat_accelerate::placement::PlacementEventKind::Complete
+                && event.variant
+                    == Some(runmat_accelerate::placement::PlacementVariant::SharedRuntime)
+                && event.duration_ns.is_some()
         }));
         assert!(!trace.events.iter().any(|event| {
             matches!(

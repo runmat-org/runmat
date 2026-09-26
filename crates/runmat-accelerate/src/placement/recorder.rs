@@ -76,6 +76,23 @@ impl PlacementTraceContext {
         );
     }
 
+    /// Close a provider-dispatch scope without asserting device completion.
+    pub fn submitted(mut self, variant: PlacementVariant, duration_ns: Option<u64>) {
+        if self.enabled {
+            record_event(
+                self.correlation,
+                PlacementEventKind::Queue,
+                Some(variant),
+                Some("provider_submission"),
+                duration_ns,
+                None,
+                &[],
+            );
+            complete_trace(self.correlation);
+        }
+        self.finished = true;
+    }
+
     pub fn complete(mut self, variant: Option<PlacementVariant>, duration_ns: Option<u64>) {
         if !self.enabled {
             self.finished = true;
@@ -269,6 +286,33 @@ mod tests {
     use super::*;
 
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn submitted_trace_closes_without_a_device_completion_event() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset();
+        let trace = begin_trace("submitted", None);
+        let correlation = trace.correlation();
+        trace.submitted(PlacementVariant::ProviderFusion, Some(7));
+        let report = report();
+        let trace = report
+            .traces
+            .iter()
+            .find(|trace| trace.correlation == correlation)
+            .unwrap();
+        assert!(trace.complete);
+        assert_eq!(trace.events.len(), 1);
+        assert_eq!(trace.events[0].kind, PlacementEventKind::Queue);
+        assert_eq!(
+            trace.events[0].reason.as_deref(),
+            Some("provider_submission")
+        );
+        assert_eq!(trace.events[0].duration_ns, Some(7));
+        assert!(!trace
+            .events
+            .iter()
+            .any(|event| event.kind == PlacementEventKind::Complete));
+    }
 
     #[test]
     fn correlated_reports_are_bounded_ordered_and_redacted_by_contract() {
