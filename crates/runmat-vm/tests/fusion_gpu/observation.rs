@@ -1,6 +1,17 @@
 //! Production-runner placement observation witnesses using the deterministic provider.
 use super::*;
 
+fn fusion_test_runtime(
+    placement: Rc<runmat_accelerate::placement::PlacementSession>,
+) -> runmat_runtime::context::RuntimeContext {
+    runmat_runtime::context::RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        runmat_runtime::context::RuntimeServicePorts::default().with_placement(placement),
+    )
+}
+
 fn fusion_var_index(bytecode: &runmat_vm::Bytecode, name: &str) -> usize {
     bytecode
         .var_names
