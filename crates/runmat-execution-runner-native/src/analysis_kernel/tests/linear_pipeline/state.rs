@@ -1,6 +1,7 @@
 use super::*;
 
 pub(super) fn execute(solved: &SolvedPipeline) {
+    rejects_unavailable_thermal_publication(solved);
     let host = &solved.prepared.host;
     let step = host.workload.step;
     let publication = SemanticStatePublicationRequest::new(
@@ -161,4 +162,45 @@ pub(super) fn execute(solved: &SolvedPipeline) {
             inputs: &substituted,
         })
         .is_err());
+}
+
+fn rejects_unavailable_thermal_publication(solved: &SolvedPipeline) {
+    let declaration =
+        runmat_analysis_core::ProcedureStep::thermal_steady("heat").state_outputs[0].clone();
+    let request = SemanticStatePublicationRequest::new(
+        SemanticStatePublicationSource::ThermalPrimaryField,
+        solved.prepared.host.workload.step,
+        declaration,
+        solved.prepared.inputs[1].manifest.logical_identity,
+        solved.source_result,
+    )
+    .unwrap();
+    let bytes = request.canonical_bytes().unwrap();
+    let request = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StatePublicationRequest,
+        Digest::sha256(&bytes),
+        &bytes,
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let inputs = vec![request, solved.solver_result.clone()];
+    let host = test_host_for_inputs(
+        &solved.prepared.host,
+        AnalysisWorkKind::PublishState,
+        &inputs,
+        vec![AnalysisNumericalObjectKind::SemanticState],
+        None,
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            kind: AnalysisWorkKind::PublishState,
+            host: &host,
+            inputs: &inputs,
+        })
+        .err()
+        .expect("structural bytes must not masquerade as a thermal result");
+    assert!(matches!(error, AnalysisBridgeError::Invalid(ref message)
+        if message.contains("portable thermal solver-result contract")));
 }

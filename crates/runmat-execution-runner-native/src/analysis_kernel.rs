@@ -898,6 +898,12 @@ fn execute_state_publication(
         ));
     }
     let state = match publication.source {
+        SemanticStatePublicationSource::ThermalPrimaryField => {
+            return Err(AnalysisBridgeError::Invalid(
+                "native thermal state publication requires a portable thermal solver-result contract; the retained in-process thermal result is not a structural solver result"
+                    .into(),
+            ));
+        }
         SemanticStatePublicationSource::StructuralPrimaryFields => {
             let solver_result =
                 StructuralLinearWorkloadResult::from_canonical_bytes(&solver_result.payload())?;
