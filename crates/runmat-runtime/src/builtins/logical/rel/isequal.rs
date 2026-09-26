@@ -1,15 +1,11 @@
 //! MATLAB-compatible `isequal` builtin for RunMat.
 //!
-//! Tests whether all input arrays have the same size, class, and content.
+//! Tests whether all input arrays have the same size and numeric values or recursive content.
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    BuiltinErrorDescriptor, ISEQUALN_ERROR_INTERNAL, ISEQUALN_ERROR_NOT_ENOUGH_INPUTS,
+    ISEQUALN_ERROR_TOO_MANY_OUTPUTS, ISEQUAL_ERROR_INTERNAL, ISEQUAL_ERROR_NOT_ENOUGH_INPUTS,
+    ISEQUAL_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -23,80 +19,13 @@ use crate::{build_runtime_error, RuntimeError};
 const BUILTIN_NAME: &str = "isequal";
 const ISEQUALN_BUILTIN_NAME: &str = "isequaln";
 
-const ISEQUAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when all inputs are equal in size, class, and content.",
-}];
-
-const ISEQUAL_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Values to compare (at least two).",
-}];
-
-const ISEQUAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isequal(A, B, ...)",
-    inputs: &ISEQUAL_INPUTS,
-    outputs: &ISEQUAL_OUTPUT,
-}];
-
-const ISEQUALN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isequaln(A, B, ...)",
-    inputs: &ISEQUAL_INPUTS,
-    outputs: &ISEQUAL_OUTPUT,
-}];
-
-const ISEQUAL_ERROR_NOT_ENOUGH_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISEQUAL.NOT_ENOUGH_INPUTS",
-    identifier: Some("RunMat:isequal:NotEnoughInputs"),
-    when: "Fewer than two arguments are supplied.",
-    message: "isequal: requires at least two input arguments",
-};
-
-const ISEQUAL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISEQUAL.INTERNAL",
-    identifier: Some("RunMat:isequal:Internal"),
-    when: "Internal gather/host normalization fails.",
-    message: "isequal: internal error",
-};
-
-const ISEQUAL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISEQUAL_ERROR_NOT_ENOUGH_INPUTS, ISEQUAL_ERROR_INTERNAL];
-
-pub const ISEQUAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISEQUAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISEQUAL_ERRORS,
-};
-
-pub const ISEQUALN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISEQUALN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISEQUAL_ERRORS,
-};
-const ISEQUAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability { name: "A", classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES, availability: BuiltinIntegerInputAvailability::Documented, scalar_double: BuiltinIntegerScalarDoubleRule::Allowed, notes: "Variadic numeric inputs compare by value across classes; exact integer storage is never preconverted to floating point." }];
-pub const ISEQUAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isequal(integer_A, B, ...)", inputs: &ISEQUAL_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Same-shape numeric values compare class-insensitively using exact signed/unsigned/integer/floating ordering; resident values gather exactly and return a host logical scalar." }];
-pub const ISEQUALN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] = [BuiltinIntegerCapabilityDescriptor { form: "tf = isequaln(integer_A, B, ...)", inputs: &ISEQUAL_INTEGER_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Predicate, output_class: BuiltinIntegerOutputClassRule::Logical, overflow: BuiltinIntegerOverflowRule::NotApplicable, backend: BuiltinIntegerBackendRule::GatherFallback, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Shares exact class-insensitive numeric equality with isequal while treating corresponding floating missing values as equal." }];
-
 /// Compares all input values for equality.
 ///
-/// Returns `true` if all inputs have the same size, class, and content.
+/// Returns `true` if all inputs have the same size and numeric values or recursive content.
 /// Returns `false` otherwise. NaN values are NOT considered equal.
 #[runtime_builtin(
     name = "isequal",
-    category = "logical/rel",
-    summary = "Test arrays for equality in size, class, and content.",
-    keywords = "isequal,equality,comparison,logical",
-    accel = "cpu",
-    descriptor(crate::builtins::logical::rel::isequal::ISEQUAL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::logical::rel::isequal::ISEQUAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -106,12 +35,7 @@ async fn isequal_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 /// Compares all input values for equality, treating NaN values as equal.
 #[runtime_builtin(
     name = "isequaln",
-    category = "logical/rel",
-    summary = "Test arrays for equality, treating NaN values as equal.",
-    keywords = "isequaln,equality,comparison,nan,logical",
-    accel = "cpu",
-    descriptor(crate::builtins::logical::rel::isequal::ISEQUALN_DESCRIPTOR),
-    integer_capabilities(crate::builtins::logical::rel::isequal::ISEQUALN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::logical::rel::isequal"
 )]
 async fn isequaln_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -123,17 +47,30 @@ async fn equality_builtin(
     nan_equal: bool,
     builtin_name: &'static str,
 ) -> crate::BuiltinResult<Value> {
-    if args.len() < 2 {
-        return Err(equality_error(
-            builtin_name,
+    let (arity_error, output_error, internal_error) = if nan_equal {
+        (
+            &ISEQUALN_ERROR_NOT_ENOUGH_INPUTS,
+            &ISEQUALN_ERROR_TOO_MANY_OUTPUTS,
+            &ISEQUALN_ERROR_INTERNAL,
+        )
+    } else {
+        (
             &ISEQUAL_ERROR_NOT_ENOUGH_INPUTS,
-        ));
+            &ISEQUAL_ERROR_TOO_MANY_OUTPUTS,
+            &ISEQUAL_ERROR_INTERNAL,
+        )
+    };
+    if matches!(crate::output_count::current_output_count(), Some(count) if count > 1) {
+        return Err(equality_error(builtin_name, output_error));
+    }
+    if args.len() < 2 {
+        return Err(equality_error(builtin_name, arity_error));
     }
 
     // Gather all values to host if needed
     let mut gathered = Vec::with_capacity(args.len());
     for arg in args {
-        gathered.push(gather_value(arg, builtin_name).await?);
+        gathered.push(gather_value(arg, builtin_name, internal_error).await?);
     }
 
     // Compare first value against all others
@@ -147,31 +84,51 @@ async fn equality_builtin(
     Ok(Value::Bool(true))
 }
 
-async fn gather_value(value: Value, builtin_name: &'static str) -> crate::BuiltinResult<Value> {
+async fn gather_value(
+    value: Value,
+    builtin_name: &'static str,
+    internal_error: &'static BuiltinErrorDescriptor,
+) -> crate::BuiltinResult<Value> {
     match value {
+        Value::Cell(mut cell) => {
+            for item in &mut cell.data {
+                *item = Box::pin(gather_value(item.clone(), builtin_name, internal_error)).await?;
+            }
+            Ok(Value::Cell(cell))
+        }
+        Value::Struct(mut record) => {
+            for item in record.fields.values_mut() {
+                *item = Box::pin(gather_value(item.clone(), builtin_name, internal_error)).await?;
+            }
+            Ok(Value::Struct(record))
+        }
+        Value::StructArray(records) => {
+            let mapped = records
+                .try_map_values_async(|value| {
+                    Box::pin(gather_value(value, builtin_name, internal_error))
+                })
+                .await?;
+            Ok(Value::StructArray(mapped))
+        }
         Value::GpuTensor(handle) => {
             let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
                 equality_error_with_detail(
                     builtin_name,
-                    &ISEQUAL_ERROR_INTERNAL,
+                    internal_error,
                     "no acceleration provider owns the resident input",
                 )
             })?;
             gpu_helpers::download_value_preserving_residency_async(owner, &handle)
                 .await
                 .map_err(|err| {
-                    equality_error_with_detail(
-                        builtin_name,
-                        &ISEQUAL_ERROR_INTERNAL,
-                        err.to_string(),
-                    )
+                    equality_error_with_detail(builtin_name, internal_error, err.to_string())
                 })
         }
         other => Ok(other),
     }
 }
 
-/// Compare two values for equality (same size, class, and content).
+/// Compare two values for equality (same size and numeric values or recursive content).
 /// NaN values are NOT considered equal.
 fn values_equal(a: &Value, b: &Value, nan_equal: bool) -> bool {
     if let (Some(a), Some(b)) = (real_numeric_view(a), real_numeric_view(b)) {
@@ -454,339 +411,5 @@ fn equality_error_with_detail(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::{CellArray, ComplexTensor, IntegerComplexStorage, IntegerStorage};
-
-    fn run_isequal(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(isequal_builtin(args))
-    }
-
-    fn run_isequaln(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(isequaln_builtin(args))
-    }
-
-    fn typed_complex_u64(real: u64, imag: u64) -> ComplexTensor {
-        ComplexTensor::new_integer(
-            IntegerComplexStorage::new(
-                IntegerStorage::U64(vec![real]),
-                IntegerStorage::U64(vec![imag]),
-            )
-            .expect("matching components"),
-            vec![1, 1],
-        )
-        .expect("typed complex")
-    }
-
-    #[test]
-    fn numeric_equality_is_class_insensitive_without_losing_wide_integers() {
-        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1]).unwrap();
-        let unsigned = Tensor::new_integer(IntegerStorage::U8(vec![255]), vec![1, 1]).unwrap();
-        assert_eq!(
-            run_isequal(vec![Value::Tensor(signed), Value::Tensor(unsigned)]).unwrap(),
-            Value::Bool(true)
-        );
-
-        let wide = (1_u64 << 53) + 1;
-        let exact = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        let rounded = Tensor::new(vec![wide as f64], vec![1, 1]).unwrap();
-        assert_eq!(
-            run_isequal(vec![Value::Tensor(exact), Value::Tensor(rounded)]).unwrap(),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            run_isequal(vec![Value::Bool(true), Value::Num(1.0)]).unwrap(),
-            Value::Bool(true)
-        );
-    }
-
-    #[test]
-    fn real_complex_and_sparse_numeric_values_compare_across_classes() {
-        let wide = u64::MAX;
-        let real = Tensor::new_integer(IntegerStorage::U64(vec![wide]), vec![1, 1]).unwrap();
-        let complex = typed_complex_u64(wide, 0);
-        assert_eq!(
-            run_isequal(vec![Value::Tensor(real), Value::ComplexTensor(complex)]).unwrap(),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            run_isequal(vec![Value::Int(IntValue::I32(1)), Value::Complex(1.0, 0.0)]).unwrap(),
-            Value::Bool(true)
-        );
-        let sparse =
-            SparseTensor::new_integer(2, 1, vec![0, 1], vec![1], IntegerStorage::U64(vec![wide]))
-                .unwrap();
-        let dense = Tensor::new_integer(IntegerStorage::U64(vec![0, wide]), vec![2, 1]).unwrap();
-        assert_eq!(
-            run_isequal(vec![Value::SparseTensor(sparse), Value::Tensor(dense)]).unwrap(),
-            Value::Bool(true)
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_two_scalars_equal() {
-        let result = run_isequal(vec![Value::Num(5.0), Value::Num(5.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_two_scalars_not_equal() {
-        let result = run_isequal(vec![Value::Num(5.0), Value::Num(4.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_three_args_all_equal() {
-        let result =
-            run_isequal(vec![Value::Num(3.0), Value::Num(3.0), Value::Num(3.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_three_args_one_different() {
-        let result =
-            run_isequal(vec![Value::Num(3.0), Value::Num(3.0), Value::Num(4.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_tensors_equal() {
-        let t1 = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let t2 = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let result = run_isequal(vec![Value::Tensor(t1), Value::Tensor(t2)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_tensors_different_shape() {
-        let t1 = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let t2 = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let result = run_isequal(vec![Value::Tensor(t1), Value::Tensor(t2)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_tensors_different_values() {
-        let t1 = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap();
-        let t2 = Tensor::new(vec![1.0, 2.0, 4.0], vec![1, 3]).unwrap();
-        let result = run_isequal(vec![Value::Tensor(t1), Value::Tensor(t2)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_empty_arrays() {
-        // Test that empty arrays are equal
-        let empty_a = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let empty_b = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let result =
-            run_isequal(vec![Value::Tensor(empty_a), Value::Tensor(empty_b)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_empty_cell_arrays() {
-        // Test the cell example from the failing test: cell(2,2) elements should be []
-        let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let c1 = CellArray::new(vec![Value::Tensor(empty.clone()); 4], 2, 2).unwrap();
-        let c2 = CellArray::new(vec![Value::Tensor(empty); 4], 2, 2).unwrap();
-        let result = run_isequal(vec![Value::Cell(c1), Value::Cell(c2)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_cell_element_with_empty() {
-        // Test isequal(C{1,1}, [], C{2,2}, []) pattern
-        let empty_a = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let empty_b = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let empty_c = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let empty_d = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
-        let result = run_isequal(vec![
-            Value::Tensor(empty_a),
-            Value::Tensor(empty_b),
-            Value::Tensor(empty_c),
-            Value::Tensor(empty_d),
-        ])
-        .expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_nan_not_equal() {
-        // In isequal, NaN != NaN (use isequaln for NaN equality)
-        let result =
-            run_isequal(vec![Value::Num(f64::NAN), Value::Num(f64::NAN)]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequaln_nan_values_are_equal_recursively() {
-        let t1 = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).unwrap();
-        let t2 = Tensor::new(vec![1.0, f64::NAN], vec![1, 2]).unwrap();
-        let cells = CellArray::new(vec![Value::Tensor(t1), Value::Num(f64::NAN)], 1, 2).unwrap();
-        let other = CellArray::new(vec![Value::Tensor(t2), Value::Num(f64::NAN)], 1, 2).unwrap();
-        let result = run_isequaln(vec![Value::Cell(cells), Value::Cell(other)]).expect("isequaln");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[test]
-    fn isequal_and_isequaln_compare_single_storage_without_widening_class() {
-        let left = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
-        let right = Tensor::from_f32(vec![0.1, f32::NAN], vec![1, 2]).unwrap();
-
-        assert_eq!(
-            run_isequal(vec![
-                Value::Tensor(left.clone()),
-                Value::Tensor(right.clone())
-            ])
-            .expect("isequal"),
-            Value::Bool(false)
-        );
-        assert_eq!(
-            run_isequaln(vec![Value::Tensor(left), Value::Tensor(right)]).expect("isequaln"),
-            Value::Bool(true)
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_strings() {
-        let result = run_isequal(vec![
-            Value::String("hello".into()),
-            Value::String("hello".into()),
-        ])
-        .expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_different_types() {
-        let result =
-            run_isequal(vec![Value::Num(5.0), Value::String("5".into())]).expect("isequal");
-        assert_eq!(result, Value::Bool(false));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_not_enough_args() {
-        let err = run_isequal(vec![Value::Num(5.0)]).unwrap_err();
-        assert!(err.message().contains("at least two"));
-        assert_eq!(err.identifier(), ISEQUAL_ERROR_NOT_ENOUGH_INPUTS.identifier);
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_bool_and_num_compare_by_numeric_value() {
-        let result = run_isequal(vec![Value::Bool(true), Value::Num(1.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_tensor_numeric_classes_compare_by_value() {
-        let double_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::F64).unwrap();
-        let uint32_tensor =
-            Tensor::new_with_dtype(vec![1.0], vec![1, 1], runmat_value::NumericDType::U32).unwrap();
-        let result = run_isequal(vec![
-            Value::Tensor(double_tensor),
-            Value::Tensor(uint32_tensor),
-        ])
-        .expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[test]
-    fn isequal_integer_tensor_values_are_compared_exactly() {
-        let same_left = Tensor::new_integer(
-            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-            vec![1, 2],
-        )
-        .expect("left integer tensor");
-        let same_right = Tensor::new_integer(
-            IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-            vec![1, 2],
-        )
-        .expect("right integer tensor");
-        let different = Tensor::new_integer(
-            IntegerStorage::U64(vec![(1_u64 << 53), u64::MAX]),
-            vec![1, 2],
-        )
-        .expect("different integer tensor");
-
-        assert_eq!(
-            run_isequal(vec![Value::Tensor(same_left), Value::Tensor(same_right)])
-                .expect("isequal same"),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            run_isequal(vec![
-                Value::Tensor(different),
-                Value::Tensor(
-                    Tensor::new_integer(
-                        IntegerStorage::U64(vec![(1_u64 << 53) + 1, u64::MAX]),
-                        vec![1, 2],
-                    )
-                    .expect("comparison tensor"),
-                ),
-            ])
-            .expect("isequal different"),
-            Value::Bool(false)
-        );
-    }
-
-    #[test]
-    fn isequal_integer_tensor_classes_compare_exact_values() {
-        let unsigned = Tensor::new_integer(IntegerStorage::U64(vec![255]), vec![1, 1])
-            .expect("unsigned integer tensor");
-        let signed = Tensor::new_integer(IntegerStorage::I64(vec![255]), vec![1, 1])
-            .expect("signed integer tensor");
-
-        assert_eq!(
-            run_isequal(vec![Value::Tensor(unsigned), Value::Tensor(signed)]).expect("isequal"),
-            Value::Bool(true)
-        );
-    }
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[test]
-    fn isequal_complex() {
-        let result =
-            run_isequal(vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)]).expect("isequal");
-        assert_eq!(result, Value::Bool(true));
-    }
-
-    #[test]
-    fn isequal_typed_complex_integer_compares_exact_components() {
-        let left = typed_complex_u64(u64::MAX, 1_u64 << 63);
-        let same = left.clone();
-        let different = typed_complex_u64(u64::MAX - 1, 1_u64 << 63);
-
-        assert_eq!(
-            run_isequal(vec![Value::ComplexTensor(left), Value::ComplexTensor(same)])
-                .expect("isequal"),
-            Value::Bool(true)
-        );
-        assert_eq!(
-            run_isequal(vec![
-                Value::ComplexTensor(different),
-                Value::ComplexTensor(typed_complex_u64(u64::MAX, 1_u64 << 63)),
-            ])
-            .expect("isequal"),
-            Value::Bool(false)
-        );
-    }
-}
+#[path = "isequal/tests.rs"]
+pub(crate) mod tests;
