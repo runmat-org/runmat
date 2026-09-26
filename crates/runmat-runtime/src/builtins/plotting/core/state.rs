@@ -25,6 +25,9 @@ use crate::{BuiltinResult, RuntimeError};
 
 #[path = "state/colorbar.rs"]
 mod colorbar;
+#[path = "state/clear_axes.rs"]
+mod clear_axes;
+pub use clear_axes::{clear_axes_target, clear_current_axes};
 pub use colorbar::{
     colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,
     set_colorbar_enabled, set_colorbar_enabled_for_axes, set_colorbar_visible, toggle_colorbar,
@@ -3310,30 +3313,6 @@ pub fn set_color_limits_for_axes(
     Ok(())
 }
 
-pub fn clear_current_axes() {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let axes_index = {
-            let state = get_state_mut(&mut reg, handle);
-            let axes_index = state.active_axes;
-            state.figure.clear_axes(axes_index);
-            state.reset_cycle(axes_index);
-            state.revision = state.revision.wrapping_add(1);
-            axes_index
-        };
-        purge_plot_children_for_axes(&mut reg, handle, axes_index);
-        let figure_clone = reg
-            .figures
-            .get(&handle)
-            .expect("figure exists")
-            .figure
-            .clone();
-        (handle, figure_clone)
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
 pub fn set_legend_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -4314,8 +4293,11 @@ where
         {
             let state = get_state_mut(&mut reg, handle);
             state.figure.set_subplot_grid(axes_count, 1);
+        }
+        clear_axes::clear_registered_axes(&mut reg, handle, &axes_indices);
+        {
+            let state = get_state_mut(&mut reg, handle);
             for axes_index in &axes_indices {
-                state.figure.clear_axes(*axes_index);
                 state.figure.set_axes_kind(*axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(*axes_index, None, None);
                 state.figure.set_axes_z_limits(*axes_index, None);
@@ -4326,9 +4308,6 @@ where
             }
             state.active_axes = *axes_indices.last().unwrap_or(&0);
             state.figure.set_active_axes_index(state.active_axes);
-        }
-        for axes_index in &axes_indices {
-            purge_plot_children_for_axes(&mut reg, handle, *axes_index);
         }
         {
             let state = get_state_mut(&mut reg, handle);
@@ -4981,75 +4960,6 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
     });
 }
 
-fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, axes_index: usize) {
-    reg.plot_children.retain(|_, state| match state {
-        // Colorbars belong to the figure; clearing plotted axes children keeps them live.
-        PlotChildHandleState::ColorBar(_) => true,
-        PlotChildHandleState::Histogram(hist) => {
-            !(hist.figure == handle && hist.axes_index == axes_index)
-        }
-        PlotChildHandleState::Histogram2(hist) => {
-            !(hist.figure == handle && hist.axes_index == axes_index)
-        }
-        PlotChildHandleState::Line(plot)
-        | PlotChildHandleState::Scatter(plot)
-        | PlotChildHandleState::Bar(plot)
-        | PlotChildHandleState::Stairs(plot)
-        | PlotChildHandleState::Surface(plot)
-        | PlotChildHandleState::Patch(plot)
-        | PlotChildHandleState::Line3(plot)
-        | PlotChildHandleState::Scatter3(plot)
-        | PlotChildHandleState::Contour(plot)
-        | PlotChildHandleState::ContourFill(plot)
-        | PlotChildHandleState::ReferenceLine(plot)
-        | PlotChildHandleState::Pie(plot) => {
-            !(plot.figure == handle && plot.axes_index == axes_index)
-        }
-        PlotChildHandleState::AnimatedLine(animated) => {
-            !(animated.figure == handle && animated.axes_index == axes_index)
-        }
-        PlotChildHandleState::Stem(stem) => {
-            !(stem.figure == handle && stem.axes_index == axes_index)
-        }
-        PlotChildHandleState::ErrorBar(err) => {
-            !(err.figure == handle && err.axes_index == axes_index)
-        }
-        PlotChildHandleState::Quiver(quiver) => {
-            !(quiver.figure == handle && quiver.axes_index == axes_index)
-        }
-        PlotChildHandleState::Image(image) => {
-            !(image.figure == handle && image.axes_index == axes_index)
-        }
-        PlotChildHandleState::Heatmap(heatmap) => {
-            !(heatmap.figure == handle && heatmap.axes_index == axes_index)
-        }
-        PlotChildHandleState::Binscatter(binscatter) => {
-            !(binscatter.figure == handle && binscatter.axes_index == axes_index)
-        }
-        PlotChildHandleState::FunctionSurface(function_surface) => {
-            !(function_surface.figure == handle && function_surface.axes_index == axes_index)
-        }
-        PlotChildHandleState::FunctionContour(function_contour) => {
-            !(function_contour.figure == handle && function_contour.axes_index == axes_index)
-        }
-        PlotChildHandleState::Area(area) => {
-            !(area.figure == handle && area.axes_index == axes_index)
-        }
-        PlotChildHandleState::Text(text) => {
-            !(text.figure == handle && text.axes_index == axes_index)
-        }
-        PlotChildHandleState::TextScatter(textscatter) => {
-            !(textscatter.figure == handle && textscatter.axes_index == axes_index)
-        }
-        PlotChildHandleState::WordCloud(wordcloud) => {
-            !(wordcloud.figure == handle && wordcloud.axes_index == axes_index)
-        }
-        PlotChildHandleState::StackedPlot(stacked) => {
-            !(stacked.figure == handle && stacked.axes_indices.contains(&axes_index))
-        }
-    });
-}
-
 pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureError> {
     if !value.is_finite() || value <= 0.0 {
         return Err(FigureError::InvalidAxesHandle);
@@ -5652,8 +5562,11 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
         let state = get_state_mut(&mut reg, handle);
         let left_axes = state.active_axes;
         let right_axes = state.figure.ensure_overlay_axes(left_axes);
-        state.figure.clear_axes(left_axes);
-        state.figure.clear_axes(right_axes);
+        (left_axes, right_axes)
+    };
+    clear_axes::clear_registered_axes(&mut reg, handle, &[left_axes, right_axes]);
+    {
+        let state = get_state_mut(&mut reg, handle);
         state.figure.set_axes_kind(left_axes, AxesKind::Cartesian);
         state.figure.set_axes_kind(right_axes, AxesKind::Cartesian);
         state.figure.set_axes_limits(left_axes, None, None);
@@ -5669,10 +5582,7 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
         state.reset_cycle(right_axes);
         state.active_axes = left_axes;
         state.figure.set_active_axes_index(left_axes);
-        (left_axes, right_axes)
-    };
-    purge_plot_children_for_axes(&mut reg, handle, left_axes);
-    purge_plot_children_for_axes(&mut reg, handle, right_axes);
+    }
     Ok((
         handle,
         left_axes,
@@ -5697,19 +5607,18 @@ where
         let handle = reg.current;
         let axes_index = { get_state_mut(&mut reg, handle).active_axes };
         let should_clear = { !get_state_mut(&mut reg, handle).hold() };
+        if should_clear {
+            clear_axes::clear_registered_axes(&mut reg, handle, &[axes_index]);
+        }
         {
             let state = get_state_mut(&mut reg, handle);
             state.figure.set_active_axes_index(axes_index);
             if should_clear {
-                state.figure.clear_axes(axes_index);
                 state.figure.set_axes_kind(axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(axes_index, None, None);
                 state.figure.set_axes_z_limits(axes_index, None);
                 state.reset_cycle(axes_index);
             }
-        }
-        if should_clear {
-            purge_plot_children_for_axes(&mut reg, handle, axes_index);
         }
         {
             let state = get_state_mut(&mut reg, handle);

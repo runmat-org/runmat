@@ -13,6 +13,8 @@ use crate::plots::{
 use glam::Vec4;
 use log::trace;
 use std::collections::HashMap;
+#[path = "figure/axes_reset.rs"]
+mod axes_reset;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBoundsRef<'a> = &'a [Option<ViewBounds2D>];
