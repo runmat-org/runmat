@@ -153,3 +153,42 @@ fn logical_constructors_preserve_borrowed_alias_metadata_and_storage() {
     }
     assert_eq!(provider.frees.load(Ordering::SeqCst), 0);
 }
+
+#[test]
+fn logical_constructors_upload_native_single_when_f32_provider_has_no_fill_hooks() {
+    test_support::with_f32_test_provider(|provider| {
+        assert!(provider.ones(&[2, 3]).is_err());
+        assert!(provider.zeros(&[2, 3]).is_err());
+        let host = Tensor::from_f32(vec![7.0], vec![1, 1]).expect("single prototype");
+        let prototype = crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)
+            .expect("native single prototype upload");
+        for (name, expected) in [("true", 1.0), ("false", 0.0)] {
+            let output = call(
+                name,
+                vec![
+                    Value::Num(2.0),
+                    Value::Num(3.0),
+                    Value::from("like"),
+                    Value::GpuTensor(prototype.clone()),
+                ],
+            )
+            .expect("single-only upload fallback");
+            let Value::GpuTensor(handle) = output else {
+                panic!("expected resident logical output");
+            };
+            assert_eq!(handle.shape, vec![2, 3]);
+            assert_eq!(
+                handle.descriptor.element_type,
+                Some(runmat_accelerate_api::NumericElementType::F32)
+            );
+            assert!(runmat_accelerate_api::handle_is_logical(&handle));
+            assert!(
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+            );
+            let gathered = test_support::gather(Value::GpuTensor(handle)).expect("logical gather");
+            assert_eq!(gathered.materialize_f64(), vec![expected; 6]);
+        }
+        assert!(!runmat_accelerate_api::handle_is_logical(&prototype));
+    });
+}

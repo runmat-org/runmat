@@ -38,7 +38,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Allocates provider-resident NaN-filled arrays through constant-fill hooks when profitable; otherwise falls back to host tensors.",
+    notes: "Explicit gpuArray or resident like requests preserve device intent through constant-fill hooks or validated host-upload fallback; unavailable device allocation returns an error, not a host result. Ordinary size controls produce host output.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {

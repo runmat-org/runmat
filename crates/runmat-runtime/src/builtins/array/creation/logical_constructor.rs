@@ -253,10 +253,17 @@ fn logical_gpu_output(
     } {
         Ok(result) => result,
         Err(_) => {
-            let host = runmat_value::Tensor::new(
-                vec![if fill { 1.0 } else { 0.0 }; shape.iter().product()],
-                shape.to_vec(),
-            )
+            let len = shape.iter().product();
+            let host = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => runmat_value::Tensor::from_f32(
+                    vec![if fill { 1.0 } else { 0.0 }; len],
+                    shape.to_vec(),
+                ),
+                runmat_accelerate_api::ProviderPrecision::F64 => runmat_value::Tensor::new(
+                    vec![if fill { 1.0 } else { 0.0 }; len],
+                    shape.to_vec(),
+                ),
+            }
             .map_err(|error| builtin_error(name, format!("{name}: {error}")))?;
             crate::builtins::common::gpu_helpers::upload_tensor_protecting(
                 provider,
