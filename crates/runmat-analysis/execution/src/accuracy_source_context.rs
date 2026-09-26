@@ -1,5 +1,6 @@
 //! Reprojection shared by admission and workers. Context is bound to the producing receipt,
 //! independently of the observation catalog's own declarations and hashes.
+mod structural;
 use runmat_analysis_fea::{
     execution::{
         AccuracyEvaluationRequest, AccuracySourceReceipt, AnalysisNumericalObjectKind as Kind,
@@ -9,6 +10,7 @@ use runmat_analysis_fea::{
 };
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+pub(crate) use structural::prepare_contract as prepare_accuracy_source_contract;
 
 use crate::{AnalysisBridgeError, AnalysisBridgeResult, PreparedAnalysisObjects};
 
@@ -29,12 +31,7 @@ pub fn validate_accuracy_source_context(
         ));
     }
     let AccuracySourceReceipt::Thermal(receipt) = receipt else {
-        if !inputs.is_empty() {
-            return Err(AnalysisBridgeError::Invalid(
-                "accuracy source context is not yet supported for this source family".into(),
-            ));
-        }
-        return Ok(());
+        return structural::validate(request, receipt, observations, inputs);
     };
     let unique = |kind| -> AnalysisBridgeResult<&PreparedAnalysisObjects> {
         let mut matching = inputs.iter().filter(|input| input.manifest.kind == kind);

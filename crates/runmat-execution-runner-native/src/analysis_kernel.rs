@@ -593,7 +593,12 @@ fn execute_accuracy_evaluation(
         .filter(|input| {
             matches!(
                 input.manifest.kind,
-                AnalysisNumericalObjectKind::ThermalWorkload | AnalysisNumericalObjectKind::Mesh
+                AnalysisNumericalObjectKind::ThermalWorkload
+                    | AnalysisNumericalObjectKind::Mesh
+                    | AnalysisNumericalObjectKind::AccuracySourceContext
+                    | AnalysisNumericalObjectKind::SolverInvocation
+                    | AnalysisNumericalObjectKind::StructuralModalResponseSpectrumWorkload
+                    | AnalysisNumericalObjectKind::StructuralRandomResponseWorkload
             )
         })
         .collect();

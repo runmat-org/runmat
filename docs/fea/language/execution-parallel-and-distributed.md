@@ -106,3 +106,18 @@ Every explicit `--cluster` request requires `--trust-identity`; `--project` is a
 flags are rejected without `--cluster`. A configured placement profile may supply pinned trust and
 routing without these CLI flags. An explicit CLI cluster overrides authored placement but cannot
 weaken physical or accuracy requirements.
+
+## Accuracy source authority
+
+Portable accuracy tasks for linear structural, modal response-spectrum and random-response
+results carry the producing workload contract and its canonical numerical workload and mesh
+inputs. Preparation and workers bind those inputs to the numerical receipt before checking the
+authored accuracy plan, formulation requirement and observation coverage. A result catalog cannot
+define a weaker acceptance plan or silently omit authored observations. Thermal tasks bind their
+original thermal workload and mesh directly to the thermal receipt.
+
+The binding is to canonical scientific content, not one transport chunk layout. Rechunking the
+same payload does not change its producing workload identity. This source validation does not
+establish convergence, validate a formulation, or prove measured memory bounds. In particular,
+constraint compilation and observation reprojection still need independently bounded workspace
+admission; the current workspace multiplier is not a proof for multiplicative expansion.

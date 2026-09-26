@@ -2,9 +2,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{StateKind, StateUse};
 use runmat_analysis_fea::execution::{
-    AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity,
-    StructuralModalResponseSpectrumTemplate, StructuralModalResponseSpectrumWorkload,
-    StructuralModalWorkload, StructuralStepWorkload, StructuralStudyWorkloads,
+    AccuracySourceKind, AnalysisNumericalObjectKind, SemanticStatePublicationSource,
+    SequenceIdentity, StructuralModalResponseSpectrumTemplate,
+    StructuralModalResponseSpectrumWorkload, StructuralModalWorkload, StructuralStepWorkload,
+    StructuralStudyWorkloads,
 };
 use runmat_execution::{resource::AcceleratorRequest, Digest, ProgramRevision};
 use runmat_execution_artifact::{
@@ -73,6 +74,7 @@ pub struct StructuralModalResponseSpectrumStudyCoordinator {
     basis_state: Option<ImportedSemanticState>,
     directions: Vec<ImportedStructuralModalResponseSpectrumDirection>,
     assembly_host: Option<crate::AnalysisHostWorkload>,
+    assembly_source_context_inputs: Vec<crate::PreparedAnalysisObjects>,
     result: Option<ImportedStructuralModalResponseSpectrumResult>,
     accuracy_host: Option<crate::AnalysisHostWorkload>,
     accuracy: Option<ImportedAccuracy>,
@@ -137,6 +139,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             basis_state: None,
             directions: Vec::new(),
             assembly_host: None,
+            assembly_source_context_inputs: Vec::new(),
             result: None,
             accuracy_host: None,
             accuracy: None,
@@ -381,6 +384,18 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             self.preparation.inventory_limits,
         )?);
         self.assembly_host = Some(task.host.clone());
+        self.assembly_source_context_inputs = task
+            .inputs
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input.manifest.kind,
+                    AnalysisNumericalObjectKind::StructuralModalResponseSpectrumWorkload
+                        | AnalysisNumericalObjectKind::Mesh
+                )
+            })
+            .cloned()
+            .collect();
         self.phase = StudyPhase::ReadyForAccuracy;
         Ok(())
     }
@@ -400,7 +415,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             .as_ref()
             .ok_or_else(|| invalid("completed response-spectrum result is absent"))?;
         let task = prepare_accuracy(AccuracyPreparation {
-            source_context_inputs: Vec::new(),
+            source_context_inputs: self.assembly_source_context_inputs.clone(),
             solve_host: self
                 .assembly_host
                 .as_ref()

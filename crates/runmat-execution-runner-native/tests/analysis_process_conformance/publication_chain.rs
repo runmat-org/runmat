@@ -17,7 +17,8 @@ use runmat_analysis_execution::{
     StructuralFieldRecoveryPreparation,
 };
 use runmat_analysis_fea::execution::{
-    SequenceIdentity, StructuralLinearWorkload, DEFAULT_ANALYSIS_CHUNK_BYTES,
+    AnalysisNumericalObjectKind, SequenceIdentity, StructuralLinearWorkload,
+    DEFAULT_ANALYSIS_CHUNK_BYTES,
 };
 use runmat_analysis_fea::results::publication::PublishedAnalysisResult;
 use runmat_execution::{Digest, ExecutionScopeId, PoolId, ProgramRevision};
@@ -294,7 +295,18 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt,
         source_observations: Some(publication_catalog.clone()),
-        source_context_inputs: Vec::new(),
+        source_context_inputs: solve
+            .inputs
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input.manifest.kind,
+                    AnalysisNumericalObjectKind::SolverInvocation
+                        | AnalysisNumericalObjectKind::Mesh
+                )
+            })
+            .cloned()
+            .collect(),
         sequence,
         step,
         formulation_requirement: workload.formulation_requirement,

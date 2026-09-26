@@ -24,6 +24,8 @@ use crate::response::prepare_analysis_output_set;
 #[path = "tests/observation_history_checkpoint.rs"]
 mod observation_history_checkpoint_tests;
 
+#[path = "tests/accuracy_source_context.rs"]
+mod accuracy_source_context_tests;
 #[path = "tests/thermal_execution.rs"]
 mod thermal_execution_tests;
 #[path = "tests/thermal_observation.rs"]
@@ -2317,7 +2319,18 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: completed.outputs[1].clone(),
         source_observations: Some(publication_catalog.clone()),
-        source_context_inputs: Vec::new(),
+        source_context_inputs: prepared
+            .inputs
+            .iter()
+            .filter(|input| {
+                matches!(
+                    input.manifest.kind,
+                    AnalysisNumericalObjectKind::SolverInvocation
+                        | AnalysisNumericalObjectKind::Mesh
+                )
+            })
+            .cloned()
+            .collect(),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,
@@ -2326,6 +2339,11 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         inventory_limits: ObjectInventoryLimits::default(),
     })
     .unwrap();
+    accuracy_source_context_tests::reject_substituted_structural_authority(
+        &accuracy_prepared,
+        &publication_catalog,
+        &prepared.host,
+    );
     assert!(accuracy_prepared
         .inputs
         .iter()
@@ -2363,7 +2381,15 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: unrelated_receipt,
         source_observations: Some(publication_catalog.clone()),
-        source_context_inputs: Vec::new(),
+        source_context_inputs: prepared
+            .inputs
+            .iter()
+            .filter(|input| matches!(
+                input.manifest.kind,
+                AnalysisNumericalObjectKind::SolverInvocation | AnalysisNumericalObjectKind::Mesh
+            ))
+            .cloned()
+            .collect(),
         sequence,
         step: producer_step.clone(),
         formulation_requirement: solve.formulation_requirement,

@@ -1,72 +1,50 @@
 use super::*;
-use runmat_analysis_fea::execution::AccuracySourceKind;
+use runmat_analysis_fea::execution::{AccuracySourceKind, SequenceIdentity};
 
 pub(super) fn execute(
     solved: &SolvedPipeline,
     observations: &runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
 ) {
     let host = &solved.prepared.host;
-    let step = host.workload.step;
-    let accuracy_request = AccuracyEvaluationRequest::new(
-        step,
-        AccuracySourceKind::StructuralLinear,
-        solved.source_result,
-        Some(observations),
-        solved.solve.formulation_requirement,
-        solved.solve.model.sequence.steps[0].accuracy.clone(),
+    let prepared = runmat_analysis_execution::prepare_accuracy(
+        runmat_analysis_execution::AccuracyPreparation {
+            solve_host: host.clone(),
+            source_kind: AccuracySourceKind::StructuralLinear,
+            source_numerical_receipt: solved.numerical_receipt.clone(),
+            source_observations: Some(observations.clone()),
+            source_context_inputs: solved
+                .prepared
+                .inputs
+                .iter()
+                .filter(|input| {
+                    matches!(
+                        input.manifest.kind,
+                        AnalysisNumericalObjectKind::SolverInvocation
+                            | AnalysisNumericalObjectKind::Mesh
+                    )
+                })
+                .cloned()
+                .collect(),
+            sequence: SequenceIdentity::from_solver_contract(&solved.solve.model.sequence).unwrap(),
+            step: solved.solve.model.sequence.steps[0].clone(),
+            formulation_requirement: solved.solve.formulation_requirement,
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
+        },
     )
     .unwrap();
-    let accuracy_request = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::AccuracyEvaluationRequest,
-        accuracy_request.identity().digest(),
-        &accuracy_request.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let observation_artifact = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::ObservationCatalog,
-        observations.identity().digest(),
-        &observations.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::ResultValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let mut accuracy_inputs = vec![
-        accuracy_request,
-        solved.numerical_receipt.clone(),
-        observation_artifact,
-    ];
-    let plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
-        &AccuracyEvaluationRequest::from_canonical_bytes(&accuracy_inputs[0].payload()).unwrap(),
-        &runmat_analysis_fea::execution::AccuracySourceReceipt::from_canonical_bytes(
-            AccuracySourceKind::StructuralLinear,
-            &accuracy_inputs[1].payload(),
-        )
-        .unwrap(),
-        &accuracy_inputs,
-    )
-    .unwrap();
-    accuracy_inputs.push(
-        runmat_analysis_execution::prepare_analysis_objects(
-            AnalysisNumericalObjectKind::ResourcePlan,
-            plan.identity.digest(),
-            &plan.canonical_bytes().unwrap(),
-            4096,
-            ObjectNamespace::InputValue,
-            ObjectInventoryLimits::default(),
-        )
-        .unwrap(),
-    );
-    let accuracy_host = test_host_for_inputs(
-        host,
-        AnalysisWorkKind::EvaluateAccuracy,
-        &accuracy_inputs,
-        vec![AnalysisNumericalObjectKind::AccuracyReport],
-        Some(1),
-    );
+    let accuracy_inputs = prepared.inputs;
+    let plan = prepared.resource_plan;
+    let accuracy_host = prepared.host;
+    let plan_index = accuracy_inputs
+        .iter()
+        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        .unwrap();
+    let observations_index = accuracy_inputs
+        .iter()
+        .position(|input| input.manifest.kind == AnalysisNumericalObjectKind::ObservationCatalog)
+        .unwrap();
     let mut exact_ceiling = plan.input.clone();
     exact_ceiling.accuracy_ceiling.maximum_resident_bytes = plan.request.memory_bytes;
     runmat_analysis_fea::planning::resource::build_resource_plan(exact_ceiling.clone()).unwrap();
@@ -78,7 +56,7 @@ pub(super) fn execute(
     let altered_plan =
         runmat_analysis_fea::planning::resource::build_resource_plan(altered_input).unwrap();
     let mut altered_inputs = accuracy_inputs.clone();
-    altered_inputs[3] = runmat_analysis_execution::prepare_analysis_objects(
+    altered_inputs[plan_index] = runmat_analysis_execution::prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
         altered_plan.identity.digest(),
         &altered_plan.canonical_bytes().unwrap(),
@@ -103,6 +81,66 @@ pub(super) fn execute(
         })
         .unwrap_err();
     assert!(error.to_string().contains("accuracy resource plan differs"));
+    let original_request =
+        AccuracyEvaluationRequest::from_canonical_bytes(&accuracy_inputs[0].payload()).unwrap();
+    let mut weakened_plan = original_request.plan.clone();
+    weakened_plan.criteria[0].tolerance = runmat_analysis_core::AccuracyTolerance::Relative(0.99);
+    let weakened = AccuracyEvaluationRequest::new(
+        original_request.producer,
+        original_request.source_kind,
+        original_request.source_result,
+        Some(observations),
+        original_request.formulation_requirement,
+        weakened_plan,
+    )
+    .unwrap();
+    let mut weakened_inputs = accuracy_inputs.clone();
+    weakened_inputs[0] = runmat_analysis_execution::prepare_analysis_objects(
+        AnalysisNumericalObjectKind::AccuracyEvaluationRequest,
+        weakened.identity().digest(),
+        &weakened.canonical_bytes().unwrap(),
+        4096,
+        ObjectNamespace::InputValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    let weakened_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::EvaluateAccuracy,
+        &weakened_inputs,
+        vec![AnalysisNumericalObjectKind::AccuracyReport],
+        Some(1),
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::EvaluateAccuracy,
+            host: &weakened_host,
+            inputs: &weakened_inputs,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("authored requirements"));
+    let missing_context: Vec<_> = accuracy_inputs
+        .iter()
+        .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::AccuracySourceContext)
+        .cloned()
+        .collect();
+    let missing_host = test_host_for_inputs(
+        host,
+        AnalysisWorkKind::EvaluateAccuracy,
+        &missing_context,
+        vec![AnalysisNumericalObjectKind::AccuracyReport],
+        Some(1),
+    );
+    let error = NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::EvaluateAccuracy,
+            host: &missing_host,
+            inputs: &missing_context,
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("unique source inputs"));
     let accuracy_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),
@@ -174,7 +212,7 @@ pub(super) fn execute(
         publication_request_objects,
         accuracy_artifact,
         resource_usage_objects,
-        accuracy_inputs[2].clone(),
+        accuracy_inputs[observations_index].clone(),
     ];
     let admission_plan =
         runmat_analysis_execution::build_prepared_result_publication_resource_plan(
@@ -258,7 +296,9 @@ pub(super) fn execute(
     }
 
     let mut substituted_accuracy_inputs = accuracy_inputs;
-    substituted_accuracy_inputs[2].manifest.logical_identity = digest("substituted-observations");
+    substituted_accuracy_inputs[observations_index]
+        .manifest
+        .logical_identity = digest("substituted-observations");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),

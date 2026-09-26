@@ -28,8 +28,9 @@ pub struct AccuracyPreparation {
     pub source_numerical_receipt: PreparedAnalysisObjects,
     pub source_observations: Option<ObservationPublicationCatalog>,
     /// Original numerical intent and topology, not copies reconstructed from a result catalog.
-    /// Thermal evaluations require exactly ThermalWorkload and Mesh; other families currently
-    /// retain their existing receipt contract and do not accept context inputs.
+    /// Thermal evaluations require ThermalWorkload and Mesh. Structural evaluations require
+    /// the original solver/assembly workload and its Mesh input when present. Preparation adds
+    /// the producing host contract, which the worker authenticates against the receipt.
     pub source_context_inputs: Vec<PreparedAnalysisObjects>,
     pub sequence: SequenceIdentity,
     pub step: ProcedureStep,
@@ -54,7 +55,7 @@ pub struct ImportedAccuracy {
 }
 
 pub fn prepare_accuracy(
-    preparation: AccuracyPreparation,
+    mut preparation: AccuracyPreparation,
 ) -> AnalysisBridgeResult<PreparedAccuracy> {
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
@@ -116,6 +117,15 @@ pub fn prepare_accuracy(
         preparation.formulation_requirement,
         preparation.step.accuracy.clone(),
     )?;
+    if preparation.source_kind != AccuracySourceKind::Thermal {
+        preparation.source_context_inputs.push(
+            crate::accuracy_source_context::prepare_accuracy_source_contract(
+                &preparation.solve_host.workload,
+                preparation.chunk_bytes,
+                preparation.inventory_limits,
+            )?,
+        );
+    }
     crate::validate_accuracy_source_context(
         &request,
         &numerical_receipt,

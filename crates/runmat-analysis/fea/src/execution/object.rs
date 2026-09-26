@@ -50,6 +50,7 @@ pub enum AnalysisNumericalObjectKind {
     ObservationPartitionReductionRequest,
     ObservationAssemblyRequest,
     AccuracyEvaluationRequest,
+    AccuracySourceContext,
     PublicationRequest,
     StatePublicationRequest,
     ObservationHistoryCheckpointRequest,
