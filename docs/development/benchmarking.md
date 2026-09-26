@@ -84,6 +84,8 @@ runmat accel-calibrate benchmarks/results/suite_results.json --dry-run --json
 
 Use telemetry when deciding whether a benchmark is measuring the intended execution path. For GPU work, verify provider selection, offload decisions, residency behavior, and fallback counts before interpreting raw timings.
 
+GPU submission time measures how long the host takes to enqueue work; it does not measure completed device execution. Fusion placement traces report successful submission as a queue event, without a completion event or a successful execution-cost sample. Measure device completion and any required transfers or synchronization when comparing CPU and GPU latency. A CPU-selected fusion region records completion only after its bytecode reaches the region's normal exit; errors, cancellation, and abandoned execution do not contribute successful timing samples.
+
 ## Performance Smoke Tests
 
 Some performance checks live as Rust tests. They are not a replacement for benchmark runs, but they catch severe regressions in JIT, residency, and GPU dispatch behavior.
