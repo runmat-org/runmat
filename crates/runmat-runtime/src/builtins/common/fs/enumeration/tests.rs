@@ -2,6 +2,48 @@ use super::*;
 use runmat_filesystem::{File, MemoryFsProvider};
 use std::sync::Arc;
 use tempfile::tempdir;
+#[path = "permission_tests.rs"]
+mod permission_tests;
+
+#[test]
+fn missing_and_file_prefixes_have_no_native_matches() {
+    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let folder = tempdir().unwrap();
+    std::fs::write(folder.path().join("file"), b"").unwrap();
+    for prefix in ["missing", "file"] {
+        for suffix in ["*.m", "**/*.m"] {
+            assert!(futures::executor::block_on(matching(
+                &folder.path().join(prefix).join(suffix)
+            ))
+            .unwrap()
+            .is_empty());
+        }
+    }
+}
+
+#[test]
+fn missing_and_file_prefixes_have_no_memory_provider_matches() {
+    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let filesystem = MemoryFsProvider::with_current_dir("/workspace");
+    filesystem
+        .write_project_path("/workspace/file", b"")
+        .unwrap();
+    runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
+        for prefix in ["missing", "file"] {
+            for suffix in ["*.m", "**/*.m"] {
+                assert!(
+                    futures::executor::block_on(matching(&Path::new(prefix).join(suffix)))
+                        .unwrap()
+                        .is_empty()
+                );
+            }
+        }
+    });
+}
 
 #[test]
 fn recursive_component_matches_files_at_every_depth() {

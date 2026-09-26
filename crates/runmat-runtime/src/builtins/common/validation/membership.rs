@@ -1,10 +1,14 @@
 //! Typed membership atoms and equality.
 
+use super::cell_leaves::CellLeaves;
 use super::{
     chars_to_string, host_value, integer_f64_order, invalid_argument_error, numeric_class_identity,
     tensor, BuiltinResult, CharArray, ComplexTensor, Ordering, RuntimeError, SparseTensor,
     ValidationAtom, Value,
 };
+mod admission;
+#[cfg(test)]
+mod tests;
 
 pub fn value_is_member(value: &Value, set: &Value) -> Result<bool, RuntimeError> {
     let values = atoms(value)?;
@@ -13,11 +17,14 @@ pub fn value_is_member(value: &Value, set: &Value) -> Result<bool, RuntimeError>
 }
 
 pub async fn value_is_member_async(value: &Value, set: &Value) -> BuiltinResult<bool> {
+    admission::shape_and_kind(value)?;
+    admission::shape_and_kind(set)?;
     ensure_member_class_compatibility(value, set)?;
-    let value = host_value(value).await?;
-    let set = host_value(set).await?;
-    ensure_member_class_compatibility(&value, &set)?;
-    value_is_member(&value, &set).map_err(Into::into)
+    admission::resident_metadata(value)?;
+    admission::resident_metadata(set)?;
+    let values = host_atoms(value).await?;
+    let allowed = host_atoms(set).await?;
+    value_is_member_atoms_inner(&values, &allowed).map_err(Into::into)
 }
 
 fn ensure_member_class_compatibility(value: &Value, set: &Value) -> BuiltinResult<()> {
@@ -52,8 +59,17 @@ pub async fn value_is_member_atoms_async(
     value: &Value,
     allowed: &[ValidationAtom],
 ) -> BuiltinResult<bool> {
-    let value = host_value(value).await?;
-    value_is_member_atoms(&value, allowed).map_err(Into::into)
+    admission::shape_and_kind(value)?;
+    admission::resident_metadata(value)?;
+    value_is_member_atoms_inner(&host_atoms(value).await?, allowed).map_err(Into::into)
+}
+
+async fn host_atoms(value: &Value) -> BuiltinResult<Vec<ValidationAtom>> {
+    let mut result = Vec::new();
+    for leaf in CellLeaves::new(value) {
+        result.extend(atoms(&host_value(leaf).await?)?);
+    }
+    Ok(result)
 }
 
 fn value_is_member_atoms_inner(

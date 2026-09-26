@@ -15,9 +15,6 @@ pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
         &MUST_BE_MEMBER_ERROR_OUTPUTS,
         &args,
     )?;
-    let passed = {
-        super::validate_resident_metadata(&args[0])?;
-        super::value_is_member_async(&args[0], &args[1]).await?
-    };
+    let passed = super::value_is_member_async(&args[0], &args[1]).await?;
     super::check_validator("mustBeMember", passed)
 }

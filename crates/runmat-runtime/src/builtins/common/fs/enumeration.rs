@@ -29,6 +29,24 @@ pub(crate) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
     Ok(listed)
 }
 
+// Wildcards do not match missing or non-directory literal prefixes. Inspect
+// metadata first because providers need not classify read_dir(file) identically.
+async fn matching_directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
+    match vfs::metadata_async(path).await {
+        Ok(metadata) if metadata.is_dir() => directory(path).await,
+        Ok(_) => Ok(Vec::new()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(Vec::new())
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
     let (base, components) = split_pattern(pattern)?;
     let mut pending = vec![(base, 0usize)];
@@ -41,7 +59,7 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
         }
         let component = &components[index];
         if component == "**" {
-            let entries = directory(&folder).await?;
+            let entries = matching_directory(&folder).await?;
             if index + 1 == components.len() {
                 for entry in entries {
                     let path = child_path(&folder, &entry.path);
@@ -62,7 +80,7 @@ pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
         }
 
         let matcher = Pattern::new(component).map_err(invalid_pattern)?;
-        for entry in directory(&folder).await? {
+        for entry in matching_directory(&folder).await? {
             let name = entry.path.file_name().and_then(|name| name.to_str());
             if !name.is_some_and(|name| matcher.matches(name)) {
                 continue;

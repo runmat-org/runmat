@@ -3,6 +3,7 @@
 
 pub(in crate::catalog) mod acceleration;
 mod aggregation;
+mod argument_validation;
 mod array;
 pub(in crate::catalog) mod cells;
 mod constants;
@@ -14,9 +15,11 @@ mod parallel;
 mod stats;
 mod strings;
 pub(in crate::catalog) mod structs;
+mod value_distribution;
 
 pub use acceleration::*;
 use aggregation::extend_groups;
+pub use argument_validation::*;
 pub use array::*;
 pub use cells::*;
 pub use introspection::*;
@@ -27,9 +30,11 @@ pub use parallel::*;
 pub use stats::*;
 pub use strings::*;
 pub use structs::*;
+pub use value_distribution::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     acceleration::extend_entries(values);
+    argument_validation::extend_entries(values);
     array::extend_entries(values);
     cells::extend_entries(values);
     introspection::extend_entries(values);
@@ -40,6 +45,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     stats::extend_entries(values);
     strings::extend_entries(values);
     structs::extend_entries(values);
+    value_distribution::extend_entries(values);
 }
 
 pub(super) fn extend_constants(values: &mut Vec<crate::BuiltinConstantCatalogEntry>) {
