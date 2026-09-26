@@ -91,8 +91,8 @@ mod tests {
                 futures::executor::block_on(sym_builtin(Value::from(text), vec![])).unwrap();
             assert_eq!(result.to_string(), expected);
         }
-        let decimal = futures::executor::block_on(sym_builtin(Value::from("3.25"), vec![]))
-            .unwrap();
+        let decimal =
+            futures::executor::block_on(sym_builtin(Value::from("3.25"), vec![])).unwrap();
         let Value::Symbolic(decimal) = decimal else {
             panic!("expected symbolic decimal");
         };

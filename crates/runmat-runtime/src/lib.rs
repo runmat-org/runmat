@@ -479,7 +479,6 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
     make_cell_with_shape(values, vec![rows, cols])
 }
 
-
 pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count().unwrap_or(1);
     let valid_count = rest.len() == 1 || rest.len() == out_count;

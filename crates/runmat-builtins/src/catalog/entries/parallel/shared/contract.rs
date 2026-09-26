@@ -50,7 +50,7 @@ pub(in crate::catalog::entries::parallel) const PARALLEL_PLACEMENT: BuiltinPlace
     };
 pub(in crate::catalog::entries::parallel) const DISTRIBUTED_INSPECTION_PLACEMENT:
     BuiltinPlacementContract = BuiltinPlacementContract {
-        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+    preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
     distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     ..PARALLEL_PLACEMENT
 };

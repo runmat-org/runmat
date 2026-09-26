@@ -377,5 +377,8 @@ fn gauspuls_is_registered() {
     assert_eq!(entry.bindings.len(), 1);
     let bindings = crate::builtin::runtime_builtin_bindings_by_name("gauspuls");
     assert_eq!(bindings.len(), 1);
-    assert_eq!(bindings[0].identity, entry.binding_identity(&entry.bindings[0]));
+    assert_eq!(
+        bindings[0].identity,
+        entry.binding_identity(&entry.bindings[0])
+    );
 }

@@ -528,7 +528,9 @@ const EPS: f64 = 1.0e-12;
 
 fn chol_factor(matrix: RowMajorMatrix) -> BuiltinResult<CholComponents> {
     let factor = super::cholesky::factor_upper(matrix.rows, |row, col| matrix.get(row, col))
-        .map_err(|error| chol_internal_error(format!("chol: factor allocation failed: {error:?}")))?;
+        .map_err(|error| {
+            chol_internal_error(format!("chol: factor allocation failed: {error:?}"))
+        })?;
     Ok(CholComponents {
         upper: RowMajorMatrix {
             rows: matrix.rows,
