@@ -13,6 +13,44 @@ fn numeric(class: NumericClass) -> ValueFact {
 }
 
 #[test]
+fn dynamic_duplicate_and_padded_options_match_runtime_collection_policy() {
+    let base = vec![builtin("abs"), cell(numeric(NumericClass::Double), &[2, 2])];
+    for (names, controls, expected_cell) in [
+        (vec![LiteralValue::Unknown], vec![false], None),
+        (
+            vec![LiteralValue::String(" UniformOutput ".into())],
+            vec![false],
+            Some(true),
+        ),
+        (
+            vec![
+                LiteralValue::String("UniformOutput".into()),
+                LiteralValue::String("UniformOutput".into()),
+            ],
+            vec![false, true],
+            Some(true),
+        ),
+    ] {
+        let mut arguments = base.clone();
+        let mut literals = vec![LiteralValue::Unknown, LiteralValue::Unknown];
+        for (name, control) in names.into_iter().zip(controls) {
+            arguments.extend([
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Logical),
+            ]);
+            literals.extend([name, LiteralValue::Bool(control)]);
+        }
+        let result = infer(arguments, LiteralContext::new(literals));
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        match expected_cell {
+            Some(true) => assert!(matches!(result.outputs[0].kind, ValueKindFact::Cell(_))),
+            None => assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn nonuniform_collection_preserves_callback_residency() {
     let mut device = numeric(NumericClass::Single);
     device.residency = runmat_types::ResidencyFact::Device {

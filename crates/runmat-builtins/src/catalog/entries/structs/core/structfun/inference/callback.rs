@@ -59,7 +59,7 @@ pub(super) fn infer(request: &CallRequest, count: usize) -> InferredFields {
                 .literal_args
                 .get(index)
                 .and_then(crate::catalog::inference::literal_text)
-                .is_some_and(|name| name.eq_ignore_ascii_case("ErrorHandler"));
+                .is_some_and(|name| name.trim().eq_ignore_ascii_case("ErrorHandler"));
             if !handler {
                 continue;
             }

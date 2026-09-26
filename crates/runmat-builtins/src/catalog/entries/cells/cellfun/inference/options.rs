@@ -12,8 +12,11 @@ impl Options {
         let start = trailing_pair_start(request);
         let mut diagnostics = Vec::new();
         let mut uniform_output = Some(true);
-        let mut index = start;
-        while index + 1 < request.arguments.len() {
+        // Runtime consumes trailing pairs right-to-left, so the first duplicate wins.
+        for index in (start..request.arguments.len().saturating_sub(1))
+            .step_by(2)
+            .rev()
+        {
             let Some(name) = request
                 .literals
                 .literal_args
@@ -21,11 +24,11 @@ impl Options {
                 .and_then(literal_text)
             else {
                 uniform_output = None;
-                break;
+                continue;
             };
-            if name.eq_ignore_ascii_case("UniformOutput") {
+            if name.trim().eq_ignore_ascii_case("UniformOutput") {
                 uniform_output = parse_uniform_output(request, index + 1, &mut diagnostics);
-            } else if name.eq_ignore_ascii_case("ErrorHandler") {
+            } else if name.trim().eq_ignore_ascii_case("ErrorHandler") {
                 validate_error_handler(request, index + 1, &mut diagnostics);
             } else {
                 diagnostics.push(argument_error(
@@ -34,7 +37,6 @@ impl Options {
                     index,
                 ));
             }
-            index += 2;
         }
         Self {
             start,
@@ -48,13 +50,22 @@ fn trailing_pair_start(request: &CallRequest) -> usize {
     let mut end = request.arguments.len();
     while end >= 3 {
         let candidate = end - 2;
-        if request
+        let literal_name = request
             .literals
             .literal_args
             .get(candidate)
             .and_then(literal_text)
-            .is_none()
-        {
+            .is_some();
+        let possible_name = candidate >= 2
+            && request.arguments.get(candidate).is_some_and(|value| {
+                matches!(
+                    value.kind,
+                    runmat_types::ValueKindFact::String
+                        | runmat_types::ValueKindFact::Character
+                        | runmat_types::ValueKindFact::Unknown
+                )
+            });
+        if !literal_name && !possible_name {
             break;
         }
         end = candidate;

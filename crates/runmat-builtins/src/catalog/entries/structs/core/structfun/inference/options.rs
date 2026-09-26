@@ -34,7 +34,12 @@ impl Options {
                 .literal_args
                 .get(index)
                 .and_then(literal_text);
-            match literal.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            match literal
+                .as_deref()
+                .map(str::trim)
+                .map(str::to_ascii_lowercase)
+                .as_deref()
+            {
                 Some("uniformoutput") => uniform = literal_bool(request, index + 1),
                 Some("errorhandler") => validate_handler(request, index + 1, &mut diagnostics),
                 Some(name) => diagnostics.push(argument_error(
@@ -69,12 +74,14 @@ fn literal_bool(request: &CallRequest, index: usize) -> Option<bool> {
         Some(LiteralValue::Bool(value)) => Some(*value),
         Some(LiteralValue::Number(value)) => Some(*value != 0.0),
         Some(LiteralValue::String(value))
-            if value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("on") =>
+            if value.trim().eq_ignore_ascii_case("true")
+                || value.trim().eq_ignore_ascii_case("on") =>
         {
             Some(true)
         }
         Some(LiteralValue::String(value))
-            if value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("off") =>
+            if value.trim().eq_ignore_ascii_case("false")
+                || value.trim().eq_ignore_ascii_case("off") =>
         {
             Some(false)
         }

@@ -3,6 +3,25 @@ use runmat_builtins::{CELLFUN_ERROR_INVALID_INPUT, CELLFUN_ERROR_UNIFORM_OUTPUT}
 use runmat_value::{IntegerStorage, LogicalArray};
 
 #[test]
+fn padded_names_and_first_duplicate_control_collection() {
+    let output = call(
+        Value::FunctionHandle("abs".into()),
+        vec![
+            cell(vec![Value::Num(-1.0)], &[1, 1]),
+            Value::String(" UniformOutput ".into()),
+            Value::Bool(false),
+            Value::String("UniformOutput".into()),
+            Value::Bool(true),
+        ],
+    )
+    .unwrap();
+    let Value::Cell(output) = output else {
+        panic!("first option must select cell collection")
+    };
+    assert_eq!(output.to_column_major(), vec![Value::Num(1.0)]);
+}
+
+#[test]
 fn uniform_output_accepts_logical_and_legacy_double_controls() {
     for (control, expected_cell) in [
         (Value::Bool(true), false),
