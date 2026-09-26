@@ -856,6 +856,19 @@ async fn run_interpreter_inner(
                             ),
                         ) => {
                             fusion_observations.begin(span.clone(), Some(ticket), trace);
+                            // Planning may yield or request cancellation. Install
+                            // the observation first so cancellation retires the
+                            // selected ticket as failure, even for a one-instruction
+                            // CPU region that could otherwise complete this turn.
+                            if let Err(err) = interp_engine::check_cancelled() {
+                                for value in &stack {
+                                    clear_residency(value);
+                                }
+                                for value in &vars {
+                                    clear_residency(value);
+                                }
+                                return Err(err);
+                            }
                         }
                         Err(err) => {
                             trace.event(

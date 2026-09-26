@@ -59,17 +59,6 @@ fn resume_after_input_store(
     }
 }
 
-fn resident_small_input() -> Value {
-    let mut handle = PROVIDER
-        .get()
-        .expect("test provider")
-        .push(vec![0.25, 0.5], vec![1, 2]);
-    // Model an automatically resident input at a real resume boundary, not an
-    // explicit gpuArray whose placement intent may not be silently discarded.
-    runmat_accelerate_api::mark_handle_automatic(&mut handle);
-    Value::GpuTensor(handle)
-}
-
 fn assert_fusion_numeric_output(bytecode: &runmat_vm::Bytecode, vars: &[Value], inputs: &[f64]) {
     let value = gather_if_needed(&vars[fusion_var_index(bytecode, "y")]).expect("gather result");
     let Value::Tensor(tensor) = value else {
@@ -304,31 +293,6 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
     });
 }
 
-struct ScopedDownloadMode(&'static TestProvider);
-
-impl ScopedDownloadMode {
-    fn new(mode: DownloadMode) -> Self {
-        let provider = PROVIDER.get().expect("registered test provider");
-        provider.download_started.store(false, Ordering::SeqCst);
-        *provider
-            .download_test_mode
-            .lock()
-            .expect("download mode lock") = mode;
-        Self(provider)
-    }
-}
-
-impl Drop for ScopedDownloadMode {
-    fn drop(&mut self) {
-        *self
-            .0
-            .download_test_mode
-            .lock()
-            .expect("download mode lock") = DownloadMode::Normal;
-        self.0.download_started.store(false, Ordering::SeqCst);
-    }
-}
-
 fn assert_cpu_fusion_was_selected_without_completion() {
     use runmat_accelerate::placement::{PlacementEventKind, PlacementVariant};
     let report = runmat_accelerate::placement_report();
@@ -350,17 +314,6 @@ fn assert_cpu_fusion_was_selected_without_completion() {
         "expected an incomplete CPU-selected region: {:?}",
         report.traces
     );
-}
-
-fn fusion_test_runtime(
-    placement: Rc<runmat_accelerate::placement::PlacementSession>,
-) -> runmat_runtime::context::RuntimeContext {
-    runmat_runtime::context::RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
-    .with_service_ports(
-        runmat_runtime::context::RuntimeServicePorts::default().with_placement(placement),
-    )
 }
 
 fn assert_cpu_region_failed_without_success(
@@ -404,64 +357,84 @@ fn fusion_compiler_nested_expressions_and_branches_have_disjoint_regions() {
     });
 }
 
-#[test]
-fn fusion_cpu_region_polled_drop_records_failure_not_completion() {
-    gc_test_context(|| {
-        use std::future::Future;
-        let _guard = accel_test_lock();
-        ensure_provider_registered();
-        runmat_accelerate::placement::reset();
-        // This is an ordinary compiler-produced region. A tiny resident input
-        // selects shared bytecode; unsupported unary_sin then downloads it.
-        let bytecode = compile_semantic("x = [0.25, 0.5]; y = sin(x) .* x + 2;");
-        let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
-        let runtime = fusion_test_runtime(placement.clone());
-        let resume = resume_after_input_store(&bytecode, resident_small_input());
-        let mode = ScopedDownloadMode::new(DownloadMode::Pending);
-        let mut future = Box::pin(runmat_vm::interpret_resume_in_context(
-            &bytecode, resume, None, runtime,
-        ));
-        let waker = futures::task::noop_waker();
-        let mut context = std::task::Context::from_waker(&waker);
-        assert!(future.as_mut().poll(&mut context).is_pending());
-        assert!(mode.0.download_started.load(Ordering::SeqCst));
-        assert_cpu_fusion_was_selected_without_completion();
-        assert!(!placement
-            .profile_snapshot()
-            .feedback
-            .iter()
-            .any(|series| series.candidate == "cpu.shared.fusion.elementwise"));
-        drop(future);
-        assert_cpu_region_failed_without_success(&placement);
-        assert_cpu_fusion_was_selected_without_completion();
-    });
+/// Delegates all placement and feedback to the real session. Cancellation is
+/// requested only after the planner actually selects shared fusion execution;
+/// no instruction, span, candidate, decision, or execution result is replaced.
+struct CancelOnCpuFusionSelection {
+    placement: Rc<runmat_accelerate::placement::PlacementSession>,
+    cancellation: std::sync::Arc<AtomicBool>,
+    selected: std::cell::Cell<bool>,
+}
+
+impl runmat_runtime::context::RuntimePlacementService for CancelOnCpuFusionSelection {
+    fn plan(
+        &self,
+        request: runmat_execution::PlacementPlanRequest,
+    ) -> Result<runmat_execution::PlacementDecision, RuntimeError> {
+        let decision = runmat_runtime::context::RuntimePlacementService::plan(
+            self.placement.as_ref(),
+            request,
+        )?;
+        if decision.signature.operation == "fusion.elementwise"
+            && decision.selections.iter().any(|selection| {
+                selection.kind == runmat_execution::ExecutionCandidateKind::SharedRuntime
+                    && selection.candidate == "cpu.shared.fusion.elementwise"
+            })
+        {
+            self.selected.set(true);
+            self.cancellation.store(true, Ordering::SeqCst);
+        }
+        Ok(decision)
+    }
+
+    fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError> {
+        runmat_runtime::context::RuntimePlacementService::observe(self.placement.as_ref(), feedback)
+    }
+
+    fn invalidate(&self, invalidation: runmat_execution::PlacementInvalidation) {
+        runmat_runtime::context::RuntimePlacementService::invalidate(
+            self.placement.as_ref(),
+            invalidation,
+        );
+    }
 }
 
 #[test]
-fn fusion_cpu_region_caught_error_records_failure_not_completion() {
+fn fusion_cpu_region_cancellation_records_failure_not_completion() {
     gc_test_context(|| {
         let _guard = accel_test_lock();
         ensure_provider_registered();
         runmat_accelerate::placement::reset();
-        let bytecode = compile_semantic(
-            "x = [0.25, 0.5]; caught = false; try; y = sin(x) .* x + 2; catch; caught = true; end",
-        );
+        // The same host fixture as the successful CPU witness. Injecting a
+        // pending resident download instead would suspend before any fusion
+        // trace, not inside an observed CPU region. This test proves runner
+        // cancellation after selection, not provider-future drop or caught-error
+        // coverage; ticket RAII drop remains separately unit-tested.
+        let bytecode = compile_semantic("x = [0.25, 0.5]; y = sin(x) .* x + 2;");
         let placement = Rc::new(runmat_accelerate::placement::PlacementSession::default());
-        let resume = resume_after_input_store(&bytecode, resident_small_input());
-        let mode = ScopedDownloadMode::new(DownloadMode::Fail);
-        let runmat_vm::InterpreterOutcome::Completed(completion) =
-            block_on(runmat_vm::interpret_resume_in_context(
-                &bytecode,
-                resume,
-                None,
-                fusion_test_runtime(placement.clone()),
-            ))
-            .expect("handler resumes actual bytecode");
-        assert!(mode.0.download_started.load(Ordering::SeqCst));
-        assert_eq!(
-            completion.values[fusion_var_index(&bytecode, "caught")],
-            Value::Bool(true)
+        let cancellation = std::sync::Arc::new(AtomicBool::new(false));
+        let service = Rc::new(CancelOnCpuFusionSelection {
+            placement: placement.clone(),
+            cancellation: cancellation.clone(),
+            selected: std::cell::Cell::new(false),
+        });
+        let runtime = runmat_runtime::context::RuntimeContext::with_cancellation(
+            Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+            cancellation,
+        )
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default().with_placement(service.clone()),
         );
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let error = block_on(runmat_vm::interpret_with_vars_in_context(
+            &bytecode, &mut vars, None, runtime,
+        ))
+        .expect_err("cancellation after CPU fusion selection");
+        assert!(
+            service.selected.get(),
+            "real planner must select CPU fusion"
+        );
+        assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
         assert_cpu_region_failed_without_success(&placement);
         assert_cpu_fusion_was_selected_without_completion();
     });

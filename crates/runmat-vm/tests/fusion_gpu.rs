@@ -119,20 +119,10 @@ fn fusion_graph_helper_ignores_stale_compile_graph_metadata() {
     });
 }
 
-#[derive(Clone, Copy, Default)]
-enum DownloadMode {
-    #[default]
-    Normal,
-    Pending,
-    Fail,
-}
-
 struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
     reject_fusion: AtomicBool,
-    download_test_mode: Mutex<DownloadMode>,
-    download_started: AtomicBool,
 }
 
 impl TestProvider {
@@ -141,25 +131,7 @@ impl TestProvider {
             next_id: AtomicU64::new(1),
             buffers: Mutex::new(HashMap::new()),
             reject_fusion: AtomicBool::new(false),
-            download_test_mode: Mutex::new(DownloadMode::Normal),
-            download_started: AtomicBool::new(false),
         }
-    }
-
-    async fn before_download(&self) -> anyhow::Result<()> {
-        let mode = *self.download_test_mode.lock().expect("download mode lock");
-        match mode {
-            DownloadMode::Pending => {
-                self.download_started.store(true, Ordering::SeqCst);
-                std::future::pending::<()>().await;
-            }
-            DownloadMode::Fail => {
-                self.download_started.store(true, Ordering::SeqCst);
-                bail!("deterministic test download failure");
-            }
-            DownloadMode::Normal => {}
-        }
-        Ok(())
     }
 
     fn pull(&self, handle: &GpuTensorHandle) -> anyhow::Result<(Vec<f64>, Vec<usize>)> {
@@ -372,7 +344,6 @@ impl AccelProvider for TestProvider {
 
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
-            self.before_download().await?;
             let (data, shape) = self.pull(handle)?;
             Ok(HostTensorOwned {
                 data,
@@ -387,7 +358,6 @@ impl AccelProvider for TestProvider {
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            self.before_download().await?;
             let (data, shape) = self.pull(handle)?;
             let data = match handle.descriptor.element_type {
                 Some(runmat_accelerate_api::NumericElementType::F32) => {
