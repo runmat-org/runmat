@@ -231,10 +231,6 @@ pub fn getpref_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn readlines_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::String
-}
-
 pub fn uigetfile_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     let _ = args;
     Type::Union(vec![Type::String, Type::Num, Type::cell_of(Type::String)])

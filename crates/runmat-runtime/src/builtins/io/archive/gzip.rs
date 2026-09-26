@@ -7,10 +7,6 @@ use std::time::Duration;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
 use runmat_filesystem as vfs;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, Value};
@@ -24,53 +20,16 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn archive_error(name: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(name).build()
+    build_runtime_error(message)
+        .with_builtin(name)
+        .with_identifier(format!("RunMat:{name}:RuntimeError"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build()
 }
 
-const INPUTS_ARCHIVE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "filename",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input file.",
-    },
-    BuiltinParamDescriptor {
-        name: "outputfolder",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Destination folder.",
-    },
-];
-const OUTPUT_FILES: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "files",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Cell array of output file paths.",
-}];
-const GZIP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "files = gzip(filename, outputfolder)",
-    inputs: &INPUTS_ARCHIVE,
-    outputs: &OUTPUT_FILES,
-}];
-pub const GZIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GZIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
-};
-const GUNZIP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "files = gunzip(filename, outputfolder)",
-    inputs: &INPUTS_ARCHIVE,
-    outputs: &OUTPUT_FILES,
-}];
-pub const GUNZIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GUNZIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[],
+pub use runmat_builtins::{
+    GUNZIP_DESCRIPTOR, GUNZIP_ERROR_OUTPUTS, GUNZIP_INTEGER_AUDIT, GZIP_DESCRIPTOR,
+    GZIP_ERROR_OUTPUTS, GZIP_INTEGER_AUDIT,
 };
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
@@ -173,15 +132,11 @@ fn cellstr(paths: Vec<PathBuf>, name: &str) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "gzip",
-    category = "io/archive",
-    summary = "Compress files using gzip.",
-    keywords = "gzip,compress,archive,file",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::unzip_type),
-    descriptor(crate::builtins::io::archive::gzip::GZIP_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::archive::gzip"
 )]
 async fn gzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(&GZIP_DESCRIPTOR, &GZIP_ERROR_OUTPUTS, "gzip")?;
     if args.is_empty() || args.len() > 2 {
         return Err(archive_error(
             "gzip",
@@ -234,15 +189,15 @@ async fn gzip_one(input: &Path, output_folder: Option<&Path>) -> BuiltinResult<P
 
 #[runtime_builtin(
     name = "gunzip",
-    category = "io/archive",
-    summary = "Decompress gzip files.",
-    keywords = "gunzip,decompress,archive,file",
-    accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::unzip_type),
-    descriptor(crate::builtins::io::archive::gzip::GUNZIP_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::archive::gzip"
 )]
 async fn gunzip_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &GUNZIP_DESCRIPTOR,
+        &GUNZIP_ERROR_OUTPUTS,
+        "gunzip",
+    )?;
     if args.is_empty() || args.len() > 2 {
         return Err(archive_error(
             "gunzip",
@@ -339,12 +294,18 @@ async fn gunzip_bytes(
     filename: &str,
     output_folder: Option<&Path>,
 ) -> BuiltinResult<PathBuf> {
+    let output_name = filename.strip_suffix(".gz").unwrap_or(filename);
+    if output_name.is_empty()
+        || matches!(output_name, "." | "..")
+        || output_name.contains(['/', '\\'])
+    {
+        return Err(archive_error("gunzip", "gunzip: invalid output filename"));
+    }
     let mut decoder = GzDecoder::new(bytes);
     let mut decoded = Vec::new();
     decoder
         .read_to_end(&mut decoded)
         .map_err(|err| archive_error("gunzip", format!("gunzip: {err}")))?;
-    let output_name = filename.strip_suffix(".gz").unwrap_or(filename);
     let output = output_folder
         .map(|folder| folder.join(output_name))
         .unwrap_or_else(|| PathBuf::from(output_name));
@@ -459,5 +420,31 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(error.message().contains("outputfolder must be"), "{error}");
+    }
+
+    #[test]
+    fn requested_outputs_reject_before_invalid_input_or_provider_access() {
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        for (name, result) in [
+            ("gzip", run(gzip_builtin(vec![Value::Num(1.0)]))),
+            ("gunzip", run(gunzip_builtin(vec![Value::Num(1.0)]))),
+        ] {
+            assert_eq!(
+                result.unwrap_err().identifier(),
+                Some(format!("RunMat:{name}:TooManyOutputs").as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn decompression_rejects_non_basename_destinations_before_decode_or_write() {
+        for name in [".gz", "..gz", "...gz", "../escape.gz", "nested\\escape.gz"] {
+            let error = futures::executor::block_on(gunzip_bytes(b"not a gzip stream", name, None))
+                .unwrap_err();
+            assert!(
+                error.message().contains("invalid output filename"),
+                "{name}: {error}"
+            );
+        }
     }
 }
