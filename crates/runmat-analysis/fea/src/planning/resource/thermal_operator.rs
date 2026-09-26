@@ -107,11 +107,12 @@ impl ThermalOperatorResourceFacts {
         history: &ThermalHistoryResourceFacts,
     ) -> Result<ByteCount, ResourcePlanningError> {
         let workspace = self.workspace.reservation_bytes()?.0;
+        let history_bytes = history.reservation_bytes()?.0;
         self.csr_payload_bytes
             .0
             .checked_add(self.admission.resident_bytes_upper_bound.0)
             .and_then(|bytes| bytes.checked_add(self.support_payload_bytes.0))
-            .and_then(|bytes| bytes.checked_add(history.retained_field_bytes.0))
+            .and_then(|bytes| bytes.checked_add(history_bytes))
             .and_then(|bytes| bytes.checked_add(workspace))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(

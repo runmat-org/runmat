@@ -1,5 +1,5 @@
-//! Exact retained numerical history payload, a necessary floor rather than total solve memory.
-use super::{ByteCount, Count, ResourcePlanningError};
+//! Retained numerical history payload and shared metadata estimates; not total solve memory.
+use super::{field_metadata::FIELD_METADATA_BYTES, ByteCount, Count, ResourcePlanningError};
 use crate::execution::ThermalSolveSchedule;
 use runmat_meshing_core::SolverMeshArtifact;
 
@@ -9,6 +9,7 @@ pub struct ThermalHistoryResourceFacts {
     pub temperature_values: Count,
     pub recovered_element_values: Count,
     pub retained_field_bytes: ByteCount,
+    pub retained_metadata_bytes: ByteCount,
 }
 
 impl ThermalHistoryResourceFacts {
@@ -49,12 +50,34 @@ impl ThermalHistoryResourceFacts {
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal retained field bytes",
             ))?;
+        // Four typed fields per sample, including conversion-time Vec headers and field IDs.
+        // Additional arrays coexist: schedule points/events, result time points/residuals,
+        // six-scalar energy balance, and optional observation coordinates. Reserve S slots
+        // even when a particular array contains only S-1 or zero entries.
+        let sample_arrays = (4 * std::mem::size_of::<f64>()
+            + std::mem::size_of::<crate::physics::thermal::assembly::ThermalEnergyBalance>()
+            + std::mem::size_of::<crate::results::field::RecoveredFieldSample>())
+            as u64;
+        let retained_metadata_bytes = samples
+            .checked_mul(4 * FIELD_METADATA_BYTES + sample_arrays)
+            .ok_or(ResourcePlanningError::Overflow("thermal history metadata"))?;
         Ok(Self {
             samples: Count(samples),
             temperature_values: Count(temperature_values),
             recovered_element_values: Count(recovered_element_values),
             retained_field_bytes: ByteCount(retained_field_bytes),
+            retained_metadata_bytes: ByteCount(retained_metadata_bytes),
         })
+    }
+
+    pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
+        self.retained_field_bytes
+            .0
+            .checked_add(self.retained_metadata_bytes.0)
+            .map(ByteCount)
+            .ok_or(ResourcePlanningError::Overflow(
+                "thermal history reservation",
+            ))
     }
 
     /// Reject a ceiling already smaller than mandatory retained field values. Passing this
@@ -80,10 +103,40 @@ mod tests {
         assert_eq!(facts.temperature_values, Count(50));
         assert_eq!(facts.recovered_element_values, Count(35));
         assert_eq!(facts.retained_field_bytes, ByteCount(680));
+        assert!(facts.retained_metadata_bytes.0 >= 5 * 4 * FIELD_METADATA_BYTES);
+        assert_eq!(
+            facts.reservation_bytes().unwrap().0,
+            facts.retained_field_bytes.0 + facts.retained_metadata_bytes.0
+        );
+        let mut overflowing = facts;
+        overflowing.retained_metadata_bytes = ByteCount(u64::MAX);
+        assert!(overflowing.reservation_bytes().is_err());
         assert!(facts.require_fits(679).is_err());
         assert!(facts.require_fits(680).is_ok());
         assert!(
             ThermalHistoryResourceFacts::from_counts(usize::MAX, usize::MAX, usize::MAX).is_err()
         );
+    }
+
+    #[test]
+    fn metadata_scales_with_samples_even_without_field_values() {
+        let one = ThermalHistoryResourceFacts::from_counts(0, 0, 1).unwrap();
+        let many = ThermalHistoryResourceFacts::from_counts(0, 0, 257).unwrap();
+        assert_eq!(many.retained_field_bytes.0, 0);
+        assert_eq!(
+            many.retained_metadata_bytes.0,
+            257 * one.retained_metadata_bytes.0
+        );
+        assert_eq!(
+            ThermalHistoryResourceFacts::from_counts(0, 0, 0)
+                .unwrap()
+                .reservation_bytes()
+                .unwrap()
+                .0,
+            0
+        );
+        if usize::BITS == 64 {
+            assert!(ThermalHistoryResourceFacts::from_counts(0, 0, usize::MAX).is_err());
+        }
     }
 }

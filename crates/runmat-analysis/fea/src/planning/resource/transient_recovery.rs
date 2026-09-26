@@ -13,11 +13,11 @@ use crate::{
 
 use super::{
     build_resource_plan, build_structural_transient_scope_resource_plan,
-    transient_scope::transient_source_workload_identity, AccuracyResourceDemand, ByteCount,
-    CheckpointArtifactPolicy, Count, FeaResourceDemand, FeaResourcePhase, FeaResourcePlan,
-    FeaResourcePlanningInput, FieldRecoveryResourceFacts, ObservationResourceFacts,
-    PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts, ResourcePlanningError,
-    SolveResourcePolicy, StructuralTransientFieldRecoveryResourceDemand,
+    field_metadata::FIELD_METADATA_BYTES, transient_scope::transient_source_workload_identity,
+    AccuracyResourceDemand, ByteCount, CheckpointArtifactPolicy, Count, FeaResourceDemand,
+    FeaResourcePhase, FeaResourcePlan, FeaResourcePlanningInput, FieldRecoveryResourceFacts,
+    ObservationResourceFacts, PartitioningPolicy, PhaseResourcePolicy, PreparedInputResourceFacts,
+    ResourcePlanningError, SolveResourcePolicy, StructuralTransientFieldRecoveryResourceDemand,
     RESOURCE_ESTIMATION_MODEL_REVISION,
 };
 
@@ -29,7 +29,6 @@ const SAMPLE_VALUES_PER_PHYSICAL_DOF: u64 = 16;
 const SAMPLE_METADATA_BYTES: u64 = 8 * 1024;
 const FIELD_VALUES_PER_ENTITY: u64 = 128;
 const FIELD_VALUES_PER_OBSERVATION_ENTITY: u64 = 16;
-const FIELD_METADATA_BYTES: u64 = 4 * 1024;
 const FIELDS_PER_SAMPLE: u64 = 32;
 const FIELDS_PER_OBSERVATION: u64 = 4;
 const RECOVERY_SCRATCH_BYTES_PER_ELEMENT: u64 = 4 * 1024;

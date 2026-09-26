@@ -7,6 +7,7 @@ mod connector_buffers;
 mod contract;
 mod estimate;
 mod facts;
+mod field_metadata;
 mod frequency;
 mod local_execution;
 mod modal;

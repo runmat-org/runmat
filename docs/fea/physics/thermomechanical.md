@@ -187,6 +187,30 @@ thermal event detector fail during preflight. Counts remain planner estimates/lo
 dynamic plan/catalog metadata and transport are not thereby fully admitted.
 Passing this partial reservation is not whole-process memory admission or GPU qualification.
 
+Thermal history admission also reserves four owned field metadata records per sample using the
+shared 4 KiB field-metadata policy from structural recovery, plus the typed schedule, time,
+residual, energy-balance and observation-coordinate arrays. The exact numerical payload remains
+separately reported; metadata is an estimate including field conversion scratch, not exact RSS.
+The `thermal_history_memory` example uses the shared Rust counting allocator around complete
+local workload execution (including its own preflight), excluding fixture and reporting-plan
+construction. It fails on a measured heap-growth overrun or an insulated-temperature reference
+failure. Run each case in its own process:
+
+```sh
+cargo run --release -p runmat-analysis-fea --example thermal_history_memory -- tet4 257 fields
+cargo run --release -p runmat-analysis-fea --example thermal_history_memory -- tet10 4097 history
+```
+
+On macOS aarch64, the connected four-element Tet4 case with 257 samples originally measured
+274,415 B additional Rust heap against a 136,943 B reservation, demonstrating the omitted
+metadata. With metadata included its reservation is 4,372,303 B. The Tet10 4,097-sample case
+measured 4,538,879 B against 69,353,421 B without observations, and 23,488,847 B against
+1,084,098,813 B with nodal temperature history. All twelve combinations of Tet4/Tet10,
+3/257/4,097 samples and fields/history passed, preserving 293.15 K to reported zero error.
+This is a small spatial fixture stressed in sample count, not a spatial convergence or throughput
+claim. Dynamic excitation/source evidence, arbitrary model metadata, provider allocations,
+allocator overhead and transport remain outside a complete producer admission guarantee.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature
