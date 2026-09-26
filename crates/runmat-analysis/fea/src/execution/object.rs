@@ -42,6 +42,7 @@ pub enum AnalysisNumericalObjectKind {
     SolverInvocation,
     SolverResult,
     NumericalReceipt,
+    StatePublicationProfiles,
     FieldRecoveryRequest,
     ObservationEvaluationRequest,
     ObservationPartitionEvaluationRequest,

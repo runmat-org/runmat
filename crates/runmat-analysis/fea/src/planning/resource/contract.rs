@@ -59,7 +59,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 27;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 28;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -397,124 +397,7 @@ pub enum FeaResourceDemand {
     StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyResourceDemand),
 }
 
-impl FeaResourceDemand {
-    /// Returns the admitted semantic envelope for one output kind governed by this phase.
-    /// Legacy whole-pipeline plans predate independently prepared output envelopes.
-    pub const fn output_facts(
-        &self,
-        kind: AnalysisNumericalObjectKind,
-    ) -> Option<&PreparedOutputResourceFacts> {
-        match (self, kind) {
-            (Self::AccuracyEvaluation(demand), AnalysisNumericalObjectKind::AccuracyReport) => {
-                Some(&demand.output)
-            }
-            (Self::ThermalSolve(demand), AnalysisNumericalObjectKind::SolverResult) => {
-                Some(&demand.result_output)
-            }
-            (Self::ThermalSolve(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
-                Some(&demand.receipt_output)
-            }
-            (
-                Self::StructuralModalExtraction(demand),
-                AnalysisNumericalObjectKind::SolverResult,
-            ) => Some(&demand.result_output),
-            (
-                Self::StructuralModalExtraction(demand),
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ) => Some(&demand.receipt_output),
-            (Self::StructuralBuckling(demand), AnalysisNumericalObjectKind::SolverResult) => {
-                Some(&demand.result_output)
-            }
-            (Self::StructuralBuckling(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
-                Some(&demand.receipt_output)
-            }
-            (
-                Self::StructuralFrequencyEntry(demand),
-                AnalysisNumericalObjectKind::StructuralFrequencyEntryResult,
-            )
-            | (
-                Self::StructuralFrequencyFieldRecovery(demand),
-                AnalysisNumericalObjectKind::Field,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralObservationPartition(demand),
-                AnalysisNumericalObjectKind::ObservationPartitionContribution,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralObservationReduction(demand),
-                AnalysisNumericalObjectKind::ObservationResult,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralObservationHistoryCheckpoint(demand),
-                AnalysisNumericalObjectKind::ObservationHistoryCheckpoint,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralObservationAssembly(demand),
-                AnalysisNumericalObjectKind::Observation,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralFrequencyResultAssembly(demand),
-                AnalysisNumericalObjectKind::SolverResult,
-            ) => Some(&demand.result_output),
-            (
-                Self::StructuralFrequencyResultAssembly(demand),
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ) => Some(&demand.receipt_output),
-            (
-                Self::StructuralTransientResultAssembly(demand),
-                AnalysisNumericalObjectKind::SolverResult,
-            ) => Some(&demand.result_output),
-            (
-                Self::StructuralTransientResultAssembly(demand),
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ) => Some(&demand.receipt_output),
-            (
-                Self::StructuralModalResponseSpectrumDirection(demand),
-                AnalysisNumericalObjectKind::StructuralModalResponseSpectrumDirectionResult,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralTransientScopePreparation(demand),
-                AnalysisNumericalObjectKind::StructuralTransientCheckpointScope,
-            ) => Some(&demand.scope_output),
-            (
-                Self::StructuralTransientBlock(demand),
-                AnalysisNumericalObjectKind::StructuralTransientSegment,
-            ) => Some(&demand.segment_output),
-            (
-                Self::StructuralModalResponseSpectrumAssembly(demand),
-                AnalysisNumericalObjectKind::SolverResult,
-            ) => Some(&demand.result_output),
-            (
-                Self::StructuralModalResponseSpectrumAssembly(demand),
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ) => Some(&demand.receipt_output),
-            (
-                Self::StructuralModalResponseSpectrumAssembly(demand),
-                AnalysisNumericalObjectKind::StructuralModalResponseSpectrumFieldRecovery,
-            ) => Some(&demand.field_recovery_output),
-            (
-                Self::StructuralRandomResponseInterval(demand),
-                AnalysisNumericalObjectKind::StructuralRandomResponseIntervalResult,
-            ) => Some(&demand.output),
-            (
-                Self::StructuralRandomResponseAssembly(demand),
-                AnalysisNumericalObjectKind::SolverResult,
-            ) => Some(&demand.result_output),
-            (
-                Self::StructuralRandomResponseAssembly(demand),
-                AnalysisNumericalObjectKind::NumericalReceipt,
-            ) => Some(&demand.receipt_output),
-            _ => None,
-        }
-    }
-
-    pub const fn governs_prepared_outputs(&self) -> bool {
-        !matches!(
-            self,
-            Self::StructuralLinearPipeline(_) | Self::StructuralTransientFieldRecovery(_)
-        )
-    }
-}
+mod output_facts;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

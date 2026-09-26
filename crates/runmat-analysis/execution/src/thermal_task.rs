@@ -93,6 +93,7 @@ pub fn prepare_thermal_task(
         vec![
             AnalysisNumericalObjectKind::SolverResult,
             AnalysisNumericalObjectKind::NumericalReceipt,
+            AnalysisNumericalObjectKind::StatePublicationProfiles,
         ],
         capabilities,
     )?;

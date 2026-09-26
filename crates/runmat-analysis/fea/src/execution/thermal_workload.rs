@@ -13,6 +13,7 @@ use crate::{ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalProcedureCo
 use super::{AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity};
 
 const PREFIX: &[u8] = b"runmat-thermal-workload/v1\0";
+mod state_profiles;
 pub(crate) const LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 

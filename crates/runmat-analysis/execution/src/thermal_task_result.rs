@@ -1,12 +1,12 @@
 //! Validate completed thermal task outputs without reconstructing numerical field arrays.
 use crate::{
     decode_prepared_thermal_manifest, import_analysis_objects, import_analysis_output_set,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
-    PreparedThermalTask,
+    thermal_state_publication_profiles, AnalysisBridgeError, AnalysisBridgeResult,
+    AnalysisHostWorkload, PreparedAnalysisObjects, PreparedThermalTask,
 };
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, ThermalNumericalReceiptArtifact, ThermalSolverResultManifest,
-    ThermalWorkload,
+    AnalysisNumericalObjectKind, StatePublicationProfiles, ThermalNumericalReceiptArtifact,
+    ThermalSolverResultManifest, ThermalWorkload,
 };
 use runmat_execution::value::ValueRefKind;
 use runmat_execution_artifact::{
@@ -20,6 +20,8 @@ pub struct ImportedThermalResult {
     pub objects: PreparedAnalysisObjects,
     pub numerical_receipt: ThermalNumericalReceiptArtifact,
     pub numerical_receipt_objects: PreparedAnalysisObjects,
+    pub state_publication_profiles: StatePublicationProfiles,
+    pub state_publication_profile_objects: PreparedAnalysisObjects,
     pub response: ProgramExecutionResponse,
 }
 
@@ -31,9 +33,10 @@ pub fn import_thermal_result(
 ) -> AnalysisBridgeResult<ImportedThermalResult> {
     response.validate_against(&prepared.program.request)?;
     let output_set = import_analysis_output_set(source, response.clone(), &prepared.host)?;
-    let [result, receipt] = output_set.manifest.outputs.as_slice() else {
+    let [result, receipt, profiles] = output_set.manifest.outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(
-            "thermal task requires one result and one receipt".into(),
+            "thermal task requires one result, one receipt and one publication profile catalog"
+                .into(),
         ));
     };
     let objects = import_analysis_objects(
@@ -56,8 +59,21 @@ pub fn import_thermal_result(
     )?;
     let mut expected =
         objects.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    let profile_objects = import_analysis_objects(
+        source,
+        &profiles.root,
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        profiles.logical_identity,
+        profiles.payload_digest,
+        &prepared.host.artifact_access,
+        limits,
+    )?;
     expected.extend(
         receipt_objects
+            .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
+    );
+    expected.extend(
+        profile_objects
             .unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?,
     );
     crate::object::retain_unique_references(&mut expected);
@@ -82,6 +98,21 @@ pub fn import_thermal_result(
     let numerical_receipt =
         ThermalNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
     numerical_receipt.validate_against(&workload, &manifest)?;
+    let state_publication_profiles =
+        StatePublicationProfiles::from_canonical_bytes(&profile_objects.payload())?;
+    state_publication_profiles.validate_source(
+        manifest.producer,
+        manifest.identity(),
+        manifest.topology_digest,
+        objects.manifest.payload_digest,
+    )?;
+    if state_publication_profiles.identity() != profiles.logical_identity
+        || state_publication_profiles != thermal_state_publication_profiles(&workload, &objects)?
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "thermal publication profiles differ from canonical metadata projection",
+        ));
+    }
     if numerical_receipt.identity().digest() != receipt.logical_identity
         || manifest.producer != prepared.host.workload.step
         || !prepared.inputs.iter().any(|input| {
@@ -99,6 +130,8 @@ pub fn import_thermal_result(
         objects,
         numerical_receipt,
         numerical_receipt_objects: receipt_objects,
+        state_publication_profiles,
+        state_publication_profile_objects: profile_objects,
         response,
     })
 }

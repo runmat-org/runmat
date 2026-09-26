@@ -690,9 +690,18 @@ temperature partitions; structural sizing borrows the producing worker's existin
 The projections use the shared canonical profiler and are checked against actual state encoding
 for primary displacement, linearization, modal basis, response envelope, random statistics and
 Tet4/Tet10 thermal states. Primary field selection is shared with actual publication. These facts
-bound canonical output construction only: they do not yet provide source-bound transport metadata,
-scheduler admission, source-decoding residency, state validation scratch or complete attempt usage.
+bound canonical output construction only: they do not yet provide publication-task scheduler
+admission, source-decoding residency, state validation scratch or complete attempt usage.
 Structural planners must not decode full results on the driver merely to obtain these profiles.
+
+Thermal producer tasks now also emit a separate `StatePublicationProfiles` artifact. Its bounded,
+sorted catalog binds each exact authored publication request and encoding profile to the producer,
+topology, semantic result and source payload digest. Thermal import checks the complete output
+inventory, then independently reprojects the catalog from metadata only; hashes alone are not
+treated as proof of a claimed size. Resource estimation revision 28 reserves this third output
+from the actual declaration inventory before solving. Existing numerical receipts and numerical
+result identities are unchanged. Structural producers still need equivalent catalog transport,
+and publication tasks still need explicit resource plans and measured usage integration.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

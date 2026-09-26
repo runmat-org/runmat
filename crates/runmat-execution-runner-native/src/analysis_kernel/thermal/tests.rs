@@ -1,4 +1,5 @@
 use super::*;
+mod profile_rejection;
 use crate::analysis_kernel::NativeAnalysisKernel;
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, ProcedureStep, Temperature, ThermalDomain,
@@ -157,7 +158,22 @@ fn native_thermal_preserves_uniform_equilibrium_and_source_bound_receipt() {
                 .unwrap()
                 .into_prepared(chunk, ObjectInventoryLimits::default())
                 .unwrap();
+            let profiles = outputs
+                .next()
+                .unwrap()
+                .into_prepared(chunk, ObjectInventoryLimits::default())
+                .unwrap();
             assert!(outputs.next().is_none());
+            let catalog =
+                runmat_analysis_fea::execution::StatePublicationProfiles::from_canonical_bytes(
+                    &profiles.payload(),
+                )
+                .unwrap();
+            assert_eq!(
+                catalog,
+                runmat_analysis_execution::thermal_state_publication_profiles(&workload, &result)
+                    .unwrap()
+            );
             let manifest = decode_prepared_thermal_manifest(&result).unwrap();
             if let Some(expected) = semantic_identity {
                 assert_eq!(manifest.identity(), expected);

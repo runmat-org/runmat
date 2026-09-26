@@ -177,6 +177,15 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             import_thermal_result(&store, inline_response, &prepared, limits.inventory).unwrap();
         assert_eq!(process.manifest, inline.manifest);
         assert_eq!(process.numerical_receipt, inline.numerical_receipt);
+        assert_eq!(
+            process.state_publication_profiles,
+            inline.state_publication_profiles
+        );
+        assert_eq!(
+            process.state_publication_profile_objects,
+            inline.state_publication_profile_objects
+        );
+        assert!(!process.state_publication_profiles.entries().is_empty());
         assert_eq!(process.objects, inline.objects);
         assert_eq!(
             process.numerical_receipt_objects,

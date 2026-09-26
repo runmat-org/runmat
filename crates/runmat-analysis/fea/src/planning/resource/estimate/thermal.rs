@@ -13,16 +13,24 @@ pub(super) fn build_thermal_plan(
         || demand.inputs.transport_closure_bytes < demand.inputs.encoded_payload_bytes
         || demand.inputs.decoded_resident_bytes_admission_budget
             < demand.inputs.encoded_payload_bytes
-        || [&demand.result_output, &demand.receipt_output]
-            .iter()
-            .any(|output| {
-                output.construction_resident_bytes_admission_budget
-                    < output.transport_closure_bytes_upper_bound
-            })
+        || [
+            &demand.result_output,
+            &demand.receipt_output,
+            &demand.state_profiles_output,
+        ]
+        .iter()
+        .any(|output| {
+            output.construction_resident_bytes_admission_budget
+                < output.transport_closure_bytes_upper_bound
+        })
     {
         return Err(ResourcePlanningError::Invalid("thermal host demand requires numerical storage, samples and valid inputs without accelerators".into()));
     }
-    let outputs = [&demand.result_output, &demand.receipt_output];
+    let outputs = [
+        &demand.result_output,
+        &demand.receipt_output,
+        &demand.state_profiles_output,
+    ];
     // Imported chunk buffers coexist with decoded numerical inputs during execution.
     let retained_transport = ByteCount(add(
         demand.inputs.transport_closure_bytes.0,

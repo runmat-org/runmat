@@ -59,6 +59,22 @@ fn fixture(
             transport_closure_bytes_upper_bound: ByteCount(131072),
             construction_resident_bytes_admission_budget: ByteCount(4194304),
         },
+        state_profiles_output: {
+            let profile = workload
+                .state_publication_profiles_encoding_profile(Digest::from_bytes(
+                    *mesh.canonical_digest.bytes(),
+                ))
+                .unwrap();
+            PreparedOutputResourceFacts {
+                encoded_payload_bytes_upper_bound: ByteCount(profile.encoded_bytes_upper_bound),
+                transport_closure_bytes_upper_bound: ByteCount(
+                    profile.encoded_bytes_upper_bound + 65536,
+                ),
+                construction_resident_bytes_admission_budget: ByteCount(
+                    profile.materialization_resident_bytes_estimate + 65536,
+                ),
+            }
+        },
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(65536),
         },
@@ -97,6 +113,18 @@ fn thermal_plan_is_source_bound_host_only_and_accounts_for_outputs() {
                 FeaResourcePlan::from_canonical_bytes(&plan.canonical_bytes().unwrap()).unwrap(),
                 plan
             );
+            assert_eq!(
+                plan.input.demand.output_facts(
+                    crate::execution::AnalysisNumericalObjectKind::StatePublicationProfiles
+                ),
+                Some(&facts.state_profiles_output)
+            );
+            let mut short_metadata = facts.clone();
+            short_metadata
+                .state_profiles_output
+                .encoded_payload_bytes_upper_bound
+                .0 -= 1;
+            assert!(build_thermal_resource_plan(&workload, &mesh, 1024, short_metadata).is_err());
             let mut larger = facts.clone();
             larger
                 .receipt_output

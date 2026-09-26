@@ -19,4 +19,5 @@ pub struct ThermalSolveResourceDemand {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
 }

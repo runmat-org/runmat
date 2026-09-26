@@ -12,6 +12,7 @@ pub struct PreparedThermalResourceFacts {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
+    pub state_profiles_output: PreparedOutputResourceFacts,
     pub output_set: PreparedOutputSetResourceFacts,
 }
 
@@ -47,6 +48,16 @@ pub fn build_thermal_resource_plan(
         .len()
         .checked_add(mesh.canonical_encode().map_err(|e| invalid(&e))?.len())
         .ok_or(ResourcePlanningError::Overflow("thermal input bytes"))?;
+    let profile_metadata = workload
+        .state_publication_profiles_encoding_profile(Digest::from_bytes(
+            *mesh.canonical_digest.bytes(),
+        ))
+        .map_err(|e| invalid(&e))?;
+    super::post_process::validate_projected_output(
+        &prepared.state_profiles_output,
+        profile_metadata.encoded_bytes_upper_bound,
+        "thermal state publication profiles",
+    )?;
     if prepared.inputs.encoded_payload_bytes.0 != payload_bytes as u64
         || prepared.result_output.encoded_payload_bytes_upper_bound.0
             < transport.payload_bytes_upper_bound
@@ -80,6 +91,7 @@ pub fn build_thermal_resource_plan(
             inputs: prepared.inputs,
             result_output: prepared.result_output,
             receipt_output: prepared.receipt_output,
+            state_profiles_output: prepared.state_profiles_output,
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {

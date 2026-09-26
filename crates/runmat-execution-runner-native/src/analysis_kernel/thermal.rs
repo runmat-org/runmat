@@ -6,6 +6,7 @@ use super::{
 use runmat_analysis_execution::{
     execute_thermal_solver_result_objects, prepare_analysis_objects,
     rederive_thermal_resource_plan, thermal_receipt_from_prepared_result,
+    thermal_state_publication_profiles,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, ExecutionPlanIdentity, NumericalPlanIdentity, SequenceIdentity,
@@ -27,6 +28,7 @@ pub(super) fn execute(
             != vec![
                 AnalysisNumericalObjectKind::SolverResult,
                 AnalysisNumericalObjectKind::NumericalReceipt,
+                AnalysisNumericalObjectKind::StatePublicationProfiles,
             ]
     {
         return Err(AnalysisBridgeError::Invalid(
@@ -97,6 +99,15 @@ pub(super) fn execute(
         policy.inventory_limits(),
     )?;
     let receipt = thermal_receipt_from_prepared_result(&workload, &result)?;
+    let profiles = thermal_state_publication_profiles(&workload, &result)?;
+    let profile_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::StatePublicationProfiles,
+        profiles.identity(),
+        &profiles.canonical_bytes()?,
+        policy.chunk_bytes(),
+        ObjectNamespace::ResultValue,
+        policy.inventory_limits(),
+    )?;
     let receipt_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::NumericalReceipt,
         receipt.identity().digest(),
@@ -108,6 +119,7 @@ pub(super) fn execute(
     Ok(vec![
         AnalysisKernelOutput::prepared(result),
         AnalysisKernelOutput::prepared(receipt_objects),
+        AnalysisKernelOutput::prepared(profile_objects),
     ])
 }
 

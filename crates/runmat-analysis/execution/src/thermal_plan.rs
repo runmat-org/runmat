@@ -55,11 +55,13 @@ pub fn rederive_thermal_resource_plan(
             "thermal resource inputs differ from decoded workload or mesh",
         ));
     }
-    let (result_output, receipt_output) = projected_thermal_outputs(workload, mesh, policy)?;
+    let (result_output, receipt_output, state_profiles_output) =
+        projected_thermal_outputs(workload, mesh, policy)?;
     let facts = PreparedThermalResourceFacts {
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
         receipt_output,
+        state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
     Ok(build_thermal_resource_plan(
@@ -77,7 +79,8 @@ pub fn prepare_thermal_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
-    let (result_output, receipt_output) = projected_thermal_outputs(workload, mesh, policy)?;
+    let (result_output, receipt_output, state_profiles_output) =
+        projected_thermal_outputs(workload, mesh, policy)?;
     let workload_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ThermalWorkload,
         workload.identity()?.digest(),
@@ -102,6 +105,7 @@ pub fn prepare_thermal_inputs(
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
         receipt_output,
+        state_profiles_output,
         output_set: projected_output_set_resource_facts(),
     };
     let resource_plan = build_thermal_resource_plan(workload, mesh, policy.chunk_bytes(), facts)?;
@@ -118,16 +122,25 @@ fn projected_thermal_outputs(
 ) -> AnalysisBridgeResult<(
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
+    runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
 )> {
     let numerical = workload.prepare(mesh)?;
     let result = numerical.transport_profile(policy.chunk_bytes())?;
     let mut receipt = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
     receipt.push(THERMAL_RECEIPT_MAX_ENCODED_BYTES)?;
     let receipt = receipt.finish(AnalysisNumericalObjectKind::NumericalReceipt)?;
+    let profile_metadata = workload.state_publication_profiles_encoding_profile(
+        Digest::from_bytes(*mesh.canonical_digest.bytes()),
+    )?;
+    let mut profiles = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
+    profiles.push(profile_metadata.encoded_bytes_upper_bound)?;
+    let profiles = profiles.finish(AnalysisNumericalObjectKind::StatePublicationProfiles)?;
     crate::thermal_execution::require_inventory(&result, policy.inventory_limits())?;
     crate::thermal_execution::require_inventory(&receipt, policy.inventory_limits())?;
+    crate::thermal_execution::require_inventory(&profiles, policy.inventory_limits())?;
     Ok((
         projected_transport_output_resource_facts(&result)?,
         projected_transport_output_resource_facts(&receipt)?,
+        projected_transport_output_resource_facts(&profiles)?,
     ))
 }
