@@ -109,6 +109,12 @@ conflicts with the retained source reject. Temperature/eigenstrain/eigenstress s
 integration-point fields, not fabricated nodal fields. Recovery means deriving strain, stress,
 and energy from retained solutions—not reconstructing lost data.
 
+Thermal binding owns node alignment, material-capability validation, and source lineage. The
+receiving structural assembly alone constructs equivalent loads and element recovery data.
+The aligned global temperature copy is released after assembly; the immutable source and the
+element-local temperatures needed for recovery are preserved. This avoids a second unused load
+and recovery allocation, but does not yet qualify portable thermal-state resource accounting.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

@@ -183,6 +183,9 @@ fn run_linear_static_with_constraint_plan(
         }
         other => FeaRunError::Assembly(other.to_string()),
     })?;
+    // Element recovery now owns the temperatures it needs. Release the aligned global
+    // field before solving; only the canonical transition must survive into the result.
+    let thermal_transition = thermal_transfer.map(|transfer| transfer.transition);
     preflight::verify_executed_preassembly(
         model,
         &options,
@@ -548,7 +551,7 @@ fn run_linear_static_with_constraint_plan(
     };
     run.validate_solver_formulation()?;
     Ok(LinearStaticComputation {
-        thermal_transition: thermal_transfer.map(|transfer| transfer.transition),
+        thermal_transition,
         run,
         summary,
         solution: solve_result.solution,

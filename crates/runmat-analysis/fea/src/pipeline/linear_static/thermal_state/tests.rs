@@ -154,6 +154,20 @@ fn retained_thermal_state_drives_restrained_expansion_and_source_linked_results(
         .find(|field| field.field_id == crate::fea_thermo_mechanical_temperature_field_id(0))
         .unwrap();
     assert_eq!(temperature_field.shape, vec![1, 4]);
+    assert!(temperature_field
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .all(|temperature| (temperature - 303.15).abs() < 1.0e-10));
+    let mut missing_thermal = model.clone();
+    missing_thermal.materials[0].thermal = None;
+    assert!(run_linear_static_from_thermal_state(
+        &missing_thermal,
+        ComputeBackend::Cpu,
+        options.clone(),
+        &source,
+    )
+    .is_err());
     let options = LinearStaticSolveOptions {
         formulation_requirement: FormulationRequirement::Experimental,
         solver_mesh: Some(mesh.clone()),
