@@ -75,6 +75,7 @@ pub use dispatch::{dispatch_validator, dispatch_validator_async};
 mod shape;
 pub use shape::{
     value_is_column, value_is_empty, value_is_scalar_or_empty, value_is_vector,
+    value_satisfies_nonsparse_validator, value_satisfies_sparse_validator,
     value_satisfies_vector_validator, value_shape_2d,
 };
 mod class;
@@ -127,46 +128,6 @@ use controls::{range_inclusivity_arg, text_scalar_arg, type_names_arg};
 mod resident;
 use resident::host_value;
 pub use resident::{ensure_resident_extension, validate_resident_metadata};
-
-fn bool_type(
-    _: &[runmat_builtins::Type],
-    _: &runmat_builtins::ResolveContext,
-) -> runmat_builtins::Type {
-    runmat_builtins::Type::Bool
-}
-
-fn any_type(
-    _: &[runmat_builtins::Type],
-    _: &runmat_builtins::ResolveContext,
-) -> runmat_builtins::Type {
-    runmat_builtins::Type::Unknown
-}
-
-#[runtime_builtin(
-    name = "isvarname",
-    category = "argument-validation",
-    summary = "Return true when text is a valid MATLAB variable name.",
-    type_resolver(bool_type),
-    descriptor(self::ISVARNAME_DESCRIPTOR),
-    integer_audit(self::ISVARNAME_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::common::validation"
-)]
-fn isvarname_builtin(value: Value) -> BuiltinResult<Value> {
-    Ok(Value::Bool(isvarname_value(&value)))
-}
-
-#[runtime_builtin(
-    name = "namedargs2cell",
-    category = "argument-validation",
-    summary = "Convert a scalar name-value struct to an alternating name/value cell row.",
-    type_resolver(any_type),
-    descriptor(self::NAMEDARGS2CELL_DESCRIPTOR),
-    integer_audit(self::NAMEDARGS2CELL_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::common::validation"
-)]
-fn namedargs2cell_builtin(value: Value) -> BuiltinResult<Value> {
-    namedargs2cell_value(value)
-}
 
 macro_rules! validator_builtin {
     ($func:ident, $name:literal, capabilities = $capabilities:path) => {
@@ -232,16 +193,6 @@ macro_rules! validator_builtin {
 }
 
 validator_builtin!(
-    must_be_a_builtin,
-    "mustBeA",
-    capabilities = self::MUST_BE_A_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_column_builtin,
-    "mustBeColumn",
-    capabilities = self::MUST_BE_COLUMN_INTEGER_CAPABILITIES
-);
-validator_builtin!(
     must_be_file_builtin,
     "mustBeFile",
     audit = self::MUST_BE_FILE_INTEGER_AUDIT
@@ -252,11 +203,7 @@ validator_builtin!(
     capabilities = self::MUST_BE_FINITE_INTEGER_CAPABILITIES,
     extensions = self::MUST_BE_FINITE_EXTENSIONS
 );
-validator_builtin!(
-    must_be_float_builtin,
-    "mustBeFloat",
-    capabilities = self::MUST_BE_FLOAT_INTEGER_CAPABILITIES
-);
+
 validator_builtin!(
     must_be_folder_builtin,
     "mustBeFolder",
@@ -303,11 +250,7 @@ validator_builtin!(
     "mustBeNegative",
     capabilities = self::MUST_BE_NEGATIVE_INTEGER_CAPABILITIES
 );
-validator_builtin!(
-    must_be_nonempty_builtin,
-    "mustBeNonempty",
-    capabilities = self::MUST_BE_NONEMPTY_INTEGER_CAPABILITIES
-);
+
 validator_builtin!(
     must_be_nonmissing_builtin,
     "mustBeNonmissing",
@@ -329,32 +272,14 @@ validator_builtin!(
     "mustBeNonpositive",
     capabilities = self::MUST_BE_NONPOSITIVE_INTEGER_CAPABILITIES
 );
-validator_builtin!(
-    must_be_nonsparse_builtin,
-    "mustBeNonsparse",
-    capabilities = self::MUST_BE_NONSPARSE_INTEGER_CAPABILITIES
-);
+
 validator_builtin!(
     must_be_nonzero_builtin,
     "mustBeNonzero",
     capabilities = self::MUST_BE_NONZERO_INTEGER_CAPABILITIES,
     extensions = self::MUST_BE_NONZERO_EXTENSIONS
 );
-validator_builtin!(
-    must_be_nonzero_length_text_builtin,
-    "mustBeNonzeroLengthText",
-    audit = self::MUST_BE_NONZERO_LENGTH_TEXT_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_numeric_builtin,
-    "mustBeNumeric",
-    capabilities = self::MUST_BE_NUMERIC_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_numeric_or_logical_builtin,
-    "mustBeNumericOrLogical",
-    capabilities = self::MUST_BE_NUMERIC_OR_LOGICAL_INTEGER_CAPABILITIES
-);
+
 validator_builtin!(
     must_be_positive_builtin,
     "mustBePositive",
@@ -365,46 +290,26 @@ validator_builtin!(
     "mustBeReal",
     capabilities = self::MUST_BE_REAL_INTEGER_CAPABILITIES
 );
-validator_builtin!(
-    must_be_scalar_or_empty_builtin,
-    "mustBeScalarOrEmpty",
-    capabilities = self::MUST_BE_SCALAR_OR_EMPTY_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_sparse_builtin,
-    "mustBeSparse",
-    capabilities = self::MUST_BE_SPARSE_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_text_builtin,
-    "mustBeText",
-    audit = self::MUST_BE_TEXT_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_text_scalar_builtin,
-    "mustBeTextScalar",
-    audit = self::MUST_BE_TEXT_SCALAR_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_underlying_type_builtin,
-    "mustBeUnderlyingType",
-    capabilities = self::MUST_BE_UNDERLYING_TYPE_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    must_be_valid_variable_name_builtin,
-    "mustBeValidVariableName",
-    audit = self::MUST_BE_VALID_VARIABLE_NAME_INTEGER_AUDIT
-);
-validator_builtin!(
-    must_be_vector_builtin,
-    "mustBeVector",
-    capabilities = self::MUST_BE_VECTOR_INTEGER_CAPABILITIES
-);
-validator_builtin!(
-    validate_function_signatures_json_builtin,
-    "validateFunctionSignaturesJSON",
-    audit = self::VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT
-);
+
+mod admission;
+pub(crate) mod isvarname;
+pub(crate) mod must_be_a;
+pub(crate) mod must_be_column;
+pub(crate) mod must_be_float;
+pub(crate) mod must_be_nonempty;
+pub(crate) mod must_be_nonsparse;
+pub(crate) mod must_be_numeric;
+pub(crate) mod must_be_numeric_or_logical;
+pub(crate) mod must_be_scalar_or_empty;
+pub(crate) mod must_be_sparse;
+pub(crate) mod must_be_text;
+pub(crate) mod must_be_text_scalar;
+pub(crate) mod must_be_nonzero_length_text;
+pub(crate) mod must_be_underlying_type;
+pub(crate) mod must_be_valid_variable_name;
+pub(crate) mod must_be_vector;
+pub(crate) mod namedargs2cell;
+pub(crate) mod validate_function_signatures_json;
 
 #[cfg(test)]
 mod tests;

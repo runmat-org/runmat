@@ -5,10 +5,14 @@ use super::{
     CharArray, RuntimeError, Value,
 };
 
+fn is_character_row(chars: &CharArray) -> bool {
+    chars.rows == 1 && crate::builtins::common::shape::effective_rank(&chars.shape) == 2
+}
+
 pub fn value_is_text(value: &Value) -> bool {
     match value {
         Value::String(_) | Value::StringArray(_) => true,
-        Value::CharArray(chars) => chars.rows == 1,
+        Value::CharArray(chars) => is_character_row(chars),
         Value::Cell(cell) => cell.data.iter().all(value_is_text),
         _ => false,
     }
@@ -20,7 +24,7 @@ pub fn value_is_text_scalar(value: &Value) -> bool {
         Value::StringArray(strings) => {
             strings.data.len() == 1 && strings.rows == 1 && strings.cols == 1
         }
-        Value::CharArray(chars) => chars.rows == 1,
+        Value::CharArray(chars) => is_character_row(chars),
         _ => false,
     }
 }
@@ -42,7 +46,7 @@ pub(super) fn value_texts(value: &Value) -> Result<Vec<String>, RuntimeError> {
     match value {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::StringArray(s) => Ok(s.data.clone()),
-        Value::CharArray(c) if c.rows == 1 => Ok(vec![chars_to_string(c)]),
+        Value::CharArray(c) if is_character_row(c) => Ok(vec![chars_to_string(c)]),
         Value::Cell(c) => {
             let mut out = Vec::with_capacity(c.data.len());
             for entry in &c.data {

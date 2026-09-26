@@ -7,6 +7,11 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
         Value::Tensor(t) => (t.rows, t.cols),
         Value::SparseTensor(t) => (t.rows, t.cols),
         Value::ComplexTensor(t) => (t.rows, t.cols),
+        Value::SymbolicArray(array) => (array.rows, array.cols),
+        Value::ObjectArray(array) => (
+            array.shape().first().copied().unwrap_or(1),
+            array.shape().get(1).copied().unwrap_or(1),
+        ),
         Value::LogicalArray(a) => {
             let rows = a.shape.first().copied().unwrap_or(0);
             let cols = a.shape.get(1).copied().unwrap_or(1);
@@ -38,6 +43,8 @@ pub fn value_is_empty(value: &Value) -> bool {
         Value::CharArray(c) => c.shape.contains(&0),
         Value::Cell(c) => c.data.is_empty(),
         Value::StructArray(array) => array.is_empty(),
+        Value::SymbolicArray(array) => array.data.is_empty(),
+        Value::ObjectArray(array) => array.is_empty(),
         Value::GpuTensor(handle) => handle.shape.contains(&0),
         _ => false,
     }
@@ -51,6 +58,8 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
         Value::StringArray(value) => &value.shape,
         Value::Cell(value) => &value.shape,
         Value::StructArray(value) => value.shape(),
+        Value::SymbolicArray(value) => &value.shape,
+        Value::ObjectArray(value) => value.shape(),
         Value::CharArray(value) => &value.shape,
         Value::GpuTensor(handle) => &handle.shape,
         _ => {
@@ -69,6 +78,8 @@ pub fn value_is_column(value: &Value) -> bool {
         Value::StringArray(value) => &value.shape,
         Value::Cell(value) => &value.shape,
         Value::StructArray(value) => value.shape(),
+        Value::SymbolicArray(value) => &value.shape,
+        Value::ObjectArray(value) => value.shape(),
         Value::CharArray(value) => &value.shape,
         Value::GpuTensor(handle) => &handle.shape,
         _ => {
@@ -81,11 +92,7 @@ pub fn value_is_column(value: &Value) -> bool {
 
 pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
     fn shape_is_vector(shape: &[usize]) -> bool {
-        let mut dimensions = shape.len();
-        while dimensions > 2 && shape[dimensions - 1] == 1 {
-            dimensions -= 1;
-        }
-        if dimensions > 2 {
+        if crate::builtins::common::shape::effective_rank(shape) > 2 {
             return false;
         }
         let rows = shape.first().copied().unwrap_or(1);
@@ -100,6 +107,8 @@ pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
         Value::StringArray(value) => shape_is_vector(&value.shape),
         Value::Cell(value) => shape_is_vector(&value.shape),
         Value::StructArray(value) => shape_is_vector(value.shape()),
+        Value::SymbolicArray(value) => shape_is_vector(&value.shape),
+        Value::ObjectArray(value) => shape_is_vector(value.shape()),
         Value::CharArray(value) => shape_is_vector(&value.shape),
         Value::GpuTensor(handle) => shape_is_vector(&handle.shape),
         Value::SparseTensor(value) => value.rows == 1 || value.cols == 1,
@@ -112,4 +121,15 @@ pub fn value_satisfies_vector_validator(
     allow_all_empties: bool,
 ) -> Result<bool, RuntimeError> {
     Ok(value_is_vector(value)? || (allow_all_empties && value_is_empty(value)))
+}
+
+/// Shared callable/arguments-block sparse admission, without builtin dispatch.
+pub fn value_satisfies_sparse_validator(value: &Value) -> Result<bool, RuntimeError> {
+    super::validate_resident_metadata(value)?;
+    Ok(value_is_empty(value) || matches!(value, Value::SparseTensor(_)))
+}
+
+pub fn value_satisfies_nonsparse_validator(value: &Value) -> Result<bool, RuntimeError> {
+    super::validate_resident_metadata(value)?;
+    Ok(!matches!(value, Value::SparseTensor(_)))
 }

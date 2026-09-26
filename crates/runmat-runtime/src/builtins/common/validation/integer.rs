@@ -93,6 +93,7 @@ pub fn value_contains_explicit_gpu(value: &Value) -> bool {
 
 pub fn value_has_logical_class(value: &Value) -> bool {
     matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::SparseTensor(tensor) if tensor.is_logical())
         || matches!(value, Value::GpuTensor(handle) if handle_is_logical(handle))
 }
 

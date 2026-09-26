@@ -1,7 +1,7 @@
 //! Class and underlying-type predicates.
 
 use super::{
-    handle_integer_type, handle_is_logical, validate_resident_metadata, value_has_logical_class,
+    handle_integer_type, handle_is_logical, value_has_logical_class,
     value_has_native_integer_class, NumericDType, RuntimeError, Value,
 };
 use crate::builtins::introspection::class::class_identity_for_value;
@@ -97,17 +97,10 @@ pub fn value_underlying_type_matches(
     value: &Value,
     class_names: Vec<String>,
 ) -> Result<bool, RuntimeError> {
-    validate_resident_metadata(value)?;
-    let actual = match value {
-        Value::GpuTensor(handle) => {
-            crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
-                runmat_accelerate_api::handle_precision(handle),
-                handle_integer_type(handle),
-                handle_is_logical(handle),
-            )
-        }
-        _ => Some(class_identity_for_value(value)),
-    };
+    // The shared checked query owns provider coherence. This predicate retains
+    // its historical error-to-false behavior; callable admission reports its
+    // own integrity failures before reaching this predicate.
+    let actual = crate::builtins::introspection::underlying_type::underlying_class_identity_for_value_checked(value).ok();
     Ok(actual.is_some_and(|actual| {
         class_names
             .iter()

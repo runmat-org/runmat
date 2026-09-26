@@ -268,14 +268,8 @@ async fn validator_passes(
             validation::value_is_nonzero_async(value).await?
         }
         V::Nonpositive => validation::value_is_nonpositive_async(value).await?,
-        V::Nonsparse => {
-            validation::dispatch_validator_async("mustBeNonsparse", vec![value.clone()])
-                .await
-                .is_ok()
-        }
-        V::Sparse => validation::dispatch_validator_async("mustBeSparse", vec![value.clone()])
-            .await
-            .is_ok(),
+        V::Nonsparse => validation::value_satisfies_nonsparse_validator(value).unwrap_or(false),
+        V::Sparse => validation::value_satisfies_sparse_validator(value).unwrap_or(false),
         V::ValidVariableName => validation::isvarname_value(value),
         V::UnderlyingType(names) => {
             validation::value_underlying_type_matches(value, names.clone())?

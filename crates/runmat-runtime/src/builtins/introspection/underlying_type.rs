@@ -4,6 +4,8 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
+use crate::builtins::introspection::class::class_identity_for_value;
+#[cfg(test)]
 use crate::builtins::introspection::class::class_name_for_value;
 use crate::builtins::introspection::type_resolvers::{
     is_underlying_type_type, underlying_type_type,
@@ -11,7 +13,6 @@ use crate::builtins::introspection::type_resolvers::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{
     handle_integer_type, handle_is_logical, handle_precision, handle_storage, GpuTensorStorage,
-    ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -244,19 +245,24 @@ pub(crate) fn underlying_type_for_value(value: &Value) -> String {
 }
 
 fn underlying_type_for_value_checked(value: &Value) -> BuiltinResult<String> {
+    underlying_class_identity_for_value_checked(value)
+        .map(|identity| identity.display_name().to_owned())
+}
+
+/// Shared typed underlying-class authority. Public text queries format this
+/// result; validators compare admitted identities without reparsing class tables.
+pub(crate) fn underlying_class_identity_for_value_checked(
+    value: &Value,
+) -> BuiltinResult<runmat_types::ClassIdentity> {
     match value {
-        Value::Tensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
-        Value::SparseTensor(sparse) => Ok(sparse.class_name().to_string()),
-        Value::ComplexTensor(tensor) => Ok(tensor.numeric_dtype().class_name().to_string()),
-        Value::Complex(_, _) | Value::Num(_) => Ok("double".to_string()),
-        Value::Int(iv) => Ok(iv.class_name().to_string()),
-        Value::Bool(_) | Value::LogicalArray(_) => Ok("logical".to_string()),
-        Value::GpuTensor(handle) => gpu_underlying_type(handle),
-        _ => Ok(class_name_for_value(value)),
+        Value::GpuTensor(handle) => gpu_underlying_class_identity(handle),
+        _ => Ok(class_identity_for_value(value)),
     }
 }
 
-fn gpu_underlying_type(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<String> {
+fn gpu_underlying_class_identity(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<runmat_types::ClassIdentity> {
     let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
         .ok_or_else(|| metadata_error("no acceleration provider owns the input handle"))?;
     let integer = handle_integer_type(handle);
@@ -285,26 +291,8 @@ fn gpu_underlying_type(handle: &runmat_accelerate_api::GpuTensorHandle) -> Built
             "resident class metadata contradicts physical storage metadata",
         ));
     }
-    Ok(if logical {
-        "logical"
-    } else if let Some(integer) = integer {
-        match integer {
-            runmat_accelerate_api::IntegerElementType::I8 => "int8",
-            runmat_accelerate_api::IntegerElementType::I16 => "int16",
-            runmat_accelerate_api::IntegerElementType::I32 => "int32",
-            runmat_accelerate_api::IntegerElementType::I64 => "int64",
-            runmat_accelerate_api::IntegerElementType::U8 => "uint8",
-            runmat_accelerate_api::IntegerElementType::U16 => "uint16",
-            runmat_accelerate_api::IntegerElementType::U32 => "uint32",
-            runmat_accelerate_api::IntegerElementType::U64 => "uint64",
-        }
-    } else {
-        match precision.expect("validated floating precision") {
-            ProviderPrecision::F32 => "single",
-            ProviderPrecision::F64 => "double",
-        }
-    }
-    .to_string())
+    crate::builtins::common::gpu_helpers::expected_gpu_class_identity(precision, integer, logical)
+        .ok_or_else(|| metadata_error("physical numeric class is missing"))
 }
 
 fn metadata_error(detail: &str) -> RuntimeError {
@@ -319,13 +307,18 @@ fn metadata_error(detail: &str) -> RuntimeError {
         .build()
 }
 
+#[cfg(test)]
 pub(crate) fn underlying_type_matches(value: &Value, typename: &str) -> bool {
     underlying_type_matches_checked(value, typename).unwrap_or(false)
 }
 
 fn underlying_type_matches_checked(value: &Value, typename: &str) -> BuiltinResult<bool> {
     let requested = typename.trim();
-    Ok(!requested.is_empty() && underlying_type_for_value_checked(value)? == requested)
+    if requested.is_empty() {
+        return Ok(false);
+    }
+    let actual = underlying_class_identity_for_value_checked(value)?;
+    Ok(runmat_types::ClassIdentity::new(requested).is_ok_and(|requested| requested == actual))
 }
 
 fn parse_type_name(value: &Value) -> BuiltinResult<String> {

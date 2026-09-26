@@ -1,5 +1,8 @@
 use super::*;
 mod class_shape;
+mod admission;
+mod ownership;
+mod text_shape;
 use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
 use crate::builtins::common::test_support;
 use runmat_value::{
