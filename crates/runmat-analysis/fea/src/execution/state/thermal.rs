@@ -219,6 +219,43 @@ mod tests {
     }
 
     #[test]
+    fn result_identity_binds_every_retained_field_and_ignores_presentation() {
+        let (_, _, result) = solved_thermal();
+        let identity = result.source_result_identity().unwrap();
+        let mut negative_zero = result.clone();
+        negative_zero.time_points_s[0] = -0.0;
+        assert!(negative_zero.validate_complete().is_err());
+        assert!(negative_zero.canonical_bytes().is_err());
+        assert!(negative_zero.source_result_identity().is_err());
+        for kind in 0..4 {
+            for sample in 0..result.time_points_s.len() {
+                let mut changed = result.clone();
+                let fields = match kind {
+                    0 => &mut changed.temperature_snapshots,
+                    1 => &mut changed.temperature_gradient_snapshots,
+                    2 => &mut changed.heat_flux_snapshots,
+                    _ => &mut changed.energy_storage_rate_snapshots,
+                };
+                let runmat_analysis_core::AnalysisFieldValues::HostF64(values) =
+                    &mut fields[sample].values
+                else {
+                    panic!("expected retained host field")
+                };
+                values[0] += 0.25;
+                assert_ne!(identity, changed.source_result_identity().unwrap());
+            }
+        }
+        let mut presentation = result.clone();
+        for diagnostic in &mut presentation.run.diagnostics {
+            diagnostic.message = "alternate presentation".into();
+        }
+        assert_eq!(identity, presentation.source_result_identity().unwrap());
+        let portable =
+            FeaThermalRunResult::from_canonical_bytes(&result.canonical_bytes().unwrap()).unwrap();
+        assert_eq!(identity, portable.source_result_identity().unwrap());
+    }
+
+    #[test]
     fn completed_thermal_result_publishes_immutable_topology_bound_terminal_state() {
         let (model, mesh, result) = solved_thermal();
         let state = CanonicalSemanticState::from_thermal_result(&model, &mesh, &result).unwrap();

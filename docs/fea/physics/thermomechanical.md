@@ -335,6 +335,23 @@ are not qualified by these tests. Production admission remains closed.
 
 ## Shared numerical transport memory evidence
 
+Thermal source-result identity binds shared recovered-field identities for every retained
+temperature, gradient, flux and storage-rate-density sample. Fields are identified one at a time
+from borrowed storage; the final identity envelope contains field identities and numerical
+metadata, not all history values. Snapshot identifiers and physical times remain bound. Shared
+owned-field construction uses the same validating identity function without hashing twice.
+
+This intentionally changes experimental thermal source-result identities; there is no legacy
+identity fallback. Shared recovered-field canonical limits apply to each field, and negative-zero
+sample times are rejected consistently. A thermal result may fit its monolithic serialization
+limit yet exceed a shared per-field identity limit; publication fails closed in that case. This
+does not expand the qualified large-field envelope. The canonical serializer still materializes
+one field at a time, and result manifests/partial terminal-state publication remain unfinished.
+The release `thermal_history_memory` diagnostic separately measured identity-construction growth
+above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
+connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature
+error). These are measured Rust-heap cases, not complete producer residency bounds.
+
 Numerical-object chunk preparation hashes borrowed partitions incrementally rather than
 concatenating them into an additional payload buffer. Closure verification checks existing chunks,
 partition digests and the complete digest directly, without gathering and rechunking. Canonical

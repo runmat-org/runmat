@@ -28,6 +28,26 @@ fn temperature_field(label: &str) -> AnalysisField {
     AnalysisField::host_f64(label, vec![4], vec![300.0, 301.0, 302.0, 303.0])
 }
 
+#[test]
+fn borrowed_field_identity_matches_owned_contract_and_rejects_bad_storage() {
+    let definition = temperature_definition("temperature");
+    let storage = temperature_field("temperature");
+    let sample = RecoveredFieldSample::TimeSeconds(0.5);
+    let identity = RecoveredField::identity_for(&definition, sample, &storage).unwrap();
+    let owned = RecoveredField::new(definition.clone(), sample, storage.clone()).unwrap();
+    assert_eq!(identity, owned.identity());
+    let roundtrip =
+        RecoveredField::from_canonical_bytes(&owned.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(roundtrip, owned);
+    let mut malformed = storage.clone();
+    malformed.field_id = "other".into();
+    assert!(RecoveredField::identity_for(&definition, sample, &malformed).is_err());
+    malformed = storage;
+    malformed.shape = vec![2, 2];
+    assert!(RecoveredField::identity_for(&definition, sample, &malformed).is_err());
+    assert!(RecoveredField::new(definition, sample, malformed).is_err());
+}
+
 fn source_result() -> crate::execution::SolverResultIdentity {
     let sequence = crate::execution::SequenceIdentity::new(Digest::sha256("sequence")).unwrap();
     let step = crate::execution::StepIdentity::new(sequence, Digest::sha256("step")).unwrap();

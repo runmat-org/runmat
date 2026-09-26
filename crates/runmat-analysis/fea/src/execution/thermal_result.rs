@@ -15,6 +15,9 @@ use std::collections::BTreeSet;
 const PREFIX: &[u8] = b"runmat-thermal-solver-result/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
 
+#[path = "thermal_result_fields.rs"]
+mod fields;
+
 impl FeaThermalRunResult {
     pub fn canonical_bytes(&self) -> AnalysisExecutionResult<Vec<u8>> {
         self.validate_complete()?;
@@ -32,17 +35,15 @@ impl FeaThermalRunResult {
     }
     pub fn source_result_identity(&self) -> AnalysisExecutionResult<SolverResultIdentity> {
         self.validate_complete()?;
+        let fields = fields::retained_field_identities(self)?;
         // Numerical identity excludes presentation diagnostics and execution telemetry.
         let content = encode_contract(
             PREFIX,
-            "thermal-solver-result-content",
+            "thermal-solver-result-field-content",
             &(
                 &self.run.identity,
                 &self.time_points_s,
-                &self.temperature_snapshots,
-                &self.temperature_gradient_snapshots,
-                &self.heat_flux_snapshots,
-                &self.energy_storage_rate_snapshots,
+                &fields,
                 &self.residual_norms,
                 self.reference_temperature_k,
                 self.topology_digest,
@@ -93,7 +94,10 @@ impl FeaThermalRunResult {
             || initial.minimum_temperature_k <= 0.0
             || !initial.maximum_temperature_k.is_finite()
             || initial.maximum_temperature_k < initial.minimum_temperature_k
-            || self.time_points_s.iter().any(|x| !x.is_finite())
+            || self
+                .time_points_s
+                .iter()
+                .any(|x| !x.is_finite() || x.to_bits() == (-0.0_f64).to_bits())
             || self.time_points_s.windows(2).any(|pair| pair[1] <= pair[0])
             || self.residual_norms.len() != residuals
             || self

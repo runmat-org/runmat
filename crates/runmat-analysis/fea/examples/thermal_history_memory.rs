@@ -151,6 +151,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let growth = peak_allocator::end_measurement().saturating_sub(baseline);
     let result = result?;
     result.validate_complete()?;
+    // Separately measure identity construction above the already retained result baseline.
+    // This is not a bound on total producer residency or canonical result serialization.
+    let identity_baseline = peak_allocator::begin_measurement();
+    let identity = result.source_result_identity();
+    let identity_growth = peak_allocator::end_measurement().saturating_sub(identity_baseline);
+    identity?;
+    println!("source_identity_rust_heap_growth_bytes={identity_growth}");
     if result.run.spatial_projection_evidence.len() != expected_evidence
         || result
             .run
