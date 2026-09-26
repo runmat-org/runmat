@@ -41,6 +41,7 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
     );
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::RecoverField,
             host: &host,
             inputs: &inputs,
@@ -74,6 +75,7 @@ pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
     substituted[2].manifest.logical_identity = digest("substituted-mesh");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::RecoverField,
             host: &host,
             inputs: &substituted,

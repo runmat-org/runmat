@@ -55,13 +55,15 @@ fn native_kernel_executes_connector_observation_admitted_by_portable_preparation
     .expect("portable preparation must admit the connector observation");
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &prepared.host,
             inputs: &prepared.inputs,
         })
         .expect("native worker must execute the admitted connector observation");
-    let result = StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload)
-        .expect("canonical solver result");
+    let result =
+        StructuralLinearWorkloadResult::from_canonical_bytes(outputs[0].whole_payload().unwrap())
+            .expect("canonical solver result");
     let connector = result
         .run
         .structural_connector_result
@@ -122,12 +124,15 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
 
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &prepared.host,
             inputs: &prepared.inputs,
         })
         .unwrap();
-    let result = StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
+    let result =
+        StructuralLinearWorkloadResult::from_canonical_bytes(outputs[0].whole_payload().unwrap())
+            .unwrap();
     assert!(matches!(
         result.constraint_result.topology,
         CanonicalStructuralTopologyIdentity::Explicit { .. }
@@ -179,6 +184,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     );
     let recovered_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::RecoverField,
             host: &recovery_host,
             inputs: &recovery_inputs,
@@ -209,6 +215,7 @@ fn native_kernel_executes_explicit_structural_workload_without_mesh_input() {
     substituted_recovery_inputs[1] = substituted_invocation.clone();
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::RecoverField,
             host: &recovery_host,
             inputs: &substituted_recovery_inputs,

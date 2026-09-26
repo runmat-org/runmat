@@ -1,72 +1,25 @@
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisResultIdentity,
-    AnalysisWorkKind, DEFAULT_ANALYSIS_CHUNK_BYTES,
+    AnalysisNumericalObjectKind, AnalysisResultIdentity, AnalysisWorkKind,
 };
 use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
-use runmat_execution::Digest;
 use runmat_execution_artifact::cache::{CacheExport, CacheImport};
 use runmat_execution_artifact::object::ObjectInventoryLimits;
-use runmat_execution_artifact::{ObjectNamespace, ProgramExecutionRequest};
+use runmat_execution_artifact::ProgramExecutionRequest;
 
 use crate::{
-    import_analysis_objects, prepare_analysis_objects, prepare_partitioned_analysis_objects,
+    import_analysis_objects,
     response::{prepare_analysis_output_set, AnalysisOutputSet},
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnalysisKernelOutput {
-    pub kind: AnalysisNumericalObjectKind,
-    pub logical_identity: Digest,
-    pub payload: Vec<u8>,
-    pub partitions: Vec<AnalysisKernelOutputPartition>,
-}
-
-impl AnalysisKernelOutput {
-    pub fn whole(
-        kind: AnalysisNumericalObjectKind,
-        logical_identity: Digest,
-        payload: Vec<u8>,
-    ) -> Self {
-        Self {
-            kind,
-            logical_identity,
-            payload,
-            partitions: Vec::new(),
-        }
-    }
-
-    pub fn partitioned(
-        kind: AnalysisNumericalObjectKind,
-        logical_identity: Digest,
-        partitions: Vec<AnalysisKernelOutputPartition>,
-    ) -> Self {
-        Self {
-            kind,
-            logical_identity,
-            payload: Vec::new(),
-            partitions,
-        }
-    }
-
-    fn is_valid(&self) -> bool {
-        (self.partitions.is_empty() && !self.payload.is_empty())
-            || (self.payload.is_empty()
-                && !self.partitions.is_empty()
-                && self
-                    .partitions
-                    .iter()
-                    .all(|partition| !partition.payload.is_empty()))
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct AnalysisKernelOutputPartition {
-    pub logical_identity: Digest,
-    pub payload: Vec<u8>,
-}
+mod output;
+pub use output::{
+    AnalysisKernelOutput, AnalysisKernelOutputPartition, AnalysisKernelPayload,
+    AnalysisOutputPolicy,
+};
 
 pub struct AnalysisKernelInvocation<'a> {
+    pub output_policy: AnalysisOutputPolicy,
     pub kind: AnalysisWorkKind,
     pub host: &'a AnalysisHostWorkload,
     pub inputs: &'a [PreparedAnalysisObjects],
@@ -112,15 +65,7 @@ where
     S: CacheImport + CacheExport,
     K: AnalysisKernel + ?Sized,
 {
-    if chunk_bytes == 0
-        || limits.max_objects == 0
-        || limits.max_object_bytes == 0
-        || limits.max_total_bytes == 0
-    {
-        return Err(AnalysisBridgeError::Invalid(
-            "analysis execution limits must be non-zero".into(),
-        ));
-    }
+    let output_policy = AnalysisOutputPolicy::new(chunk_bytes, limits)?;
     let host = AnalysisHostWorkload::from_program_request(request, store)?;
     let roots = input_roots(request)?;
     let inputs = host
@@ -140,22 +85,6 @@ where
             )
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    let kernel_outputs = kernel.execute(AnalysisKernelInvocation {
-        kind: host.workload.kind,
-        host: &host,
-        inputs: &inputs,
-    })?;
-    if kernel_outputs.len() != host.workload.outputs.len()
-        || kernel_outputs
-            .iter()
-            .zip(&host.workload.outputs)
-            .any(|(actual, expected)| actual.kind != *expected || !actual.is_valid())
-    {
-        return Err(AnalysisBridgeError::Invalid(
-            "analysis kernel outputs differ from the workload contract".into(),
-        ));
-    }
-
     // Result publication consumes the source numerical plan as audit evidence. It is not the
     // publication task's execution plan and therefore cannot govern the receipt output envelope.
     let resource_plan_inputs = if host.workload.kind == AnalysisWorkKind::PublishResult {
@@ -181,6 +110,23 @@ where
         })
         .transpose()?;
 
+    let kernel_outputs = kernel.execute(AnalysisKernelInvocation {
+        output_policy,
+        kind: host.workload.kind,
+        host: &host,
+        inputs: &inputs,
+    })?;
+    if kernel_outputs.len() != host.workload.outputs.len()
+        || kernel_outputs
+            .iter()
+            .zip(&host.workload.outputs)
+            .any(|(actual, expected)| actual.kind != *expected || !actual.is_valid())
+    {
+        return Err(AnalysisBridgeError::Invalid(
+            "analysis kernel outputs differ from the workload contract".into(),
+        ));
+    }
+
     let mut outputs = Vec::with_capacity(kernel_outputs.len());
     let mut roots = Vec::with_capacity(kernel_outputs.len());
     let mut result_objects = Vec::new();
@@ -195,34 +141,10 @@ where
                 "analysis output has no envelope in its resource plan".into(),
             ));
         }
-        let bounded_chunk_bytes = chunk_bytes.min(DEFAULT_ANALYSIS_CHUNK_BYTES);
-        let prepared = if output.partitions.is_empty() {
-            prepare_analysis_objects(
-                output.kind,
-                output.logical_identity,
-                &output.payload,
-                bounded_chunk_bytes,
-                ObjectNamespace::ResultValue,
-                limits,
-            )?
-        } else {
-            let partitions = output
-                .partitions
-                .iter()
-                .map(|partition| AnalysisPayloadPartition {
-                    logical_identity: partition.logical_identity,
-                    payload: &partition.payload,
-                })
-                .collect::<Vec<_>>();
-            prepare_partitioned_analysis_objects(
-                output.kind,
-                output.logical_identity,
-                &partitions,
-                bounded_chunk_bytes,
-                ObjectNamespace::ResultValue,
-                limits,
-            )?
-        };
+        let prepared = output.into_prepared(
+            output_policy.chunk_bytes(),
+            output_policy.inventory_limits(),
+        )?;
         if let Some(admitted) = admitted_output {
             crate::object::validate_prepared_output_resource_facts(&prepared, admitted)?;
         }

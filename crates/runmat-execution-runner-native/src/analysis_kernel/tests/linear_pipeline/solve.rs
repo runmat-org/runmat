@@ -106,12 +106,15 @@ pub(super) fn execute() -> SolvedPipeline {
     .unwrap();
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &prepared.host,
             inputs: &prepared.inputs,
         })
         .unwrap();
-    let result = StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
+    let result =
+        StructuralLinearWorkloadResult::from_canonical_bytes(outputs[0].whole_payload().unwrap())
+            .unwrap();
     assert!(!result.run.fields_are_empty());
     assert!(result.linearization.is_some());
     let constraint_plan =
@@ -131,6 +134,7 @@ pub(super) fn execute() -> SolvedPipeline {
     substituted_plan[2].manifest.logical_identity = digest("substituted-constraint-plan");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &prepared.host,
             inputs: &substituted_plan,

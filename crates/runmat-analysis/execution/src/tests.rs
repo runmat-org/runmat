@@ -1003,6 +1003,38 @@ fn observation_history_import_reads_only_the_requested_retained_sample() {
 
 struct FieldKernel;
 
+struct PreparedFieldKernel;
+struct TamperedPreparedFieldKernel;
+impl AnalysisKernel for TamperedPreparedFieldKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        let mut outputs = PreparedFieldKernel.execute(invocation)?;
+        if let AnalysisKernelPayload::Prepared(objects) = &mut outputs[0].payload {
+            objects.objects[1].bytes[0] ^= 1;
+        }
+        Ok(outputs)
+    }
+}
+impl AnalysisKernel for PreparedFieldKernel {
+    fn execute(
+        &self,
+        invocation: AnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        assert_eq!(invocation.output_policy.chunk_bytes(), 6);
+        let objects = prepare_analysis_objects(
+            AnalysisNumericalObjectKind::Field,
+            digest("field-identity"),
+            b"canonical field bytes",
+            invocation.output_policy.chunk_bytes(),
+            ObjectNamespace::ResultValue,
+            invocation.output_policy.inventory_limits(),
+        )?;
+        Ok(vec![AnalysisKernelOutput::prepared(objects)])
+    }
+}
+
 impl AnalysisKernel for FieldKernel {
     fn execute(
         &self,
@@ -1010,12 +1042,11 @@ impl AnalysisKernel for FieldKernel {
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::Solve);
         assert_eq!(invocation.inputs[0].payload(), b"canonical mesh bytes");
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::Field,
-            logical_identity: digest("field-identity"),
-            payload: b"canonical field bytes".to_vec(),
-            partitions: Vec::new(),
-        }])
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::Field,
+            digest("field-identity"),
+            b"canonical field bytes".to_vec(),
+        )])
     }
 }
 
@@ -1062,6 +1093,19 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     let invocation = host.prepare_program_request(revision(), &[root]).unwrap();
     invocation.write_to(&mut store).unwrap();
     let request = invocation.into_parts().0;
+    let before = store.0.clone();
+    assert!(execute_serial_analysis(
+        &request,
+        &mut store,
+        &TamperedPreparedFieldKernel,
+        6,
+        ObjectInventoryLimits::default()
+    )
+    .is_err());
+    assert_eq!(
+        before, store.0,
+        "invalid prepared output must not publish objects"
+    );
     let completed = execute_serial_analysis(
         &request,
         &mut store,
@@ -1071,6 +1115,15 @@ fn serial_execution_imports_closed_inputs_and_publishes_closed_results() {
     )
     .unwrap();
     assert_eq!(completed.outputs[0].payload(), b"canonical field bytes");
+    let prepared_completed = execute_serial_analysis(
+        &request,
+        &mut store,
+        &PreparedFieldKernel,
+        6,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(completed, prepared_completed);
     let response = AnalysisHostResponse::completed(&host, &completed).unwrap();
     response.validate_against(&host, &completed).unwrap();
     assert_eq!(completed.output_set.outputs.len(), 1);
@@ -1163,18 +1216,16 @@ impl AnalysisKernel for StructuralResultKernel {
             )?;
         assert_eq!(receipt.source_result, result_identity);
         Ok(vec![
-            AnalysisKernelOutput {
-                kind: AnalysisNumericalObjectKind::SolverResult,
-                logical_identity: result_identity.digest(),
-                payload: self.0.clone(),
-                partitions: Vec::new(),
-            },
-            AnalysisKernelOutput {
-                kind: AnalysisNumericalObjectKind::NumericalReceipt,
-                logical_identity: receipt.identity().digest(),
-                payload: receipt.canonical_bytes()?,
-                partitions: Vec::new(),
-            },
+            AnalysisKernelOutput::whole(
+                AnalysisNumericalObjectKind::SolverResult,
+                result_identity.digest(),
+                self.0.clone(),
+            ),
+            AnalysisKernelOutput::whole(
+                AnalysisNumericalObjectKind::NumericalReceipt,
+                receipt.identity().digest(),
+                receipt.canonical_bytes()?,
+            ),
         ])
     }
 }
@@ -1305,15 +1356,13 @@ impl AnalysisKernel for AccuracyKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::EvaluateAccuracy);
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::AccuracyReport,
-            logical_identity: self.0.identity().digest(),
-            payload: self
-                .0
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::AccuracyReport,
+            self.0.identity().digest(),
+            self.0
                 .canonical_bytes()
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-            partitions: Vec::new(),
-        }])
+        )])
     }
 }
 
@@ -1325,12 +1374,11 @@ impl AnalysisKernel for PublicationKernel {
         invocation: AnalysisKernelInvocation<'_>,
     ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
         assert_eq!(invocation.kind, AnalysisWorkKind::PublishResult);
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::PublishedResult,
-            logical_identity: self.0.identity().digest(),
-            payload: self.0.canonical_bytes()?,
-            partitions: Vec::new(),
-        }])
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::PublishedResult,
+            self.0.identity().digest(),
+            self.0.canonical_bytes()?,
+        )])
     }
 }
 
@@ -1360,12 +1408,11 @@ impl AnalysisKernel for StateProjectionKernel {
             &request,
             &result.run.fields,
         )?;
-        Ok(vec![AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::SemanticState,
-            logical_identity: state.identity.digest(),
-            payload: state.canonical_bytes()?,
-            partitions: Vec::new(),
-        }])
+        Ok(vec![AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::SemanticState,
+            state.identity.digest(),
+            state.canonical_bytes()?,
+        )])
     }
 }
 

@@ -98,25 +98,10 @@ fn checkpoint_host(inputs: &[PreparedAnalysisObjects]) -> AnalysisHostWorkload {
 }
 
 fn prepare_kernel_output(output: &AnalysisKernelOutput) -> PreparedAnalysisObjects {
-    let partitions = output
-        .partitions
-        .iter()
-        .map(
-            |partition| runmat_analysis_fea::execution::AnalysisPayloadPartition {
-                logical_identity: partition.logical_identity,
-                payload: &partition.payload,
-            },
-        )
-        .collect::<Vec<_>>();
-    runmat_analysis_execution::prepare_partitioned_analysis_objects(
-        output.kind,
-        output.logical_identity,
-        &partitions,
-        256,
-        ObjectNamespace::ResultValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap()
+    output
+        .clone()
+        .into_prepared(256, ObjectInventoryLimits::default())
+        .unwrap()
 }
 
 fn history_observation() -> runmat_analysis_core::ObservationRequest {
@@ -281,6 +266,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let first_host = checkpoint_host(&first_inputs);
     let first_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                256,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &first_host,
             inputs: &first_inputs,
@@ -315,6 +305,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let second_host = checkpoint_host(&second_inputs);
     let second_output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                256,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &second_host,
             inputs: &second_inputs,
@@ -358,6 +353,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     let understated_host = checkpoint_host(&understated_inputs);
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                256,
+                ObjectInventoryLimits::default()
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &understated_host,
             inputs: &understated_inputs,
@@ -368,6 +368,11 @@ fn native_kernel_advances_exact_history_checkpoint_lineage() {
     substituted_inputs[1] = prepare_sample(&first_sample);
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                256,
+                ObjectInventoryLimits::default()
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::CheckpointObservationHistory,
             host: &second_host,
             inputs: &substituted_inputs,

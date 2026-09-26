@@ -579,6 +579,11 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
     substituted_inputs[1] = understated_objects;
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                4096,
+                ObjectInventoryLimits::default()
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::AssembleStructuralTransientResult,
             host: &result_task.host,
             inputs: &substituted_inputs,
@@ -603,6 +608,11 @@ fn native_kernel_executes_a_two_block_physical_transient_chain() {
     .unwrap();
     let error = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                4096,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::AssembleStructuralTransientResult,
             host: &result_task.host,
             inputs: &substituted_inputs,

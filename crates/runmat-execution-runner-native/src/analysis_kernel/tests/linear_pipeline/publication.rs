@@ -45,12 +45,15 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     );
     let accuracy_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::EvaluateAccuracy,
             host: &accuracy_host,
             inputs: &accuracy_inputs,
         })
         .unwrap();
-    let accuracy = AccuracyArtifact::from_canonical_bytes(&accuracy_outputs[0].payload).unwrap();
+    let accuracy =
+        AccuracyArtifact::from_canonical_bytes(accuracy_outputs[0].whole_payload().unwrap())
+            .unwrap();
     assert_eq!(
         accuracy.evaluation().report().status,
         AccuracyStatus::Satisfied
@@ -61,7 +64,7 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     let accuracy_artifact = runmat_analysis_execution::prepare_analysis_objects(
         accuracy_outputs[0].kind,
         accuracy_outputs[0].logical_identity,
-        &accuracy_outputs[0].payload,
+        accuracy_outputs[0].whole_payload().unwrap(),
         4096,
         ObjectNamespace::ResultValue,
         ObjectInventoryLimits::default(),
@@ -128,13 +131,16 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     );
     let publication_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::PublishResult,
             host: &publication_host,
             inputs: &publication_inputs,
         })
         .unwrap();
-    let published =
-        PublishedAnalysisResult::from_canonical_bytes(&publication_outputs[0].payload).unwrap();
+    let published = PublishedAnalysisResult::from_canonical_bytes(
+        publication_outputs[0].whole_payload().unwrap(),
+    )
+    .unwrap();
     assert_eq!(published.source_result, solved.source_result);
     assert_eq!(published.source_observations, Some(observations.identity));
     assert_eq!(published.source_accuracy, accuracy.identity());
@@ -143,6 +149,7 @@ pub(super) fn execute(solved: &SolvedPipeline, observations: &ObservationArtifac
     substituted_accuracy_inputs[2].manifest.logical_identity = digest("substituted-observations");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::EvaluateAccuracy,
             host: &accuracy_host,
             inputs: &substituted_accuracy_inputs,

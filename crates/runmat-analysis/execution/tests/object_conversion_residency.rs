@@ -4,6 +4,7 @@ mod counting;
 
 use runmat_analysis_execution::{
     prepare_partitioned_analysis_objects, projected_chunked_output_resource_facts,
+    AnalysisKernelOutput,
 };
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisPayloadPartition, AnalysisPayloadPartitionPlan,
@@ -52,7 +53,11 @@ fn chunk_conversion_stays_within_planned_requested_heap_and_preserves_names() {
             CHUNK_BYTES,
             namespace,
             ObjectInventoryLimits::default(),
-        );
+        )
+        .and_then(|prepared| {
+            AnalysisKernelOutput::prepared(prepared)
+                .into_prepared(CHUNK_BYTES, ObjectInventoryLimits::default())
+        });
         let growth = counting::end_measurement().saturating_sub(baseline);
         let prepared = prepared.unwrap();
         let reserved = facts.construction_resident_bytes_admission_budget.0;

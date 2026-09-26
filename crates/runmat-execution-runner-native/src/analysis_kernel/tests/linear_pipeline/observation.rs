@@ -170,6 +170,7 @@ pub(super) fn execute(
         );
         let outputs = NativeAnalysisKernel
             .execute(AnalysisKernelInvocation {
+                output_policy: output_policy(),
                 kind: AnalysisWorkKind::EvaluateObservationPartition,
                 host: &host,
                 inputs: &inputs,
@@ -235,6 +236,7 @@ pub(super) fn execute(
     );
     let reduction_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::ReduceObservationPartitions,
             host: &reduction_host,
             inputs: &reduction_inputs,
@@ -242,7 +244,7 @@ pub(super) fn execute(
         .unwrap();
     let distributed_result =
         runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
-            &reduction_outputs[0].payload,
+            reduction_outputs[0].whole_payload().unwrap(),
         )
         .unwrap();
     assert_eq!(
@@ -301,6 +303,7 @@ pub(super) fn execute(
     );
     let assembly_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::AssembleObservations,
             host: &assembly_host,
             inputs: &assembly_inputs,
@@ -350,6 +353,7 @@ fn assert_substituted_resource_plan_rejected(
     *substituted_inputs.last_mut().unwrap() = resource_plan_objects(&substituted_plan);
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind,
             host,
             inputs: &substituted_inputs,

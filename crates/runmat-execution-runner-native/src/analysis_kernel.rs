@@ -558,12 +558,11 @@ fn execute_result_publication(
     }
     let result =
         PublishedAnalysisResult::new(&request, &accuracy, &resource_plan, &resource_usage)?;
-    Ok(vec![AnalysisKernelOutput {
-        kind: AnalysisNumericalObjectKind::PublishedResult,
-        logical_identity: result.identity().digest(),
-        payload: result.canonical_bytes()?,
-        partitions: Vec::new(),
-    }])
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::PublishedResult,
+        result.identity().digest(),
+        result.canonical_bytes()?,
+    )])
 }
 
 fn execute_accuracy_evaluation(
@@ -627,14 +626,13 @@ fn execute_accuracy_evaluation(
     let artifact =
         runmat_analysis_fea::results::accuracy::evaluate_accuracy_artifact(&request, evidence)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    Ok(vec![AnalysisKernelOutput {
-        kind: AnalysisNumericalObjectKind::AccuracyReport,
-        logical_identity: artifact.identity().digest(),
-        payload: artifact
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::AccuracyReport,
+        artifact.identity().digest(),
+        artifact
             .canonical_bytes()
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
-        partitions: Vec::new(),
-    }])
+    )])
 }
 
 fn execute_structural_linear(
@@ -849,18 +847,16 @@ fn execute_structural_linear(
         StructuralLinearNumericalReceiptArtifact::new(invocation.host.workload.identity, &result)?;
     let result_identity = numerical_receipt.source_result;
     Ok(vec![
-        AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::SolverResult,
-            logical_identity: result_identity.digest(),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::SolverResult,
+            result_identity.digest(),
             payload,
-            partitions: Vec::new(),
-        },
-        AnalysisKernelOutput {
-            kind: AnalysisNumericalObjectKind::NumericalReceipt,
-            logical_identity: numerical_receipt.identity().digest(),
-            payload: numerical_receipt.canonical_bytes()?,
-            partitions: Vec::new(),
-        },
+        ),
+        AnalysisKernelOutput::whole(
+            AnalysisNumericalObjectKind::NumericalReceipt,
+            numerical_receipt.identity().digest(),
+            numerical_receipt.canonical_bytes()?,
+        ),
     ])
 }
 
@@ -948,12 +944,11 @@ fn execute_state_publication(
             )?
         }
     };
-    Ok(vec![AnalysisKernelOutput {
-        kind: AnalysisNumericalObjectKind::SemanticState,
-        logical_identity: state.identity.digest(),
-        payload: state.canonical_bytes()?,
-        partitions: Vec::new(),
-    }])
+    Ok(vec![AnalysisKernelOutput::whole(
+        AnalysisNumericalObjectKind::SemanticState,
+        state.identity.digest(),
+        state.canonical_bytes()?,
+    )])
 }
 
 fn unique_input<'a>(

@@ -248,7 +248,8 @@ pub use semantic_state_object_access::{
 };
 pub use serial::{
     execute_serial_analysis, AnalysisKernel, AnalysisKernelInvocation, AnalysisKernelOutput,
-    AnalysisKernelOutputPartition, CompletedAnalysisWorkload,
+    AnalysisKernelOutputPartition, AnalysisKernelPayload, AnalysisOutputPolicy,
+    CompletedAnalysisWorkload,
 };
 pub use signal_input::{validate_signal_input_payload, ResolvedSignalArtifact};
 pub use signal_materialization::{

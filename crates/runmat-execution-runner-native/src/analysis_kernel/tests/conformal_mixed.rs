@@ -138,12 +138,15 @@ fn native_kernel_executes_conformal_mixed_structural_workload() {
     .unwrap();
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &prepared.host,
             inputs: &prepared.inputs,
         })
         .unwrap();
-    let result = StructuralLinearWorkloadResult::from_canonical_bytes(&outputs[0].payload).unwrap();
+    let result =
+        StructuralLinearWorkloadResult::from_canonical_bytes(outputs[0].whole_payload().unwrap())
+            .unwrap();
     assert!(result
         .run
         .diagnostics

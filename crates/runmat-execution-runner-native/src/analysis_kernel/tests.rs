@@ -41,36 +41,18 @@ fn revision() -> ProgramRevision {
 fn prepare_kernel_output(
     output: &AnalysisKernelOutput,
 ) -> runmat_analysis_execution::PreparedAnalysisObjects {
-    if output.partitions.is_empty() {
-        return runmat_analysis_execution::prepare_analysis_objects(
-            output.kind,
-            output.logical_identity,
-            &output.payload,
-            4096,
-            ObjectNamespace::ResultValue,
-            ObjectInventoryLimits::default(),
+    output
+        .clone()
+        .into_prepared(
+            output_policy().chunk_bytes(),
+            output_policy().inventory_limits(),
         )
-        .unwrap();
-    }
-    let partitions = output
-        .partitions
-        .iter()
-        .map(
-            |partition| runmat_analysis_fea::execution::AnalysisPayloadPartition {
-                logical_identity: partition.logical_identity,
-                payload: &partition.payload,
-            },
-        )
-        .collect::<Vec<_>>();
-    runmat_analysis_execution::prepare_partitioned_analysis_objects(
-        output.kind,
-        output.logical_identity,
-        &partitions,
-        4096,
-        ObjectNamespace::ResultValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap()
+        .unwrap()
+}
+
+fn output_policy() -> runmat_analysis_execution::AnalysisOutputPolicy {
+    runmat_analysis_execution::AnalysisOutputPolicy::new(4096, ObjectInventoryLimits::default())
+        .unwrap()
 }
 
 fn test_host_for_inputs(

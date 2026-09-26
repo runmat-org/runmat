@@ -279,6 +279,11 @@ fn assert_substituted_inputs_are_rejected(
     substituted_resource_inputs[resource_index] = resource_objects;
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                4096,
+                ObjectInventoryLimits::default()
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::SolveStructuralBucklingModes,
             host: &prepared.host,
             inputs: &substituted_resource_inputs,
@@ -295,6 +300,11 @@ fn assert_substituted_inputs_are_rejected(
         .logical_identity = digest("other-prestress");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: runmat_analysis_execution::AnalysisOutputPolicy::new(
+                4096,
+                ObjectInventoryLimits::default()
+            )
+            .unwrap(),
             kind: AnalysisWorkKind::SolveStructuralBucklingModes,
             host: &prepared.host,
             inputs: &substituted_state_inputs,

@@ -33,12 +33,15 @@ pub(super) fn execute(solved: &SolvedPipeline) {
     );
     let state_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::PublishState,
             host: &state_host,
             inputs: &state_inputs,
         })
         .unwrap();
-    let state = CanonicalSemanticState::from_canonical_bytes(&state_outputs[0].payload).unwrap();
+    let state =
+        CanonicalSemanticState::from_canonical_bytes(state_outputs[0].whole_payload().unwrap())
+            .unwrap();
     assert_eq!(
         state.payload.fields().unwrap()[0].field_id,
         runmat_analysis_fea::FEA_FIELD_STRUCTURAL_DISPLACEMENT
@@ -82,13 +85,14 @@ pub(super) fn execute(solved: &SolvedPipeline) {
     );
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::PublishState,
             host: &publication_host,
             inputs: &inputs,
         })
         .unwrap();
     let linearization_state =
-        CanonicalSemanticState::from_canonical_bytes(&outputs[0].payload).unwrap();
+        CanonicalSemanticState::from_canonical_bytes(outputs[0].whole_payload().unwrap()).unwrap();
     let linearization = linearization_state
         .payload
         .structural_linearization()
@@ -134,13 +138,16 @@ pub(super) fn execute(solved: &SolvedPipeline) {
     .unwrap();
     let warm_outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &warm_prepared.host,
             inputs: &warm_prepared.inputs,
         })
         .unwrap();
-    let warm_result =
-        StructuralLinearWorkloadResult::from_canonical_bytes(&warm_outputs[0].payload).unwrap();
+    let warm_result = StructuralLinearWorkloadResult::from_canonical_bytes(
+        warm_outputs[0].whole_payload().unwrap(),
+    )
+    .unwrap();
     assert_eq!(
         solved
             .result
@@ -158,6 +165,7 @@ pub(super) fn execute(solved: &SolvedPipeline) {
     substituted[4].manifest.logical_identity = digest("substituted-state");
     assert!(NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::Solve,
             host: &warm_prepared.host,
             inputs: &substituted,
@@ -196,6 +204,7 @@ fn rejects_structural_bytes_for_thermal_publication(solved: &SolvedPipeline) {
     );
     let error = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::PublishState,
             host: &host,
             inputs: &inputs,
@@ -272,6 +281,7 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
     );
     let output = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
             kind: AnalysisWorkKind::PublishState,
             host: &host,
             inputs: &inputs,
@@ -280,7 +290,7 @@ fn publishes_retained_thermal_result(solved: &SolvedPipeline) {
     assert_eq!(output.len(), 1);
     assert_eq!(output[0].logical_identity, expected.identity.digest());
     assert_eq!(
-        CanonicalSemanticState::from_canonical_bytes(&output[0].payload).unwrap(),
+        CanonicalSemanticState::from_canonical_bytes(output[0].whole_payload().unwrap()).unwrap(),
         expected
     );
 }

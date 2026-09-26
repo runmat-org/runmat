@@ -17,6 +17,7 @@ use runmat_execution_artifact::{ArtifactAccess, LogicalObject, ObjectDescriptor,
 use crate::{AnalysisBridgeError, AnalysisBridgeResult};
 
 mod conversion;
+mod validation;
 use conversion::logical_object;
 pub(crate) use conversion::prepare_chunked_analysis_objects;
 pub use conversion::{

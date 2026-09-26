@@ -8,6 +8,41 @@ const ROOT_PREFIX: &str = "analysis/manifests";
 const CHUNK_PREFIX: &str = "analysis/chunks/";
 const ORDINAL_CAPACITY: usize = 10; // All u32 ordinals, including the eight-digit padding.
 const DIGEST_SUFFIX_BYTES: usize = 65; // Slash and raw SHA-256 hex (no algorithm prefix).
+const HEX: &[u8; 16] = b"0123456789abcdef";
+
+pub(super) fn matches_root_name(name: &str, digest: Digest) -> bool {
+    name.strip_prefix(ROOT_PREFIX)
+        .and_then(|suffix| suffix.strip_prefix('/'))
+        .is_some_and(|suffix| matches_digest_suffix(suffix, digest))
+}
+
+pub(super) fn matches_chunk_name(name: &str, ordinal: u32, digest: Digest) -> bool {
+    let Some((number, suffix)) = name
+        .strip_prefix(CHUNK_PREFIX)
+        .and_then(|value| value.split_once('/'))
+    else {
+        return false;
+    };
+    let width = ordinal
+        .checked_ilog10()
+        .map_or(1, |value| value as usize + 1)
+        .max(8);
+    number.len() == width
+        && number.bytes().all(|byte| byte.is_ascii_digit())
+        && number.parse::<u32>() == Ok(ordinal)
+        && matches_digest_suffix(suffix, digest)
+}
+
+fn matches_digest_suffix(suffix: &str, digest: Digest) -> bool {
+    suffix.len() == 64
+        && suffix
+            .as_bytes()
+            .chunks_exact(2)
+            .zip(digest.bytes())
+            .all(|(pair, byte)| {
+                pair[0] == HEX[(byte >> 4) as usize] && pair[1] == HEX[(byte & 15) as usize]
+            })
+}
 
 /// Requested builder and artifact-conversion heap, excluding caller-owned source fields,
 /// their canonical encoding, allocator overhead and process/native memory. Conservative
@@ -42,6 +77,8 @@ fn projected_conversion_facts(
     let root_strings = ROOT_PREFIX.len() + DIGEST_SUFFIX_BYTES + ANALYSIS_MANIFEST_MEDIA_TYPE.len();
     let components = [
         builder_bytes,
+        // Optional kernel handoff boxes the typed envelope, never the already owned buffers.
+        std::mem::size_of::<PreparedAnalysisObjects>() as u64,
         count
             .checked_mul(std::mem::size_of::<LogicalObject>() as u64)
             .ok_or_else(overflow)?,
@@ -133,7 +170,6 @@ pub(super) fn logical_object(
     )?;
     name.push_str(prefix);
     name.push('/');
-    const HEX: &[u8; 16] = b"0123456789abcdef";
     for byte in digest.bytes() {
         name.push(HEX[(byte >> 4) as usize] as char);
         name.push(HEX[(byte & 15) as usize] as char);

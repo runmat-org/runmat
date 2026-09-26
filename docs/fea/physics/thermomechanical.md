@@ -601,6 +601,21 @@ above caller-owned model/mesh storage. Tet4 at 8/128 samples measured 203,014/2,
 4,745,367/34,616,281 B. These small insulated fixtures demonstrate the tested requested-heap
 envelope, not large-mesh, allocator/native-memory or portable-worker qualification.
 
+The shared kernel handoff now distinguishes whole, partitioned and already prepared outputs with
+a closed payload enum. `AnalysisKernelInvocation` carries the effective (default-capped) chunk size
+and inventory limits. Prepared envelopes move through the serial bridge without gathering or
+rechunking buffers; the projection includes the boxed typed envelope. Before publication the bridge
+checks the canonical root bytes, canonical logical names, namespace/media, each chunk digest and
+length, per-partition chunk boundaries and digests, whole-payload digest, inventory limits and the
+declared resource envelope. Resource plans are decoded before kernel invocation. No output objects
+are written until all output closures and the output-set envelope pass validation. Tests retain
+buffer pointers across the handoff, reject substitutions and wrong policy, and compare published
+whole/prepared outputs. The conversion-memory fixture includes this validation pass. This removes
+the forced all-field buffering at the kernel boundary; thermal native dispatch is still pending.
+With prepared handoff validation included, the isolated 16/64-partition fixture measured
+8,607,519/34,424,943 B of requested heap growth against reservations of
+8,698,192/34,582,960 B. This remains requested-heap evidence, not a process-memory ceiling.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature
