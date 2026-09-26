@@ -14,12 +14,12 @@ pub enum FusionExecutionOutcome<T> {
 /// Inner calls may submit provider work; this elapsed time is not evidence of
 /// completion of that device work and must not be assigned to a GPU candidate.
 pub struct FusionCpuObservation {
-    feedback: Option<LocalPlacementFeedback>,
+    feedback: Option<Box<LocalPlacementFeedback>>,
     started: Instant,
 }
 
 impl FusionCpuObservation {
-    pub(super) fn new(feedback: Option<LocalPlacementFeedback>) -> Self {
+    pub(super) fn new(feedback: Option<Box<LocalPlacementFeedback>>) -> Self {
         Self {
             feedback,
             started: Instant::now(),
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn cpu_observation_records_success_once_only_after_completion() {
         let (feedback, session) = ticket("cpu.shared.test");
-        let observation = FusionCpuObservation::new(Some(feedback));
+        let observation = FusionCpuObservation::new(Some(Box::new(feedback)));
         assert!(session.profile_snapshot().feedback.is_empty());
         observation.complete();
         let snapshot = session.profile_snapshot();
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn abandoned_cpu_observation_never_records_success() {
         let (feedback, session) = ticket("cpu.shared.test");
-        drop(FusionCpuObservation::new(Some(feedback)));
+        drop(FusionCpuObservation::new(Some(Box::new(feedback))));
         let snapshot = session.profile_snapshot();
         assert_eq!(snapshot.feedback[0].samples, 0);
         assert_eq!(snapshot.feedback[0].failures, 1);
@@ -114,7 +114,7 @@ mod tests {
     #[test]
     fn cancelled_future_drops_cpu_ticket_without_a_success_sample() {
         let (feedback, session) = ticket("cpu.shared.test");
-        let observation = FusionCpuObservation::new(Some(feedback));
+        let observation = FusionCpuObservation::new(Some(Box::new(feedback)));
         let future = async move {
             std::future::pending::<()>().await;
             observation.complete();

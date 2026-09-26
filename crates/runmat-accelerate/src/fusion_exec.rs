@@ -326,7 +326,7 @@ fn select_fusion_provider(
                 cpu_cost.checked_total_ns(),
             );
             Ok(FusionExecutionOutcome::SharedRuntime(
-                FusionCpuObservation::new(feedback.map(|feedback| *feedback)),
+                FusionCpuObservation::new(feedback),
             ))
         }
     }

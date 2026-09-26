@@ -126,7 +126,7 @@ async fn pagefun_impl(func: Value, first: Value, rest: Vec<Value>) -> crate::Bui
         .collect();
     let mut host_values = Vec::with_capacity(operands.len());
     for value in &operands {
-        host_values.push(gather_if_needed_async(&value).await?);
+        host_values.push(gather_if_needed_async(value).await?);
     }
 
     let mut page_inputs = Vec::with_capacity(host_values.len());

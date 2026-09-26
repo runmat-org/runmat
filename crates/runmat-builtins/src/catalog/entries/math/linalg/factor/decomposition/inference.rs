@@ -128,18 +128,17 @@ pub(super) fn constructor(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             }
         }
         for index in 1..request.arguments.len() {
-            if request.literals.literal_string_at(index).as_deref() == Some("ranktolerance") {
-                if request
+            if request.literals.literal_string_at(index).as_deref() == Some("ranktolerance")
+                && request
                     .literals
                     .numeric_at(index + 1)
                     .is_some_and(|n| n < 0.0 || n.is_nan())
-                {
-                    diagnostics.push(argument_error(
-                        "RM-DECOMPOSITION-TOLERANCE",
-                        "RankTolerance must be nonnegative",
-                        index + 1,
-                    ));
-                }
+            {
+                diagnostics.push(argument_error(
+                    "RM-DECOMPOSITION-TOLERANCE",
+                    "RankTolerance must be nonnegative",
+                    index + 1,
+                ));
             }
         }
     } else {
