@@ -1,4 +1,13 @@
 use super::*;
+
+#[test]
+fn unknown_scalar_class_does_not_invent_scalar_storage() {
+    let mut req = request(vec![Some(1), Some(1)], LiteralValue::Number(1.));
+    req.arguments[0].kind = ValueKindFact::Unknown;
+    let result = infer(&req, &super::super::MAXK_CATALOG_ENTRY);
+    assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
+    assert_eq!(result.outputs[1].storage, StorageFact::Scalar);
+}
 fn input(shape: Vec<Option<usize>>) -> ValueFact {
     ValueFact::proven(
         ValueKindFact::Numeric(NumericFact {

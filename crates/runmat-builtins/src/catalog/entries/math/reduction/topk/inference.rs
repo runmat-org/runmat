@@ -201,6 +201,7 @@ fn storage(value: &ValueFact) -> StorageFact {
         return StorageFact::Unknown;
     }
     match value.shape.element_count() {
+        Some(1) if matches!(value.kind, ValueKindFact::Unknown) => StorageFact::Unknown,
         Some(1)
             if !value
                 .numeric()

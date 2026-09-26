@@ -45,6 +45,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             StorageFact::Unknown
         } else {
             match output.shape.element_count() {
+                Some(1) if matches!(output.kind, ValueKindFact::Unknown) => StorageFact::Unknown,
                 Some(1)
                     if !output
                         .numeric()
@@ -203,6 +204,13 @@ fn result_shape(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unknown_scalar_class_keeps_storage_unknown() {
+        let mut req = request(vec![Some(1), Some(1)], vec![LiteralValue::Unknown]);
+        req.arguments[0].kind = ValueKindFact::Unknown;
+        let result = infer(&req, &super::super::BOUNDS_CATALOG_ENTRY);
+        assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
+    }
     fn request(shape: Vec<Option<usize>>, literals: Vec<LiteralValue>) -> CallRequest {
         let input = ValueFact::proven(
             ValueKindFact::Numeric(NumericFact {
