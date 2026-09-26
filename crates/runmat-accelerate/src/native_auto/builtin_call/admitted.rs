@@ -80,7 +80,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                     request.into_operands(),
                 ));
             };
-            let prepared = prepare_with(auto, &context, request)?;
+            let prepared = prepare_with(auto, &context, request).map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             Ok(PreparedBuiltinOperands::new(
                 operands,
@@ -94,7 +94,7 @@ pub(super) fn prepare_with(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
     request: AdmittedBuiltinPreparation,
-) -> Result<PreparedBuiltinCall, RuntimeError> {
+) -> PreparationResult<PreparedBuiltinCall> {
     if !auto.enabled
         || (request.form().provider_requirement == BuiltinPreparationProviderRequirement::F64
             && auto.provider.precision() != ProviderPrecision::F64)
@@ -131,7 +131,7 @@ impl BuiltinPreparationObservation for BuiltinCallGuard {
         BuiltinCallGuard::begin_execution(self);
     }
     fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
-        (*self).finish(result)
+        (*self).finish(result).map_err(|error| *error)
     }
     fn abort(self: Box<Self>) {
         drop(self);

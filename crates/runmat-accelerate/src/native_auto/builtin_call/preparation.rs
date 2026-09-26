@@ -139,7 +139,7 @@ impl NativeAutoOffload {
         let mut uploads = None;
         if evaluation.recommend_gpu {
             for value in processed.iter_mut().take(operation.count()) {
-                if !matches!(value, Value::Tensor(tensor) if tensor.len() > 0) {
+                if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
                     continue;
                 }
                 if uploads.is_none() {

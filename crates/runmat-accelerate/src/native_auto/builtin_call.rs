@@ -11,6 +11,8 @@ use super::*;
 use observation::BuiltinCallObservation;
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
 
+type PreparationResult<T> = std::result::Result<T, Box<RuntimeError>>;
+
 pub(super) struct PreparedBuiltinCall {
     args: Vec<Value>,
     observation: Option<BuiltinCallObservation>,
@@ -30,7 +32,7 @@ impl BuiltinCallGuard {
         }
     }
 
-    fn finish(mut self, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+    fn finish(mut self, result: &Result<Value, RuntimeError>) -> PreparationResult<()> {
         if let (Some(uploads), Ok(value)) = (self.uploads.as_mut(), result) {
             uploads.adopt(value)?;
         }
@@ -80,7 +82,7 @@ impl PreparedBuiltinCall {
         async move {
             guard.begin_execution();
             let result = call(args).await;
-            guard.finish(&result)?;
+            guard.finish(&result).map_err(|error| *error)?;
             result
         }
     }

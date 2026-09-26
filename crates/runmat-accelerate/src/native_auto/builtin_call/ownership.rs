@@ -14,7 +14,7 @@ impl OwnedUploads {
     pub(super) fn new(
         provider: &'static dyn AccelProvider,
         args: &[Value],
-    ) -> Result<Self, RuntimeError> {
+    ) -> PreparationResult<Self> {
         let mut borrowed = BTreeSet::new();
         let mut borrowed_handles = Vec::new();
         for value in args {
@@ -50,7 +50,7 @@ impl OwnedUploads {
         });
     }
 
-    pub(super) fn adopt(&mut self, value: &Value) -> Result<(), RuntimeError> {
+    pub(super) fn adopt(&mut self, value: &Value) -> PreparationResult<()> {
         if self.owned.is_empty() {
             return Ok(());
         }
