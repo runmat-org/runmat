@@ -29,7 +29,7 @@ impl EnvironmentValues {
     pub(super) fn decode(value: &Value) -> Result<Self, ValueError> {
         match value {
             Value::String(text) => Ok(Self::scalar(string_value(text))),
-            Value::CharArray(array) if array.rows == 1 => {
+            Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
                 Ok(Self::scalar(EnvironmentValue::Set(character_row(array))))
             }
             Value::StringArray(array) => Ok(Self {
@@ -38,12 +38,12 @@ impl EnvironmentValues {
             }),
             Value::Cell(array) => {
                 let mut values = Vec::with_capacity(array.data.len());
-                for value in &array.data {
+                for value in array.iter_column_major() {
                     values.push(Self::decode_scalar(value).ok_or(ValueError::InvalidCellElement)?);
                 }
                 Ok(Self {
                     values,
-                    shape: Some(vec![array.rows, array.cols]),
+                    shape: Some(array.shape.clone()),
                 })
             }
             value => Self::decode_scalar(value)
@@ -62,7 +62,7 @@ impl EnvironmentValues {
     fn decode_scalar(value: &Value) -> Option<EnvironmentValue> {
         match value {
             Value::String(text) => Some(string_value(text)),
-            Value::CharArray(array) if array.rows == 1 => {
+            Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
                 Some(EnvironmentValue::Set(character_row(array)))
             }
             Value::Num(value) => Some(EnvironmentValue::Set(format_float(*value))),

@@ -9,7 +9,8 @@ pub(super) enum NamePolicy {
 pub(super) fn valid_name(input: &ValueFact, policy: NamePolicy) -> bool {
     match &input.kind {
         ValueKindFact::Character => {
-            policy == NamePolicy::GetenvExtensions || !known_character_matrix(&input.shape)
+            !known_nd_character(&input.shape)
+                && (policy == NamePolicy::GetenvExtensions || !known_character_matrix(&input.shape))
         }
         ValueKindFact::String | ValueKindFact::Unknown => true,
         ValueKindFact::Cell(cell) => valid_name_cell(cell, policy),
@@ -25,7 +26,7 @@ pub(super) fn valid_name_or_dictionary(input: &ValueFact) -> bool {
 
 pub(super) fn valid_value(input: &ValueFact) -> bool {
     match &input.kind {
-        ValueKindFact::Character => !known_character_matrix(&input.shape),
+        ValueKindFact::Character => valid_character_row(&input.shape),
         ValueKindFact::String | ValueKindFact::Unknown => true,
         ValueKindFact::Numeric(_) => {
             input.shape.element_count() != Some(0)
@@ -74,9 +75,10 @@ fn valid_name_cell(cell: &CellFact, policy: NamePolicy) -> bool {
 
 fn valid_name_cell_element(input: &ValueFact, policy: NamePolicy) -> bool {
     match input.kind {
-        ValueKindFact::Character => !known_character_matrix(&input.shape),
+        ValueKindFact::Character => valid_character_row(&input.shape),
         ValueKindFact::String => {
-            policy == NamePolicy::GetenvExtensions && input.shape == ShapeFact::Scalar
+            policy == NamePolicy::GetenvExtensions
+                && input.shape.element_count().is_none_or(|n| n == 1)
         }
         ValueKindFact::Unknown => true,
         _ => false,
@@ -89,9 +91,9 @@ fn valid_value_cell(cell: &CellFact) -> bool {
 
 fn valid_value_cell_element(input: &ValueFact) -> bool {
     match input.kind {
-        ValueKindFact::Character => !known_character_matrix(&input.shape),
-        ValueKindFact::String => input.shape == ShapeFact::Scalar,
-        ValueKindFact::Numeric(_) => input.shape.element_count() == Some(1),
+        ValueKindFact::Character => valid_character_row(&input.shape),
+        ValueKindFact::String => input.shape.element_count().is_none_or(|n| n == 1),
+        ValueKindFact::Numeric(_) => input.shape.element_count().is_none_or(|n| n == 1),
         ValueKindFact::Unknown => true,
         _ => false,
     }
@@ -102,6 +104,14 @@ fn known_character_matrix(shape: &ShapeFact) -> bool {
         shape.known_dims().and_then(|dimensions| dimensions.first().copied().flatten()),
         Some(rows) if rows > 1
     )
+}
+
+fn known_nd_character(shape: &ShapeFact) -> bool {
+    shape.rank().is_some_and(|rank| rank > 2)
+}
+
+fn valid_character_row(shape: &ShapeFact) -> bool {
+    !known_character_matrix(shape) && !known_nd_character(shape)
 }
 
 fn known_shape(shape: &ShapeFact) -> Option<Vec<usize>> {

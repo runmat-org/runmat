@@ -57,6 +57,7 @@ pub(super) fn text_for_names(input: &ValueFact) -> ValueFact {
 pub(super) fn logical_for_names(input: Option<&ValueFact>) -> ValueFact {
     let shape = input.map_or(ShapeFact::Scalar, |input| match input.kind {
         ValueKindFact::String | ValueKindFact::Cell(_) => input.shape.clone(),
+        ValueKindFact::Unknown => ShapeFact::Unknown,
         _ => ShapeFact::Scalar,
     });
     ValueFact::proven(ValueKindFact::Logical, shape, StorageFact::Dense)
