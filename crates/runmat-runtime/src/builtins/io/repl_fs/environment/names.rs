@@ -40,7 +40,11 @@ pub(super) enum NameError {
 impl EnvironmentNames {
     pub(super) fn decode(value: &Value) -> Result<Self, NameError> {
         match value {
-            Value::CharArray(array) if array.shape.len() > 2 => Err(NameError::InvalidType),
+            Value::CharArray(array)
+                if crate::builtins::common::shape::effective_rank(&array.shape) > 2 =>
+            {
+                Err(NameError::InvalidType)
+            }
             Value::CharArray(array) if array.rows == 1 => {
                 Ok(Self::CharacterRow(character_row(array, 0)))
             }
@@ -66,7 +70,10 @@ impl EnvironmentNames {
         let mut kinds = Vec::with_capacity(array.data.len());
         for value in array.iter_column_major() {
             match value {
-                Value::CharArray(chars) if chars.rows == 1 && chars.shape.len() <= 2 => {
+                Value::CharArray(chars)
+                    if chars.rows == 1
+                        && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
+                {
                     names.push(character_row(chars, 0));
                     kinds.push(CellNameKind::Character);
                 }

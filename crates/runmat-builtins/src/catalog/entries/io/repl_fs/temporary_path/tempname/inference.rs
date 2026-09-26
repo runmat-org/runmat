@@ -16,13 +16,12 @@ pub(in crate::catalog::entries::io::repl_fs::temporary_path) fn infer(
     }
     if let Some(folder) = request.arguments.first() {
         let valid = match folder.kind {
-            ValueKindFact::Character => {
-                folder.shape.rank().is_none_or(|rank| rank <= 2)
-                    && folder.shape.known_dims().is_none_or(|dims| {
-                        dims.first()
-                            .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
-                    })
-            }
+            ValueKindFact::Character => folder.shape.known_dims().is_none_or(|dims| {
+                dims.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+                    && dims
+                        .first()
+                        .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
+            }),
             ValueKindFact::String => folder.shape.element_count().is_none_or(|count| count == 1),
             ValueKindFact::Unknown => true,
             _ => false,
@@ -55,7 +54,9 @@ mod tests {
     fn unknown_row_count_remains_possible_but_known_nd_folder_is_rejected() {
         for (shape, rejected) in [
             (ShapeFact::from(vec![None, Some(3)]), false),
-            (ShapeFact::Ranked { rank: 3 }, true),
+            (ShapeFact::from(vec![Some(1), Some(2), Some(2)]), true),
+            (ShapeFact::from(vec![Some(1), Some(2), Some(1)]), false),
+            (ShapeFact::from(vec![Some(1), Some(2), None]), false),
         ] {
             let request = CallRequest {
                 arguments: vec![ValueFact::proven(

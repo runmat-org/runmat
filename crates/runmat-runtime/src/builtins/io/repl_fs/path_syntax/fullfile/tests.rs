@@ -62,6 +62,15 @@ fn nd_character_components_reject_instead_of_losing_pages() {
 }
 
 #[test]
+fn trailing_singleton_character_components_are_rows() {
+    let row = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    assert_eq!(
+        run(vec![row]).unwrap(),
+        Value::CharArray(CharArray::new_row("ab"))
+    );
+}
+
+#[test]
 fn invalid_output_count_precedes_provider_access() {
     let _outputs = crate::output_count::push_output_count(Some(2));
     let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(

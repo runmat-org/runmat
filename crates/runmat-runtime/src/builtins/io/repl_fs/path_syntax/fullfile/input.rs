@@ -33,7 +33,7 @@ async fn decode_numeric(value: &Value) -> BuiltinResult<TextContainer> {
             IDENTITY,
         ));
     };
-    if tensor.rows() != 1 || tensor.shape.len() > 2 {
+    if tensor.rows() != 1 || crate::builtins::common::shape::effective_rank(&tensor.shape) > 2 {
         return Err(super::super::error::catalog(
             &runmat_builtins::FULLFILE_ERROR_ARGUMENT_TYPE,
             IDENTITY,

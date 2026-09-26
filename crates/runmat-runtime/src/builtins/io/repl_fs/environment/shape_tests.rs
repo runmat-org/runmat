@@ -49,6 +49,14 @@ fn nd_characters_are_not_silently_truncated_as_names_or_values() {
 }
 
 #[test]
+fn trailing_singleton_dimensions_still_describe_a_character_row() {
+    let chars = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    let names = EnvironmentNames::decode(&chars).unwrap();
+    assert_eq!(names.names(), &["ab"]);
+    assert!(EnvironmentValues::decode(&chars).is_ok());
+}
+
+#[test]
 fn invalid_output_counts_reject_before_reading_names() {
     for name in ["getenv", "isenv"] {
         let error = futures::executor::block_on(crate::call_builtin_async_with_outputs(

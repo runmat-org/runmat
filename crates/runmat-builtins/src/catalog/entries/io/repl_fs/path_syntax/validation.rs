@@ -18,12 +18,12 @@ pub(super) fn is_text_container(value: &ValueFact) -> bool {
 }
 
 fn is_character_row(value: &ValueFact) -> bool {
-    value.shape.rank().is_none_or(|rank| rank <= 2)
-        && value.shape.known_dims().is_none_or(|dimensions| {
-            dimensions
+    value.shape.known_dims().is_none_or(|dimensions| {
+        dimensions.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+            && dimensions
                 .first()
                 .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
-        })
+    })
 }
 
 pub(super) fn is_numeric_character_row(value: &ValueFact) -> bool {
@@ -31,12 +31,12 @@ pub(super) fn is_numeric_character_row(value: &ValueFact) -> bool {
         return false;
     };
     numeric.domain == NumericDomain::Real
-        && value.shape.rank().is_none_or(|rank| rank <= 2)
         && matches!(value.storage, StorageFact::Dense | StorageFact::Unknown)
         && value.shape.known_dims().is_none_or(|dimensions| {
-            dimensions
-                .first()
-                .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
+            dimensions.iter().skip(2).all(|n| n.is_none_or(|n| n == 1))
+                && dimensions
+                    .first()
+                    .is_none_or(|rows| rows.is_none_or(|rows| rows == 1))
         })
 }
 
@@ -125,7 +125,7 @@ mod tests {
         assert!(is_text_container(&row));
         let nd = ValueFact::proven(
             ValueKindFact::Character,
-            ShapeFact::Ranked { rank: 3 },
+            ShapeFact::from(vec![Some(1), Some(2), Some(2)]),
             StorageFact::Dense,
         );
         assert!(!is_text_container(&nd));

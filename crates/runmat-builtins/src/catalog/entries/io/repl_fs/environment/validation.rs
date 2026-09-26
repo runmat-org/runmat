@@ -107,7 +107,12 @@ fn known_character_matrix(shape: &ShapeFact) -> bool {
 }
 
 fn known_nd_character(shape: &ShapeFact) -> bool {
-    shape.rank().is_some_and(|rank| rank > 2)
+    shape.known_dims().is_some_and(|dimensions| {
+        dimensions
+            .iter()
+            .skip(2)
+            .any(|dimension| dimension.is_some_and(|n| n != 1))
+    })
 }
 
 fn valid_character_row(shape: &ShapeFact) -> bool {

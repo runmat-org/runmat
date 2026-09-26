@@ -30,7 +30,10 @@ impl TextContainer {
                 values: array.data.clone(),
                 shape: array.shape.clone(),
             }),
-            Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
+            Value::CharArray(array)
+                if array.rows == 1
+                    && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
+            {
                 Ok(Self::scalar(
                     TextRepresentation::Character,
                     array.data.iter().take(array.cols).collect(),
@@ -59,7 +62,7 @@ impl TextContainer {
             let Value::CharArray(chars) = value else {
                 return Err(super::error::catalog(error, identity));
             };
-            if chars.rows != 1 || chars.shape.len() > 2 {
+            if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2 {
                 return Err(super::error::catalog(error, identity));
             }
             values.push(chars.data.iter().take(chars.cols).collect());

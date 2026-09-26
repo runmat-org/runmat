@@ -29,7 +29,10 @@ impl EnvironmentValues {
     pub(super) fn decode(value: &Value) -> Result<Self, ValueError> {
         match value {
             Value::String(text) => Ok(Self::scalar(string_value(text))),
-            Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
+            Value::CharArray(array)
+                if array.rows == 1
+                    && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
+            {
                 Ok(Self::scalar(EnvironmentValue::Set(character_row(array))))
             }
             Value::StringArray(array) => Ok(Self {
@@ -62,7 +65,10 @@ impl EnvironmentValues {
     fn decode_scalar(value: &Value) -> Option<EnvironmentValue> {
         match value {
             Value::String(text) => Some(string_value(text)),
-            Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
+            Value::CharArray(array)
+                if array.rows == 1
+                    && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
+            {
                 Some(EnvironmentValue::Set(character_row(array)))
             }
             Value::Num(value) => Some(EnvironmentValue::Set(format_float(*value))),

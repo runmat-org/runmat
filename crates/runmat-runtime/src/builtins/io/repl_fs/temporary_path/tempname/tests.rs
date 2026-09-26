@@ -74,6 +74,13 @@ fn nd_characters_are_not_flattened_into_a_folder() {
 }
 
 #[test]
+fn trailing_singleton_character_folder_is_a_row() {
+    let folder =
+        Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 2, 1]).unwrap());
+    assert_eq!(super::input::folder(&folder).unwrap(), PathBuf::from("ab"));
+}
+
+#[test]
 fn fixed_output_counts_reject_without_selecting_a_path() {
     for name in ["tempdir", "tempname", "pathsep"] {
         let error =
