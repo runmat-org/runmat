@@ -19,6 +19,7 @@ mod scoped_execution;
 mod solve_policy;
 mod structural_facts;
 mod symbolic;
+mod thermal_state;
 mod transient_block;
 mod transient_recovery;
 mod transient_result;

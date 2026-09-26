@@ -21,6 +21,7 @@ use super::*;
 
 mod curved_connector;
 mod exact_work;
+mod thermal_state;
 
 fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
     FeaResourcePlanningInput {

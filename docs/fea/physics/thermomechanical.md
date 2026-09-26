@@ -113,7 +113,13 @@ Thermal binding owns node alignment, material-capability validation, and source 
 receiving structural assembly alone constructs equivalent loads and element recovery data.
 The aligned global temperature copy is released after assembly; the immutable source and the
 element-local temperatures needed for recovery are preserved. This avoids a second unused load
-and recovery allocation, but does not yet qualify portable thermal-state resource accounting.
+and recovery allocation. Static preflight additionally reserves source/alignment/load numerical
+storage, local element temperatures and thermal recovery coefficients, and the 52 thermal output
+values per solid element plus one coupling residual, and owned displacement/von-Mises snapshot
+copies (including the temporary construction copy). These topology-derived charges participate
+in memory-ceiling admission and resource-plan identity (estimation revision 25). They are not a
+portable source artifact encoding/metadata bound or measured peak-memory qualification; transport
+decoding and result serialization lifetimes still require separate accounting.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate

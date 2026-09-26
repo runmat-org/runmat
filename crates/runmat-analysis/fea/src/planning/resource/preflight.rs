@@ -120,6 +120,7 @@ pub(crate) fn build_static_resource_plan(
         local_execution,
     } = input;
     let facts = derive_structural_resource_facts(model, mesh, constraints)?;
+    let thermal_storage = super::thermal_state::ThermalStateStorage::derive(step, mesh)?;
     if observations.topology_digest != facts.topology_digest {
         return Err(ResourcePlanningError::Invalid(
             "observation plan and structural constraints name different topology".into(),
@@ -212,6 +213,11 @@ pub(crate) fn build_static_resource_plan(
         ))?;
     let mut recovery_values = u64::try_from(recovery_values)
         .map_err(|_| ResourcePlanningError::Overflow("structural recovery value count"))?;
+    recovery_values = checked_add(
+        recovery_values,
+        thermal_storage.output_values,
+        "solved thermal recovery values",
+    )?;
     if publishes_linearization {
         // Two full vectors, worst-case four full stress tensors per element, and a complete
         // sparse geometric-stiffness CSR. Index storage is charged at the same eight-byte width.
@@ -306,7 +312,11 @@ pub(crate) fn build_static_resource_plan(
         worker: WorkerResourcePolicy {
             cpu_millicores,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
-            fixed_memory_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_MEMORY_BYTES),
+            fixed_memory_bytes: ByteCount(checked_add(
+                STRUCTURAL_FIXED_WORKER_MEMORY_BYTES,
+                thermal_storage.resident_bytes,
+                "worker and solved thermal numerical storage",
+            )?),
             fixed_scratch_bytes: ByteCount(STRUCTURAL_FIXED_WORKER_SCRATCH_BYTES),
             required_capabilities,
             accelerators,
