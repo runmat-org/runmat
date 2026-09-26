@@ -23,6 +23,7 @@ fn tensor(values: Vec<f64>, shape: &[usize]) -> Value {
 
 mod callback;
 mod invocation;
+mod linear_order;
 mod options;
 mod provider;
 mod storage;

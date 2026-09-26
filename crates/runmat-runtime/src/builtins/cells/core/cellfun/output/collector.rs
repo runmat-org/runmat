@@ -1,6 +1,6 @@
 use crate::builtins::common::uniform_scalar_output::UniformScalarCollector;
-use crate::{gather_if_needed_async, make_cell_with_shape, BuiltinResult};
-use runmat_value::Value;
+use crate::{gather_if_needed_async, BuiltinResult};
+use runmat_value::{CellArray, Value};
 
 pub(in crate::builtins::cells::core::cellfun) enum Collector {
     Uniform(UniformScalarCollector),
@@ -34,7 +34,8 @@ impl Collector {
     ) -> BuiltinResult<Value> {
         match self {
             Self::Uniform(collector) => collector.finish(shape).map_err(super::map_error),
-            Self::Cell(values) => make_cell_with_shape(values, shape.to_vec())
+            Self::Cell(values) => CellArray::from_column_major(values, shape.to_vec())
+                .map(Value::Cell)
                 .map_err(|reason| super::super::error::internal(format!("cellfun: {reason}"))),
         }
     }

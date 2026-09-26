@@ -64,12 +64,10 @@ impl Execution {
     async fn evaluate(&self, index: usize, requested: usize) -> BuiltinResult<Value> {
         let mut cell_values = Vec::with_capacity(self.plan.cells.len());
         for cell in &self.plan.cells {
-            let value = cell
-                .data
-                .get(index)
-                .cloned()
-                .unwrap_or(Value::Num(f64::NAN));
-            cell_values.push(gather_if_needed_async(&value).await?);
+            let value = cell.iter_column_major().nth(index).ok_or_else(|| {
+                super::error::internal("cellfun: cell storage does not match its shape")
+            })?;
+            cell_values.push(gather_if_needed_async(value).await?);
         }
         let mut arguments = Vec::with_capacity(cell_values.len() + self.host_extra_arguments.len());
         arguments.extend(cell_values.iter().cloned());
