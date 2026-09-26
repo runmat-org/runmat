@@ -213,6 +213,7 @@ pub(super) fn run(
                 temperature_snapshots.as_slice(),
                 temperature_gradient_snapshots.as_slice(),
                 heat_flux_snapshots.as_slice(),
+                energy_storage_rate_snapshots.as_slice(),
             ])
             .map(|(definition, snapshots)| HistoryFieldSeries {
                 quantity: definition.quantity(),

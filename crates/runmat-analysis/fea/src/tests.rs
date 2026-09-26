@@ -1,4 +1,5 @@
 mod thermal_schedule_admission;
+mod thermal_storage_history;
 
 use crate::{
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
@@ -3938,6 +3939,12 @@ fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() 
             runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
             runmat_analysis_core::FieldLocation::Element,
         ),
+        history_observation(
+            "storage_rate_history",
+            runmat_analysis_core::ObservationQuantity::ThermalEnergyStorageRateDensity,
+            runmat_analysis_core::SamplingPolicy::TimeSeconds(requested_times.clone()),
+            runmat_analysis_core::FieldLocation::Element,
+        ),
     ];
     model.sequence.steps = vec![step];
     let mesh = single_tetrahedron_solver_mesh_for_model(&model);
@@ -3956,7 +3963,7 @@ fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() 
     assert!(requested_times
         .iter()
         .all(|time| result.time_points_s.contains(time)));
-    assert_eq!(result.run.observation_histories.len(), 3);
+    assert_eq!(result.run.observation_histories.len(), 4);
     for (quantity, snapshots) in [
         (
             runmat_analysis_core::ObservationQuantity::Temperature,
@@ -3969,6 +3976,10 @@ fn thermal_history_schedule_adds_exact_solve_points_and_publishes_temperature() 
         (
             runmat_analysis_core::ObservationQuantity::HeatFlux,
             &result.heat_flux_snapshots,
+        ),
+        (
+            runmat_analysis_core::ObservationQuantity::ThermalEnergyStorageRateDensity,
+            &result.energy_storage_rate_snapshots,
         ),
     ] {
         let history = result

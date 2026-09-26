@@ -522,6 +522,10 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
         ),
         Q::HeatFlux => (PhysicalDimension::HEAT_FLUX, 3),
         Q::HeatRate => (PhysicalDimension::POWER, 1),
+        Q::ThermalEnergyStorageRateDensity => (
+            PhysicalDimension::POWER.divide(PhysicalDimension::VOLUME)?,
+            1,
+        ),
         Q::ElectricPotential => (PhysicalDimension::ELECTRIC_POTENTIAL, 1),
         Q::ElectricField => (
             PhysicalDimension::ELECTRIC_POTENTIAL.divide(PhysicalDimension::LENGTH)?,
@@ -567,4 +571,24 @@ pub(crate) fn field_reference_type(name: &str) -> Option<(ObservationQuantity, F
             }
         },
     ))
+}
+
+#[cfg(test)]
+mod quantity_tests {
+    use super::*;
+
+    #[test]
+    fn thermal_storage_density_reference_is_scalar_power_per_volume() {
+        assert_eq!(
+            field_reference_type("thermal_energy_storage_rate_density"),
+            Some((
+                ObservationQuantity::ThermalEnergyStorageRateDensity,
+                FeaType::Quantity(
+                    PhysicalDimension::POWER
+                        .divide(PhysicalDimension::VOLUME)
+                        .unwrap()
+                ),
+            ))
+        );
+    }
 }

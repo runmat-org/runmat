@@ -10,6 +10,20 @@ public typed `.fea` executor does not yet connect a thermal study from source th
 so `runmat fea run` rejects the family today. The equations below describe the implemented thermal
 assembly—not a claim that the public end-to-end path is production-qualified.
 
+## Retained thermal field histories
+
+The experimental thermal pipeline exposes temperature (K), temperature gradient (K/m), heat flux
+(W/m²), and `thermal_energy_storage_rate_density` (W/m³) to the shared history evaluator.
+The last quantity is a scalar element field: the volume average of
+`rho * c_p * dT/dt`, stored in `thermal.energy_storage_rate` snapshots. It is distinct from
+`heat_rate`, whose dimension is watts. A volume integral of storage-rate density has units of
+power; an average retains W/m³. Exact requested history times are inserted into the solve schedule.
+
+The insulated uniform-heating reference uses `Q = rho * c_p`, giving a 1 K/s temperature rise
+and storage-rate density equal to Q for accepted time steps, independently of element volume.
+Both Tet4 and Tet10 history outputs are checked against that analytic value. This does not qualify
+the unfinished public thermal executor or portable thermal result publication.
+
 ## What heat equation does RunMat assemble?
 
 For temperature $T(\mathbf x,t)$, density $\rho$, specific heat $c_p$, conductivity $k$, and

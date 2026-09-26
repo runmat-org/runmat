@@ -28,6 +28,13 @@ pub(crate) fn definitions() -> Result<Vec<RecoveredFieldDefinition>, RecoveredFi
             RecoveredFieldEntityDomain::SolidElements,
             ObservationValueShape::Vector3,
         ),
+        (
+            "thermal.energy_storage_rate",
+            ObservationQuantity::ThermalEnergyStorageRateDensity,
+            FieldLocation::Element,
+            RecoveredFieldEntityDomain::SolidElements,
+            ObservationValueShape::Scalar,
+        ),
     ]
     .into_iter()
     .map(|(id, quantity, location, domain, shape)| {

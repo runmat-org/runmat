@@ -168,6 +168,7 @@ fn is_thermal(quantity: ObservationQuantity) -> bool {
             | ObservationQuantity::TemperatureGradient
             | ObservationQuantity::HeatFlux
             | ObservationQuantity::HeatRate
+            | ObservationQuantity::ThermalEnergyStorageRateDensity
     )
 }
 
@@ -483,6 +484,27 @@ mod tests {
 
         let thermal = ProcedureStep::thermal_transient("thermal");
         assert!(quantity_supported(&thermal, ObservationQuantity::HeatFlux));
+        assert!(quantity_supported(
+            &thermal,
+            ObservationQuantity::ThermalEnergyStorageRateDensity
+        ));
+        assert!(!quantity_supported(
+            &structural,
+            ObservationQuantity::ThermalEnergyStorageRateDensity
+        ));
+        for family in [
+            crate::PhysicsFamily::Electromagnetic,
+            crate::PhysicsFamily::Acoustic,
+            crate::PhysicsFamily::Fluid,
+            crate::PhysicsFamily::Coupled(crate::CoupledPhysicsFamily::FluidStructureInteraction),
+        ] {
+            let mut nonthermal = structural.clone();
+            nonthermal.family = family;
+            assert!(!quantity_supported(
+                &nonthermal,
+                ObservationQuantity::ThermalEnergyStorageRateDensity
+            ));
+        }
         assert!(!quantity_supported(
             &thermal,
             ObservationQuantity::Displacement
