@@ -43,3 +43,54 @@ fn preserves_a_file_at_the_target_and_returns_failure() {
     assert_eq!(outcome.identifier(), "RunMat:mkdir:TargetNotDirectory");
     assert!(target.is_file());
 }
+
+#[test]
+fn rejects_character_pages_and_resident_paths_without_gathering() {
+    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    assert_eq!(
+        evaluate(vec![Value::CharArray(pages)])
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:mkdir:InvalidFolder")
+    );
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    });
+    assert_eq!(
+        evaluate(vec![resident]).unwrap_err().identifier(),
+        Some("RunMat:mkdir:InvalidFolder")
+    );
+}
+
+#[test]
+fn requested_outputs_preserve_filesystem_effects_and_failure_policy() {
+    let _lock = lock();
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("created");
+    let args = vec![Value::from(path.to_string_lossy().to_string())];
+    {
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        assert_eq!(
+            super::invoke(args.clone()).unwrap(),
+            Value::OutputList(vec![])
+        );
+        assert!(path.is_dir());
+    }
+    {
+        let _outputs = crate::output_count::push_output_count(Some(4));
+        let Value::OutputList(values) = super::invoke(args).unwrap() else {
+            panic!("output list")
+        };
+        assert_eq!(values.len(), 4);
+        assert_eq!(values[0], Value::Bool(true));
+        assert_eq!(values[3], Value::Num(0.0));
+    }
+    let file = temp.path().join("file");
+    File::create(&file).unwrap();
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    assert!(super::invoke(vec![Value::from(file.to_string_lossy().to_string())]).is_err());
+    assert!(file.is_file());
+}

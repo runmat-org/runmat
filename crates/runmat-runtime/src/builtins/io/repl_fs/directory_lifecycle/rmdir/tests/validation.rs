@@ -48,3 +48,45 @@ fn rejects_files_without_removing_them() {
     assert_eq!(outcome.identifier(), "RunMat:rmdir:NotADirectory");
     assert!(target.is_file());
 }
+
+#[test]
+fn text_admission_precedes_resident_control_access() {
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    });
+    let error = evaluate(vec![
+        Value::from("unused"),
+        Value::from("invalid-option"),
+        resident,
+    ])
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some(runmat_builtins::RMDIR_ERROR_OPTION.identifier.unwrap())
+    );
+    let pages = runmat_value::CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
+    let error = evaluate(vec![Value::CharArray(pages)]).unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::RMDIR_ERROR_FOLDER_TYPE.identifier
+    );
+}
+
+#[test]
+fn no_output_removal_executes_and_reports_missing_target() {
+    let _lock = lock();
+    let temp = tempdir().unwrap();
+    let path = temp.path().join("removed");
+    std::fs::create_dir(&path).unwrap();
+    let args = vec![Value::from(path.to_string_lossy().to_string())];
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    assert_eq!(
+        super::invoke(args.clone()).unwrap(),
+        Value::OutputList(vec![])
+    );
+    assert!(!path.exists());
+    assert!(super::invoke(args).is_err());
+}

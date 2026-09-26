@@ -19,7 +19,13 @@ pub(super) fn is_logical_control(value: &ValueFact) -> bool {
 }
 
 fn character_is_row(shape: &ShapeFact) -> bool {
-    shape
-        .known_dims()
-        .is_none_or(|dimensions| dimensions.first() == Some(&Some(1)))
+    shape.known_dims().is_none_or(|dimensions| {
+        !dimensions
+            .first()
+            .is_some_and(|row| row.is_some_and(|row| row != 1))
+            && !dimensions
+                .iter()
+                .skip(2)
+                .any(|dim| dim.is_some_and(|dim| dim != 1))
+    })
 }

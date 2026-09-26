@@ -17,7 +17,6 @@ pub(super) struct RemoveRequest {
 }
 
 pub(super) async fn parse(args: Vec<Value>) -> BuiltinResult<RemoveRequest> {
-    let args = super::super::input::gather(args, "rmdir").await?;
     if !(1..=4).contains(&args.len()) {
         return Err(error(&RMDIR_ERROR_ARITY));
     }
@@ -27,7 +26,7 @@ pub(super) async fn parse(args: Vec<Value>) -> BuiltinResult<RemoveRequest> {
         return Err(error(&RMDIR_ERROR_EMPTY_NAME));
     }
     let (recursive, option_start) = recursive_prefix(&args)?;
-    let resolve_symbolic_links = symbolic_link_option(&args, option_start)?;
+    let resolve_symbolic_links = symbolic_link_option(&args, option_start).await?;
     let path = expand_user_path(&folder, "rmdir")
         .map(PathBuf::from)
         .map_err(|cause| error_with_source(&RMDIR_ERROR_FILESYSTEM, cause.into()))?;
@@ -49,7 +48,7 @@ fn recursive_prefix(args: &[Value]) -> BuiltinResult<(bool, usize)> {
     }
 }
 
-fn symbolic_link_option(args: &[Value], start: usize) -> BuiltinResult<bool> {
+async fn symbolic_link_option(args: &[Value], start: usize) -> BuiltinResult<bool> {
     if args.len() == start {
         return Ok(false);
     }
@@ -61,7 +60,19 @@ fn symbolic_link_option(args: &[Value], start: usize) -> BuiltinResult<bool> {
     if !name.eq_ignore_ascii_case("ResolveSymbolicLinks") {
         return Err(error(&RMDIR_ERROR_OPTION));
     }
-    exact_logical::decode(&args[start + 1]).map_err(|_| error(&RMDIR_ERROR_OPTION))
+    let control = &args[start + 1];
+    let gathered;
+    let control = if matches!(control, Value::GpuTensor(_)) {
+        gathered = crate::gather_if_needed_async(control)
+            .await
+            .map_err(|error| {
+                crate::builtins::common::map_control_flow_with_builtin(error, "rmdir")
+            })?;
+        &gathered
+    } else {
+        control
+    };
+    exact_logical::decode(control).map_err(|_| error(&RMDIR_ERROR_OPTION))
 }
 
 fn error(descriptor: &'static BuiltinErrorDescriptor) -> crate::RuntimeError {

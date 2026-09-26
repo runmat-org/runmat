@@ -1,6 +1,5 @@
 mod execute;
 mod options;
-pub(crate) mod specification;
 
 #[cfg(test)]
 mod tests;

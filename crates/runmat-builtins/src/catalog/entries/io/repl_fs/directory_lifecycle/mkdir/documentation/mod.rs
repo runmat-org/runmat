@@ -15,7 +15,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "When outputs are requested, an operational filesystem failure returns false with diagnostic text. Without outputs, the same failure raises an error; an existing directory emits a warning governed by the session's warning settings.",
             "Folder names accept character rows and scalar strings. Relative paths use the current folder, a leading `~` expands through the active environment, and native Windows paths may use drive-letter or UNC syntax. The filesystem service receives the path without rewriting platform-specific components.",
-            "Directory creation runs through the host or browser filesystem service rather than an acceleration provider. Provider-resident arguments are gathered before validation; directory creation itself never executes on a GPU.",
+            "Directory creation runs through the host or browser filesystem service rather than an acceleration provider. Folder names must be host text; numeric or provider-resident values are rejected without a device transfer.",
         ],
     },
 ];
@@ -31,7 +31,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "Can mkdir run on a GPU?",
-        answer: "No. Directory creation is a filesystem operation. Provider-resident arguments are gathered before validation and execution.",
+        answer: "No. Directory creation is a filesystem operation, and its text path arguments do not require device transfers.",
     },
     BuiltinDocumentationFaq {
         question: "Which path value types does mkdir accept?",
