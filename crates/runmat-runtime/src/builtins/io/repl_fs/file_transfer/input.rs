@@ -22,7 +22,12 @@ pub(super) fn text(
 ) -> BuiltinResult<String> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array)
+            if array.rows == 1
+                && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
+        {
+            Ok(array.data.iter().collect())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         _ => Err(descriptor_error(error, builtin)),
     }
@@ -64,4 +69,24 @@ fn map_gather_error(error: RuntimeError, builtin: &'static str) -> RuntimeError 
         builder = builder.with_identifier(identifier);
     }
     builder.build()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_text_admission_preserves_rows_and_rejects_pages() {
+        for (builtin, descriptor) in [
+            ("copyfile", &runmat_builtins::COPYFILE_ERROR_SOURCE_ARG),
+            ("movefile", &runmat_builtins::MOVEFILE_ERROR_SOURCE_ARG),
+        ] {
+            for (shape, valid) in [(vec![1, 2, 1], true), (vec![1, 1, 2], false)] {
+                let value = Value::CharArray(
+                    runmat_value::CharArray::new_with_shape(vec!['a', 'b'], shape).unwrap(),
+                );
+                assert_eq!(text(&value, descriptor, builtin).is_ok(), valid);
+            }
+        }
+    }
 }

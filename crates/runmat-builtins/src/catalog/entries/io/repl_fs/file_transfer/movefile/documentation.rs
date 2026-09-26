@@ -11,8 +11,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Results and execution",
         paragraphs: &[
-            "`status` is a double scalar: 1 after success and 0 after an operational failure. `msg` and `msgID` are empty character rows after success and describe a failure otherwise. Invalid argument types and malformed flags raise an error before filesystem access.",
-            "Paths accept character rows and scalar strings. Relative paths use the current folder and a leading `~` expands through the active environment. The operation runs through the host or browser filesystem service; provider-resident inputs gather before parsing, and no accelerator kernel is used.",
+            "`status` is a double scalar: 1 after success and 0 after an operational failure. `msg` and `msgID` are empty character rows after success and describe a failure otherwise. Without outputs, an operational failure raises an error. Invalid argument types and malformed flags raise an error before filesystem access.",
+            "Paths accept character rows and scalar strings. Relative paths use the current folder and a leading `~` expands through the active environment. The operation runs through the host or browser filesystem service. Numeric and provider-resident path values reject without a device transfer; no accelerator kernel is used.",
             "The active filesystem provider defines cross-volume behavior and metadata preservation. If its rename operation cannot move between two storage volumes, movefile returns status 0 with the provider error and leaves recovery to the caller.",
         ],
     },
@@ -89,9 +89,9 @@ const EXAMPLES: &[BuiltinExample] = &[
 
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "How do I replace an existing target?", answer: "Pass `'f'` as the third argument. Without it, movefile leaves the existing target unchanged and returns status 0." },
-    BuiltinDocumentationFaq { question: "Can movefile move several files?", answer: "Yes. Use a wildcard source and an existing destination directory. Every match is planned before the first move begins." },
+    BuiltinDocumentationFaq { question: "Can movefile move several files?", answer: "Yes. Use a wildcard source and an existing destination directory. Every match is planned before the first move begins. The moves execute in sequence, not as one transaction; an error can leave earlier matches already moved." },
     BuiltinDocumentationFaq { question: "Can movefile cross storage volumes?", answer: "Only when the active filesystem provider supports that rename. An unsupported cross-volume move returns status 0 and provider diagnostics." },
-    BuiltinDocumentationFaq { question: "Can movefile run on a GPU?", answer: "No. Filesystem access is a host-service operation. Resident arguments gather before validation and execution." },
+    BuiltinDocumentationFaq { question: "Can movefile run on a GPU?", answer: "No. Filesystem access is a host-service operation, and path inputs must be host text." },
 ];
 
 const LINKS: &[BuiltinDocumentationLink] = &[

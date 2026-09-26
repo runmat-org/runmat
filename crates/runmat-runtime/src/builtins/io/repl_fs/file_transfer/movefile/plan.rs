@@ -19,6 +19,18 @@ pub(super) struct MoveFailure {
 
 pub(super) async fn execute(entries: &[MovePlanEntry]) -> Result<(), MoveFailure> {
     for entry in entries {
+        if super::super::target::same_path(&entry.source, &entry.target).await {
+            continue;
+        }
+        if super::super::target::is_descendant(&entry.source, &entry.target).await {
+            return Err(failure(
+                entry,
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "cannot move a directory into its own descendant",
+                ),
+            ));
+        }
         if let Some(directory) = entry.replace_directory {
             if let Err(error) =
                 super::super::target::remove_existing(&entry.target, directory).await

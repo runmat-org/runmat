@@ -20,7 +20,10 @@ pub(super) async fn move_matches(pattern: &str, destination: &str, force: bool) 
             return super::result::destination_not_directory(destination);
         }
         Ok(_) => {}
-        Err(_) => return super::result::destination_missing(destination),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return super::result::destination_missing(destination)
+        }
+        Err(error) => return super::result::filesystem(pattern, destination, &error),
     }
     let entries = match plan(matches, &destination_path, force).await {
         Ok(entries) => entries,
@@ -52,8 +55,18 @@ async fn plan_entry(
     force: bool,
 ) -> Result<Option<MovePlanEntry>, TransferOutcome> {
     let source_display = super::super::target::display(&source);
-    if vfs::metadata_async(&source).await.is_err() {
-        return Err(super::result::source_not_found(&source_display));
+    match vfs::symlink_metadata_async(&source).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(super::result::source_not_found(&source_display))
+        }
+        Err(error) => {
+            return Err(super::result::filesystem(
+                &source_display,
+                &super::super::target::display(destination),
+                &error,
+            ))
+        }
     }
     let name = source.file_name().ok_or_else(|| {
         super::result::filesystem(
@@ -63,11 +76,11 @@ async fn plan_entry(
         )
     })?;
     let target = destination.join(name);
-    if target == source {
+    if super::super::target::same_path(&target, &source).await {
         return Ok(None);
     }
     let target_display = super::super::target::display(&target);
-    let replace_directory = match vfs::metadata_async(&target).await {
+    let replace_directory = match vfs::symlink_metadata_async(&target).await {
         Ok(_) if !force => return Err(super::result::destination_exists(&target_display)),
         Ok(metadata) => Some(metadata.is_dir()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => None,
