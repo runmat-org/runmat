@@ -246,6 +246,9 @@ struct ResolvedBuiltinName<'a> {
     canonical: &'a str,
 }
 
+mod preparation;
+use preparation::SelectedBindingOrigin;
+
 impl<'a> ResolvedBuiltinName<'a> {
     fn resolve(requested: &'a str) -> Self {
         Self {
@@ -337,39 +340,33 @@ async fn call_builtin_async_impl(
     let implementations = matching_bindings
         .into_iter()
         .rev()
-        .map(|binding| (false, binding.implementation))
+        .map(|binding| {
+            (
+                SelectedBindingOrigin::CanonicalOrScoped,
+                binding.implementation,
+            )
+        })
         .chain(
             no_category
                 .into_iter()
                 .rev()
                 .chain(categorized.into_iter().rev())
-                .map(|builtin| (true, builtin.implementation)),
+                .map(|builtin| {
+                    (
+                        SelectedBindingOrigin::LegacyInventory,
+                        builtin.implementation,
+                    )
+                }),
         );
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
-    for (legacy, implementation) in implementations {
+    for (origin, implementation) in implementations {
         // Resolve methods and scoped overrides before legacy preparation. This
         // bridge preserves the old transfer contract only for selected inventory
         // implementations; canonical bodies own their admitted preparation.
-        let prepared = if legacy {
-            if let Some(context) = crate::context::legacy::active() {
-                if let Some(service) = context.service_ports().acceleration().cloned() {
-                    Some(
-                        service
-                            .prepare_legacy(context, name.to_owned(), args.to_vec())
-                            .await?,
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        let prepared = preparation::prepare_selected(origin, name, args).await?;
         let execution_args = prepared.as_deref().unwrap_or(args);
         let f = implementation;
         match (f)(execution_args).await {

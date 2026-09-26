@@ -1,42 +1,46 @@
 use super::*;
 use std::rc::Rc;
 
-fn runtime() -> RuntimeContext {
-    RuntimeContext::new(Rc::new(
+fn runtime() -> runmat_runtime::context::RuntimeContext {
+    runmat_runtime::context::RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
 }
 
 #[test]
-fn prepared_call_keeps_outputs_and_runtime_errors() {
+fn direct_dispatch_keeps_outputs_and_runtime_errors() {
     runmat_gc::gc_test_context(|| {
         futures::executor::block_on(async {
             let runtime = runtime();
+            let _scope = runtime.enter();
             let args = [Value::Tensor(
                 runmat_value::Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
             )];
-            let prepared = prepare_builtin_args("size", &args, &runtime).await.unwrap();
-            let result = call_prepared_builtin("size", prepared, 2).await.unwrap();
+            let result = runmat_runtime::call_builtin_async_with_outputs("size", &args, 2)
+                .await
+                .unwrap();
             let Value::OutputList(outputs) = result else {
                 panic!("two outputs")
             };
             assert_eq!(outputs, vec![Value::Num(2.), Value::Num(3.)]);
-            let prepared = prepare_builtin_args("__missing_observed_builtin__", &[], &runtime)
-                .await
-                .unwrap();
-            let error = call_prepared_builtin("__missing_observed_builtin__", prepared, 1)
-                .await
-                .unwrap_err();
+            let error = runmat_runtime::call_builtin_async_with_outputs(
+                "__missing_observed_builtin__",
+                &[],
+                1,
+            )
+            .await
+            .unwrap_err();
             assert_eq!(error.identifier(), Some("RunMat:UndefinedFunction"));
         });
     });
 }
 
 #[test]
-fn imported_call_uses_the_same_prepared_invocation_boundary() {
+fn imported_call_uses_runtime_dispatch_with_original_arguments() {
     runmat_gc::gc_test_context(|| {
         futures::executor::block_on(async {
             let runtime = runtime();
+            let _scope = runtime.enter();
             let args = [Value::Tensor(
                 runmat_value::Tensor::new(vec![1.; 6], vec![2, 3]).unwrap(),
             )];
@@ -45,7 +49,6 @@ fn imported_call_uses_the_same_prepared_invocation_boundary() {
                 &[(vec!["numel".into()], false)],
                 &args,
                 1,
-                &runtime,
             )
             .await
             .unwrap();

@@ -1269,7 +1269,6 @@ pub async fn dispatch_instruction(
         Instr::CallBuiltinMulti(name, arg_count, out_count) => {
             match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
-                    runtime: &context.runtime,
                     stack,
                     name,
                     arg_count: *arg_count,
@@ -1309,7 +1308,6 @@ pub async fn dispatch_instruction(
             let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
             match handle_builtin_call_multi(
                 calls::BuiltinCallContext {
-                    runtime: &context.runtime,
                     stack,
                     name,
                     arg_count: *arg_count,
@@ -1822,10 +1820,8 @@ pub async fn dispatch_instruction(
                 build_builtin_expand_multi_args(stack, specs, sequence_register, &context.runtime)
                     .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
-            let prepared =
-                crate::call::builtins::prepare_builtin_args(name, &args, &context.runtime).await?;
             let result =
-                crate::call::builtins::call_prepared_builtin(name, prepared, *out_count).await?;
+                runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
             calls::publish_fixed_outputs(
                 stack,
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
