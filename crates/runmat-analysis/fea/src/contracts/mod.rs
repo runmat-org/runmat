@@ -5,7 +5,9 @@ mod thermal_state;
 
 pub use field_ids::*;
 pub use run_error::FeaRunError;
-pub use thermal_state::{FeaThermalRunResult, ThermalInitialStateEvidence};
+pub use thermal_state::{
+    FeaThermalRunResult, ThermalInitialStateEvidence, ThermalProcedureControl, ThermalSolveOptions,
+};
 
 pub use solver_compatibility::{
     validate_solver_formulation_compatibility, SolverFormulationCompatibilityError,
@@ -664,40 +666,6 @@ impl Default for ElectromagneticSolveOptions {
             residual_target: 1.0e-6,
             harmonic_tolerance: 1.0e-7,
             harmonic_max_iterations: 96,
-            solver_mesh: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ThermalProcedureControl {
-    Steady,
-    BackwardEuler { snapshot_count: usize },
-}
-
-impl ThermalProcedureControl {
-    pub const fn procedure(&self) -> AnalysisProcedure {
-        match self {
-            Self::Steady => AnalysisProcedure::Static,
-            Self::BackwardEuler { .. } => AnalysisProcedure::TransientResponse,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ThermalSolveOptions {
-    pub formulation_requirement: FormulationRequirement,
-    pub procedure: ThermalProcedureControl,
-    pub residual_target: f64,
-    pub solver_mesh: Option<SolverMeshArtifact>,
-}
-
-impl Default for ThermalSolveOptions {
-    fn default() -> Self {
-        Self {
-            formulation_requirement: FormulationRequirement::Production,
-            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
-            residual_target: 1.0e-4,
             solver_mesh: None,
         }
     }

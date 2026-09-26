@@ -133,6 +133,16 @@ topology; structural result bytes are not accepted as thermal results. This does
 a portable thermal solve task, full source-to-source sequence routing, or complete transport
 resource accounting.
 
+`execution::ThermalWorkload` provides canonical numerical intent and a local execution entry for
+an explicitly selected standalone thermal step. It retains the entire authored model and sequence
+for producer lineage, binds the selected step and numerical controls in its workload identity,
+and takes the canonical mesh separately. The ordinary thermal entry and workload execution share
+step admission: unsupported upstream state and checkpoint/restart inputs are rejected rather than
+silently initialized as a fresh solve. Portable workloads additionally reject lifecycle activations
+and coupled families pending their executable contracts. Multiple thermal steps may be selected
+individually without rewriting their sequence identity; this is not sequence orchestration. The
+local entry does not yet supply thermal producer resource admission or a portable worker task.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

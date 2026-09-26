@@ -43,6 +43,8 @@ pub(crate) mod structural_identity;
 mod study_workloads;
 mod sweep;
 mod thermal_result;
+mod thermal_workload;
+pub use thermal_workload::ThermalWorkload;
 mod transient_block;
 mod transient_checkpoint;
 mod transient_coordinates;

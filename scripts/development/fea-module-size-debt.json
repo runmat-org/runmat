@@ -9,7 +9,7 @@
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1672,
   "crates/runmat-analysis/fea/src/results/observation/resolve.rs": 1372,
   "crates/runmat-analysis/fea/src/physics/thermal/assembly.rs": 1371,
-  "crates/runmat-analysis/fea/src/contracts/mod.rs": 737,
+  "crates/runmat-analysis/fea/src/contracts/mod.rs": 705,
   "crates/runmat-analysis/fea/src/results/observation/contract.rs": 1307,
   "crates/runmat-analysis/fea/src/results/observation/distributed.rs": 1253,
   "crates/runmat-analysis/fea/src/solve/nonlinear/mod.rs": 1219,

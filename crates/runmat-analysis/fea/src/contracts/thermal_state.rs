@@ -1,10 +1,46 @@
-//! Solved thermal output and its initial/reference-state evidence.
+//! Thermal solve controls, solved output and initial/reference-state evidence.
 
-use runmat_analysis_core::AnalysisField;
+use runmat_analysis_core::{AnalysisField, AnalysisProcedure, FormulationRequirement};
 use runmat_execution::Digest;
+use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
 use super::FeaRunResult;
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum ThermalProcedureControl {
+    Steady,
+    BackwardEuler { snapshot_count: usize },
+}
+
+impl ThermalProcedureControl {
+    pub const fn procedure(&self) -> AnalysisProcedure {
+        match self {
+            Self::Steady => AnalysisProcedure::Static,
+            Self::BackwardEuler { .. } => AnalysisProcedure::TransientResponse,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ThermalSolveOptions {
+    pub formulation_requirement: FormulationRequirement,
+    pub procedure: ThermalProcedureControl,
+    pub residual_target: f64,
+    pub solver_mesh: Option<SolverMeshArtifact>,
+}
+
+impl Default for ThermalSolveOptions {
+    fn default() -> Self {
+        Self {
+            formulation_requirement: FormulationRequirement::Production,
+            procedure: ThermalProcedureControl::BackwardEuler { snapshot_count: 10 },
+            residual_target: 1.0e-4,
+            solver_mesh: None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

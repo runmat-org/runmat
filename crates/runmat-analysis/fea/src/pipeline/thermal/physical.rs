@@ -1,6 +1,4 @@
-use runmat_analysis_core::{
-    AnalysisModel, CoupledPhysicsFamily, IndependentDomain, PhysicsFamily, SignalSampleApproach,
-};
+use runmat_analysis_core::{AnalysisModel, IndependentDomain, PhysicsFamily, SignalSampleApproach};
 
 use crate::{
     contracts::{
@@ -42,6 +40,7 @@ pub(super) fn run(
     backend: ComputeBackend,
     options: ThermalSolveOptions,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
+    thermal_step: &runmat_analysis_core::ProcedureStep,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
     emit_phase(
         "fea.run_thermal",
@@ -64,7 +63,6 @@ pub(super) fn run(
         options.formulation_requirement,
     )?;
 
-    let thermal_step = thermal_step(model, procedure)?;
     let required_history_samples = required_time_history_samples(thermal_step)
         .map_err(|error| FeaRunError::Observation(error.to_string()))?;
     let time_origin_s = match &thermal_step.independent_domain {
@@ -491,28 +489,6 @@ fn rhs_norm(rhs: &[f64]) -> f64 {
         .sum::<f64>()
         .sqrt()
         .max(1.0)
-}
-
-fn thermal_step(
-    model: &AnalysisModel,
-    procedure: runmat_analysis_core::AnalysisProcedure,
-) -> Result<&runmat_analysis_core::ProcedureStep, FeaRunError> {
-    let mut steps = model.sequence.steps.iter().filter(|step| {
-        step.procedure == procedure
-            && matches!(
-                step.family,
-                PhysicsFamily::Thermal
-                    | PhysicsFamily::Coupled(CoupledPhysicsFamily::ConjugateHeatTransfer)
-            )
-    });
-    steps
-        .next()
-        .filter(|_| steps.next().is_none())
-        .ok_or_else(|| {
-            FeaRunError::InvalidModel(
-                "thermal solve requires exactly one matching thermal procedure step".into(),
-            )
-        })
 }
 
 fn realize_excitations_for_step(
