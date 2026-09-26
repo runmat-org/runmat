@@ -36,9 +36,6 @@ pub fn metaclass_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Unknown
 }
 
-pub fn superclasses_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::cell_of(Type::String)
-}
 
 pub fn which_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::cell_of(Type::String)])
@@ -135,13 +132,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn superclasses_type_reports_cell_of_strings() {
-        assert_eq!(
-            superclasses_type(&[], &ResolveContext::new(Vec::new())),
-            Type::cell_of(Type::String)
-        );
-    }
 
     #[test]
     fn which_type_reports_union() {

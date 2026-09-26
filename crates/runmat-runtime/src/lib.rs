@@ -893,42 +893,6 @@ pub(crate) async fn notify_builtin(
     Ok(Value::Num(0.0))
 }
 
-// Test-oriented dependent property handlers (global). If a class defines a Dependent
-// property named 'p', the VM will try to call get.p / set.p. We provide generic
-// implementations that read/write a conventional backing field 'p_backing'.
-pub(crate) async fn get_p_builtin(obj: Value) -> crate::BuiltinResult<Value> {
-    match obj {
-        Value::Object(o) => {
-            if let Some(v) = o.properties.get("p_backing") {
-                Ok(v.clone())
-            } else {
-                Ok(Value::Num(0.0))
-            }
-        }
-        other => Err(build_runtime_error(format!(
-            "get.p: requires object receiver (got {other:?})"
-        ))
-        .with_builtin("get.p")
-        .with_identifier("RunMat:GetPReceiverInvalid")
-        .build()),
-    }
-}
-
-pub(crate) async fn set_p_builtin(obj: Value, val: Value) -> crate::BuiltinResult<Value> {
-    match obj {
-        Value::Object(mut o) => {
-            o.properties.insert("p_backing".to_string(), val);
-            Ok(Value::Object(o))
-        }
-        other => Err(build_runtime_error(format!(
-            "set.p: requires object receiver (got {other:?})"
-        ))
-        .with_builtin("set.p")
-        .with_identifier("RunMat:SetPReceiverInvalid")
-        .build()),
-    }
-}
-
 pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::BuiltinResult<Value> {
     Ok(Value::String(format!("@anon({params}) {body}")))
 }
@@ -3175,15 +3139,20 @@ mod tests {
 
     #[test]
     fn get_p_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(get_p_builtin(Value::Num(1.0)))
-            .expect_err("get.p should reject non-object receiver");
+        let err = block_on(builtins::introspection::dependent_property::get_p_builtin(
+            Value::Num(1.0),
+        ))
+        .expect_err("get.p should reject non-object receiver");
         assert_eq!(err.identifier(), Some("RunMat:GetPReceiverInvalid"));
     }
 
     #[test]
     fn set_p_rejects_non_object_receiver_with_identifier() {
-        let err = block_on(set_p_builtin(Value::Num(1.0), Value::Num(2.0)))
-            .expect_err("set.p should reject non-object receiver");
+        let err = block_on(builtins::introspection::dependent_property::set_p_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+        ))
+        .expect_err("set.p should reject non-object receiver");
         assert_eq!(err.identifier(), Some("RunMat:SetPReceiverInvalid"));
     }
 
