@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use super::FeaRunResult;
 
+mod energy;
+pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError};
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ThermalProcedureControl {
@@ -61,6 +64,9 @@ pub struct FeaThermalRunResult {
     pub heat_flux_snapshots: Vec<AnalysisField>,
     pub energy_storage_rate_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+    pub residual_target: f64,
+    /// One global power balance per solve (no initial-only transient sample).
+    pub energy_balances: Vec<ThermalEnergyBalance>,
     pub reference_temperature_k: f64,
     pub initial_state: ThermalInitialStateEvidence,
 }

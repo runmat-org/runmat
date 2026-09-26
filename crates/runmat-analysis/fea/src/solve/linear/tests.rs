@@ -55,6 +55,69 @@ fn cpu_reference_solve_converges_with_small_canonical_residual() {
 }
 
 #[test]
+fn scoped_authored_tolerance_refines_a_warm_start_accepted_by_default() {
+    let operator = system([4.0, 3.0]);
+    let guess = [5.0 / 11.0 + 1e-10, 9.0 / 11.0 - 1e-10];
+    for plan in [
+        LocalExecutionPlan::serial(),
+        LocalExecutionPlan::fixed(LocalThreadCount::new(2).unwrap()).unwrap(),
+    ] {
+        let solve = |relative_tolerance| {
+            solve_operator_system_scoped(
+                &operator,
+                SpdPreconditionerKind::Jacobi,
+                LinearAlgebraBackendKind::CpuReference,
+                &CpuReferenceBackend,
+                Some(&guess),
+                ScopedLinearSolveSettings {
+                    plan,
+                    admission: None,
+                    relative_tolerance,
+                },
+            )
+            .unwrap()
+        };
+        let loose = solve(settings::DEFAULT_RELATIVE_TOLERANCE);
+        let strict = solve(1e-12);
+        assert!(loose.converged && strict.converged);
+        assert_eq!(loose.iterations, 0);
+        assert!(strict.iterations > 0);
+        assert!(loose.residual_norm > 1e-12 * 5.0_f64.sqrt());
+        assert!(strict.residual_norm <= 1e-12 * 5.0_f64.sqrt());
+    }
+}
+
+#[test]
+fn invalid_scoped_tolerances_reject_before_cpu_or_provider_work() {
+    let operator = system([4.0, 3.0]);
+    for backend in [
+        LinearAlgebraBackendKind::CpuReference,
+        LinearAlgebraBackendKind::Accelerator,
+    ] {
+        for relative_tolerance in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let result = solve_operator_system_scoped(
+                &operator,
+                SpdPreconditionerKind::Jacobi,
+                backend,
+                &CpuReferenceBackend,
+                None,
+                ScopedLinearSolveSettings {
+                    plan: LocalExecutionPlan::serial(),
+                    admission: None,
+                    relative_tolerance,
+                },
+            )
+            .unwrap();
+            assert!(!result.converged);
+            assert_eq!(result.iterations, 0);
+            assert_eq!(result.device_apply_k_attempt_count, 0);
+            assert!(result.accelerator_evidence.is_none());
+            assert_eq!(result.diagnostics[0].code, "FEA_INVALID_SOLVER_TOLERANCE");
+        }
+    }
+}
+
+#[test]
 fn exact_prepared_work_is_checked_before_pcg_iterations() {
     let operator = system([4.0, 3.0]);
     let prepared = operator.prepare_linear().unwrap();
@@ -73,8 +136,7 @@ fn exact_prepared_work_is_checked_before_pcg_iterations() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-        plan,
-        Some(&admission),
+        ScopedLinearSolveSettings::with_default_tolerance(plan, Some(&admission)),
     )
     .unwrap();
     assert!(accepted.converged);
@@ -103,8 +165,7 @@ fn exact_prepared_work_is_checked_before_pcg_iterations() {
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-            plan,
-            Some(&rejected),
+            ScopedLinearSolveSettings::with_default_tolerance(plan, Some(&rejected)),
         )
         .unwrap();
         assert!(!result.converged);
@@ -157,8 +218,7 @@ fn static_pcg_preserves_a_manufactured_solution_under_operator_and_load_scaling(
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-            plan,
-            None,
+            ScopedLinearSolveSettings::with_default_tolerance(plan, None),
         )
         .unwrap();
         assert!(serial.converged, "scale={scale}: {:?}", serial.diagnostics);
@@ -224,8 +284,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-        plan,
-        None,
+        ScopedLinearSolveSettings::with_default_tolerance(plan, None),
     )
     .unwrap();
     let repeated = solve_operator_system_scoped(
@@ -234,8 +293,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
         None,
-        plan,
-        None,
+        ScopedLinearSolveSettings::with_default_tolerance(plan, None),
     )
     .unwrap();
     assert_eq!(parallel, repeated);
@@ -250,8 +308,7 @@ fn scoped_pcg_matches_serial_and_rejects_nested_execution() {
             LinearAlgebraBackendKind::CpuReference,
             &CpuReferenceBackend,
             None,
-            plan,
-            None,
+            ScopedLinearSolveSettings::with_default_tolerance(plan, None),
         ))
     })
     .unwrap();
@@ -279,7 +336,7 @@ fn scoped_pcg_reduction_failure_is_not_reported_as_numerical_breakdown() {
             |_: &[f64], _: &[f64]| Err(ScopedSpmvError::ReductionDimensionMismatch),
             None,
         ),
-        None,
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
     );
     assert!(matches!(
         result,

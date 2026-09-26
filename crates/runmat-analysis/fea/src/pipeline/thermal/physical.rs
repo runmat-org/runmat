@@ -5,13 +5,10 @@ use crate::{
         fea_thermal_energy_storage_rate_field_id, fea_thermal_heat_flux_field_id,
         fea_thermal_temperature_field_id, fea_thermal_temperature_gradient_field_id,
         ComputeBackend, ExecutionBackend, FeaRunError, FeaRunResult, FeaThermalRunResult,
-        ThermalProcedureControl, ThermalSolveOptions,
+        ThermalEnergyBalance, ThermalProcedureControl, ThermalSolveOptions,
     },
     excitation::{realize_step_excitations, ExcitationSamplePoint},
-    physics::thermal::{
-        assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
-        initial_state,
-    },
+    physics::thermal::{assembly::assemble as assemble_thermal_operator, initial_state},
     pipeline::observation_history::{
         evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
     },
@@ -20,7 +17,7 @@ use crate::{
         backend::{
             build_backend, kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend,
         },
-        linear::{solve_operator_system_scoped, LinearSolveResult},
+        linear::{solve_operator_system_scoped, LinearSolveResult, ScopedLinearSolveSettings},
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -137,6 +134,7 @@ pub(super) fn run(
             requested_solver_backend,
             algebra.as_ref(),
             operators,
+            options.residual_target,
         )?,
         ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
             properties: &facts.properties,
@@ -149,6 +147,7 @@ pub(super) fn run(
             operators,
             requested_solver_backend,
             algebra: algebra.as_ref(),
+            residual_target: options.residual_target,
         })?,
     };
     emit_phase(
@@ -253,20 +252,12 @@ pub(super) fn run(
         run.series_reductions = evaluated_histories.series_reductions;
     }
 
-    emit_phase(
-        "fea.run_thermal",
-        FeaProgressPhase::Complete,
-        FeaProgressStatus::Completed,
-        "FEA physical thermal run complete",
-        Some(5),
-        Some(5),
-    );
     run.validate_solver_formulation()?;
     let sequence = crate::execution::SequenceIdentity::from_solver_contract(&model.sequence)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let producer = crate::execution::StepIdentity::from_solver_contract(sequence, thermal_step)
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    Ok(FeaThermalRunResult {
+    let result = FeaThermalRunResult {
         source_workload,
         numerical_intent,
         run,
@@ -290,9 +281,23 @@ pub(super) fn run(
         heat_flux_snapshots,
         energy_storage_rate_snapshots,
         residual_norms: outcome.residual_norms,
+        residual_target: options.residual_target,
+        energy_balances: outcome.energy_balances,
         reference_temperature_k: domain.reference_temperature.kelvin,
         initial_state: initial.evidence,
-    })
+    };
+    result
+        .validate_complete()
+        .map_err(|error| FeaRunError::Solve(error.to_string()))?;
+    emit_phase(
+        "fea.run_thermal",
+        FeaProgressPhase::Complete,
+        FeaProgressStatus::Completed,
+        "FEA physical thermal run complete",
+        Some(5),
+        Some(5),
+    );
+    Ok(result)
 }
 struct ProcedureOutcome {
     time_points_s: Vec<f64>,
@@ -314,6 +319,7 @@ fn solve_steady(
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     operators: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
 ) -> Result<ProcedureOutcome, FeaRunError> {
     let operator = assembly
         .steady_operator()
@@ -325,6 +331,7 @@ fn solve_steady(
         algebra,
         Some(initial_temperature_k),
         operators,
+        residual_target,
     )?;
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, &mut recovered)?;
@@ -354,6 +361,7 @@ struct TransientSolveInput<'a> {
     operators: &'a crate::planning::resource::ThermalOperatorResourceFacts,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
+    residual_target: f64,
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
@@ -416,6 +424,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             input.algebra,
             Some(&previous),
             input.operators,
+            input.residual_target,
         )?;
         host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
@@ -455,6 +464,7 @@ fn solve_checked(
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
     facts: &crate::planning::resource::ThermalOperatorResourceFacts,
+    residual_target: f64,
 ) -> Result<LinearSolveResult, FeaRunError> {
     for matrix in [
         operator.operators().stiffness(),
@@ -463,14 +473,20 @@ fn solve_checked(
     ] {
         facts.verify_matrix(matrix)?;
     }
+    // The authored acceptance target may tighten, but must not relax, the shared numerical
+    // stopping policy. Linear residual normalization alone does not bound global energy error.
+    let mut settings = ScopedLinearSolveSettings::with_default_tolerance(
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        Some(facts.solver_admission()),
+    );
+    settings.relative_tolerance = settings.relative_tolerance.min(residual_target);
     let solve = solve_operator_system_scoped(
         operator,
         SpdPreconditionerKind::Jacobi,
         requested_solver_backend,
         algebra,
         initial_guess,
-        crate::planning::resource::LocalExecutionPlan::serial(),
-        Some(facts.solver_admission()),
+        settings,
     )
     .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     if solve.converged {

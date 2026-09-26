@@ -24,8 +24,6 @@ mod convergence_tests;
 mod recovery;
 mod temperature_field;
 
-pub(crate) use recovery::ThermalEnergyBalance;
-
 #[derive(Debug, Clone)]
 pub(crate) struct ThermalOperatorAssembly {
     pub property_identity: crate::properties::CompiledPropertyMapIdentity,

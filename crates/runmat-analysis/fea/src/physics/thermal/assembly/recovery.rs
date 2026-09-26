@@ -1,14 +1,6 @@
 use super::{apply_matrix, ThermalAssemblyError, ThermalOperatorAssembly};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ThermalEnergyBalance {
-    pub storage_rate_w: f64,
-    pub boundary_loss_w: f64,
-    pub applied_power_w: f64,
-    pub prescribed_boundary_power_w: f64,
-    pub residual_w: f64,
-    pub relative_residual: f64,
-}
+use crate::contracts::ThermalEnergyBalance;
 
 impl ThermalOperatorAssembly {
     pub(crate) fn recover_element_temperature_gradients(
@@ -112,21 +104,11 @@ impl ThermalOperatorAssembly {
             .filter(|(_, value)| value.is_some())
             .map(|(node, _)| -(storage_rate[node] + conduction[node] - self.source[node]))
             .sum::<f64>();
-        let residual_w =
-            storage_rate_w + boundary_loss_w - applied_power_w + prescribed_boundary_power_w;
-        let scale = storage_rate_w
-            .abs()
-            .max(boundary_loss_w.abs())
-            .max(applied_power_w.abs())
-            .max(prescribed_boundary_power_w.abs())
-            .max(1.0);
-        ThermalEnergyBalance {
+        ThermalEnergyBalance::from_powers(
             storage_rate_w,
             boundary_loss_w,
             applied_power_w,
             prescribed_boundary_power_w,
-            residual_w,
-            relative_residual: residual_w.abs() / scale,
-        }
+        )
     }
 }

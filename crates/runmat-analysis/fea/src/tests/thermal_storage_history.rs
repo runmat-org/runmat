@@ -71,6 +71,13 @@ fn insulated_uniform_heating_publishes_storage_density_not_total_power() {
             },
         )
         .unwrap();
+        assert_eq!(result.residual_target, 1e-10);
+        assert!(result.residual_norms.iter().all(|value| *value <= 1e-10));
+        assert_eq!(result.energy_balances.len(), 2);
+        assert!(result
+            .energy_balances
+            .iter()
+            .all(|balance| balance.relative_residual <= 1e-10));
         let history = &result.run.observation_histories[0];
         assert_eq!(
             history.manifest().quantity,

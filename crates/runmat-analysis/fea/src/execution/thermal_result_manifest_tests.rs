@@ -38,13 +38,15 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             .collect::<Vec<_>>();
         let expected_content = encode_contract(
             b"runmat-thermal-solver-result/v1\0",
-            "thermal-solver-result-intent-field-content",
+            "thermal-solver-result-accepted-intent-field-content",
             &(
                 result.numerical_intent,
                 &result.run.identity,
                 &result.time_points_s,
                 &field_ids,
                 &result.residual_norms,
+                result.residual_target,
+                &result.energy_balances,
                 result.reference_temperature_k,
                 result.topology_digest,
                 result.producer,
@@ -98,5 +100,50 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         let mut malformed = manifest.clone();
         malformed.schema_version = 2;
         assert!(malformed.validate().is_err());
+        let mut malformed = manifest.clone();
+        malformed.energy_balances.pop();
+        assert!(malformed.validate().is_err());
+        let mut malformed = manifest.clone();
+        malformed.energy_balances[0].residual_w += 1.0;
+        assert!(malformed.validate().is_err());
+        let mut excessive = result.clone();
+        excessive.energy_balances[0] = crate::contracts::ThermalEnergyBalance {
+            storage_rate_w: 1.0,
+            boundary_loss_w: 0.0,
+            applied_power_w: 0.0,
+            prescribed_boundary_power_w: 0.0,
+            residual_w: 1.0,
+            relative_residual: 1.0,
+        };
+        excessive.energy_balances[0].validate().unwrap();
+        assert!(excessive.validate_complete().is_err());
+        let mut changed_energy = result.clone();
+        changed_energy.energy_balances[0] = crate::contracts::ThermalEnergyBalance {
+            storage_rate_w: 1.0,
+            boundary_loss_w: 0.0,
+            applied_power_w: 1.0,
+            prescribed_boundary_power_w: 0.0,
+            residual_w: 0.0,
+            relative_residual: 0.0,
+        };
+        assert_ne!(
+            changed_energy.source_result_identity().unwrap(),
+            result.source_result_identity().unwrap()
+        );
+        for target in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut malformed = manifest.clone();
+            malformed.residual_target = target;
+            assert!(malformed.validate().is_err());
+        }
+        let mut presentation = manifest.clone();
+        presentation.run.diagnostics.clear();
+        presentation.validate().unwrap();
+        assert_eq!(presentation.identity(), manifest.identity());
+        let mut different_acceptance = result.clone();
+        different_acceptance.residual_target *= 2.0;
+        assert_ne!(
+            different_acceptance.source_result_identity().unwrap(),
+            result.source_result_identity().unwrap()
+        );
     }
 }

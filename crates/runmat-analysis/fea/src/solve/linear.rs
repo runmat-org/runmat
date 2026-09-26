@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 mod admission;
+mod settings;
+use settings::iteration_limit;
+pub(crate) use settings::ScopedLinearSolveSettings;
 
 use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
 
@@ -132,8 +135,7 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
         backend_kind,
         algebra_backend,
         initial_guess,
-        plan,
-        admission,
+        ScopedLinearSolveSettings::with_default_tolerance(plan, admission),
     )
 }
 
@@ -143,9 +145,9 @@ pub(crate) fn solve_operator_system_scoped(
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
-    plan: LocalExecutionPlan,
-    admission: Option<&SolverAdmissionResourcePolicy>,
+    settings: ScopedLinearSolveSettings<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
+    let plan = settings.plan;
     solve_operator_system_with_apply(
         operator,
         preconditioner_kind,
@@ -169,7 +171,7 @@ pub(crate) fn solve_operator_system_scoped(
             },
             Some(plan),
         ),
-        admission,
+        settings,
     )
 }
 
@@ -193,7 +195,7 @@ pub fn solve_operator_system(
             |left: &[f64], right: &[f64]| Ok(algebra_backend.dot(left, right)),
             None,
         ),
-        None,
+        ScopedLinearSolveSettings::with_default_tolerance(LocalExecutionPlan::serial(), None),
     )
     .expect("reference sparse application is infallible for a prepared system")
 }
@@ -209,9 +211,19 @@ fn solve_operator_system_with_apply(
         impl Fn(&[f64], &[f64]) -> Result<f64, ScopedSpmvError>,
         Option<LocalExecutionPlan>,
     ),
-    admission: Option<&SolverAdmissionResourcePolicy>,
+    settings: ScopedLinearSolveSettings<'_>,
 ) -> Result<LinearSolveResult, ScopedSpmvError> {
     let (apply, dot, vector_plan) = operations;
+    let tol = settings.relative_tolerance;
+    if !tol.is_finite() || tol <= 0.0 {
+        return Ok(rejected_system_result(
+            operator,
+            backend_kind,
+            preconditioner_kind,
+            "FEA_INVALID_SOLVER_TOLERANCE",
+            "relative solver tolerance must be finite and positive".into(),
+        ));
+    }
     let mut effective_backend_kind = backend_kind;
     let mut accelerator_fallback = false;
     let has_dofs = operator.dof_count() > 0;
@@ -236,7 +248,6 @@ fn solve_operator_system_with_apply(
         });
     }
 
-    let tol = 1.0e-8;
     let prepared = match operator.prepare_linear() {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -248,7 +259,7 @@ fn solve_operator_system_with_apply(
             ))
         }
     };
-    if let Some(admission) = admission {
+    if let Some(admission) = settings.admission {
         let accepted = prepared
             .admissibility()
             .is_some_and(|evidence| admission.admits_certificate(evidence.coercivity()));
@@ -578,12 +589,6 @@ pub(crate) fn linear_result_from_accelerator_error(
             message: error.message,
         }],
     }
-}
-
-fn iteration_limit(operator: &AssembledRealSystem, base_max_iters: usize) -> usize {
-    base_max_iters
-        .max(operator.dof_count().saturating_mul(2))
-        .max(256)
 }
 
 #[cfg(test)]

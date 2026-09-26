@@ -35,6 +35,15 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
             .unwrap();
         let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
+        assert_eq!(result.energy_balances.len(), result.residual_norms.len());
+        assert_eq!(
+            receipt.receipt().maximum_relative_energy_residual,
+            result
+                .energy_balances
+                .iter()
+                .map(|balance| balance.relative_residual)
+                .fold(0.0_f64, f64::max)
+        );
         assert_eq!(result.source_workload, workload.identity().unwrap());
         assert_eq!(
             workload.identity().unwrap(),
@@ -84,11 +93,35 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
         malformed.residual_norms[0] = workload.residual_target * 2.0;
         assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
         let mut malformed = result.clone();
+        malformed.energy_balances.clear();
+        assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
+        let mut malformed = result.clone();
+        malformed.energy_balances[0].relative_residual = f64::NAN;
+        assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
+        let mut malformed = result.clone();
+        malformed.residual_target *= 2.0;
+        assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
+        let mut presentation = result.clone();
+        presentation.run.diagnostics.clear();
+        assert_eq!(
+            ThermalNumericalReceiptArtifact::new(&workload, &presentation).unwrap(),
+            receipt
+        );
+        let mut malformed = result.clone();
         malformed.initial_state.procedure_step_id = "other".into();
         assert!(ThermalNumericalReceiptArtifact::new(&workload, &malformed).is_err());
         let mut malformed = receipt.clone();
         malformed.receipt.reference_temperature_k += 1.0;
         assert!(malformed.validate().is_err());
+        let mut excessive_energy = receipt.clone();
+        excessive_energy.receipt.maximum_relative_energy_residual = workload.residual_target * 2.0;
+        excessive_energy.identity = receipt_identity(
+            excessive_energy.source_workload,
+            excessive_energy.source_result,
+            &excessive_energy.receipt,
+        )
+        .unwrap();
+        assert!(excessive_energy.validate().is_err());
         let encoded =
             encode_contract(PREFIX, "thermal-numerical-receipt", &malformed, LIMITS).unwrap();
         assert!(ThermalNumericalReceiptArtifact::from_canonical_bytes(&encoded).is_err());
@@ -132,6 +165,7 @@ fn steady_receipts_bind_one_accepted_sample_and_mandatory_workload_lineage() {
         let result = workload.execute(&mesh).unwrap();
         assert_eq!(result.time_points_s, vec![0.0]);
         assert_eq!(result.residual_norms.len(), 1);
+        assert_eq!(result.energy_balances.len(), 1);
         let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
         receipt.validate_against(&workload, &manifest).unwrap();

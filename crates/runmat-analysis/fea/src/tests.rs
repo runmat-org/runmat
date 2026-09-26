@@ -4460,11 +4460,13 @@ fn canonical_mesh_thermal_pipeline_enforces_exact_boundaries_and_reports_energy_
     assert!(final_temperature
         .iter()
         .any(|temperature| *temperature > 293.15));
-    assert!(result.run.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "FEA_THERMAL_ENERGY_BALANCE"
-            && diagnostic.severity == crate::diagnostics::FeaDiagnosticSeverity::Info
-            && diagnostic.message.contains("prescribed_boundary_power_w=")
-    }));
+    assert_eq!(result.energy_balances.len(), 2);
+    for balance in &result.energy_balances {
+        balance.validate().unwrap();
+        assert!(balance.applied_power_w > 0.0);
+        assert!(balance.prescribed_boundary_power_w.abs() > 0.0);
+        assert!(balance.relative_residual <= result.residual_target);
+    }
     assert!(result
         .run
         .identity

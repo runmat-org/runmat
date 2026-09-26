@@ -6,7 +6,6 @@ use crate::contracts::{
     fea_thermal_temperature_field_id, fea_thermal_temperature_gradient_field_id,
     FeaThermalRunResult,
 };
-use crate::diagnostics::FeaDiagnosticSeverity;
 use runmat_analysis_core::{AnalysisField, AnalysisProcedure, PhysicsFamily};
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -26,6 +25,8 @@ impl FeaThermalRunResult {
             run: &self.run,
             time_points_s: &self.time_points_s,
             residual_norms: &self.residual_norms,
+            residual_target: self.residual_target,
+            energy_balances: &self.energy_balances,
             reference_temperature_k: self.reference_temperature_k,
             topology_digest: self.topology_digest,
             producer: self.producer,
@@ -122,6 +123,8 @@ pub(super) struct ThermalResultMetadata<'a> {
     pub run: &'a crate::FeaRunResult,
     pub time_points_s: &'a [f64],
     pub residual_norms: &'a [f64],
+    pub residual_target: f64,
+    pub energy_balances: &'a [crate::contracts::ThermalEnergyBalance],
     pub reference_temperature_k: f64,
     pub topology_digest: Digest,
     pub producer: super::StepIdentity,
@@ -173,24 +176,25 @@ impl ThermalResultMetadata<'_> {
                 .any(|x| !x.is_finite() || x.to_bits() == (-0.0_f64).to_bits())
             || self.time_points_s.windows(2).any(|pair| pair[1] <= pair[0])
             || self.residual_norms.len() != residuals
+            || self.energy_balances.len() != residuals
+            || !self.residual_target.is_finite()
+            || self.residual_target <= 0.0
             || self
                 .residual_norms
                 .iter()
-                .any(|x| !x.is_finite() || *x < 0.0)
+                .any(|x| !x.is_finite() || *x < 0.0 || *x > self.residual_target)
         {
             return Err(invalid());
         }
         validate_portable_fields(&self.run.fields)?;
-        for code in ["FEA_THERMAL_STABILITY", "FEA_THERMAL_ENERGY_BALANCE"] {
-            let mut matching = self.run.diagnostics.iter().filter(|item| item.code == code);
-            if !matching
-                .next()
-                .is_some_and(|item| item.severity == FeaDiagnosticSeverity::Info)
-                || matching.next().is_some()
-            {
-                return Err(AnalysisExecutionError::Invalid(format!(
-                    "thermal result lacks unique accepted {code} evidence"
-                )));
+        for balance in self.energy_balances {
+            balance
+                .validate()
+                .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+            if balance.relative_residual > self.residual_target {
+                return Err(AnalysisExecutionError::Invalid(
+                    "thermal energy residual exceeds retained acceptance target".into(),
+                ));
             }
         }
         Ok(())
@@ -202,13 +206,15 @@ impl ThermalResultMetadata<'_> {
         // Numerical identity excludes presentation diagnostics and execution telemetry.
         let content = encode_contract(
             PREFIX,
-            "thermal-solver-result-intent-field-content",
+            "thermal-solver-result-accepted-intent-field-content",
             &(
                 self.numerical_intent,
                 &self.run.identity,
                 &self.time_points_s,
                 &fields,
                 &self.residual_norms,
+                self.residual_target,
+                &self.energy_balances,
                 self.reference_temperature_k,
                 self.topology_digest,
                 self.producer,

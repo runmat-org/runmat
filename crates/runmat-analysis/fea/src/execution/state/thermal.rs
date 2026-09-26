@@ -321,7 +321,8 @@ mod tests {
             .unwrap()
             .clone();
         contradictory.run.diagnostics.push(evidence);
-        assert!(contradictory.canonical_bytes().is_err());
+        // Presentation diagnostics are not numerical acceptance authority.
+        assert!(contradictory.canonical_bytes().is_ok());
 
         let mut reordered = result.clone();
         reordered.ordered_node_ids.swap(0, 1);
@@ -362,6 +363,8 @@ mod tests {
             .run
             .diagnostics
             .retain(|diagnostic| diagnostic.code != "FEA_THERMAL_ENERGY_BALANCE");
+        assert!(CanonicalSemanticState::from_thermal_result(&model, &mesh, &partial).is_ok());
+        partial.energy_balances.clear();
         assert!(CanonicalSemanticState::from_thermal_result(&model, &mesh, &partial).is_err());
         let mut wrong_reference = result.clone();
         wrong_reference.reference_temperature_k += 1.0;

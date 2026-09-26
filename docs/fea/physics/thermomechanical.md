@@ -126,7 +126,7 @@ decoding and result serialization lifetimes still require separate accounting.
 
 Completed thermal results have validated canonical encoding. Decoding checks nodal and element
 inventories, temperature/gradient/flux/storage-rate histories, finite values, shapes, sample counts,
-reference and initial-state evidence, and unique accepted stability/energy diagnostics. These are
+reference and initial-state evidence, and typed accepted linear/energy residual evidence. These are
 consistency checks, not an independent numerical-accuracy certificate. Native `PublishState` can
 consume this typed result and verifies the publication request's source identity, producer, and
 topology; structural result bytes are not accepted as thermal results. This does not yet provide
@@ -353,7 +353,23 @@ the retained result manifest. Tet4/Tet10 tests reject material substitutions eve
 is unchanged. The receipt is accepted-solver evidence, not an independent accuracy report; mesh
 binding and portable worker receipt routing still require the task integration path.
 
-The numerical-intent-bound identity domain intentionally changes experimental thermal source-result identities; there is no legacy
+Per-solve global energy balances and the residual target are mandatory retained numerical metadata,
+including in the partition manifest. Steady runs retain one balance; transient runs retain one per
+advance, not for the initial-only sample. Validation recomputes the signed power residual
+`storage + boundary_loss - applied_power + prescribed_boundary_power` and its normalization by
+the largest absolute power term with a one-watt floor. All terms must be finite, the recorded
+arithmetic must agree, and both linear and normalized energy residuals must meet the target.
+Receipts bind the target to the authored workload and retain both maximum residuals. Diagnostic
+severity/text is no longer acceptance authority. These checks do not independently establish
+engineering accuracy or verify power terms against unread field histories.
+Thermal solver stopping uses the tighter of the shared default and authored acceptance target;
+the latter cannot relax the established numerical stopping policy. The shared PCG path propagates
+this tolerance through its CPU and accelerator request/final-residual checks. No new successful
+GPU execution envelope is inferred. Linear and global energy normalizations differ, so converged
+linear solves must still pass the separate energy gate. Producer validation now runs before final
+completion; its uniqueness-validation scratch remains outside complete producer-memory admission.
+
+The accepted-intent-bound identity domain includes target and balances and intentionally changes experimental thermal source-result identities; there is no legacy
 identity fallback. Shared recovered-field canonical limits apply to each field, and negative-zero
 sample times are rejected consistently. A thermal result may fit its monolithic serialization
 limit yet exceed a shared per-field identity limit; publication fails closed in that case. This

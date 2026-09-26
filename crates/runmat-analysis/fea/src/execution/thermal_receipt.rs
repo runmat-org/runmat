@@ -21,6 +21,7 @@ pub struct ThermalNumericalReceipt {
     pub first_sample_time_s: f64,
     pub terminal_sample_time_s: f64,
     pub maximum_relative_linear_residual: f64,
+    pub maximum_relative_energy_residual: f64,
     pub residual_target: f64,
     pub reference_temperature_k: f64,
 }
@@ -107,6 +108,9 @@ impl ThermalNumericalReceiptArtifact {
             || !r.residual_target.is_finite()
             || r.residual_target <= 0.0
             || r.maximum_relative_linear_residual > r.residual_target
+            || !r.maximum_relative_energy_residual.is_finite()
+            || r.maximum_relative_energy_residual < 0.0
+            || r.maximum_relative_energy_residual > r.residual_target
             || !r.reference_temperature_k.is_finite()
             || r.reference_temperature_k <= 0.0
             || self.identity != receipt_identity(self.source_workload, self.source_result, &r)?
@@ -131,6 +135,8 @@ impl ThermalNumericalReceiptArtifact {
             run: &result.run,
             time_points_s: &result.time_points_s,
             residual_norms: &result.residual_norms,
+            residual_target: result.residual_target,
+            energy_balances: &result.energy_balances,
             reference_temperature_k: result.reference_temperature_k,
             topology_digest: result.topology_digest,
             producer: result.producer,
@@ -185,7 +191,8 @@ fn evidence(
 ) -> AnalysisExecutionResult<ThermalNumericalReceipt> {
     workload.validate()?;
     metadata.validate()?;
-    if metadata.source_workload != workload.identity()?
+    if metadata.residual_target != workload.residual_target
+        || metadata.source_workload != workload.identity()?
         || metadata.numerical_intent != workload.numerical_intent_identity()?
     {
         return Err(invalid(
@@ -242,6 +249,11 @@ fn evidence(
         first_sample_time_s: schedule.points_s()[0],
         terminal_sample_time_s: *schedule.points_s().last().unwrap(),
         maximum_relative_linear_residual: maximum,
+        maximum_relative_energy_residual: metadata
+            .energy_balances
+            .iter()
+            .map(|balance| balance.relative_residual)
+            .fold(0.0_f64, f64::max),
         residual_target: workload.residual_target,
         reference_temperature_k: metadata.reference_temperature_k,
     })
