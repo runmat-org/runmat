@@ -8,7 +8,7 @@ mod sequence_register;
 mod subscript;
 
 /// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 7;
+pub const BYTECODE_SCHEMA_VERSION: u16 = 8;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 5;
 
