@@ -273,8 +273,20 @@ rejects duplicate signal identifiers. Selection, breakpoint scheduling and resou
 share borrowed case/action traversal; nonempty lifecycle inventories can still allocate temporary
 identifier checks. Thermal execution releases realized entries immediately after assembly, so
 initial and subsequent realization inventories do not coexist. This remains estimated requested
-heap payload, not allocator/native/RSS coverage; signal-sampling scratch, compiled property
-metadata, and result/transport allocation admission still require separate qualification.
+heap payload, not allocator/native/RSS coverage; signal-sampling scratch, property compiler
+construction scratch, and result/transport allocation admission still require separate qualification.
+
+Thermal preassembly now compiles and retains one canonical property map for the run instead of
+recompiling material ownership at every sample. Each assembly borrows that map, verifies its
+geometry/revision/mesh binding, and updates the sample-dependent loads and boundaries. Internal
+orchestration keeps the authored material model immutable; the binding check alone is not a
+material-equivalence test for arbitrary same-geometry models. Property failures surface during
+preassembly resource derivation, before numerical assembly. The retained map's shared-codec
+materialization estimate joins the resident ceiling, without imposing the smaller authored-workload
+encoding limit on per-element expansion. Map serialization preserves ordered key/value pairs while
+streaming them without a temporary entry array. This accounts for retained map residency, not
+the compiler's temporary ownership maps, identity construction, or peak allocation before the
+post-compilation estimate is available.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate

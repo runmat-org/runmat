@@ -93,15 +93,7 @@ fn execute_validated_model(
         model, step, mesh, &schedule,
     )?;
     facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
-    physical::run(
-        model,
-        backend,
-        options,
-        mesh,
-        step,
-        &schedule,
-        &facts.operators,
-    )
+    physical::run(model, backend, options, mesh, step, &schedule, &facts)
 }
 
 pub(crate) fn validate_controls(

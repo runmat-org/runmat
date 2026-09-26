@@ -131,7 +131,7 @@ struct CompiledPropertyMapData {
 mod ordered_map_serde {
     use std::collections::BTreeMap;
 
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{ser::SerializeSeq, Deserialize, Deserializer, Serialize, Serializer};
 
     pub fn serialize<S, K, V>(map: &BTreeMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -139,7 +139,11 @@ mod ordered_map_serde {
         K: Serialize + Ord,
         V: Serialize,
     {
-        map.iter().collect::<Vec<_>>().serialize(serializer)
+        let mut sequence = serializer.serialize_seq(Some(map.len()))?;
+        for entry in map {
+            sequence.serialize_element(&entry)?;
+        }
+        sequence.end()
     }
 
     pub fn deserialize<'de, D, K, V>(deserializer: D) -> Result<BTreeMap<K, V>, D::Error>

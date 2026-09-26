@@ -59,6 +59,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         let assembly = crate::physics::thermal::assembly::assemble(
             &workload.model,
             &mesh,
+            &crate::properties::compile_thermal_property_map(&workload.model, Some(&mesh)).unwrap(),
             facts.support(),
             &excitations,
             sample,
@@ -77,6 +78,7 @@ fn thermal_support_covers_actual_operators_and_exact_proof_work() {
         let rejected = crate::physics::thermal::assembly::assemble(
             &workload.model,
             &mesh,
+            &crate::properties::compile_thermal_property_map(&workload.model, Some(&mesh)).unwrap(),
             &insufficient,
             &excitations,
             sample,

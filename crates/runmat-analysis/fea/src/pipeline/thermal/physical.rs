@@ -37,8 +37,9 @@ pub(super) fn run(
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     thermal_step: &runmat_analysis_core::ProcedureStep,
     schedule: &crate::execution::ThermalSolveSchedule,
-    operators: &crate::planning::resource::ThermalOperatorResourceFacts,
+    facts: &crate::planning::resource::ThermalPreassemblyResourceFacts,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
+    let operators = &facts.operators;
     emit_phase(
         "fea.run_thermal",
         FeaProgressPhase::ModelAssembly,
@@ -68,6 +69,7 @@ pub(super) fn run(
     let initial_assembly = assemble_thermal_operator(
         &active_model,
         mesh,
+        &facts.properties,
         operators.support(),
         &initial_excitations,
         initial_sample,
@@ -121,6 +123,7 @@ pub(super) fn run(
             operators,
         )?,
         ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
+            properties: &facts.properties,
             model: &active_model,
             mesh,
             step: thermal_step,
@@ -322,6 +325,7 @@ fn solve_steady(
 }
 
 struct TransientSolveInput<'a> {
+    properties: &'a crate::properties::CompiledPropertyMap,
     model: &'a AnalysisModel,
     mesh: &'a runmat_meshing_core::SolverMeshArtifact,
     step: &'a runmat_analysis_core::ProcedureStep,
@@ -373,6 +377,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         let assembly = assemble_thermal_operator(
             input.model,
             input.mesh,
+            input.properties,
             input.operators.support(),
             &excitations,
             sample,

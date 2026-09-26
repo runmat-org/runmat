@@ -25,6 +25,19 @@ use crate::{
     },
 };
 
+// Direct assembly fixtures prepare shared ownership just as the production preassembly does.
+pub(super) fn assemble(
+    model: &AnalysisModel,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+    support: &crate::algebra::SparsePattern,
+    excitations: &RealizedExcitations,
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
+    let properties = crate::properties::compile_thermal_property_map(model, Some(mesh))
+        .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+    super::assemble(model, mesh, &properties, support, excitations, sample)
+}
+
 fn heat_generation(value: f64) -> RealizedExcitations {
     RealizedExcitations::new(vec![RealizedExcitation {
         excitation_id: ExcitationId("uniform_heat".into()),
@@ -147,6 +160,81 @@ fn unused_material_declarations_do_not_change_thermal_operators_or_diagnostics()
     assert_eq!(baseline.constitutive_stats, changed.constitutive_stats);
     assert_eq!(baseline.conductivity, changed.conductivity);
     assert_eq!(baseline.capacity, changed.capacity);
+}
+
+#[test]
+fn prepared_properties_are_reused_across_load_samples_and_reject_topology_substitution() {
+    let (model, mesh, _, _) = thermal_reference_model();
+    let properties = crate::properties::compile_thermal_property_map(&model, Some(&mesh)).unwrap();
+    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let first = super::assemble(
+        &model,
+        &mesh,
+        &properties,
+        operators.support(),
+        &heat_generation(1.0),
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    let second = super::assemble(
+        &model,
+        &mesh,
+        &properties,
+        operators.support(),
+        &heat_generation(2.0),
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    assert_eq!(first.property_identity, properties.identity);
+    assert_eq!(second.property_identity, properties.identity);
+    assert_eq!(first.conductivity, second.conductivity);
+    assert_eq!(first.capacity, second.capacity);
+    let fresh = assemble(
+        &model,
+        &mesh,
+        operators.support(),
+        &heat_generation(2.0),
+        ExcitationSamplePoint::Static,
+    )
+    .unwrap();
+    assert_eq!(second.conductivity, fresh.conductivity);
+    assert_eq!(second.capacity, fresh.capacity);
+    assert_eq!(second.source, fresh.source);
+    for (one, two) in first.source.iter().zip(&second.source) {
+        assert!((two - 2.0 * one).abs() < 1e-14);
+    }
+    let mut substituted = properties.clone();
+    substituted.identity.mesh_digest = None;
+    assert!(matches!(
+        super::assemble(
+            &model,
+            &mesh,
+            &substituted,
+            operators.support(),
+            &heat_generation(1.0),
+            ExcitationSamplePoint::Static
+        ),
+        Err(ThermalAssemblyError::InvalidMaterialCoverage(_))
+    ));
+    for change_revision in [false, true] {
+        let mut changed_model = model.clone();
+        if change_revision {
+            changed_model.geometry_revision += 1;
+        } else {
+            changed_model.geometry_id.push_str("_different");
+        }
+        assert!(matches!(
+            super::assemble(
+                &changed_model,
+                &mesh,
+                &properties,
+                operators.support(),
+                &heat_generation(1.0),
+                ExcitationSamplePoint::Static
+            ),
+            Err(ThermalAssemblyError::InvalidMaterialCoverage(_))
+        ));
+    }
 }
 
 fn prescribe_base(model: &mut AnalysisModel, base_region: String, temperature_k: f64) {

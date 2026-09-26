@@ -9,6 +9,8 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_meshing_core::SolverMeshArtifact;
 
 pub struct ThermalPreassemblyResourceFacts {
+    pub(crate) properties: crate::properties::CompiledPropertyMap,
+    pub property_materialization_bytes: ByteCount,
     pub history: ThermalHistoryResourceFacts,
     pub operators: ThermalOperatorResourceFacts,
     pub sources: ThermalSourceEvidenceResourceFacts,
@@ -45,7 +47,30 @@ impl ThermalPreassemblyResourceFacts {
         )?;
         let operators = ThermalOperatorResourceFacts::derive(mesh)?;
         operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
+        // Compile ownership once. The map is reused by every time sample; only signal-driven
+        // loads and boundary coefficients are assembled again. Compilation scratch itself is
+        // not bounded by this post-compilation retained-map estimate.
+        let properties = crate::properties::compile_thermal_property_map(model, Some(mesh))
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let property_materialization_bytes = ByteCount(
+            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
+                // This is an already-validated expanded map, not a workload payload: one
+                // authored material can occur on millions of elements. Do not incorrectly
+                // impose the smaller workload encoding limit on that expansion. Arithmetic
+                // remains checked and the resulting residency meets the authored ceiling below.
+                &properties,
+                runmat_canonical_codec::CanonicalLimits::new(
+                    usize::MAX,
+                    usize::MAX,
+                    usize::MAX,
+                    64,
+                ),
+            )
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        );
         Ok(Self {
+            properties,
+            property_materialization_bytes,
             history,
             operators,
             sources: ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?,
@@ -65,6 +90,7 @@ impl ThermalPreassemblyResourceFacts {
             .and_then(|bytes| bytes.checked_add(self.model_materialization_bytes.0))
             .and_then(|bytes| bytes.checked_add(observations))
             .and_then(|bytes| bytes.checked_add(realization))
+            .and_then(|bytes| bytes.checked_add(self.property_materialization_bytes.0))
             .map(ByteCount)
             .ok_or(ResourcePlanningError::Overflow(
                 "thermal preassembly reservation",

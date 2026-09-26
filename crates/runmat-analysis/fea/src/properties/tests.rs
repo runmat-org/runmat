@@ -32,6 +32,15 @@ fn compiled_map_has_a_canonical_json_safe_round_trip() {
     let compiled =
         compile_solid_property_map(&matching_model(&mesh), &mesh).expect("compiled properties");
     let encoded = serde_json::to_vec(&compiled).expect("encode compiled property map");
+    let value = serde_json::to_value(&compiled).unwrap();
+    let legacy_entries = compiled
+        .solid_materials()
+        .map(|entry| (entry.element_identity, entry))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        value["solid_materials"],
+        serde_json::to_value(&legacy_entries).unwrap()
+    );
     let decoded: CompiledPropertyMap =
         serde_json::from_slice(&encoded).expect("decode compiled property map");
     assert_eq!(decoded, compiled);

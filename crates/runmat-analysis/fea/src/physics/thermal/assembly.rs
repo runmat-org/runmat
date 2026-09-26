@@ -173,17 +173,26 @@ pub(crate) enum ThermalAssemblyError {
     },
 }
 
+/// The caller owns one property map compiled from its immutable authored model for the run.
+/// Constraints/load signals may change per step/sample; material ownership is not reselected.
 pub(crate) fn assemble(
     model: &AnalysisModel,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
+    properties: &crate::properties::CompiledPropertyMap,
     support: &crate::algebra::SparsePattern,
     excitations: &RealizedExcitations,
     sample: ExcitationSamplePoint<'_>,
 ) -> Result<ThermalOperatorAssembly, ThermalAssemblyError> {
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
-    let properties = crate::properties::compile_thermal_property_map(model, Some(mesh))
-        .map_err(|error| ThermalAssemblyError::InvalidMaterialCoverage(error.to_string()))?;
+    if properties.identity.mesh_digest != Some(mesh.canonical_digest)
+        || properties.identity.geometry_id != model.geometry_id
+        || properties.identity.geometry_revision != model.geometry_revision
+    {
+        return Err(ThermalAssemblyError::InvalidMaterialCoverage(
+            "prepared thermal properties do not match model geometry and solver topology".into(),
+        ));
+    }
     if support.rows() != projection.nodes.len() || support.columns() != projection.nodes.len() {
         return Err(ThermalAssemblyError::SparseOperator(
             "thermal planned support shape mismatch".into(),

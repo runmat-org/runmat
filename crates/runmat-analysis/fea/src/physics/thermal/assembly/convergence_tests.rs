@@ -11,7 +11,7 @@ use runmat_meshing_core::{
     SolverMeshNode, SolverVolumeElement, StableDigest,
 };
 
-use super::assemble;
+use super::tests::assemble;
 use crate::{
     excitation::{ExcitationSamplePoint, RealizedExcitations},
     fixtures::{fixture_model, FixtureId},

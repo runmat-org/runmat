@@ -57,6 +57,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.sources.reservation_bytes().unwrap().0
                 + grown.observations.reservation_bytes().unwrap().0
                 + grown.realization.reservation_bytes().unwrap().0
+                + grown.property_materialization_bytes.0
         );
         workload.model.sequence.steps[0]
             .accuracy
@@ -97,4 +98,46 @@ fn oversized_input_strings_fail_the_shared_codec_limit() {
         &schedule
     )
     .is_err());
+}
+
+#[test]
+fn retained_property_metadata_is_reserved_before_assembly() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut workload = workload();
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let schedule = workload.solve_schedule().unwrap();
+        let base = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            &mesh,
+            &schedule,
+        )
+        .unwrap();
+        workload.model.materials[0].name = "long_material_description".repeat(512);
+        let facts = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            &mesh,
+            &schedule,
+        )
+        .unwrap();
+        assert!(facts.property_materialization_bytes.0 > base.property_materialization_bytes.0);
+        assert_eq!(
+            facts.properties.solid_materials().len(),
+            mesh.topology.volume_elements.len()
+        );
+        let required = facts.reservation_bytes().unwrap().0;
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required - facts.property_materialization_bytes.0;
+        assert!(
+            matches!(workload.execute(&mesh), Err(crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, .. })) if actual == required)
+        );
+        workload.model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = required;
+        workload.execute(&mesh).unwrap();
+    }
 }
