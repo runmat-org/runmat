@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn automatic_complex_control_materializes_without_losing_its_real_component() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let input = runmat_value::ComplexTensor::new(vec![(3.9, 8.0)], vec![1, 1]).unwrap();
+        let mut handle =
+            crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
+        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+        let result = magic_builtin(vec![Value::GpuTensor(handle)]).unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("expected host square");
+        };
+        assert_eq!(result.shape, vec![3, 3]);
+        assert_magic_properties(&result.materialize_f64(), 3);
+    });
+}
+
+#[test]
+fn explicit_device_control_rejects_without_provider_access() {
+    let mut handle = runmat_accelerate_api::GpuTensorHandle {
+        shape: vec![1, 1],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    };
+    runmat_accelerate_api::mark_handle_explicit(&mut handle);
+    let error = magic_builtin(vec![Value::GpuTensor(handle)]).unwrap_err();
+    assert!(error.message().contains("gpuArray input is not supported"));
+}
+
+#[test]
 fn requested_outputs_reject_before_order_evaluation() {
     let _outputs = crate::output_count::push_output_count(Some(2));
     let error = magic_builtin(vec![Value::Num(f64::INFINITY)]).unwrap_err();

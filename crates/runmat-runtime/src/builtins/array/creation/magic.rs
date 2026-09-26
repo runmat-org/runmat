@@ -2,7 +2,7 @@ mod algorithm;
 use algorithm::{magic_doubly_even, magic_odd, magic_singly_even};
 // Magic square construction. Contracts and inference live in the typed catalog.
 use crate::build_runtime_error;
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, Tensor, Value};
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -38,10 +38,10 @@ async fn parse_order_value(value: &Value) -> crate::BuiltinResult<usize> {
         if runmat_accelerate_api::handle_is_explicit(handle) {
             return Err(builtin_error("magic: gpuArray input is not supported"));
         }
-        let tensor = gpu_helpers::gather_tensor_async(handle)
+        let host = crate::gather_if_needed_async(value)
             .await
             .map_err(|err| builtin_error(format!("magic: {err}")))?;
-        return parse_order_host(&Value::Tensor(tensor)).await;
+        return parse_order_host(&host).await;
     }
     parse_order_host(value).await
 }

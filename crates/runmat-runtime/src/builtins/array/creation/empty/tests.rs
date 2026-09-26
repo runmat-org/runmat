@@ -1,6 +1,44 @@
 use super::*;
 
 #[test]
+fn explicit_gpu_empty_keeps_shape_and_device_intent() {
+    crate::builtins::common::test_support::with_test_provider(|_| {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let result = futures::executor::block_on(empty_builtin(vec![
+            Value::Num(0.0),
+            Value::Num(3.0),
+            Value::from("gpuArray"),
+        ]))
+        .unwrap();
+        let Value::GpuTensor(handle) = result else {
+            panic!("expected device empty");
+        };
+        assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+        assert_eq!(handle.shape, vec![0, 3]);
+        let host = crate::builtins::common::test_support::gather(Value::GpuTensor(handle)).unwrap();
+        assert!(host.is_empty());
+        assert_eq!(host.shape, vec![0, 3]);
+    });
+}
+
+#[test]
+fn resident_integer_size_controls_preserve_host_receiver_class() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let input = Tensor::new_integer(IntegerStorage::U64(vec![0, 7]), vec![1, 2]).unwrap();
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input).unwrap();
+        let result =
+            futures::executor::block_on(int16_empty_builtin(vec![Value::GpuTensor(handle)]))
+                .unwrap();
+        let Value::Tensor(result) = result else {
+            panic!("expected host empty");
+        };
+        assert_eq!(result.numeric_dtype(), NumericDType::I16);
+        assert_eq!(result.shape, vec![0, 7]);
+    });
+}
+
+#[test]
 fn requested_outputs_reject_before_size_or_provider_access() {
     let _outputs = crate::output_count::push_output_count(Some(2));
     let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
