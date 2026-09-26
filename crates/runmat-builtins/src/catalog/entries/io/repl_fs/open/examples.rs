@@ -9,14 +9,7 @@ pub(super) const EXAMPLES:&[
         display_output:None,
         compatibility:BuiltinExampleCompatibility::Matlab,
         harness:BuiltinExampleHarness::NativeFilesystem,
-        fixture:BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture{
-            id:BuiltinExampleFixtureId{
-                local_name:"mat"
-            },
-            root:BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries:&[
-            ]
-        }),
+        fixture:BuiltinExampleFixture::None,
         requirements:BuiltinExampleRequirements::NONE,
         verification:BuiltinExampleVerification::Assertions{
             source:"assert(isequal(S.A, A));\nassert(strcmp(class(S.A), 'uint64'));"
@@ -54,21 +47,14 @@ pub(super) const EXAMPLES:&[
     BuiltinExample{
         id:"figure",
         title:"Open a RunMat figure scene",
-        program:"original = figure;\nsavefig(original, 'plot.fig');\nclose(original);\nh = open('plot.fig');\nassert(ishandle(h));\nclose(h);",
+        program:"original = figure;\nsavefig(original, 'plot.fig');\nclose(original);\nh = open('plot.fig');\nassert(ishandle(h));\nopened = ishandle(h);\nclose(h);",
         display_output:None,
         compatibility:BuiltinExampleCompatibility::RunMat,
         harness:BuiltinExampleHarness::NativeFilesystem,
-        fixture:BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture{
-            id:BuiltinExampleFixtureId{
-                local_name:"figure"
-            },
-            root:BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries:&[
-            ]
-        }),
+        fixture:BuiltinExampleFixture::None,
         requirements:BuiltinExampleRequirements::NONE,
         verification:BuiltinExampleVerification::Assertions{
-            source:"assert(ishandle(h));"
+            source:"assert(opened);"
         },
     },
     BuiltinExample{
@@ -85,12 +71,12 @@ pub(super) const EXAMPLES:&[
             root:BuiltinFilesystemRoot::IsolatedWorkspace,
             entries:&[
                 BuiltinFilesystemEntry::File{
-                    relative_path:"payload.abc",
-                    content:BuiltinFixtureContent::Utf8("payload")
-                },
-                BuiltinFilesystemEntry::File{
                     relative_path:"openabc.m",
                     content:BuiltinFixtureContent::Utf8("function out = openabc(filename)\n out = fileread(filename);\nend\n")
+                },
+                BuiltinFilesystemEntry::File{
+                    relative_path:"payload.abc",
+                    content:BuiltinFixtureContent::Utf8("payload")
                 }
             ]
         }),

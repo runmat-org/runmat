@@ -23,17 +23,17 @@ pub const OPENTOLINE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            EffectKind::FilesystemRead,
             EffectKind::EnvironmentRead,
+            EffectKind::FilesystemRead,
             EffectKind::UserInterface,
             EffectKind::HostCallback,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
         capabilities: &[
+            CapabilityRequirement::HostRuntime,
             CapabilityRequirement::Filesystem,
             CapabilityRequirement::UserInterface,
-            CapabilityRequirement::HostRuntime,
         ],
     },
     placement: BuiltinPlacementContract {

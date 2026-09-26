@@ -25,11 +25,11 @@ pub const ANIMATEDLINE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry 
         workspace_effect: None,
         environment_effect: None,
         effects: &[
+            runmat_types::EffectKind::EnvironmentRead,
             runmat_types::EffectKind::UserInterface,
             runmat_types::EffectKind::HostCallback,
-            runmat_types::EffectKind::MayThrow,
-            runmat_types::EffectKind::EnvironmentRead,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[runmat_types::CapabilityRequirement::UserInterface],
     },

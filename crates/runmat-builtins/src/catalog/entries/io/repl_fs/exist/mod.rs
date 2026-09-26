@@ -24,15 +24,15 @@ pub const EXIST_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: Some(BuiltinWorkspaceEffect::ReadsWorkspace),
         environment_effect: Some(BuiltinEnvironmentEffect::DynamicLookupInvalidation),
         effects: &[
-            EffectKind::FilesystemRead,
-            EffectKind::EnvironmentRead,
             EffectKind::WorkspaceRead,
+            EffectKind::EnvironmentRead,
+            EffectKind::FilesystemRead,
             EffectKind::MaySuspend,
             EffectKind::MayThrow,
         ],
         capabilities: &[
-            CapabilityRequirement::Filesystem,
             CapabilityRequirement::HostRuntime,
+            CapabilityRequirement::Filesystem,
         ],
     },
     placement: BuiltinPlacementContract {

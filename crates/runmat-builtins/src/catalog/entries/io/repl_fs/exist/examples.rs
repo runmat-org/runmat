@@ -9,14 +9,7 @@ pub(super) const EXAMPLES: &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
-        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-            id: BuiltinExampleFixtureId {
-                local_name: "workspace"
-            },
-            root: BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries: &[
-            ],
-        }),
+        fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(typeID == 1);"
@@ -52,14 +45,7 @@ pub(super) const EXAMPLES: &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
-        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-            id: BuiltinExampleFixtureId {
-                local_name: "builtin"
-            },
-            root: BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries: &[
-            ],
-        }),
+        fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(typeID == 5);"

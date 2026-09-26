@@ -24,9 +24,9 @@ pub const PCODE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[
+            EffectKind::EnvironmentRead,
             EffectKind::FilesystemRead,
             EffectKind::FilesystemWrite,
-            EffectKind::EnvironmentRead,
             EffectKind::MaySuspend,
             EffectKind::MayThrow
         ],

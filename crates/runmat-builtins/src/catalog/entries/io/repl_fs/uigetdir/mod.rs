@@ -19,7 +19,7 @@ pub const UIGETDIR_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
  purity: BuiltinPurity::Impure,
  semantic_kind: BuiltinSemanticKind::General,
  workspace_effect: None, environment_effect: None,
- effects: &[EffectKind::UserInterface, EffectKind::HostCallback, EffectKind::EnvironmentRead,
+ effects: &[EffectKind::EnvironmentRead, EffectKind::UserInterface, EffectKind::HostCallback,
  EffectKind::MaySuspend, EffectKind::MayThrow],
  capabilities: &[CapabilityRequirement::HostRuntime, CapabilityRequirement::UserInterface],
  },

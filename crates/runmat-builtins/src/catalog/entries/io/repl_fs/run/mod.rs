@@ -24,10 +24,10 @@ pub const RUN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         environment_effect: None,
         // Source is resolved at runtime; its callbacks and effects are not
         // constrained by the path argument's type.
-        effects: &[EffectKind::FilesystemRead, EffectKind::EnvironmentRead,
-            EffectKind::WorkspaceRead, EffectKind::WorkspaceWrite,
+        effects: &[EffectKind::WorkspaceRead, EffectKind::WorkspaceWrite,
+            EffectKind::EnvironmentRead, EffectKind::FilesystemRead,
             EffectKind::MaySuspend, EffectKind::MayThrow, EffectKind::Unknown],
-        capabilities: &[CapabilityRequirement::Filesystem, CapabilityRequirement::HostRuntime],
+        capabilities: &[CapabilityRequirement::HostRuntime, CapabilityRequirement::Filesystem],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,

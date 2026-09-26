@@ -37,6 +37,9 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
             },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "examples",
+                },
                 BuiltinFilesystemEntry::File {
                     relative_path: "examples/fm_demo.m",
                     content: BuiltinFixtureContent::Utf8("t = [0; 1]; demodulated = [2; 4];\n"),
@@ -55,14 +58,7 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         display_output: None,
         compatibility: BuiltinExampleCompatibility::Matlab,
         harness: BuiltinExampleHarness::NativeFilesystem,
-        fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
-            id: BuiltinExampleFixtureId {
-                local_name: "catch-missing",
-            },
-            root: BuiltinFilesystemRoot::IsolatedWorkspace,
-            entries: &[
-            ],
-        }),
+        fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(caught);",

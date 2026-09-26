@@ -39,6 +39,9 @@ pub(super) const EXAMPLES: &[
             },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "src"
+                },
                 BuiltinFilesystemEntry::File {
                     relative_path: "src/worker.m",
                     content: BuiltinFixtureContent::Utf8("answer = 7;\n")
@@ -63,13 +66,19 @@ pub(super) const EXAMPLES: &[
             },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
-                BuiltinFilesystemEntry::File {
-                    relative_path: "src/worker.m",
-                    content: BuiltinFixtureContent::Utf8("answer = 7;\n")
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "helpers"
                 },
                 BuiltinFilesystemEntry::File {
                     relative_path: "helpers/helper.m",
                     content: BuiltinFixtureContent::Utf8("helper_value = 3;\n")
+                },
+                BuiltinFilesystemEntry::Directory {
+                    relative_path: "src"
+                },
+                BuiltinFilesystemEntry::File {
+                    relative_path: "src/worker.m",
+                    content: BuiltinFixtureContent::Utf8("answer = 7;\n")
                 },
             ],
         }),
