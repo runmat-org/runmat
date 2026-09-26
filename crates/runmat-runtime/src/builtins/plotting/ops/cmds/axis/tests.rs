@@ -5,6 +5,7 @@ use runmat_value::IntegerStorage;
 #[test]
 fn invalid_later_limits_do_not_create_figure_or_mutate_earlier_pairs() {
     let _guard = setup();
+    crate::builtins::plotting::state::reset_plot_state();
     let bad = || {
         Value::Tensor(
             Tensor::new(vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0, 8.0], vec![1, 8]).unwrap(),

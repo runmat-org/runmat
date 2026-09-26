@@ -4,6 +4,7 @@ use super::*;
 #[test]
 fn extra_arguments_do_not_create_figure() {
     let _guard = setup();
+    crate::builtins::plotting::state::reset_plot_state();
     assert!(colorbar_builtin(vec![
         Value::String("on".into()),
         Value::String("extra".into())

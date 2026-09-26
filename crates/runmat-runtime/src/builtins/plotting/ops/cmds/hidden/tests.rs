@@ -6,6 +6,7 @@ use runmat_value::Value;
 #[test]
 fn invalid_mode_and_extra_arguments_do_not_create_figure() {
     let _guard = setup();
+    crate::builtins::plotting::state::reset_plot_state();
     for args in [
         vec![Value::String("invalid".into())],
         vec![Value::String("on".into()), Value::String("off".into())],
