@@ -124,3 +124,37 @@ fn repeated_flags_and_invalid_known_dimensions_have_option_diagnostics() {
             .any(|diagnostic| diagnostic.code == "RM-CATALOG-LOGICAL-REDUCTION-ARGUMENTS"));
     }
 }
+
+#[test]
+fn single_dimension_literals_use_represented_precision() {
+    let single = |text: &str| LiteralValue::Real {
+        text: text.into(),
+        class: NumericClass::Single,
+    };
+    let input = ShapeFact::from(vec![Some(2), Some(3)]);
+    for (literal, expected) in [
+        (
+            single("1.00000001"),
+            ShapeFact::from(vec![Some(1), Some(3)]),
+        ),
+        (single("16777217"), input.clone()),
+    ] {
+        let result = infer_options(input.clone(), vec![literal]);
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs[0].shape, expected);
+        assert_eq!(result.outputs[0].storage, StorageFact::Dense);
+    }
+    for literal in [
+        single("1.00000011920928955078125"),
+        LiteralValue::Real {
+            text: "1.00000001".into(),
+            class: NumericClass::Double,
+        },
+    ] {
+        let result = infer_options(input.clone(), vec![literal]);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM-CATALOG-LOGICAL-REDUCTION-ARGUMENTS"));
+    }
+}
