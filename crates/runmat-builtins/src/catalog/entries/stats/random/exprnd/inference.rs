@@ -54,14 +54,14 @@ pub(crate) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         }
     }
     output.shape = if request.arguments.len() == 1 {
-        mean.shape.clone()
+        normalized_mean_shape(&mean.shape)
     } else {
         explicit_shape(request, &mut diagnostics)
     };
     if request.arguments.len() > 1
         && mean.shape.element_count().is_some_and(|n| n != 1)
-        && mean.shape.known_dims().is_some()
-        && output.shape.known_dims().is_some()
+        && fully_known(&mean.shape)
+        && fully_known(&output.shape)
         && !mean.shape.is_proven_equivalent(&output.shape)
     {
         diagnostics.push(argument_error(
@@ -98,6 +98,36 @@ pub(crate) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     finish_fixed(entry, request, output, diagnostics)
 }
 
+fn fully_known(shape: &ShapeFact) -> bool {
+    shape
+        .known_dims()
+        .is_some_and(|dims| dims.iter().all(Option::is_some))
+}
+
+fn normalized_mean_shape(shape: &ShapeFact) -> ShapeFact {
+    let mut dims = match shape {
+        ShapeFact::Scalar => return ShapeFact::Scalar,
+        ShapeFact::Unknown => return ShapeFact::Unknown,
+        ShapeFact::Ranked { rank } if *rank > 2 => return ShapeFact::Unknown,
+        ShapeFact::Ranked { rank } => vec![DimensionFact::Unknown; *rank],
+        ShapeFact::Shaped { dims } => dims.clone(),
+    };
+    if dims.is_empty() {
+        dims = vec![DimensionFact::Known(1); 2];
+    }
+    if dims.len() == 1 {
+        dims.push(DimensionFact::Known(1));
+    }
+    while dims.len() > 2 && dims.last() == Some(&DimensionFact::Known(1)) {
+        dims.pop();
+    }
+    // A dynamic trailing extent can become one, changing normalized rank.
+    if dims.len() > 2 && !matches!(dims.last(), Some(DimensionFact::Known(_))) {
+        return ShapeFact::Unknown;
+    }
+    ShapeFact::Shaped { dims }
+}
+
 fn invalid_mean(literal: &LiteralValue) -> bool {
     match literal {
         LiteralValue::Number(n) => !n.is_finite() || *n <= 0.0,
@@ -119,6 +149,18 @@ fn explicit_shape(request: &CallRequest, diagnostics: &mut Vec<InferenceDiagnost
         let values = match literal {
             LiteralValue::Empty => Vec::new(),
             LiteralValue::Vector(values) => values.iter().collect(),
+            LiteralValue::Matrix(rows) => {
+                let columns = rows.first().map_or(0, Vec::len);
+                if rows.iter().any(|row| row.len() != columns) || (rows.len() > 1 && columns > 1) {
+                    diagnostics.push(argument_error(
+                        "RM-CATALOG-EXPRND-DIMENSION",
+                        "size must be a scalar or vector",
+                        index,
+                    ));
+                    return ShapeFact::Unknown;
+                }
+                rows.iter().flatten().collect()
+            }
             LiteralValue::Unknown => return ShapeFact::Unknown,
             value => vec![value],
         };
@@ -225,5 +267,74 @@ mod tests {
         let mut r = request(vec![LiteralValue::Number(1.0)]);
         r.outputs = OutputSelection::new(RequestedOutputCount::Exactly(2));
         assert!(!infer_request(&r).diagnostics.is_empty());
+    }
+
+    #[test]
+    fn row_and_column_literal_sizes_match_runtime() {
+        for rows in [
+            vec![vec![LiteralValue::Number(2.0), LiteralValue::Number(3.0)]],
+            vec![
+                vec![LiteralValue::Number(2.0)],
+                vec![LiteralValue::Number(3.0)],
+            ],
+        ] {
+            let r = request(vec![LiteralValue::Number(1.0), LiteralValue::Matrix(rows)]);
+            let result = infer_request(&r);
+            assert!(result.diagnostics.is_empty());
+            assert_eq!(
+                result.outputs[0].shape,
+                ShapeFact::from(vec![Some(2), Some(3)])
+            );
+        }
+        let matrix = LiteralValue::Matrix(vec![vec![LiteralValue::Number(2.0); 2]; 2]);
+        assert!(
+            !infer_request(&request(vec![LiteralValue::Number(1.0), matrix]))
+                .diagnostics
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn mean_shape_normalizes_minimum_rank_and_trailing_ones() {
+        for (shape, expected) in [
+            (vec![], vec![Some(1), Some(1)]),
+            (vec![Some(3)], vec![Some(3), Some(1)]),
+            (vec![Some(2), Some(3), Some(1)], vec![Some(2), Some(3)]),
+            (
+                vec![Some(2), Some(3), Some(4)],
+                vec![Some(2), Some(3), Some(4)],
+            ),
+        ] {
+            let mut r = request(vec![LiteralValue::Unknown]);
+            r.arguments[0].shape = ShapeFact::from(shape);
+            assert_eq!(
+                infer_request(&r).outputs[0].shape,
+                ShapeFact::from(expected)
+            );
+        }
+        let mut r = request(vec![LiteralValue::Unknown]);
+        r.arguments[0].shape = ShapeFact::from(vec![Some(2), Some(3), None]);
+        assert_eq!(infer_request(&r).outputs[0].shape, ShapeFact::Unknown);
+    }
+
+    #[test]
+    fn unknown_extents_do_not_prove_a_shape_mismatch() {
+        let mut r = request(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Vector(vec![LiteralValue::Number(0.0), LiteralValue::Number(3.0)]),
+        ]);
+        r.arguments[0].shape = ShapeFact::from(vec![Some(0), None]);
+        assert!(infer_request(&r).diagnostics.is_empty());
+    }
+
+    #[test]
+    fn dynamic_mean_and_size_do_not_invent_class_or_residency() {
+        let mut r = request(vec![LiteralValue::Unknown, LiteralValue::Unknown]);
+        r.arguments[0] = ValueFact::unknown(DynamicReason::RuntimeValue);
+        let result = infer_request(&r);
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+        assert_eq!(result.outputs[0].storage, StorageFact::Unknown);
+        assert_eq!(result.outputs[0].residency, ResidencyFact::Unknown);
     }
 }
