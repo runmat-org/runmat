@@ -1,4 +1,46 @@
 // Self-contained functions are also embedded in the browser worker.
+export async function withFigureSurface(module, session, required, Canvas, run) {
+    let surfaceId = null;
+    try {
+        try {
+            if (required) {
+                for (const name of ["createPlotSurface", "resizePlotSurface", "presentFigureOnSurface", "destroyPlotSurface"]) {
+                    if (typeof module[name] !== "function") throw new Error(`Figure surface API ${name} is unavailable`);
+                }
+                if (typeof Canvas !== "function") throw new Error("Figure OffscreenCanvas is unavailable");
+            }
+            if (typeof Canvas === "function" && typeof module.createPlotSurface === "function") {
+                surfaceId = await module.createPlotSurface(new Canvas(16, 16));
+                if (!Number.isSafeInteger(surfaceId) || surfaceId < 0 || surfaceId > 0xffffffff) {
+                    throw new Error("Figure surface creation returned an invalid handle");
+                }
+                if (typeof module.resizePlotSurface === "function") {
+                    await module.resizePlotSurface(surfaceId, 16, 16, 1);
+                }
+            }
+        } catch (error) {
+            if (required) throw error;
+            // Optional legacy setup does not establish presentation evidence.
+            const failedSurface = surfaceId;
+            surfaceId = null;
+            if (Number.isSafeInteger(failedSurface) && failedSurface >= 0 && failedSurface <= 0xffffffff
+                && typeof module.destroyPlotSurface === "function") {
+                await module.destroyPlotSurface(failedSurface);
+            }
+        }
+        return await run(surfaceId);
+    } finally {
+        try {
+            if (Number.isSafeInteger(surfaceId) && surfaceId >= 0 && surfaceId <= 0xffffffff
+                && typeof module.destroyPlotSurface === "function") {
+                await module.destroyPlotSurface(surfaceId);
+            }
+        } finally {
+            if (typeof session.dispose === "function") await session.dispose();
+        }
+    }
+}
+
 export function createFigureObserver() {
     const handles = new Set();
     let failure = "";
