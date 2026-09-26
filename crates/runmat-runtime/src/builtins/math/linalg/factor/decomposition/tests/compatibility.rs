@@ -104,7 +104,7 @@ fn nonfloating_object_methods_recheck_the_compatibility_gate() {
 }
 
 #[test]
-fn every_nonfloating_object_entry_point_declares_extension_metadata() {
+fn every_nonfloating_object_entry_point_binds_canonical_extension_metadata() {
     for name in [
         "decomposition.subsref",
         "decomposition.uplus",
@@ -116,8 +116,21 @@ fn every_nonfloating_object_entry_point_declares_extension_metadata() {
         "decomposition.mrdivide",
         "decomposition.mldivide",
     ] {
-        let builtin = runmat_builtins::builtin_function_by_name(name)
-            .unwrap_or_else(|| panic!("registered {name}"));
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .unwrap_or_else(|| panic!("missing canonical catalog entry for {name}"));
+        assert!(
+            runmat_builtins::builtin_function_by_name(name).is_none(),
+            "legacy metadata authority retained for {name}"
+        );
+        assert_eq!(builtin.bindings.len(), 1, "canonical bindings for {name}");
+        assert_eq!(builtin.bindings[0].variant, "default");
+        let bindings = crate::builtin::runtime_builtin_bindings_by_name(name);
+        assert_eq!(bindings.len(), 1, "runtime implementations for {name}");
+        assert_eq!(
+            bindings[0].identity,
+            builtin.binding_identity(&builtin.bindings[0]),
+            "runtime binding must join canonical metadata for {name}"
+        );
         assert!(
             builtin
                 .extensions
