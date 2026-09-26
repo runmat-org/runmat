@@ -317,6 +317,7 @@ mod tests {
                 density_kg_per_m3: 1.0,
             },
             thermal_eigenstrain: None,
+            prescribed_temperature_k: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices: [0, 1, 2, 3],
                 coordinates_m: [
@@ -363,6 +364,7 @@ mod tests {
                 region_id: "soft-region".into(),
                 material: material(10.0),
                 thermal_eigenstrain: None,
+                prescribed_temperature_k: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
@@ -370,6 +372,7 @@ mod tests {
                 region_id: "hard-region".into(),
                 material: material(20.0),
                 thermal_eigenstrain: None,
+                prescribed_temperature_k: None,
                 geometry,
             },
         ];
@@ -447,6 +450,7 @@ mod tests {
                 density_kg_per_m3: 1.0,
             },
             thermal_eigenstrain: None,
+            prescribed_temperature_k: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices,
                 coordinates_m: node_indices.map(|node| coordinates[node]),
@@ -559,6 +563,7 @@ mod tests {
                 region_id: "soft-region".into(),
                 material: material(10.0),
                 thermal_eigenstrain: None,
+                prescribed_temperature_k: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
@@ -566,6 +571,7 @@ mod tests {
                 region_id: "hard-region".into(),
                 material: material(30.0),
                 thermal_eigenstrain: None,
+                prescribed_temperature_k: None,
                 geometry,
             },
         ];

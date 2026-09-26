@@ -138,6 +138,7 @@ pub enum SourceImplementation {
     UniformNodeDistribution,
     PrescribedTemperatureDeltaProfile,
     OrdinalRegionTemperatureDistribution,
+    PersistentRegionElementTemperatureMap,
     OrdinalDistribution,
     SyntheticProfileFallback,
     UnmappedFallback,

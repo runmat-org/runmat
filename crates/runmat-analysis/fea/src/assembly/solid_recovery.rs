@@ -30,6 +30,17 @@ pub(super) fn build(
         .iter()
         .map(|element| {
             let material = resolve_element_material(element, properties)?;
+            let prescribed_temperature_k = thermal_context
+                .map(|context| {
+                    thermoelastic_load::element_temperature_k(
+                        &element.region_id.source_topology_id,
+                        context,
+                    )
+                    .map_err(|error| {
+                        SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
+                    })
+                })
+                .transpose()?;
             let thermal_eigenstrain = thermal_context
                 .map(|context| {
                     let owner = properties
@@ -40,11 +51,14 @@ pub(super) fn build(
                                 element.element_id
                             ))
                         })?;
-                    thermoelastic_load::element_thermal_eigenstrain(owner, context).map_err(
-                        |error| {
-                            SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
-                        },
+                    thermoelastic_load::element_thermal_eigenstrain(
+                        owner,
+                        &element.region_id.source_topology_id,
+                        context,
                     )
+                    .map_err(|error| {
+                        SolverSolidAssemblyError::InvalidMaterialCoverage(error.to_string())
+                    })
                 })
                 .transpose()?;
             let geometry = match element.order {
@@ -82,6 +96,7 @@ pub(super) fn build(
                     density_kg_per_m3: material.density_kg_per_m3,
                 },
                 thermal_eigenstrain,
+                prescribed_temperature_k,
                 geometry,
             })
         })

@@ -33,6 +33,7 @@ fn thermal_eigenstrain_recovery_is_stress_free_for_free_expansion_and_compressiv
             region_id: "body".into(),
             material,
             thermal_eigenstrain: Some(eigenstrain),
+            prescribed_temperature_k: Some(303.15),
             geometry,
         };
         let free_displacement = coordinates

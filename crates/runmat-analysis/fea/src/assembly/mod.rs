@@ -695,8 +695,8 @@ pub struct SolidRecoveryElementSummary {
     pub element_id: String,
     pub region_id: String,
     pub material: SolidMaterial,
-    /// Element-owned isotropic thermal eigenstrain per normal component, if thermomechanical.
     pub thermal_eigenstrain: Option<f64>,
+    pub prescribed_temperature_k: Option<f64>,
     pub geometry: SolidRecoveryGeometry,
 }
 
@@ -1076,7 +1076,7 @@ pub(super) fn assemble_linear_system_impl(
             })
             .zip(solid_properties.as_ref())
             .map(|(mesh, properties)| {
-                thermoelastic_load::assemble_uniform_temperature_load(mesh, properties, context)
+                thermoelastic_load::assemble_prescribed_temperature_load(mesh, properties, context)
             })
             .transpose()
             .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;

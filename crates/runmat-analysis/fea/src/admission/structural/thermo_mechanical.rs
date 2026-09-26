@@ -61,13 +61,23 @@ pub fn thermomechanical_exact_realization(
     realization
         .components
         .push(if let Some(topology) = physical_solid_topology {
+            let physical_sources = input
+                .profile_sources
+                .into_iter()
+                .map(|source| match source {
+                    SourceImplementation::OrdinalRegionTemperatureDistribution => {
+                        SourceImplementation::PersistentRegionElementTemperatureMap
+                    }
+                    other => other,
+                })
+                .collect();
             ExactFormulationComponent {
                 spatial_operator:
                     SpatialOperatorImplementation::IntegratedPrescribedSolidThermoelasticLoad,
                 constitutive: ConstitutiveImplementation::ElementOwnedIsotropicThermalExpansion,
                 recovery: RecoveryImplementation::ElementOwnedThermoelasticStressEnergy,
                 topologies: vec![topology],
-                sources: input.profile_sources,
+                sources: physical_sources,
             }
         } else {
             ExactFormulationComponent {

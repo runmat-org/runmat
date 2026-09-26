@@ -227,7 +227,18 @@ fn validate_structural_identity(
             .realization
             .components
             .get(structural_component_count)
-            .map(|component| component.sources.clone())
+            .map(|component| {
+                component
+                    .sources
+                    .iter()
+                    .map(|source| match source {
+                        runmat_analysis_core::SourceImplementation::PersistentRegionElementTemperatureMap => {
+                            runmat_analysis_core::SourceImplementation::OrdinalRegionTemperatureDistribution
+                        }
+                        other => *other,
+                    })
+                    .collect()
+            })
             .ok_or(FormulationAdmissionRejectionReason::InvalidRealization)?;
         thermomechanical_exact_realization(ThermomechanicalRealizationInput {
             structural: input,

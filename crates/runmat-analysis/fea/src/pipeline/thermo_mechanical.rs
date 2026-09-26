@@ -43,14 +43,23 @@ pub(crate) fn recover_physical_static_thermo_mechanical_fields(
     if element_count == 0 {
         return Err("physical thermoelastic recovery requires solid elements".into());
     }
-    let node_count = infer_thermo_mechanical_node_count(displacement, element_count);
-    let temperature_k = coupling.reference_temperature_k + coupling.applied_temperature_delta_k;
-    if !temperature_k.is_finite() || temperature_k <= 0.0 {
-        return Err("physical thermoelastic recovery has invalid prescribed temperature".into());
-    }
+    let mut element_temperatures_k = Vec::with_capacity(element_count);
     let mut thermal_strain = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
     let mut thermal_stress = vec![0.0; element_count * TENSOR_COMPONENT_COUNT];
     for (index, element) in assembly.structural_solid_recovery.iter().enumerate() {
+        let temperature_k = element.prescribed_temperature_k.ok_or_else(|| {
+            format!(
+                "physical thermoelastic element {} lacks prescribed temperature",
+                element.element_id
+            )
+        })?;
+        if !temperature_k.is_finite() || temperature_k <= 0.0 {
+            return Err(format!(
+                "physical thermoelastic element {} has invalid prescribed temperature",
+                element.element_id
+            ));
+        }
+        element_temperatures_k.push(temperature_k);
         let eigenstrain = element.thermal_eigenstrain.ok_or_else(|| {
             format!(
                 "physical thermoelastic element {} lacks thermal eigenstrain",
@@ -73,8 +82,8 @@ pub(crate) fn recover_physical_static_thermo_mechanical_fields(
     let mut fields = ThermoMechanicalSnapshotFields {
         temperature_snapshots: vec![AnalysisField::host_f64(
             fea_thermo_mechanical_temperature_field_id(0),
-            vec![node_count],
-            vec![temperature_k; node_count],
+            vec![element_count],
+            element_temperatures_k,
         )],
         thermal_strain_snapshots: vec![AnalysisField::host_f64(
             fea_thermo_mechanical_thermal_strain_field_id(0),
@@ -96,14 +105,16 @@ pub(crate) fn recover_physical_static_thermo_mechanical_fields(
                 code: "FEA_TM_CONSISTENCY".into(),
                 severity: FeaDiagnosticSeverity::Info,
                 message: format!(
-                    "constitutive_relation=element_owned_thermal_eigenstress element_count={element_count} thermal_state_source=prescribed_uniform"
+                    "constitutive_relation=element_owned_thermal_eigenstress element_count={element_count} thermal_state_source=prescribed_element_constant region_delta_count={} sequence_state_transfer=false",
+                    coupling.region_delta_count
                 ),
             },
             FeaDiagnostic {
                 code: "FEA_TM_TEMPERATURE_FIELD".into(),
                 severity: FeaDiagnosticSeverity::Info,
                 message: format!(
-                    "temperature_field_basis=prescribed_uniform node_count={node_count} element_count={element_count}"
+                    "temperature_field_basis=element_constant element_count={element_count} region_delta_count={}",
+                    coupling.region_delta_count
                 ),
             },
         ],

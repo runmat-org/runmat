@@ -1,4 +1,6 @@
-//! Physical equivalent nodal loads for prescribed uniform thermoelastic strain on solid meshes.
+//! Physical equivalent nodal loads for element-owned prescribed thermoelastic strain.
+
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::SolverMeshArtifact;
 use thiserror::Error;
@@ -17,19 +19,75 @@ pub(super) enum ThermoelasticLoadError {
     MissingOwner(u64),
     #[error("thermoelastic solid element {0} has invalid constitutive coefficients")]
     InvalidConstitutive(u64),
-    #[error("region-specific temperature profiles require an exact element temperature map")]
-    UnresolvedRegionTemperature,
+    #[error("thermoelastic prescribed temperature is invalid for region {0}")]
+    InvalidTemperature(String),
+    #[error("thermoelastic temperature targets duplicate region {0}")]
+    DuplicateRegion(String),
+    #[error("thermoelastic temperature targets region {0} absent from the solver mesh")]
+    UnknownRegion(String),
+}
+
+pub(super) fn validate_temperature_regions(
+    mesh: &SolverMeshArtifact,
+    context: &FeaThermoMechanicalContext,
+) -> Result<(), ThermoelasticLoadError> {
+    let present = mesh
+        .topology
+        .volume_elements
+        .iter()
+        .map(|element| element.region_id.source_topology_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut targeted = BTreeSet::new();
+    for target in &context.region_temperature_deltas {
+        if !targeted.insert(target.region_id.as_str()) {
+            return Err(ThermoelasticLoadError::DuplicateRegion(
+                target.region_id.clone(),
+            ));
+        }
+        if !present.contains(target.region_id.as_str()) {
+            return Err(ThermoelasticLoadError::UnknownRegion(
+                target.region_id.clone(),
+            ));
+        }
+        let temperature = context.reference_temperature_k + target.temperature_delta_k;
+        if !temperature.is_finite() || temperature <= 0.0 {
+            return Err(ThermoelasticLoadError::InvalidTemperature(
+                target.region_id.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn element_temperature_k(
+    region_id: &str,
+    context: &FeaThermoMechanicalContext,
+) -> Result<f64, ThermoelasticLoadError> {
+    let delta = context
+        .region_temperature_deltas
+        .iter()
+        .find(|target| target.region_id == region_id)
+        .map_or(context.applied_temperature_delta_k, |target| {
+            target.temperature_delta_k
+        });
+    let temperature = context.reference_temperature_k + delta;
+    if temperature.is_finite() && temperature > 0.0 {
+        Ok(temperature)
+    } else {
+        Err(ThermoelasticLoadError::InvalidTemperature(region_id.into()))
+    }
 }
 
 pub(super) fn element_thermal_eigenstrain(
     owner: &CompiledElementMaterial,
+    region_id: &str,
     context: &FeaThermoMechanicalContext,
 ) -> Result<f64, ThermoelasticLoadError> {
     let thermal = owner
         .material
         .require_thermal()
         .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(owner.element_id))?;
-    let temperature_k = context.reference_temperature_k + context.applied_temperature_delta_k;
+    let temperature_k = element_temperature_k(region_id, context)?;
     let strain =
         thermal.expansion_coefficient_per_k * (temperature_k - thermal.reference_temperature_k);
     if strain.is_finite() {
@@ -41,18 +99,16 @@ pub(super) fn element_thermal_eigenstrain(
     }
 }
 
-/// Assemble ∫ Bᵀ D εₜₕ dV with εₜₕ = α(T − Tref)[1,1,1,0,0,0].
+/// Assemble ∫ Bᵀ D εₜₕ dV with element-constant εₜₕ = α(T − Tref)[1,1,1,0,0,0].
 /// The isotropic hydrostatic stress is E α(T − Tref)/(1−2ν), so each nodal force component is
 /// its volume integral against the corresponding physical shape gradient. No material average or
 /// ordinal DOF distribution enters this load.
-pub(super) fn assemble_uniform_temperature_load(
+pub(super) fn assemble_prescribed_temperature_load(
     mesh: &SolverMeshArtifact,
     properties: &CompiledPropertyMap,
     context: &FeaThermoMechanicalContext,
 ) -> Result<Vec<f64>, ThermoelasticLoadError> {
-    if !context.region_temperature_deltas.is_empty() {
-        return Err(ThermoelasticLoadError::UnresolvedRegionTemperature);
-    }
+    validate_temperature_regions(mesh, context)?;
     let projection = AnalysisProjection::derive(mesh)
         .map_err(|error| ThermoelasticLoadError::Projection(error.to_string()))?;
     let mut load = vec![0.0; projection.nodes.len() * 3];
@@ -65,7 +121,7 @@ pub(super) fn assemble_uniform_temperature_load(
             .require_mechanical()
             .map_err(|_| ThermoelasticLoadError::InvalidConstitutive(element.element_id))?;
         let hydrostatic_stress_pa = mechanical.youngs_modulus_pa
-            * element_thermal_eigenstrain(owner, context)?
+            * element_thermal_eigenstrain(owner, &element.region_id.source_topology_id, context)?
             / (1.0 - 2.0 * mechanical.poisson_ratio);
         if !hydrostatic_stress_pa.is_finite() {
             return Err(ThermoelasticLoadError::InvalidConstitutive(
@@ -126,7 +182,7 @@ mod tests {
             .unwrap()
             .expansion_coefficient_per_k = 1.0e-5;
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-        let load = assemble_uniform_temperature_load(&mesh, &properties, &context()).unwrap();
+        let load = assemble_prescribed_temperature_load(&mesh, &properties, &context()).unwrap();
         let mechanical = model.materials[0].require_mechanical().unwrap();
         let stress = mechanical.youngs_modulus_pa * 1.0e-4 / (1.0 - 2.0 * mechanical.poisson_ratio);
         let expected = [
@@ -153,11 +209,11 @@ mod tests {
     }
 
     #[test]
-    fn uniform_tet10_load_has_zero_resultant_and_rejects_unresolved_region_field() {
+    fn uniform_tet10_load_has_zero_resultant_and_rejects_unknown_region_field() {
         let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
         let model = fixture_model(FixtureId::CantileverLinearStatic);
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-        let load = assemble_uniform_temperature_load(&mesh, &properties, &context()).unwrap();
+        let load = assemble_prescribed_temperature_load(&mesh, &properties, &context()).unwrap();
         assert_eq!(load.len(), 30);
         assert!(load.iter().any(|force| force.abs() > 0.0));
         let scale = load.iter().map(|force| force.abs()).sum::<f64>();
@@ -165,16 +221,16 @@ mod tests {
             let resultant = load.chunks_exact(3).map(|force| force[axis]).sum::<f64>();
             assert!(resultant.abs() <= scale * 1.0e-12);
         }
-        let mut unresolved = context();
-        unresolved
+        let mut unknown = context();
+        unknown
             .region_temperature_deltas
             .push(crate::FeaThermoRegionTemperatureDelta {
-                region_id: "region".into(),
+                region_id: "missing_region".into(),
                 temperature_delta_k: 10.0,
             });
         assert!(matches!(
-            assemble_uniform_temperature_load(&mesh, &properties, &unresolved),
-            Err(ThermoelasticLoadError::UnresolvedRegionTemperature)
+            assemble_prescribed_temperature_load(&mesh, &properties, &unknown),
+            Err(ThermoelasticLoadError::UnknownRegion(_))
         ));
     }
 
@@ -206,7 +262,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
             let thermal_load =
-                assemble_uniform_temperature_load(&mesh, &properties, &context()).unwrap();
+                assemble_prescribed_temperature_load(&mesh, &properties, &context()).unwrap();
             let stiffness = assemble_solver_solid_operators(&mesh, &properties)
                 .unwrap()
                 .stiffness;
@@ -251,7 +307,24 @@ mod tests {
                 .expansion_coefficient_per_k = coefficient;
         }
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
-        let load = assemble_uniform_temperature_load(&mesh, &properties, &context()).unwrap();
+        let mut prescribed = context();
+        prescribed
+            .region_temperature_deltas
+            .push(crate::FeaThermoRegionTemperatureDelta {
+                region_id: "mid_aluminum".into(),
+                temperature_delta_k: 30.0,
+            });
+        let load = assemble_prescribed_temperature_load(&mesh, &properties, &prescribed).unwrap();
+        let recovery =
+            crate::assembly::solid_recovery::build(&mesh, &properties, Some(&prescribed)).unwrap();
+        for element in &recovery {
+            let expected = if element.region_id == "mid_aluminum" {
+                323.15
+            } else {
+                303.15
+            };
+            assert_eq!(element.prescribed_temperature_k, Some(expected));
+        }
         let projected = AnalysisProjection::derive(&mesh).unwrap();
         for element in &projected.elements {
             let region = element.region_id.source_topology_id.as_str();
@@ -261,7 +334,8 @@ mod tests {
                 "polymer_segment" => (3.2e9, 0.37, 4.0e-5),
                 _ => panic!("unexpected independent material region {region}"),
             };
-            let stress = youngs * expansion * 10.0 / (1.0 - 2.0 * poisson);
+            let delta = if region == "mid_aluminum" { 30.0 } else { 10.0 };
+            let stress = youngs * expansion * delta / (1.0 - 2.0 * poisson);
             let expected = [
                 -stress / 6.0,
                 -stress / 6.0,
@@ -291,9 +365,25 @@ mod tests {
         model.material_assignments.reverse();
         let reordered = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         assert_eq!(
-            assemble_uniform_temperature_load(&mesh, &reordered, &context()).unwrap(),
+            assemble_prescribed_temperature_load(&mesh, &reordered, &prescribed).unwrap(),
             load
         );
+        prescribed
+            .region_temperature_deltas
+            .push(crate::FeaThermoRegionTemperatureDelta {
+                region_id: "mid_aluminum".into(),
+                temperature_delta_k: 40.0,
+            });
+        assert!(matches!(
+            assemble_prescribed_temperature_load(&mesh, &reordered, &prescribed),
+            Err(ThermoelasticLoadError::DuplicateRegion(_))
+        ));
+        prescribed.region_temperature_deltas.pop();
+        prescribed.region_temperature_deltas[0].temperature_delta_k = -400.0;
+        assert!(matches!(
+            assemble_prescribed_temperature_load(&mesh, &reordered, &prescribed),
+            Err(ThermoelasticLoadError::InvalidTemperature(_))
+        ));
     }
 
     #[test]
@@ -302,7 +392,7 @@ mod tests {
         let mesh = crate::tests::single_tetrahedron_solver_mesh_for_model(&model);
         let properties = compile_structural_property_map(&model, Some(&mesh)).unwrap();
         let context = context();
-        let expected = assemble_uniform_temperature_load(&mesh, &properties, &context).unwrap();
+        let expected = assemble_prescribed_temperature_load(&mesh, &properties, &context).unwrap();
         let summary = assemble_linear_system_impl(
             &model,
             &RealizedExcitations::default(),

@@ -1420,7 +1420,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
     );
     assert_eq!(
         field(&result, &fea_thermo_mechanical_temperature_field_id(0)).shape,
-        vec![4]
+        vec![1]
     );
     assert_eq!(
         field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0)).field_id,
@@ -1473,7 +1473,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         diagnostic.code == "FEA_TM_TEMPERATURE_FIELD"
             && diagnostic
                 .message
-                .contains("temperature_field_basis=prescribed_uniform")
+                .contains("temperature_field_basis=element_constant")
     }));
     let density = host_field(&result, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0];
     let total_energy = host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0];
@@ -1483,6 +1483,58 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         density / 6.0,
         density.abs() * 1.0e-10 + 1.0e-9,
     );
+}
+
+#[test]
+fn thermo_mechanical_static_region_temperature_overrides_global_field_on_exact_solid() {
+    let mut model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+    model.material_assignments.truncate(1);
+    configure_thermo_mechanical_excitation(&mut model, 65.0, 1.2e-5);
+    let region_id = model.material_assignments[0]
+        .selected_region_id()
+        .unwrap()
+        .to_owned();
+    append_fixture_temperature_field(
+        &mut model,
+        "region_temperature",
+        313.15,
+        runmat_analysis_core::ExcitationTarget::Region(runmat_analysis_core::RegionTarget::volume(
+            region_id,
+        )),
+    );
+    model.sequence.steps = vec![ProcedureStep::coupled(
+        "thermomechanical_static",
+        runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical,
+        runmat_analysis_core::AnalysisProcedure::Static,
+    )];
+    let result = crate::run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        LinearStaticSolveOptions {
+            solver_mesh: Some(single_tetrahedron_solver_mesh_for_model(&model)),
+            ..experimental_linear_static_options()
+        },
+    )
+    .expect("exact-region prescribed temperature should solve physically");
+    assert_eq!(
+        result.identity.realization().components[1].sources,
+        vec![
+            runmat_analysis_core::SourceImplementation::PrescribedTemperatureDeltaProfile,
+            runmat_analysis_core::SourceImplementation::PersistentRegionElementTemperatureMap,
+        ]
+    );
+    assert_eq!(
+        field(&result, &fea_thermo_mechanical_temperature_field_id(0))
+            .as_host_f64()
+            .unwrap(),
+        &[313.15]
+    );
+    for strain in &field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0))
+        .as_host_f64()
+        .unwrap()[..3]
+    {
+        assert!((*strain - 2.4e-4).abs() < 1.0e-15);
+    }
 }
 
 #[test]
