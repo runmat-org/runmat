@@ -116,7 +116,7 @@ fn cpu_call_is_observed_only_once_after_its_result() {
     let prepared = observed(&probe, false, vec![Value::Num(1.)]);
     let observation = prepared.into_execution().1;
     assert!(probe.feedback.borrow().is_empty());
-    observation.finish(&Ok(Value::Num(2.)));
+    observation.finish(&Ok(Value::Num(2.))).unwrap();
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(probe.feedback.borrow()[0].succeeded);
 }
@@ -128,13 +128,14 @@ fn errors_abandonment_and_cancelled_call_futures_report_failure() {
     prepared
         .into_execution()
         .1
-        .finish(&Err(RuntimeError::new("test failure")));
+        .finish(&Err(RuntimeError::new("test failure")))
+        .unwrap();
     drop(observed(&probe, false, vec![]));
     let prepared = observed(&probe, false, vec![]);
     let observation = prepared.into_execution().1;
     let future = async move {
         std::future::pending::<()>().await;
-        observation.finish(&Ok(Value::Num(1.)));
+        observation.finish(&Ok(Value::Num(1.))).unwrap();
     };
     drop(future);
     // Retaining prepared arguments must not retain a cancelled call's ticket.
