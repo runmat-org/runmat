@@ -1,7 +1,4 @@
 use crate::*;
-use runmat_types::EffectKind;
-
-use super::documentation::STRUCT_DOCUMENTATION;
 
 const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "S",
@@ -182,44 +179,3 @@ pub const STRUCT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &ERRORS,
 };
-const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
-pub const STRUCT_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
-    provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
-    identity: BuiltinCatalogIdentity { name: "struct" },
-    category: "structs/core",
-    documentation: STRUCT_DOCUMENTATION,
-    descriptor: &STRUCT_DESCRIPTOR,
-    contract: BuiltinContractDeclaration {
-        maturity: BuiltinContractMaturity::Complete,
-        inference_rule: BuiltinInferenceRule::Aggregate(AggregateInferenceRule::Struct),
-        compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
-        purity: BuiltinPurity::Pure,
-        semantic_kind: BuiltinSemanticKind::General,
-        workspace_effect: None,
-        environment_effect: None,
-        effects: &EFFECTS,
-        capabilities: &[],
-    },
-    placement: BuiltinPlacementContract {
-        portability: BuiltinPortability::NativeAndWasm,
-        accelerator: BuiltinAcceleratorPolicy::Forbidden,
-        residency: BuiltinResidencyPolicy::PreserveInputs,
-        fusion: BuiltinFusionPolicy::Boundary,
-        distributed: crate::BuiltinDistributedPolicy::Unsupported,
-    },
-    link: BuiltinLinkContract {
-        reachability: BuiltinReachability::Always,
-        policy: BuiltinLinkPolicy::PortableRuntime,
-        execution_stack: runmat_types::ExecutionStackRequirement::Any,
-        artifact_dependencies: &[],
-    },
-    bindings: &BINDINGS,
-    extensions: &[],
-    integer_capabilities: &[],
-    integer_audit: None,
-    suppress_auto_output: false,
-};
-
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&STRUCT_CATALOG_ENTRY];
