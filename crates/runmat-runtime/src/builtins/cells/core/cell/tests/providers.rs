@@ -1,4 +1,51 @@
 use super::*;
+
+#[test]
+fn invalid_cell_option_precedes_unavailable_size_provider_access() {
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    let input = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
+        vec![1, 2],
+        u32::MAX - 31,
+        91821,
+    ));
+    let error = run(vec![input, Value::from("bad-option")]).unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        runmat_builtins::CELL_ERROR_INVALID_INPUT.identifier
+    );
+}
+
+#[test]
+fn runtime_owned_cell_sink_invalidates_only_successful_resident_controls() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        runmat_accelerate::ensure_residency_hooks();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let handle = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        for args in [
+            vec![Value::GpuTensor(handle.clone())],
+            vec![Value::from("like"), Value::GpuTensor(handle.clone())],
+        ] {
+            runmat_accelerate_api::mark_residency(&handle);
+            assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+            assert!(run(args).is_ok());
+            assert!(!runmat_accelerate::fusion_residency::is_resident(&handle));
+            assert!(block_on(provider.download(&handle)).is_ok());
+        }
+        runmat_accelerate_api::mark_residency(&handle);
+        assert!(run(vec![
+            Value::GpuTensor(handle.clone()),
+            Value::from("bad-option")
+        ])
+        .is_err());
+        assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+        provider.free(&handle).unwrap();
+    });
+}
 use crate::builtins::common::test_support;
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::AccelProvider;

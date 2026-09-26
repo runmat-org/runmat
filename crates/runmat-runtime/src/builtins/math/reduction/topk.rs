@@ -1,4 +1,6 @@
 //! MATLAB-compatible `maxk` and `mink` builtins.
+//! Runtime-owned sink: exact host selection owns its gather and requested-output
+//! restoration. A post-admission barrier must never erase explicit source intent.
 
 use std::cmp::Ordering;
 
@@ -135,6 +137,9 @@ async fn evaluate_topk(
         TopKInput::Complex(tensor) => evaluate_complex(kind, tensor, &args),
         TopKInput::Logical(logical) => evaluate_logical(kind, logical, &args),
     }?;
+    for handle in &protected {
+        runmat_accelerate_api::clear_residency(handle);
+    }
     let Some(source) = source else {
         return Ok(evaluation);
     };

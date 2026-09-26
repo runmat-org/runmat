@@ -27,6 +27,8 @@ pub const SYMS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        // Text-only declarations have no valid resident data operands; workspace
+        // effects remain a fusion boundary, not an operand-gather operation.
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,

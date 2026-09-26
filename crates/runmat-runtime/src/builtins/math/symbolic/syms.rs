@@ -1,4 +1,7 @@
 //! MATLAB-compatible scalar `syms` builtin for declaring symbolic variables.
+//! Runtime-owned effect boundary: accepted declarations contain only text, so
+//! there are no resident data operands to gather or invalidate. Invalid resident
+//! inputs are rejected by declaration admission before provider/workspace access.
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, SYMS_DESCRIPTOR, SYMS_ERRORS, SYMS_ERROR_TOO_MANY_OUTPUTS,
@@ -183,6 +186,19 @@ mod tests {
         let error = block_on(syms_builtin(vec![Value::from("x")])).unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERROR_TOO_MANY_OUTPUTS.identifier);
         assert!(crate::workspace::lookup("x").is_none());
+    }
+
+    #[test]
+    fn resident_declaration_rejects_without_provider_or_workspace_effects() {
+        let _workspace = test_workspace_guard();
+        runmat_accelerate::ensure_residency_hooks();
+        let handle = runmat_accelerate_api::GpuTensorHandle::new(vec![1, 1], u32::MAX - 23, 98231);
+        runmat_accelerate_api::mark_residency(&handle);
+        let error = block_on(syms_builtin(vec![Value::from("x"), Value::GpuTensor(handle.clone())])).unwrap_err();
+        assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
+        assert!(workspace::lookup("x").is_none());
+        assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
+        runmat_accelerate_api::clear_residency(&handle);
     }
 
     #[test]

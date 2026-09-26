@@ -22,6 +22,8 @@ pub const HISTC_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        // Domain admission owns data/edge gathering and the successful-call
+        // barrier. Legacy pre-admission blanket gathering is deliberately retired.
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,

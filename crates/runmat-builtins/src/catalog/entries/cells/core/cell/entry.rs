@@ -24,6 +24,8 @@ pub const CELL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        // Size/prototype controls are not data operands. The admitted constructor
+        // owns required size gathers and successful-call fusion invalidation.
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,

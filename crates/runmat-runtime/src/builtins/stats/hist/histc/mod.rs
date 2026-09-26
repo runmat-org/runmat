@@ -1,4 +1,6 @@
 //! Legacy histogram counting with explicit bin endpoints.
+//! Runtime-owned sink: admitted data/edges gather in the domain, returning host
+//! outputs; original source buffers remain reusable after their fusion barrier.
 mod admission;
 mod compute;
 mod edges;
@@ -31,6 +33,14 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
     if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
         return Err(invalid_argument("histc: too many output arguments"));
     }
+    let resident_inputs: Vec<_> = [&x, &binranges]
+        .into_iter()
+        .chain(rest.iter())
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
     let dim = match rest.as_slice() {
         [] => None,
         [value] => Some(
@@ -49,6 +59,9 @@ async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinR
     ensure_histc_input_extensions(&x)?;
     ensure_histc_input_extensions(&binranges)?;
     let eval = evaluate(x, binranges, dim).await?;
+    for handle in &resident_inputs {
+        runmat_accelerate_api::clear_residency(handle);
+    }
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));

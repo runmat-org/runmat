@@ -2,6 +2,8 @@ use super::*;
 use futures::executor::block_on;
 use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
+mod sink;
+
 #[test]
 fn empty_literal_edges_accept_vector_and_matrix_data() {
     for (shape, expected) in [(vec![1, 3], vec![0, 0]), (vec![3, 2], vec![0, 2])] {

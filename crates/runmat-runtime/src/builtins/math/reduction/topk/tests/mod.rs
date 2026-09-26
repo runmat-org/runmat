@@ -21,3 +21,4 @@ mod controls;
 mod integer_classes;
 mod ordering;
 mod provider;
+mod sink;

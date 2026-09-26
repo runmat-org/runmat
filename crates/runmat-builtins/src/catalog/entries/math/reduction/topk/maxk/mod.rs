@@ -28,6 +28,8 @@ pub const MAXK_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        // The domain owns gather, admitted barrier and requested resident-output
+        // restoration; generic Gather would erase explicit input ownership.
         preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,

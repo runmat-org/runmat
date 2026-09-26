@@ -1,3 +1,6 @@
+//! Runtime-owned sink: size controls gather in their parser; prototypes retain
+//! metadata-only handling. Successful construction clears original top-level
+//! fusion marks without blanket gathering, freeing inputs, or inventing data roles.
 mod allocation;
 mod arguments;
 mod error;
@@ -27,5 +30,16 @@ async fn cell_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         "cell",
     )?;
 
-    allocation::build(arguments::parse(args).await?)
+    let resident_controls: Vec<_> = args
+        .iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let output = allocation::build(arguments::parse(args).await?)?;
+    for handle in &resident_controls {
+        runmat_accelerate_api::clear_residency(handle);
+    }
+    Ok(output)
 }
