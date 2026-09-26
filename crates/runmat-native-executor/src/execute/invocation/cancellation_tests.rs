@@ -27,6 +27,7 @@ struct PendingProbe {
     polls: Rc<Cell<usize>>,
     drops: Rc<Cell<usize>>,
     ready: Rc<Cell<bool>>,
+    on_drop: Option<Box<dyn Fn()>>,
 }
 impl Future for PendingProbe {
     type Output = NativeExecutorResult<CallCompletion>;
@@ -42,6 +43,9 @@ impl Future for PendingProbe {
 impl Drop for PendingProbe {
     fn drop(&mut self) {
         self.drops.set(self.drops.get() + 1);
+        if let Some(on_drop) = &self.on_drop {
+            on_drop();
+        }
     }
 }
 
@@ -104,6 +108,7 @@ fn work() -> (
             polls: polls.clone(),
             drops: drops.clone(),
             ready: ready.clone(),
+            on_drop: None,
         },
         polls,
         drops,
@@ -181,11 +186,21 @@ fn correct_resume_after_stale_request_restores_active_execution() {
 fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() {
     runmat_gc::gc_test_context(|| {
         let source = CancellationSource::new();
-        let (work, _, drops, _) = work();
-        let mut invocation = invocation(&source, work);
         let allocation =
             runmat_gc::gc_allocate_rooted(runmat_value::Value::String("capture".into())).unwrap();
         let handle = allocation.handle();
+        let (mut work, _, drops, _) = work();
+        work.on_drop = Some(Box::new(move || {
+            let runtime = runmat_runtime::context::legacy::active()
+                .expect("originating runtime during pending destructor");
+            assert!(runtime.is_cancelled());
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(
+                runmat_gc::gc_clone_value(&handle).is_ok(),
+                "arena roots outlive pending destructor"
+            );
+        }));
+        let mut invocation = invocation(&source, work);
         let state = &mut invocation.active.as_mut().unwrap().state;
         let value =
             state

@@ -45,7 +45,6 @@ pub(super) struct HostState {
     pub function: NativeFunction,
     pub functions: Arc<Vec<NativeFunction>>,
     pub runtime: RuntimeContext,
-    pub arena: ValueArena,
     pub locals: Vec<NativeValueRef>,
     pub values: BTreeMap<NativeValueId, NativeValueRef>,
     pub roots: Vec<NativeRoot>,
@@ -97,6 +96,12 @@ pub(super) struct HostState {
     vectorized_regions: u64,
     workspace: Option<super::workspace::NativeWorkspaceState>,
     last_expression: Option<NativeValueRef>,
+    // Fields drop in declaration order. Pending work/service destructors may
+    // trace or collect values, so retain the arena's GC roots until every
+    // execution-owned future, capture, receiver and workspace has been dropped.
+    // The invocation's execution lease keeps runtime activation alive outside
+    // this owner while its fields are destroyed.
+    pub arena: ValueArena,
 }
 
 impl HostState {
