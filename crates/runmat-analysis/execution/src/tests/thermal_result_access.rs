@@ -68,13 +68,57 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
         )
         .unwrap();
         for chunk_bytes in [1024, 8192] {
+            let transport = ThermalSolverResultManifest::from_result(&result)
+                .unwrap()
+                .transport_profile(chunk_bytes)
+                .unwrap();
+            let admitted_limits = ObjectInventoryLimits {
+                max_objects: transport.chunk_count_upper_bound as usize + 1,
+                max_total_bytes: transport.total_bytes_upper_bound,
+                max_object_bytes: transport
+                    .root
+                    .encoded_bytes_upper_bound
+                    .max(transport.largest_chunk_bytes_upper_bound),
+            };
+            for limits in [
+                ObjectInventoryLimits {
+                    max_objects: admitted_limits.max_objects - 1,
+                    ..admitted_limits
+                },
+                ObjectInventoryLimits {
+                    max_total_bytes: admitted_limits.max_total_bytes - 1,
+                    ..admitted_limits
+                },
+                ObjectInventoryLimits {
+                    max_object_bytes: admitted_limits.max_object_bytes - 1,
+                    ..admitted_limits
+                },
+            ] {
+                let error = prepare_thermal_solver_result_objects(
+                    &result,
+                    chunk_bytes,
+                    ObjectNamespace::ResultValue,
+                    limits,
+                )
+                .unwrap_err();
+                assert!(error.to_string().contains("canonical payload projection"));
+            }
             let prepared = prepare_thermal_solver_result_objects(
                 &result,
                 chunk_bytes,
                 ObjectNamespace::ResultValue,
-                ObjectInventoryLimits::default(),
+                admitted_limits,
             )
             .unwrap();
+            assert!(prepared.objects.len() as u64 <= transport.chunk_count_upper_bound + 1);
+            assert!(
+                prepared
+                    .objects
+                    .iter()
+                    .map(|o| o.bytes.len() as u64)
+                    .sum::<u64>()
+                    <= transport.total_bytes_upper_bound
+            );
             assert_eq!(prepared, collected_reference(&result, chunk_bytes));
             assert_eq!(
                 prepared.manifest.partitions.len() as u64,

@@ -12,13 +12,46 @@ impl ThermalSolverResultManifest {
     /// Profile metadata plus every field partition before encoding numerical payloads.
     /// This is post-solve: runtime provenance is known. It is not pre-solve admission.
     pub fn encoding_profile(&self) -> AnalysisExecutionResult<ThermalResultEncodingProfile> {
-        self.validate()?;
-        let header = runmat_canonical_codec::profile_serialized(self, LIMITS)?;
         let mut result = ThermalResultEncodingProfile {
-            contract_count: 1,
-            encoded_bytes_upper_bound: header.encoded_bytes_upper_bound,
-            largest_contract_materialization_bytes: header.materialization_resident_bytes_estimate,
+            contract_count: 0,
+            encoded_bytes_upper_bound: 0,
+            largest_contract_materialization_bytes: 0,
         };
+        self.visit_encoding_profiles(|profile| {
+            result.contract_count = result
+                .contract_count
+                .checked_add(1)
+                .ok_or_else(|| invalid("encoding contract count overflows"))?;
+            result.encoded_bytes_upper_bound = result
+                .encoded_bytes_upper_bound
+                .checked_add(profile.encoded_bytes_upper_bound)
+                .ok_or_else(|| invalid("encoding payload size overflows"))?;
+            result.largest_contract_materialization_bytes = result
+                .largest_contract_materialization_bytes
+                .max(profile.materialization_resident_bytes_estimate);
+            Ok(())
+        })?;
+        Ok(result)
+    }
+
+    /// Post-solve output projection governed by the actual transport chunk parameter.
+    pub fn transport_profile(
+        &self,
+        chunk_bytes: usize,
+    ) -> AnalysisExecutionResult<AnalysisTransportProfile> {
+        let mut transport = AnalysisTransportProfiler::new(chunk_bytes)?;
+        self.visit_encoding_profiles(|profile| transport.push(profile.encoded_bytes_upper_bound))?;
+        transport.finish(AnalysisNumericalObjectKind::SolverResult)
+    }
+
+    fn visit_encoding_profiles(
+        &self,
+        mut visit: impl FnMut(
+            runmat_canonical_codec::SerializedCanonicalProfile,
+        ) -> AnalysisExecutionResult<()>,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate()?;
+        visit(runmat_canonical_codec::profile_serialized(self, LIMITS)?)?;
         for entry in self.fields.iter().flatten() {
             // A canonical field consists of equal full blocks and at most one trailing block.
             // Cache the previous shape: profiling work is bounded by two shapes per field,
@@ -38,19 +71,9 @@ impl ThermalSolverResultManifest {
                         profile
                     }
                 };
-                result.contract_count = result
-                    .contract_count
-                    .checked_add(1)
-                    .ok_or_else(|| invalid("encoding contract count overflows"))?;
-                result.encoded_bytes_upper_bound = result
-                    .encoded_bytes_upper_bound
-                    .checked_add(profile.encoded_bytes_upper_bound)
-                    .ok_or_else(|| invalid("encoding payload size overflows"))?;
-                result.largest_contract_materialization_bytes = result
-                    .largest_contract_materialization_bytes
-                    .max(profile.materialization_resident_bytes_estimate);
+                visit(profile)?;
             }
         }
-        Ok(result)
+        Ok(())
     }
 }

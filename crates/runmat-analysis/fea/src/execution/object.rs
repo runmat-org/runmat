@@ -19,6 +19,9 @@ const MAX_CHUNKS: usize = 1_000_000;
 
 mod incremental;
 pub use incremental::AnalysisPayloadBuilder;
+mod transport_profile;
+pub use transport_profile::{AnalysisTransportProfile, AnalysisTransportProfiler};
+mod serialization;
 
 #[cfg(test)]
 #[path = "object_tests.rs"]
@@ -116,7 +119,7 @@ pub struct AnalysisPayloadPartition<'a> {
     pub payload: &'a [u8],
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AnalysisObjectManifest {
     pub schema_version: u16,

@@ -518,6 +518,18 @@ acceptance/rejection and checked overflow. These are fixture measurements of Rus
 not allocator/native/RSS qualification. Actual chunk-size-dependent transport inventories,
 output accumulation and their overlapping lifetimes remain open.
 
+Thermal output preparation now preflights the complete wire closure before constructing transport
+chunks. The shared numerical-object profiler sums the chunk ceiling of each independently encoded
+partition using the requested chunk size, then profiles the actual shared root serializer. Root
+bytes and the root object count toward inventory limits; both root and chunks obey per-object
+limits, and the root obeys its canonical schema limits. Tests cover partition remainders, overflow,
+root limits, unchanged wire bytes, and exact projected-limit acceptance/rejection at two chunk sizes.
+The projection is conservative and may reject a closure whose eventual encoding is smaller.
+It avoids hypothetical chunk/descriptor vectors, but custom serializers may allocate temporary
+strings. This is post-solve wire admission, not pre-solve transport or complete retained-heap
+admission: builder uniqueness trees, artifact inventory validation and object-conversion overlap
+still require explicit memory accounting.
+
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
 counts and total-byte arithmetic before changing retained content. Canonical chunks still restart

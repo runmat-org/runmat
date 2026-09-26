@@ -23,13 +23,15 @@ pub fn prepare_thermal_solver_result_objects(
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
     let manifest = ThermalSolverResultManifest::from_result(result)?;
-    let encoding = manifest.encoding_profile()?;
-    // Reject oversized canonical payloads before the final partition encoding pass.
+    let transport = manifest.transport_profile(chunk_bytes)?;
+    // Reject the complete projected output closure before allocating output chunks.
     // Manifest construction above already encodes field and partition identities.
     // Root/chunk inventory validation remains authoritative after transport construction;
     // this early guard is not a complete process-residency or pre-solve admission claim.
-    if encoding.encoded_bytes_upper_bound > limits.max_total_bytes
-        || encoding.contract_count >= limits.max_objects as u64
+    if transport.total_bytes_upper_bound > limits.max_total_bytes
+        || transport.chunk_count_upper_bound >= limits.max_objects as u64
+        || transport.largest_chunk_bytes_upper_bound > limits.max_object_bytes
+        || transport.root.encoded_bytes_upper_bound > limits.max_object_bytes
     {
         return Err(AnalysisBridgeError::Invalid(
             "thermal canonical payload projection exceeds output inventory limits".into(),
