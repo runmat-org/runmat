@@ -5,6 +5,9 @@ mod native_workspace_reconciliation;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_optional_profile.rs"]
 mod native_optional_profile;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_definition_identity.rs"]
+mod native_definition_identity;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn repeated_anonymous_publication_changes_session_catalog_dependency() {
+fn repeated_anonymous_publication_preserves_session_catalog_dependency() {
     runmat_gc::gc_test_context(|| {
         let mut session = crate::RunMatSession::with_options(false, false).unwrap();
         let source = "f = @(x) x + 1; y = f(2); assert(y == 3);";
@@ -22,11 +22,11 @@ fn repeated_anonymous_publication_changes_session_catalog_dependency() {
             .keys()
             .find(|name| name.starts_with("anonymous#"))
             .expect("authored closure is represented in the session registry");
-        assert_ne!(
+        assert_eq!(
             first.resolve_name(anonymous),
             second.resolve_name(anonymous)
         );
-        assert_ne!(
+        assert_eq!(
             session_catalog_revision(&first).unwrap(),
             session_catalog_revision(&second).unwrap()
         );
@@ -38,9 +38,7 @@ fn repeated_anonymous_publication_changes_session_catalog_dependency() {
             .dependencies
             .snapshot([&DependencyKey::SessionCatalog]);
         cache.publish_session_registry(&first, &second).unwrap();
-        assert!(!captured.is_satisfied_by(&cache.dependencies.snapshot_all()));
-        // This characterizes the invalidation gate, not proof that the L03
-        // witness depends on SessionCatalog or that stale code is safe to reuse.
+        assert!(captured.is_satisfied_by(&cache.dependencies.snapshot_all()));
     });
 }
 
