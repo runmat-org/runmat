@@ -1,4 +1,5 @@
 use super::*;
+use super::statistics::kendall_tau_b;
 use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
