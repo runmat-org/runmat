@@ -1,11 +1,10 @@
-use runmat_builtins::MTIMES_ERROR_INVALID_INPUT;
 use runmat_value::Value;
 
+use super::ProductResult as BuiltinResult;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{linalg, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{try_integer_binary, IntegerBinaryOp};
 use crate::builtins::math::symbolic::{symbolic_binary, SymbolicBinaryOp};
-use crate::BuiltinResult;
 
 use super::{errors, integer, NAME};
 
@@ -38,10 +37,16 @@ pub(super) async fn evaluate(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     }
 
     if is_scalar(&lhs) || is_scalar(&rhs) {
-        return crate::builtins::math::elementwise::binary_arithmetic::times::times_host(lhs, rhs);
+        return crate::builtins::math::elementwise::binary_arithmetic::times::times_host(lhs, rhs)
+            .map_err(errors::map_control_flow);
     }
 
-    match (lhs, rhs) {
+    let single = [&lhs, &rhs].iter().any(|value| match value {
+        Tensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        ComplexTensor(tensor) => tensor.numeric_dtype() == runmat_value::NumericDType::F32,
+        _ => false,
+    });
+    let result = match (lhs, rhs) {
         (LogicalArray(lhs), other) => {
             let tensor = tensor::logical_to_tensor(&lhs).map_err(errors::invalid_input)?;
             evaluate(Value::Tensor(tensor), other).await
@@ -78,7 +83,34 @@ pub(super) async fn evaluate(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
             .map(tensor::tensor_into_value)
             .map_err(errors::invalid_input),
         (Num(lhs), Num(rhs)) => Ok(Num(lhs * rhs)),
-        _ => Err(errors::descriptor(&MTIMES_ERROR_INVALID_INPUT)),
+        _ => Err(errors::invalid_input(
+            "matrix multiplication: unsupported input types",
+        )),
+    }?;
+    if !single {
+        return Ok(result);
+    }
+    match result {
+        Tensor(value) => Ok(Tensor(tensor::coerce_tensor_dtype(
+            value,
+            runmat_value::NumericDType::F32,
+        ))),
+        ComplexTensor(value) => runmat_value::ComplexTensor::from_f64_values_with_dtype(
+            value.materialize_f64(),
+            value.shape,
+            runmat_value::NumericDType::F32,
+        )
+        .map(ComplexTensor)
+        .map_err(errors::invalid_input),
+        Num(value) => runmat_value::Tensor::from_f32(vec![value as f32], vec![1, 1])
+            .map(Tensor)
+            .map_err(errors::invalid_input),
+        Complex(real, imag) => {
+            runmat_value::ComplexTensor::from_f32(vec![(real as f32, imag as f32)], vec![1, 1])
+                .map(ComplexTensor)
+                .map_err(errors::invalid_input)
+        }
+        value => Ok(value),
     }
 }
 

@@ -1,9 +1,9 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
 use runmat_value::{Tensor, Value};
 
+use super::ProductResult as BuiltinResult;
 use crate::builtins::common::gpu_helpers::{BinaryGpuOutputContract, GpuOutputAliasPolicy};
 use crate::builtins::common::{binary, gpu_helpers, tensor};
-use crate::BuiltinResult;
 
 pub(super) async fn try_product(lhs: &Value, rhs: &Value) -> BuiltinResult<Option<Value>> {
     if contains_complex(lhs) || contains_complex(rhs) {

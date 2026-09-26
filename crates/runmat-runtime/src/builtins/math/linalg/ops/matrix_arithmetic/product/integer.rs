@@ -1,7 +1,7 @@
 use runmat_value::Value;
 
+use super::ProductResult as BuiltinResult;
 use crate::builtins::common::{gpu_helpers, provider_restore};
-use crate::BuiltinResult;
 
 use super::{errors, host, NAME};
 

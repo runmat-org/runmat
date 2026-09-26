@@ -9972,8 +9972,8 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn pagefun(&self, _request: &PagefunRequest) -> Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "pagefun: in-process provider does not implement GPU page operations"
+        Err(runmat_accelerate_api::unsupported_provider_operation(
+            "pagefun: in-process provider does not implement GPU page operations",
         ))
     }
 

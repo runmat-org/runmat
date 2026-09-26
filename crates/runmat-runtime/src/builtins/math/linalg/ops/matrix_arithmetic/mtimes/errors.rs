@@ -4,10 +4,6 @@ use crate::{build_runtime_error, RuntimeError};
 
 use super::NAME;
 
-pub(super) fn descriptor(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
-    with_message(error.message, error)
-}
-
 pub(super) fn with_message(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -42,4 +38,12 @@ pub(super) fn map_control_flow(error: RuntimeError) -> RuntimeError {
         builder = builder.with_phase(phase);
     }
     builder.with_source(error).build()
+}
+
+pub(super) fn from_product(error: super::super::product::ProductError) -> RuntimeError {
+    match error {
+        super::super::product::ProductError::InvalidInput(message) => invalid_input(message),
+        super::super::product::ProductError::Internal(message) => internal(message),
+        super::super::product::ProductError::Runtime(error) => map_control_flow(error),
+    }
 }
