@@ -41,7 +41,7 @@ fn cancellation_wakes_every_listener_and_keeps_first_reason() {
             Poll::Ready(CancellationReason::User)
         );
     }
-    assert!(token.state.listeners().slots.is_empty());
+    assert!(token.states()[0].listeners().slots.is_empty());
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn drop_and_repoll_release_only_their_listener() {
     let source = CancellationSource::new();
     let token = source.token();
     drop(token.cancelled());
-    assert!(token.state.listeners().slots.is_empty());
+    assert!(token.states()[0].listeners().slots.is_empty());
     let first = Arc::new(WakeCount::default());
     let second = Arc::new(WakeCount::default());
     let mut dropped = token.cancelled();
@@ -135,4 +135,62 @@ fn fresh_generation_does_not_revive_or_inherit_previous_cancellation() {
     assert!(!fresh.token().is_cancelled());
     fresh.cancel(CancellationReason::User);
     assert_eq!(old_token.reason(), Some(CancellationReason::ParentScope));
+}
+
+#[test]
+fn composed_token_wakes_for_either_parent_and_releases_all_registrations() {
+    for cancelled_parent in 0..2 {
+        let sources = [CancellationSource::new(), CancellationSource::new()];
+        let token = sources[0].token().or(&sources[1].token());
+        let counter = Arc::new(WakeCount::default());
+        let waker = Waker::from(counter.clone());
+        let mut listener = token.cancelled();
+        assert!(poll(&mut listener, &waker).is_pending());
+        sources[cancelled_parent].cancel(CancellationReason::User);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            poll(&mut listener, &waker),
+            Poll::Ready(CancellationReason::User)
+        );
+        assert!(token
+            .states()
+            .iter()
+            .all(|state| { state.listeners().slots.iter().all(Option::is_none) }));
+        // A retained completed listener must not receive unrelated later wakes.
+        sources[1 - cancelled_parent].cancel(CancellationReason::Shutdown);
+        assert_eq!(counter.0.load(Ordering::Relaxed), 1);
+    }
+}
+
+#[test]
+fn composition_flattens_deduplicates_and_uses_stable_reason_precedence() {
+    let first = CancellationSource::new();
+    let second = CancellationSource::new();
+    let token = first.token().or(&second.token());
+    let mut nested = token.clone();
+    for _ in 0..32 {
+        nested = nested.or(&first.token()).or(&token);
+    }
+    assert_eq!(nested.states().len(), 2);
+    second.cancel(CancellationReason::Deadline);
+    first.cancel(CancellationReason::User);
+    assert_eq!(nested.reason(), Some(CancellationReason::User));
+    let fresh = CancellationSource::new();
+    assert!(!fresh.token().is_cancelled());
+    assert!(nested.is_cancelled());
+}
+
+#[test]
+fn dropping_composed_listener_unregisters_each_parent() {
+    let first = CancellationSource::new();
+    let second = CancellationSource::new();
+    let token = first.token().or(&second.token());
+    let counter = Arc::new(WakeCount::default());
+    let mut listener = token.cancelled();
+    assert!(poll(&mut listener, &Waker::from(counter.clone())).is_pending());
+    drop(listener);
+    assert_eq!(Arc::strong_count(&counter), 1);
+    first.cancel(CancellationReason::User);
+    second.cancel(CancellationReason::Shutdown);
+    assert_eq!(counter.0.load(Ordering::Relaxed), 0);
 }
