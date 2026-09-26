@@ -479,37 +479,6 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
     make_cell_with_shape(values, vec![rows, cols])
 }
 
-pub(crate) async fn deal_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let out_count = crate::output_count::current_output_count().unwrap_or(1);
-    let valid_count = rest.len() == 1 || rest.len() == out_count;
-    if !valid_count {
-        return Err(build_runtime_error(
-            "deal: the number of outputs must match the number of inputs unless there is exactly one input",
-        )
-        .with_builtin("deal")
-        .with_identifier("RunMat:deal:InputOutputCountMismatch")
-        .build());
-    }
-    if rest.iter().any(crate::value_contains_gpu) {
-        crate::compatibility::ensure_builtin_extension_enabled(
-            &crate::builtins::common::deal::DEAL_RESIDENT_INPUT_EXTENSION,
-            "deal",
-        )?;
-    }
-    if out_count == 0 {
-        return Ok(Value::OutputList(Vec::new()));
-    }
-    if rest.len() == 1 {
-        let value = rest.into_iter().next().expect("one deal input");
-        return if out_count == 1 {
-            Ok(value)
-        } else {
-            Ok(Value::OutputList(vec![value; out_count]))
-        };
-    }
-    Ok(Value::OutputList(rest))
-}
-
 // Object/handle utilities used by interpreter lowering for OOP/func handles
 
 pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
