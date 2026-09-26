@@ -3,6 +3,9 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Barrier;
 use std::task::Wake;
 
+#[path = "raw_waker_tests.rs"]
+mod raw_waker_tests;
+
 #[derive(Default)]
 struct WakeCount(AtomicUsize);
 
