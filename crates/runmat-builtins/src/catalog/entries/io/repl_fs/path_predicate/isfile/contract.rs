@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const ISFILE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.ISFILE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:isfile:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "isfile: too many output arguments",
+};
+
 const PATH: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "filename",
     ty: BuiltinParamType::Any,
@@ -31,6 +38,10 @@ pub const ISFILE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[ISFILE_ERROR_ARITY, ISFILE_ERROR_PATH],
+    errors: &[
+        ISFILE_ERROR_ARITY,
+        ISFILE_ERROR_PATH,
+        ISFILE_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 pub const ISFILE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor { kind: BuiltinIntegerAuditKind::NotApplicable, canonical_builtin: None, notes: "File names are text. Integer and provider-resident numeric values reject before provider or filesystem access." };

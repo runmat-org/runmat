@@ -1,5 +1,12 @@
 use crate::*;
 
+pub const MATLABROOT_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MATLABROOT.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:matlabroot:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "matlabroot: too many output arguments",
+};
+
 const OUTPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "root",
     ty: BuiltinParamType::StringScalar,
@@ -24,7 +31,10 @@ pub const MATLABROOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &[MATLABROOT_ERROR_TOO_MANY_INPUTS],
+    errors: &[
+        MATLABROOT_ERROR_TOO_MANY_INPUTS,
+        MATLABROOT_ERROR_TOO_MANY_OUTPUTS,
+    ],
 };
 
 pub const MATLABROOT_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
