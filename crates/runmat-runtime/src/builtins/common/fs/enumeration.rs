@@ -5,13 +5,13 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-pub(super) struct ListedEntry {
+pub(crate) struct ListedEntry {
     pub path: PathBuf,
     pub metadata: FsMetadata,
     pub recursable: bool,
 }
 
-pub(super) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
+pub(crate) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
     let mut listed = Vec::new();
     for entry in vfs::read_dir_async(path).await? {
         let entry_path = entry.path().to_path_buf();
@@ -29,7 +29,7 @@ pub(super) async fn directory(path: &Path) -> io::Result<Vec<ListedEntry>> {
     Ok(listed)
 }
 
-pub(super) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
+pub(crate) async fn matching(pattern: &Path) -> io::Result<Vec<ListedEntry>> {
     let (base, components) = split_pattern(pattern)?;
     let mut pending = vec![(base, 0usize)];
     let mut paths = HashSet::new();
@@ -134,7 +134,7 @@ fn invalid_pattern(error: impl ToString) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, error.to_string())
 }
 
-pub(super) fn filename(path: &Path) -> OsString {
+pub(crate) fn filename(path: &Path) -> OsString {
     path.file_name()
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| path.as_os_str().to_owned())
