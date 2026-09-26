@@ -5,15 +5,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use runmat_analysis_execution::{
-    extend_structural_resource_usage, import_observation_partition_contribution,
-    import_published_result, import_reduced_observation, import_structural_accuracy,
-    import_structural_linear_completion, import_structural_observation_assembly,
-    import_structural_recovered_fields, prepare_result_publication, prepare_structural_accuracy,
-    prepare_structural_field_recovery, prepare_structural_observation_assembly,
-    prepare_structural_observation_fanout, prepare_structural_observation_reduction,
-    AnalysisHostWorkload, PlannedResourceUsageAttempt, PlannedResourceUsageGraph,
-    PreparedAnalysisProgram, PreparedStructuralLinearProgram, PreparedStructuralResourceUsage,
-    ResultPublicationPreparation, StructuralAccuracyPreparation,
+    extend_structural_resource_usage, import_accuracy, import_observation_partition_contribution,
+    import_published_result, import_reduced_observation, import_structural_linear_completion,
+    import_structural_observation_assembly, import_structural_recovered_fields, prepare_accuracy,
+    prepare_result_publication, prepare_structural_field_recovery,
+    prepare_structural_observation_assembly, prepare_structural_observation_fanout,
+    prepare_structural_observation_reduction, AccuracyPreparation, AnalysisHostWorkload,
+    PlannedResourceUsageAttempt, PlannedResourceUsageGraph, PreparedAnalysisProgram,
+    PreparedStructuralLinearProgram, PreparedStructuralResourceUsage, ResultPublicationPreparation,
     StructuralFieldRecoveryPreparation, StructuralObservationAssemblyPreparation,
     StructuralObservationPreparation, StructuralObservationReductionPreparation,
     StructuralObservationWorkloadSource,
@@ -268,7 +267,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
         expected_attempt_count
     );
 
-    let accuracy = prepare_structural_accuracy(StructuralAccuracyPreparation {
+    let accuracy = prepare_accuracy(AccuracyPreparation {
         solve_host: solve.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt,
@@ -284,7 +283,7 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
     let accuracy_response = driver
         .execute(&accuracy.host, &accuracy.program, None)
         .await;
-    let imported_accuracy = import_structural_accuracy(
+    let imported_accuracy = import_accuracy(
         driver.store(),
         accuracy_response.response,
         &accuracy,

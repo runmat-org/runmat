@@ -75,8 +75,7 @@ mod transport;
 mod workload;
 
 pub use accuracy_evaluation::{
-    import_structural_accuracy, prepare_structural_accuracy, ImportedAccuracy,
-    PreparedStructuralAccuracy, StructuralAccuracyPreparation,
+    import_accuracy, prepare_accuracy, AccuracyPreparation, ImportedAccuracy, PreparedAccuracy,
 };
 pub use buckling_object_access::{
     decode_prepared_structural_buckling_receipt, decode_prepared_structural_buckling_result,

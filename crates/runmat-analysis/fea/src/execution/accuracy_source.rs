@@ -6,10 +6,12 @@ use super::{
     AccuracyEvaluationRequest, AccuracySourceKind, AnalysisExecutionError, AnalysisExecutionResult,
     AnalysisWorkloadIdentity, SolverResultIdentity, StructuralLinearNumericalReceiptArtifact,
     StructuralModalResponseSpectrumNumericalReceipt, StructuralRandomResponseNumericalReceipt,
+    ThermalNumericalReceiptArtifact,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AccuracySourceReceipt {
+    Thermal(ThermalNumericalReceiptArtifact),
     StructuralLinear(StructuralLinearNumericalReceiptArtifact),
     StructuralModalResponseSpectrum(StructuralModalResponseSpectrumNumericalReceipt),
     StructuralRandomResponse(StructuralRandomResponseNumericalReceipt),
@@ -21,6 +23,9 @@ impl AccuracySourceReceipt {
         bytes: &[u8],
     ) -> AnalysisExecutionResult<Self> {
         let receipt = match kind {
+            AccuracySourceKind::Thermal => Self::Thermal(
+                ThermalNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
+            ),
             AccuracySourceKind::StructuralLinear => Self::StructuralLinear(
                 StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(bytes)?,
             ),
@@ -39,6 +44,7 @@ impl AccuracySourceReceipt {
 
     pub const fn kind(&self) -> AccuracySourceKind {
         match self {
+            Self::Thermal(_) => AccuracySourceKind::Thermal,
             Self::StructuralLinear(_) => AccuracySourceKind::StructuralLinear,
             Self::StructuralModalResponseSpectrum(_) => {
                 AccuracySourceKind::StructuralModalResponseSpectrum
@@ -49,6 +55,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_workload(&self) -> AnalysisWorkloadIdentity {
         match self {
+            Self::Thermal(receipt) => receipt.source_workload,
             Self::StructuralLinear(receipt) => receipt.source_workload,
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_workload(),
             Self::StructuralRandomResponse(receipt) => receipt.source_workload(),
@@ -57,6 +64,7 @@ impl AccuracySourceReceipt {
 
     pub const fn source_result(&self) -> SolverResultIdentity {
         match self {
+            Self::Thermal(receipt) => receipt.source_result(),
             Self::StructuralLinear(receipt) => receipt.source_result(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.source_result(),
             Self::StructuralRandomResponse(receipt) => receipt.source_result(),
@@ -65,6 +73,7 @@ impl AccuracySourceReceipt {
 
     pub const fn identity(&self) -> super::NumericalReceiptIdentity {
         match self {
+            Self::Thermal(receipt) => receipt.identity(),
             Self::StructuralLinear(receipt) => receipt.identity(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.identity(),
             Self::StructuralRandomResponse(receipt) => receipt.identity(),
@@ -80,9 +89,36 @@ impl AccuracySourceReceipt {
                 "accuracy receipt differs from its admitted request",
             ));
         }
+        if let Self::Thermal(receipt) = self {
+            if receipt.receipt().producer != request.producer {
+                return Err(AnalysisExecutionError::Identity(
+                    "thermal accuracy receipt differs from its requested producer",
+                ));
+            }
+        }
         let mut evidence = Vec::new();
         for criterion in &request.plan.criteria {
             let measured = match self {
+                Self::Thermal(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ResidualBound =>
+                {
+                    Some((
+                        receipt.receipt().maximum_relative_linear_residual,
+                        "maximum accepted thermal linear-system residual norm divided by max(load-vector Euclidean norm, 1) over solved samples; measures algebraic equation satisfaction, not spatial or temporal discretization error",
+                    ))
+                }
+                Self::Thermal(receipt)
+                    if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
+                        && criterion.contribution == ErrorContributionKind::Algebraic
+                        && criterion.evidence == RequiredAccuracyEvidence::ConservationBalance =>
+                {
+                    Some((
+                        receipt.receipt().maximum_relative_energy_residual,
+                        "maximum accepted absolute thermal energy imbalance divided by max(absolute storage, boundary-loss, applied, prescribed-boundary powers, 1 W) over solved samples; includes prescribed-temperature reaction power and is not a field-accuracy or convergence estimate",
+                    ))
+                }
                 Self::StructuralLinear(receipt)
                     if criterion.target == runmat_analysis_core::AccuracyTarget::GlobalEquilibrium
                         && criterion.contribution == ErrorContributionKind::Algebraic
@@ -136,9 +172,13 @@ impl AccuracySourceReceipt {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::Thermal(receipt) => receipt.validate(),
             Self::StructuralLinear(receipt) => receipt.validate(),
             Self::StructuralModalResponseSpectrum(receipt) => receipt.validate_source(),
             Self::StructuralRandomResponse(receipt) => receipt.validate_source(),
         }
     }
 }
+
+#[cfg(test)]
+mod thermal_tests;

@@ -2250,7 +2250,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     .unwrap();
     assert_eq!(imported_observation.observation_id.0, "whole_displacement");
 
-    let accuracy_prepared = prepare_structural_accuracy(StructuralAccuracyPreparation {
+    let accuracy_prepared = prepare_accuracy(AccuracyPreparation {
         solve_host: prepared.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: completed.outputs[1].clone(),
@@ -2295,7 +2295,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         ObjectInventoryLimits::default(),
     )
     .unwrap();
-    assert!(prepare_structural_accuracy(StructuralAccuracyPreparation {
+    assert!(prepare_accuracy(AccuracyPreparation {
         solve_host: prepared.host.clone(),
         source_kind: runmat_analysis_fea::execution::AccuracySourceKind::StructuralLinear,
         source_numerical_receipt: unrelated_receipt,
@@ -2369,7 +2369,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         AnalysisHostResponse::completed(&accuracy_prepared.host, &accuracy_completed)
             .unwrap()
             .program_response();
-    let imported_accuracy = import_structural_accuracy(
+    let imported_accuracy = import_accuracy(
         &store,
         accuracy_response,
         &accuracy_prepared,

@@ -13,22 +13,21 @@ use runmat_execution_artifact::{
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    bind_upstream_state_transition, import_published_result, import_semantic_state_completion,
-    import_structural_accuracy, import_structural_modal_response_spectrum_direction,
+    bind_upstream_state_transition, import_accuracy, import_published_result,
+    import_semantic_state_completion, import_structural_modal_response_spectrum_direction,
     import_structural_modal_response_spectrum_result, import_structural_modal_result,
-    prepare_result_publication, prepare_semantic_state_publication, prepare_structural_accuracy,
+    prepare_accuracy, prepare_result_publication, prepare_semantic_state_publication,
     prepare_structural_modal_response_spectrum_assembly,
     prepare_structural_modal_response_spectrum_fanout, prepare_structural_modal_task,
-    AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement, ImportedAccuracy,
-    ImportedPublishedResult, ImportedSemanticState,
+    AccuracyPreparation, AnalysisBridgeError, AnalysisBridgeResult, AnalysisCapabilityRequirement,
+    ImportedAccuracy, ImportedPublishedResult, ImportedSemanticState,
     ImportedStructuralModalResponseSpectrumDirection,
-    ImportedStructuralModalResponseSpectrumResult, ImportedStructuralModalResult,
-    PreparedResultPublication, PreparedSemanticStatePublication, PreparedStructuralAccuracy,
+    ImportedStructuralModalResponseSpectrumResult, ImportedStructuralModalResult, PreparedAccuracy,
+    PreparedResultPublication, PreparedSemanticStatePublication,
     PreparedStructuralModalResponseSpectrumAssemblyTask,
     PreparedStructuralModalResponseSpectrumDirectionTask, PreparedStructuralModalTask,
     PreparedStructuralResourceUsage, ResultPublicationPreparation,
-    SemanticStatePublicationPreparation, StructuralAccuracyPreparation,
-    StructuralModalResponseSpectrumAssemblyPreparation,
+    SemanticStatePublicationPreparation, StructuralModalResponseSpectrumAssemblyPreparation,
     StructuralModalResponseSpectrumFanoutPreparation, StructuralModalTaskPreparation,
 };
 
@@ -388,7 +387,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         Ok(())
     }
 
-    pub fn prepare_accuracy(&mut self) -> AnalysisBridgeResult<PreparedStructuralAccuracy> {
+    pub fn prepare_accuracy(&mut self) -> AnalysisBridgeResult<PreparedAccuracy> {
         if self.phase != StudyPhase::ReadyForAccuracy {
             return Err(invalid(
                 "response-spectrum study is not ready for accuracy evaluation",
@@ -402,7 +401,7 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
             .result
             .as_ref()
             .ok_or_else(|| invalid("completed response-spectrum result is absent"))?;
-        let task = prepare_structural_accuracy(StructuralAccuracyPreparation {
+        let task = prepare_accuracy(AccuracyPreparation {
             solve_host: self
                 .assembly_host
                 .as_ref()
@@ -426,15 +425,14 @@ impl StructuralModalResponseSpectrumStudyCoordinator {
         &mut self,
         source: &impl CacheImport,
         response: ProgramExecutionResponse,
-        task: &PreparedStructuralAccuracy,
+        task: &PreparedAccuracy,
     ) -> AnalysisBridgeResult<()> {
         if self.phase != StudyPhase::AwaitingAccuracy(task.host.workload.identity.digest()) {
             return Err(AnalysisBridgeError::Identity(
                 "response-spectrum accuracy differs from the awaited evaluation",
             ));
         }
-        let accuracy =
-            import_structural_accuracy(source, response, task, self.preparation.inventory_limits)?;
+        let accuracy = import_accuracy(source, response, task, self.preparation.inventory_limits)?;
         self.accuracy_host = Some(task.host.clone());
         self.accuracy = Some(accuracy);
         self.phase = StudyPhase::ReadyForPublication;

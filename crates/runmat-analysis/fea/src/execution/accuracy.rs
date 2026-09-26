@@ -16,6 +16,7 @@ const ACCURACY_EVALUATION_LIMITS: CanonicalLimits =
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AccuracySourceKind {
+    Thermal,
     StructuralLinear,
     StructuralModalResponseSpectrum,
     StructuralRandomResponse,

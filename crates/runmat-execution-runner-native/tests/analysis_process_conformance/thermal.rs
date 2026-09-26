@@ -49,6 +49,10 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             "isolated-thermal",
             vec![ProcedureStep::thermal_transient("heat")],
         );
+        let mut energy = model.sequence.steps[0].accuracy.criteria[0].clone();
+        energy.criterion_id = "energy_balance".into();
+        energy.evidence = runmat_analysis_core::RequiredAccuracyEvidence::ConservationBalance;
+        model.sequence.steps[0].accuracy.criteria.push(energy);
         let workload = ThermalWorkload {
             step_id: model.sequence.steps[0].step_id.clone(),
             model,
@@ -109,6 +113,39 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             .validate_against(&workload, &process.manifest)
             .unwrap();
         assert_equilibrium(&process);
+        let accuracy = runmat_analysis_execution::prepare_accuracy(
+            runmat_analysis_execution::AccuracyPreparation {
+                solve_host: prepared.host.clone(),
+                source_kind: runmat_analysis_fea::execution::AccuracySourceKind::Thermal,
+                source_numerical_receipt: process.numerical_receipt_objects.clone(),
+                source_observations: None,
+                sequence: runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+                    &workload.model.sequence,
+                )
+                .unwrap(),
+                step: workload.model.sequence.steps[0].clone(),
+                formulation_requirement: workload.formulation_requirement,
+                program_revision: revision.clone(),
+                chunk_bytes: limits.chunk_bytes,
+                inventory_limits: limits.inventory,
+            },
+        )
+        .unwrap();
+        let response = driver
+            .execute(&accuracy.host, &accuracy.program, None)
+            .await;
+        let report = runmat_analysis_execution::import_accuracy(
+            driver.store(),
+            response.response,
+            &accuracy,
+            limits.inventory,
+        )
+        .unwrap();
+        assert_eq!(
+            report.artifact.gate().status,
+            runmat_analysis_fea::results::accuracy::AccuracyStatus::Satisfied
+        );
+        assert_eq!(report.artifact.evidence().len(), 2);
         let publication = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: prepared.host.clone(),
             source_result: process.objects,

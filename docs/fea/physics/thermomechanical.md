@@ -611,7 +611,7 @@ declared resource envelope. Resource plans are decoded before kernel invocation.
 are written until all output closures and the output-set envelope pass validation. Tests retain
 buffer pointers across the handoff, reject substitutions and wrong policy, and compare published
 whole/prepared outputs. The conversion-memory fixture includes this validation pass. This removes
-the forced all-field buffering at the kernel boundary; thermal native dispatch is still pending.
+the forced all-field buffering at the kernel boundary; thermal native dispatch now uses this path.
 With prepared handoff validation included, the isolated 16/64-partition fixture measured
 8,607,519/34,424,943 B of requested heap growth against reservations of
 8,698,192/34,582,960 B. This remains requested-heap evidence, not a process-memory ceiling.
@@ -653,6 +653,15 @@ fixture binds its actual run authorization scope and frozen-project program revi
 establishes these execution paths for those fixtures, not general thermal accuracy or a distributed
 thermal solve. Measured worker residency, interrupted-solve restart, and independent
 accuracy/release gates remain unproven.
+
+Thermal numerical receipts feed the shared accuracy evaluator through a typed thermal source.
+The bridge binds the receipt to the numerical workload input, mesh and producer step, not to a
+transport-dependent host identity. The only receipt-backed criteria currently supplied are
+global-equilibrium algebraic residual bounds and conservation balances, using the maximum accepted
+linear and energy residuals respectively. Their normalization assumptions are retained in the
+evidence. These criteria do not establish spatial, temporal, recovery or reference accuracy.
+Unsupported mandatory criteria remain indeterminate, and the shared production publication gate
+blocks them. Satisfying a residual-only plan does not promote the thermal formulation to production.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

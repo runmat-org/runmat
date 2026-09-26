@@ -22,7 +22,7 @@ use crate::{
     PreparedAnalysisProgram, ANALYSIS_HOST_ABI,
 };
 
-pub struct StructuralAccuracyPreparation {
+pub struct AccuracyPreparation {
     pub solve_host: AnalysisHostWorkload,
     pub source_kind: AccuracySourceKind,
     pub source_numerical_receipt: PreparedAnalysisObjects,
@@ -35,7 +35,7 @@ pub struct StructuralAccuracyPreparation {
     pub inventory_limits: ObjectInventoryLimits,
 }
 
-pub struct PreparedStructuralAccuracy {
+pub struct PreparedAccuracy {
     pub request: AccuracyEvaluationRequest,
     pub host: AnalysisHostWorkload,
     pub program: PreparedAnalysisProgram,
@@ -48,11 +48,12 @@ pub struct ImportedAccuracy {
     pub objects: PreparedAnalysisObjects,
 }
 
-pub fn prepare_structural_accuracy(
-    preparation: StructuralAccuracyPreparation,
-) -> AnalysisBridgeResult<PreparedStructuralAccuracy> {
+pub fn prepare_accuracy(
+    preparation: AccuracyPreparation,
+) -> AnalysisBridgeResult<PreparedAccuracy> {
     preparation.solve_host.validate()?;
     let expected_work_kind = match preparation.source_kind {
+        AccuracySourceKind::Thermal => AnalysisWorkKind::SolveThermal,
         AccuracySourceKind::StructuralLinear => AnalysisWorkKind::Solve,
         AccuracySourceKind::StructuralModalResponseSpectrum => {
             AnalysisWorkKind::AssembleStructuralModalResponseSpectrumResult
@@ -86,7 +87,7 @@ pub fn prepare_structural_accuracy(
         .manifest
         .logical_identity
         != numerical_receipt.identity().digest()
-        || numerical_receipt.source_workload() != preparation.solve_host.workload.identity
+        || !receipt_matches_solve(&numerical_receipt, &preparation.solve_host)
     {
         return Err(AnalysisBridgeError::Identity(
             "accuracy numerical receipt differs from its canonical solve",
@@ -97,7 +98,7 @@ pub fn prepare_structural_accuracy(
         && preparation.source_observations.is_some()
     {
         return Err(AnalysisBridgeError::Invalid(
-            "specialized dynamics accuracy does not yet admit observation artifacts".into(),
+            "this accuracy source does not yet admit observation artifacts".into(),
         ));
     }
     let observations = preparation
@@ -193,7 +194,7 @@ pub fn prepare_structural_accuracy(
     )?;
     let host = AnalysisHostWorkload::new(workload, preparation.solve_host.artifact_access)?;
     let program = prepare_analysis_program(&host, preparation.program_revision, &inputs)?;
-    Ok(PreparedStructuralAccuracy {
+    Ok(PreparedAccuracy {
         request,
         host,
         program,
@@ -201,10 +202,36 @@ pub fn prepare_structural_accuracy(
     })
 }
 
-pub fn import_structural_accuracy(
+fn receipt_matches_solve(receipt: &AccuracySourceReceipt, host: &AnalysisHostWorkload) -> bool {
+    match receipt {
+        AccuracySourceReceipt::Thermal(thermal) => {
+            let inputs_of_kind = |kind| {
+                host.workload
+                    .inputs
+                    .iter()
+                    .filter(move |input| input.kind == kind)
+            };
+            let mut workloads = inputs_of_kind(AnalysisNumericalObjectKind::ThermalWorkload);
+            let mut meshes = inputs_of_kind(AnalysisNumericalObjectKind::Mesh);
+            // Thermal receipts bind numerical intent, not the transport/placement host identity.
+            matches!(workloads.next(), Some(input) if input.logical_identity == thermal.source_workload.digest())
+                && workloads.next().is_none()
+                && matches!(meshes.next(), Some(input) if input.logical_identity == thermal.receipt().topology_digest)
+                && meshes.next().is_none()
+                && thermal.receipt().producer == host.workload.step
+        }
+        AccuracySourceReceipt::StructuralLinear(_)
+        | AccuracySourceReceipt::StructuralModalResponseSpectrum(_)
+        | AccuracySourceReceipt::StructuralRandomResponse(_) => {
+            receipt.source_workload() == host.workload.identity
+        }
+    }
+}
+
+pub fn import_accuracy(
     source: &impl CacheImport,
     response: ProgramExecutionResponse,
-    prepared: &PreparedStructuralAccuracy,
+    prepared: &PreparedAccuracy,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<ImportedAccuracy> {
     response.validate_against(&prepared.program.request)?;

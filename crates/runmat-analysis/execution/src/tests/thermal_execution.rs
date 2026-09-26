@@ -27,6 +27,76 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
 }
 
 #[test]
+fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
+    use runmat_analysis_fea::execution::{AccuracySourceKind, SequenceIdentity};
+    let workload = workload(ThermalProcedureControl::BackwardEuler { snapshot_count: 3 });
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let limits = ObjectInventoryLimits::default();
+    let task = |workload: ThermalWorkload, mesh| {
+        prepare_thermal_task(ThermalTaskPreparation {
+            authored_study_digest: Digest::sha256("thermal-accuracy"),
+            frozen_project_digest: None,
+            program_revision: revision(),
+            artifact_access: ArtifactAccess {
+                authorization_scope: "thermal-accuracy".into(),
+                encryption_context: Digest::sha256("thermal-accuracy"),
+            },
+            workload,
+            mesh,
+            output_policy: AnalysisOutputPolicy::new(1024, limits).unwrap(),
+            required_capabilities: Default::default(),
+        })
+        .unwrap()
+    };
+    let prepared = task(workload.clone(), mesh.clone());
+    let result = execute_thermal_solver_result_objects(
+        &workload,
+        &mesh,
+        1024,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    let receipt = thermal_receipt_from_prepared_result(&workload, &result).unwrap();
+    assert_ne!(receipt.source_workload, prepared.host.workload.identity);
+    let receipt_objects = prepare_analysis_objects(
+        AnalysisNumericalObjectKind::NumericalReceipt,
+        receipt.identity().digest(),
+        &receipt.canonical_bytes().unwrap(),
+        1024,
+        ObjectNamespace::ResultValue,
+        limits,
+    )
+    .unwrap();
+    let request = |host| AccuracyPreparation {
+        solve_host: host,
+        source_kind: AccuracySourceKind::Thermal,
+        source_numerical_receipt: receipt_objects.clone(),
+        source_observations: None,
+        sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence).unwrap(),
+        step: workload.model.sequence.steps[0].clone(),
+        formulation_requirement: workload.formulation_requirement,
+        program_revision: revision(),
+        chunk_bytes: 1024,
+        inventory_limits: limits,
+    };
+    assert!(prepare_accuracy(request(prepared.host)).is_ok());
+    let other_mesh = task(
+        workload.clone(),
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
+    );
+    assert!(prepare_accuracy(request(other_mesh.host)).is_err());
+    let mut other_workload = workload.clone();
+    other_workload
+        .model
+        .thermal
+        .as_mut()
+        .unwrap()
+        .reference_temperature = Temperature::new(305.0);
+    assert!(prepare_accuracy(request(task(other_workload, mesh).host)).is_err());
+}
+
+#[test]
 fn thermal_input_preparation_derives_real_transport_facts() {
     use runmat_analysis_fea::planning::resource::{FeaResourceDemand, FeaResourcePlan};
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
