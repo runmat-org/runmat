@@ -126,7 +126,8 @@ impl PreparedMultiAssignment {
                         &state.runtime,
                         destination.assign(current, values, Some(&state.function.name)),
                         "prepared native output assignment",
-                    )?;
+                    )
+                    .finish(state)?;
                     roots.insert(root, updated);
                 }
             }

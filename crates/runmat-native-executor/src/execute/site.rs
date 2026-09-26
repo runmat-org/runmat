@@ -398,7 +398,8 @@ fn execute_terminator(
                 &state.runtime,
                 runmat_runtime::condition::logical_truth_from_value(value, "branch condition"),
                 "branch condition",
-            )?;
+            )
+            .finish(state)?;
             if truth {
                 take_edge(state, then_edge, 0, None, None)
             } else {
@@ -417,7 +418,8 @@ fn execute_terminator(
                     &state.runtime,
                     runmat_runtime::call_builtin_async("eq", &[discriminant.clone(), case]),
                     "switch comparison",
-                )?;
+                )
+                .finish(state)?;
                 if super::sync::complete(
                     &state.runtime,
                     runmat_runtime::condition::logical_truth_from_value(
@@ -425,7 +427,9 @@ fn execute_terminator(
                         "switch case comparison",
                     ),
                     "switch truth evaluation",
-                )? {
+                )
+                .finish(state)?
+                {
                     return take_edge(state, edge, index as u32, None, None);
                 }
             }
@@ -443,14 +447,16 @@ fn execute_terminator(
                     &state.runtime,
                     runmat_runtime::iteration::ForColumnIterator::new(source),
                     "for iterable capture",
-                )?;
+                )
+                .finish(state)?;
                 state.start_for_loop(block, body.target, iterator);
             }
             let runtime = state.runtime.clone();
             let next = {
                 let active = state.for_loop_mut(block)?;
-                super::sync::complete(&runtime, active.iterator.next(), "for iteration")?
-            };
+                super::sync::complete(&runtime, active.iterator.next(), "for iteration")
+            }
+            .finish(state)?;
             if let Some(value) = next {
                 state.observe_loop_backedge(terminator.site.point);
                 let reference = state.arena.insert(value);

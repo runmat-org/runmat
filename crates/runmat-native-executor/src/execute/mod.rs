@@ -15,6 +15,7 @@ mod operand;
 mod operator;
 mod osr;
 mod region;
+mod short_circuit;
 mod site;
 mod state;
 mod subscript_path;

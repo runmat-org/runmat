@@ -27,7 +27,16 @@ impl HostState {
                 "embedded call identity has no call segment".into(),
             ));
         };
+        self.contextual_regions
+            .operation_region_ends
+            .insert(identity.clone(), self.contextual_regions.next_region);
         self.pop_operation(EmbeddedOperationSegment::Call { ordinal: *ordinal })
+    }
+
+    pub fn restore_embedded_call_regions(&mut self, identity: &EmbeddedOperationIdentity) {
+        if let Some(next_region) = self.contextual_regions.operation_region_ends.get(identity) {
+            self.contextual_regions.next_region = *next_region;
+        }
     }
 
     pub fn current_embedded_operation(&self) -> Option<EmbeddedOperationIdentity> {
@@ -42,19 +51,24 @@ impl HostState {
     }
 
     pub fn cached_embedded_call(
-        &self,
+        &mut self,
         identity: &EmbeddedOperationIdentity,
     ) -> NativeExecutorResult<Option<Vec<runmat_value::Value>>> {
-        self.contextual_regions
+        let cached = self
+            .contextual_regions
             .completed_operations
             .get(identity)
             .map(|references| {
                 references
                     .iter()
                     .map(|reference| self.arena.get(*reference).cloned())
-                    .collect()
+                    .collect::<NativeExecutorResult<Vec<_>>>()
             })
-            .transpose()
+            .transpose()?;
+        if cached.is_some() {
+            self.restore_embedded_call_regions(identity);
+        }
+        Ok(cached)
     }
 
     pub fn cache_embedded_call(

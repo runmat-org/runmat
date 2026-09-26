@@ -89,6 +89,15 @@ impl MirCallArg {
         }
     }
 
+    /// Visits argument operands without entering private contextual selector regions.
+    pub(crate) fn visit_outer_operands_dyn(&self, visitor: &mut dyn FnMut(&MirOperand)) {
+        match self {
+            Self::Single(operand) => visitor(operand),
+            Self::Expansion(source) => source.visit_outer_operands_dyn(visitor),
+            Self::CapturedSequence(_) => {}
+        }
+    }
+
     pub fn visit_operands_mut(&mut self, mut visitor: impl FnMut(&mut MirOperand)) {
         match self {
             Self::Single(operand) => visitor(operand),

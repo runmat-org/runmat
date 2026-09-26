@@ -44,24 +44,7 @@ pub(super) fn evaluate_rvalue(
             op,
             right_temps,
             right,
-        } => {
-            let left = materialize_operand(state, left)?;
-            let left_truth = logical_truth(state, &left, "short-circuit left operand")?;
-            let short_circuited = match op {
-                runmat_mir::MirShortCircuitOp::And => !left_truth,
-                runmat_mir::MirShortCircuitOp::Or => left_truth,
-            };
-            let result = if short_circuited {
-                left_truth
-            } else {
-                for statement in right_temps {
-                    execute_embedded_statement(state, &statement.kind)?;
-                }
-                let right = materialize_operand(state, right)?;
-                logical_truth(state, &right, "short-circuit right operand")?
-            };
-            Ok(vec![state.arena.insert(Value::Bool(result))])
-        }
+        } => super::short_circuit::evaluate(state, left, *op, right_temps, right),
         MirRvalue::Range { start, step, end } => {
             let mut arguments = vec![materialize_operand(state, start)?];
             if let Some(step) = step {
@@ -135,7 +118,8 @@ pub(super) fn evaluate_rvalue(
                     )
                 },
                 "member read",
-            )?;
+            )
+            .finish(state)?;
             Ok(values
                 .into_iter()
                 .map(|value| state.arena.insert(value))
@@ -171,7 +155,8 @@ pub(super) fn evaluate_rvalue(
                     )
                 },
                 "dynamic member read",
-            )?;
+            )
+            .finish(state)?;
             Ok(values
                 .into_iter()
                 .map(|value| state.arena.insert(value))
@@ -332,46 +317,6 @@ fn execution_service_error(
     error: runmat_runtime::execution::ExecutionServiceError,
 ) -> NativeExecutorError {
     runmat_runtime::runtime_error::semantic_error("ExecutionService", error.to_string()).into()
-}
-
-fn execute_embedded_statement(
-    state: &mut HostState,
-    statement: &runmat_mir::MirStmtKind,
-) -> NativeExecutorResult<()> {
-    match statement {
-        runmat_mir::MirStmtKind::Assign {
-            place: runmat_mir::MirPlace::Local(local),
-            value,
-        } => {
-            let native_local = u32::try_from(local.0)
-                .map(runmat_native_codegen::NativeLocalId)
-                .map_err(|_| {
-                    NativeExecutorError::Host("embedded local exceeds native schema".into())
-                })?;
-            let mut values = evaluate_rvalue(state, value, 1, Some(native_local))?;
-            if values.len() != 1 {
-                return Err(NativeExecutorError::Host(
-                    "embedded short-circuit assignment did not produce one value".into(),
-                ));
-            }
-            state.set_local(local.0, values.remove(0))
-        }
-        runmat_mir::MirStmtKind::Expr(value) => {
-            let _ = evaluate_rvalue(state, value, 0, None)?;
-            Ok(())
-        }
-        other => Err(NativeExecutorError::Host(format!(
-            "verified short-circuit payload contains invalid statement {other:?}"
-        ))),
-    }
-}
-
-fn logical_truth(state: &HostState, value: &Value, label: &str) -> NativeExecutorResult<bool> {
-    super::sync::complete(
-        &state.runtime,
-        runmat_runtime::condition::logical_truth_from_value(value, label),
-        "logical truth evaluation",
-    )
 }
 
 pub(super) fn materialize_operand(

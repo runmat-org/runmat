@@ -176,7 +176,8 @@ pub(super) fn execute(
                     Some(&state.function.name),
                 ),
                 "comma-separated member assignment",
-            )?;
+            )
+            .finish(state)?;
             commit_prepared_place_write(state, prepared.destination.writeback, updated)?;
             let base = match target {
                 runmat_mir::MirSequenceTarget::Member { base, .. }
@@ -366,7 +367,8 @@ fn read_segment(
                 Some(&state.function.name),
             ),
             "member read",
-        ),
+        )
+        .finish(state),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -386,6 +388,7 @@ fn read_segment(
                 ),
                 "dynamic member read",
             )
+            .finish(state)
         }
         PlaceSegment::Index(indexing) => {
             let values = super::indexing::read_value(state, base, indexing, 1)?;
@@ -415,7 +418,8 @@ fn write_segment(
                 Some(&state.function.name),
             ),
             "member write",
-        ),
+        )
+        .finish(state),
         PlaceSegment::DynamicMember(member) => {
             let member = super::operand::materialize_operand(state, member)?;
             let member = String::try_from(&member).map_err(|error| {
@@ -435,6 +439,7 @@ fn write_segment(
                 ),
                 "dynamic member write",
             )
+            .finish(state)
         }
         PlaceSegment::Index(indexing) => {
             super::indexing::assign(state, base, indexing, rhs, delete)

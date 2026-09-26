@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, BTreeSet},
     rc::Rc,
 };
@@ -14,6 +14,9 @@ use runmat_value::Value;
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
+
+mod rooted_value;
+use rooted_value::RootedWorkspaceValue;
 
 /// One assigned interactive binding supplied to a native script invocation.
 ///
@@ -54,7 +57,8 @@ pub struct NativeWorkspaceSnapshot {
 
 #[derive(Clone)]
 pub(super) struct NativeWorkspaceState {
-    values: Rc<RefCell<BTreeMap<String, Value>>>,
+    values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
+    externally_mutated: Rc<Cell<bool>>,
     local_names: BTreeMap<usize, String>,
     publish: bool,
 }
@@ -109,8 +113,14 @@ impl NativeWorkspaceState {
                 )));
             }
         }
+        let values = values
+            .into_iter()
+            .map(|(name, value)| RootedWorkspaceValue::new(value).map(|value| (name, value)))
+            .collect::<Result<_, _>>()
+            .map_err(NativeExecutorError::Runtime)?;
         Ok(Self {
             values: Rc::new(RefCell::new(values)),
+            externally_mutated: Rc::new(Cell::new(false)),
             local_names,
             publish: true,
         })
@@ -125,6 +135,7 @@ impl NativeWorkspaceState {
             .collect();
         Self {
             values: Rc::new(RefCell::new(BTreeMap::new())),
+            externally_mutated: Rc::new(Cell::new(false)),
             local_names,
             publish: false,
         }
@@ -133,32 +144,56 @@ impl NativeWorkspaceState {
     pub(super) fn service(&self) -> Rc<dyn RuntimeWorkspaceService> {
         Rc::new(NativeWorkspaceService {
             values: Rc::clone(&self.values),
+            externally_mutated: Rc::clone(&self.externally_mutated),
         })
     }
 
-    pub(super) fn initial_value(&self, slot: usize) -> Option<Value> {
-        self.local_names
-            .get(&slot)
-            .and_then(|name| self.values.borrow().get(name).cloned())
+    pub(super) fn needs_reconciliation(&self) -> bool {
+        self.externally_mutated.get()
     }
 
-    pub(super) fn synchronize_local(&self, slot: usize, value: Value) {
+    pub(super) fn mark_reconciled(&self) {
+        self.externally_mutated.set(false);
+    }
+
+    pub(super) fn initial_value(&self, slot: usize) -> Option<Value> {
+        self.local_names.get(&slot).and_then(|name| {
+            self.values
+                .borrow()
+                .get(name)
+                .map(|entry| entry.value.clone())
+        })
+    }
+
+    pub(super) fn synchronize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
         if let Some(name) = self.local_names.get(&slot) {
-            self.values.borrow_mut().insert(name.clone(), value);
+            let rooted = RootedWorkspaceValue::new(value).map_err(NativeExecutorError::Runtime)?;
+            let previous = self
+                .values
+                .try_borrow_mut()
+                .map_err(workspace_borrow_error)?
+                .insert(name.clone(), rooted);
+            drop(previous);
         }
+        Ok(())
     }
 
     pub(super) fn local_values(&self) -> Vec<(usize, Option<Value>)> {
         let values = self.values.borrow();
         self.local_names
             .iter()
-            .map(|(slot, name)| (*slot, values.get(name).cloned()))
+            .map(|(slot, name)| (*slot, values.get(name).map(|entry| entry.value.clone())))
             .collect()
     }
 
     pub(super) fn snapshot(&self) -> Option<NativeWorkspaceSnapshot> {
         self.publish.then(|| NativeWorkspaceSnapshot {
-            values: self.values.borrow().clone(),
+            values: self
+                .values
+                .borrow()
+                .iter()
+                .map(|(name, entry)| (name.clone(), entry.value.clone()))
+                .collect(),
         })
     }
 }
@@ -167,20 +202,34 @@ impl NativeWorkspaceState {
 #[path = "workspace_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+mod gc_tests;
+
+fn workspace_borrow_error(error: std::cell::BorrowMutError) -> runmat_runtime::RuntimeError {
+    runmat_runtime::runtime_error::semantic_error(
+        "NativeWorkspaceBorrow",
+        format!("native workspace mutation is reentrant: {error}"),
+    )
+}
+
 struct NativeWorkspaceService {
-    values: Rc<RefCell<BTreeMap<String, Value>>>,
+    values: Rc<RefCell<BTreeMap<String, RootedWorkspaceValue>>>,
+    externally_mutated: Rc<Cell<bool>>,
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
     fn lookup(&self, name: &str) -> Option<Value> {
-        self.values.borrow().get(name).cloned()
+        self.values
+            .borrow()
+            .get(name)
+            .map(|entry| entry.value.clone())
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
         self.values
             .borrow()
             .iter()
-            .map(|(name, value)| (name.clone(), value.clone()))
+            .map(|(name, entry)| (name.clone(), entry.value.clone()))
             .collect()
     }
 
@@ -189,27 +238,47 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
-        self.values.borrow_mut().insert(name.to_string(), value);
+        let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
+        let previous = self
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?
+            .insert(name.to_string(), rooted);
+        self.externally_mutated.set(true);
+        drop(previous);
         Ok(())
     }
 
     fn clear(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        self.values.borrow_mut().clear();
+        let previous = std::mem::take(
+            &mut *self
+                .values
+                .try_borrow_mut()
+                .map_err(workspace_borrow_error)?,
+        );
+        self.externally_mutated.set(true);
+        drop(previous);
         Ok(())
     }
 
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
-        self.values.borrow_mut().remove(name);
+        let previous = self
+            .values
+            .try_borrow_mut()
+            .map_err(workspace_borrow_error)?
+            .remove(name);
+        self.externally_mutated.set(true);
+        drop(previous);
         Ok(())
     }
 }
 
 /// Execute semantic workspace declarations and commit effect markers.
 ///
-/// Call-backed workspace and environment effects describe what the preceding
-/// runtime call already performed. Replaying those mutations here would apply
-/// them twice; their Native IR instruction instead preserves ordering, source,
-/// safepoint, and effect-epoch information. Global and persistent declarations
+/// Call-backed workspace and environment markers preserve ordering, source,
+/// safepoint, and effect-epoch information. The call performs the mutation, and
+/// its completion boundary reconciles externally changed workspace bindings.
+/// Replaying the mutation at a marker would apply it twice. Global and persistent declarations
 /// are different: they establish storage aliases and therefore execute here.
 pub(super) fn execute(
     state: &mut HostState,

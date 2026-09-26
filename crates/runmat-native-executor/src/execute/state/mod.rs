@@ -231,7 +231,7 @@ impl HostState {
             }
             let reference = *local;
             if !reference.is_null() {
-                workspace.synchronize_local(slot, arena.get(reference)?.clone());
+                workspace.synchronize_local(slot, arena.get(reference)?.clone())?;
             }
         }
         let roots = locals

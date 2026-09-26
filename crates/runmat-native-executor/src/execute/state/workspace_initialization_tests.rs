@@ -4,6 +4,9 @@ use runmat_native_codegen::*;
 use runmat_types::{BindingId, ProgramFunctionId, ProgramPointId, ProgramSourceId, ProgramSpan};
 use std::{rc::Rc, sync::Arc};
 
+#[path = "workspace_initialization_tests/sync_completion.rs"]
+mod sync_completion;
+
 fn omitted_input_state() -> HostState {
     let point = ProgramPointId {
         function: ProgramFunctionId(0),
@@ -128,12 +131,63 @@ fn workspace_reconciliation_records_initialization_but_not_absence() {
             .workspace
             .as_ref()
             .unwrap()
-            .synchronize_local(0, Value::Struct(runmat_value::StructValue::new()));
+            .synchronize_local(0, Value::Struct(runmat_value::StructValue::new()))
+            .unwrap();
         state.reconcile_workspace().unwrap();
         assert!(matches!(
             state.assignment_root(0, true).unwrap(),
             Value::Struct(_)
         ));
         assert!(state.missing_input_locals.is_empty());
+    });
+}
+
+#[test]
+fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
+    runmat_gc::gc_test_context(|| {
+        for fail in [false, true] {
+            let mut state = omitted_input_state();
+            let service = state.workspace.as_ref().unwrap().service();
+            let request = runmat_runtime::native::NativeSiteRequest {
+                function: 0,
+                block: 0,
+                position: 0,
+                phase: runmat_runtime::native::NativeSitePhase::RVALUE,
+                ordinal: 0,
+                reserved: 0,
+            };
+            state.pending_call = Some(crate::execute::call_suspension::PendingCall {
+                continuation: 1,
+                generation: 1,
+                request,
+                embedded: None,
+                future: Box::pin(async move {
+                    service.assign("x", Value::Num(42.0))?;
+                    if fail {
+                        Err(runmat_runtime::runtime_error::semantic_error(
+                            "WorkspaceCompletionFixture",
+                            "failure after workspace assignment",
+                        )
+                        .into())
+                    } else {
+                        Ok(crate::execute::call_suspension::CallCompletion::Values(
+                            vec![],
+                        ))
+                    }
+                }),
+            });
+            let result = futures::executor::block_on(crate::execute::call_suspension::complete(
+                &mut state, 1, 1,
+            ));
+            if fail {
+                assert!(matches!(result, Err(NativeExecutorError::Runtime(error))
+                    if error.identifier() == Some("RunMat:WorkspaceCompletionFixture")));
+            } else {
+                assert_eq!(result.unwrap(), request);
+            }
+            assert_eq!(state.assignment_root(0, false).unwrap(), Value::Num(42.0));
+            assert!(state.missing_input_locals.is_empty());
+            assert!(!state.workspace.as_ref().unwrap().needs_reconciliation());
+        }
     });
 }

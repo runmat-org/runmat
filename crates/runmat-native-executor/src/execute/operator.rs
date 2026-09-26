@@ -46,6 +46,7 @@ pub(super) fn evaluate(
         }
         runmat_runtime::call_builtin_async(name.display_name(), &arguments).await
     };
-    let value = super::sync::complete(&state.runtime, future, "operator evaluation")?;
+    let value =
+        super::sync::complete(&state.runtime, future, "operator evaluation").finish(state)?;
     Ok(state.arena.insert(value))
 }

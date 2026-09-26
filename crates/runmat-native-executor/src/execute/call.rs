@@ -104,7 +104,8 @@ fn evaluate_inner(
                             requested_outputs,
                         }),
                         "nested lexical call",
-                    )?;
+                    )
+                    .finish(state)?;
                     state.apply_lexical_captures(result.captures)?;
                     return normalize_sequence_outputs(result.outputs, requested_outputs);
                 }
@@ -133,7 +134,8 @@ fn evaluate_inner(
                     requested_outputs,
                 ),
                 "dynamic call",
-            )?;
+            )
+            .finish(state)?;
             normalize_legacy_outputs(value, requested_outputs)
         }
         MirCallee::SuperConstructor {
@@ -149,7 +151,8 @@ fn evaluate_inner(
                     arguments,
                 ),
                 "superclass constructor call",
-            )?;
+            )
+            .finish(state)?;
             normalize_legacy_outputs(value, requested_outputs)
         }
         MirCallee::SuperMethod {
@@ -167,7 +170,8 @@ fn evaluate_inner(
                     arguments,
                 ),
                 "superclass method call",
-            )?;
+            )
+            .finish(state)?;
             normalize_legacy_outputs(value, requested_outputs)
         }
     }
@@ -202,6 +206,7 @@ pub(super) fn materialize_arguments(
         runmat_runtime::call::arguments::expand_arguments(&state.runtime, materialized),
         "call argument expansion",
     )
+    .finish(state)
 }
 
 fn materialize_argument(
@@ -244,7 +249,8 @@ pub(super) fn capture_sequence(
             &state.runtime,
             runmat_runtime::call::arguments::materialize_expansion(&state.runtime, source),
             "sequence capture",
-        )?;
+        )
+        .finish(state)?;
         sequence.resolve(
             runmat_types::SequenceUse::ExpandAll,
             runmat_runtime::sequence::SequenceResolutionContext::default(),

@@ -49,11 +49,22 @@ impl HostState {
         *local = value;
         if !value.is_null() {
             if let Some(workspace) = &self.workspace {
-                workspace.synchronize_local(slot, self.arena.get(value)?.clone());
+                workspace.synchronize_local(slot, self.arena.get(value)?.clone())?;
             }
         }
         self.record_local_initialization(slot, value);
         self.synchronize_session_binding(slot, value)
+    }
+
+    pub fn reconcile_external_workspace(&mut self) -> NativeExecutorResult<()> {
+        if self
+            .workspace
+            .as_ref()
+            .is_some_and(|workspace| workspace.needs_reconciliation())
+        {
+            self.reconcile_workspace()?;
+        }
+        Ok(())
     }
 
     pub fn reconcile_workspace(&mut self) -> NativeExecutorResult<()> {
@@ -69,6 +80,9 @@ impl HostState {
             })?;
             *local = reference;
             self.record_local_initialization(slot, reference);
+        }
+        if let Some(workspace) = &self.workspace {
+            workspace.mark_reconciled();
         }
         Ok(())
     }

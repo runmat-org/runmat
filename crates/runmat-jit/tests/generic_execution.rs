@@ -1,5 +1,8 @@
 #![cfg(not(target_arch = "wasm32"))]
 
+#[path = "generic_execution/short_circuit.rs"]
+mod short_circuit;
+
 use std::{
     collections::BTreeMap,
     rc::Rc,
