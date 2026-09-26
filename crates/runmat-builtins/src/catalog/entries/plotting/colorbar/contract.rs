@@ -23,13 +23,14 @@ pub const COLORBAR_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDe
     description: "Colorbar enabled state after command execution.",
 }];
 pub const COLORBAR_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-pub const COLORBAR_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const MODE_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "mode",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Optional,
     default: None,
     description: "Colorbar mode token ('on'|'off').",
-}];
+};
+pub const COLORBAR_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [MODE_INPUT];
 pub const COLORBAR_INPUTS_TARGET_MODE: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
         name: "ax",
@@ -38,7 +39,7 @@ pub const COLORBAR_INPUTS_TARGET_MODE: [BuiltinParamDescriptor; 2] = [
         default: None,
         description: "Associated axes, without changing current selection.",
     },
-    COLORBAR_INPUTS_MODE[0],
+    MODE_INPUT,
 ];
 pub const COLORBAR_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "c",

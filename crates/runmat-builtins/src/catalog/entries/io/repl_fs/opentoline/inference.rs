@@ -2,7 +2,9 @@ use crate::{
     catalog::inference::{argument_error, finish_fixed_outputs},
     BuiltinCatalogEntry,
 };
-use runmat_types::{CallInference, CallRequest, LiteralValue, ValueFact, ValueKindFact};
+use runmat_types::{
+    CallInference, CallRequest, LiteralValue, NumericDomain, NumericFact, ValueFact, ValueKindFact,
+};
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
     if !(2..=4).contains(&request.arguments.len()) {
@@ -49,7 +51,10 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         let fact = &request.arguments[index];
         let possible = match fact.kind {
             ValueKindFact::Unknown => true,
-            ValueKindFact::NumericReal(_) => fact.shape.element_count().is_none_or(|n| n == 1),
+            ValueKindFact::Numeric(NumericFact {
+                domain: NumericDomain::Real,
+                ..
+            }) => fact.shape.element_count().is_none_or(|n| n == 1),
             ValueKindFact::String | ValueKindFact::Character => possible_text(fact),
             _ => false,
         };

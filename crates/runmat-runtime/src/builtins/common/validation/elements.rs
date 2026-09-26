@@ -1,9 +1,6 @@
 //! Borrowed numeric element traversal, including implicit sparse zeros.
 
-use super::{
-    integer_f64_order, tensor, ComplexTensor, IntValue, IntegerStorage, Ordering, SparseTensor,
-    Value,
-};
+use super::{integer_f64_order, tensor, IntValue, IntegerStorage, Ordering, Value};
 
 pub(super) fn complex_real_values_all(
     value: &Value,

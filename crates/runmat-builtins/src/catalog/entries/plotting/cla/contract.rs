@@ -21,22 +21,23 @@ pub const CLA_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     description: "True when current axes are cleared.",
 }];
 pub const CLA_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-pub const CLA_INPUTS_RESET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+const RESET_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "reset",
     ty: BuiltinParamType::StringScalar,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "The reset token resets appearance while preserving Position and Units.",
-}];
-pub const CLA_INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
+};
+pub const CLA_INPUTS_RESET: [BuiltinParamDescriptor; 1] = [RESET_INPUT];
+const AX_INPUT: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "ax",
     ty: BuiltinParamType::AxesHandle,
     arity: BuiltinParamArity::Required,
     default: None,
     description: "Axes to clear without selecting them.",
-}];
-pub const CLA_INPUTS_AX_RESET: [BuiltinParamDescriptor; 2] =
-    [CLA_INPUTS_AX[0], CLA_INPUTS_RESET[0]];
+};
+pub const CLA_INPUTS_AX: [BuiltinParamDescriptor; 1] = [AX_INPUT];
+pub const CLA_INPUTS_AX_RESET: [BuiltinParamDescriptor; 2] = [AX_INPUT, RESET_INPUT];
 pub const CLA_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
     BuiltinSignatureDescriptor {
         label: "cla(ax)",

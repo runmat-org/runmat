@@ -15,7 +15,7 @@ type HiddenAxesTarget = Option<(crate::builtins::plotting::state::FigureHandle, 
 #[runtime_builtin(
     name = "hidden",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::hidden"
 )]
 pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(

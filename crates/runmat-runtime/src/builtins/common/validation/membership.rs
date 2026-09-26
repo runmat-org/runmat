@@ -3,8 +3,7 @@
 use super::cell_leaves::CellLeaves;
 use super::{
     chars_to_string, host_value, integer_f64_order, invalid_argument_error, numeric_class_identity,
-    tensor, BuiltinResult, CharArray, ComplexTensor, Ordering, RuntimeError, SparseTensor,
-    ValidationAtom, Value,
+    tensor, BuiltinResult, Ordering, RuntimeError, SparseTensor, ValidationAtom, Value,
 };
 mod admission;
 #[cfg(test)]

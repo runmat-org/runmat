@@ -12,7 +12,7 @@ mod tests;
 #[runtime_builtin(
     name = "box",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::r#box"
 )]
 pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&BOX_DESCRIPTOR, &BOX_ERROR_OUTPUTS, "box")?;

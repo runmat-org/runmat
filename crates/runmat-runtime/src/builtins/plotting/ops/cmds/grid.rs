@@ -16,7 +16,7 @@ enum GridMode {
 #[runtime_builtin(
     name = "grid",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::grid"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&GRID_DESCRIPTOR, &GRID_ERROR_OUTPUTS, "grid")?;

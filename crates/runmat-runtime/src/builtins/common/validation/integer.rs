@@ -1,10 +1,10 @@
 //! Shared integer classification and exact conversion boundaries.
 
 use super::{
-    build_runtime_error, handle_integer_type, handle_is_logical, handle_storage, tensor,
-    BuiltinExtensionDescriptor, BuiltinResult, ComplexTensor, GpuTensorStorage, IntValue,
-    RuntimeError, SparseTensor, Value,
+    build_runtime_error, handle_integer_type, handle_is_logical, handle_storage, BuiltinResult,
+    ComplexTensor, GpuTensorStorage, IntValue, RuntimeError, Value,
 };
+use runmat_builtins::BuiltinExtensionDescriptor;
 
 /// MATLAB stores complex integer arrays, but does not support arithmetic on
 /// them. Arithmetic builtins use this before selecting floating or provider

@@ -4,8 +4,8 @@ use super::{
     complex_real_values_all, exact_integer_values_all, handle_integer_type, handle_is_logical,
     handle_storage, host_value, int_f64_matches, int_is_negative, int_is_nonnegative,
     int_is_nonpositive, int_is_positive, numeric_values_all, tensor, value_is_empty,
-    value_is_ordered_against_zero_async, BuiltinResult, CharArray, ComplexTensor, GpuTensorStorage,
-    IntValue, IntegerComparisonOp, Ordering, RangeInclusivity, SparseTensor, Value,
+    value_is_ordered_against_zero_async, BuiltinResult, GpuTensorStorage, IntValue,
+    IntegerComparisonOp, Ordering, RangeInclusivity, Value,
 };
 
 pub fn value_is_finite(value: &Value) -> bool {

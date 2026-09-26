@@ -13,7 +13,7 @@ mod tests;
 #[runtime_builtin(
     name = "cla",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::cla"
 )]
 pub fn cla_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(&CLA_DESCRIPTOR, &CLA_ERROR_OUTPUTS, "cla")?;

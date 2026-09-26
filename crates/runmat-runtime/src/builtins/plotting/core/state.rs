@@ -27,24 +27,28 @@ use crate::{BuiltinResult, RuntimeError};
 mod colorbar;
 #[path = "state/colormap.rs"]
 mod colormap;
+#[cfg(test)]
+pub use colormap::set_colormap_with_length;
 pub use colormap::{
     colormap_length_for_axes, current_colormap_length, figure_colormap_snapshot,
     set_colormap_for_axes, set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
-    set_colormap_with_length,
 };
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
-pub use clear_axes::{clear_axes_target, clear_current_axes};
+pub use clear_axes::clear_axes_target;
+#[cfg(test)]
+pub use clear_axes::clear_current_axes;
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
 pub use axes_modes::{
     axis_color_limits_snapshot_for_axes, axis_z_limits_snapshot_for_axes, lock_axes_limits,
     set_hidden_line_removal_for_axes, set_y_direction_for_axes,
 };
+#[cfg(test)]
+pub use colorbar::colorbar_handle_for_axes;
 pub use colorbar::{
-    colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,
-    set_colorbar_enabled, set_colorbar_enabled_for_axes, set_colorbar_visible, toggle_colorbar,
-    ColorBarHandleState,
+    colorbar_handles_for_figure, ensure_colorbar_for_axes, set_colorbar_enabled_for_axes,
+    set_colorbar_visible, ColorBarHandleState,
 };
 
 type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);

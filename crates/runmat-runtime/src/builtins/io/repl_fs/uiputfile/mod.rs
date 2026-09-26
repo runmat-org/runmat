@@ -53,7 +53,7 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
     builtin_path = "crate::builtins::io::repl_fs::uiputfile"
 )]
 async fn uiputfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    crate::builtins::common::output_count::validate_fixed_outputs(
+    crate::output_count::validate_fixed_outputs(
         &UIPUTFILE_DESCRIPTOR,
         &UIPUTFILE_ERROR_TOO_MANY_OUTPUTS,
         NAME,

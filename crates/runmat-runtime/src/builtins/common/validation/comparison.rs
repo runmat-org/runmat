@@ -3,8 +3,8 @@
 use super::{
     class_name_for_value, handle_integer_type, handle_is_logical, host_value,
     invalid_argument_error, tensor, try_complex_ordering_comparison, try_real_ordering_comparison,
-    value_is_numeric_or_logical, BuiltinResult, ComplexTensor, IntegerComparisonError,
-    IntegerComparisonOp, RangeInclusivity, SparseTensor, Value,
+    value_is_numeric_or_logical, BuiltinResult, IntegerComparisonError, IntegerComparisonOp,
+    RangeInclusivity, SparseTensor, Value,
 };
 
 pub(super) async fn value_is_ordered_against_zero_async(

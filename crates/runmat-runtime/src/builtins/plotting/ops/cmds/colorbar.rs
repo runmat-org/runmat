@@ -16,7 +16,7 @@ mod tests;
 #[runmat_macros::runtime_builtin(
     name = "colorbar",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::colorbar"
 )]
 pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(

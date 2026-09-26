@@ -56,7 +56,7 @@ fn host_error(detail: impl AsRef<str>) -> RuntimeError {
     builtin_path = "crate::builtins::io::repl_fs::uigetfile"
 )]
 async fn uigetfile_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    crate::builtins::common::output_count::validate_fixed_outputs(
+    crate::output_count::validate_fixed_outputs(
         &UIGETFILE_DESCRIPTOR,
         &UIGETFILE_ERROR_TOO_MANY_OUTPUTS,
         NAME,

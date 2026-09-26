@@ -37,7 +37,7 @@ fn exist_error_row(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(name = "exist", builtin_path = "crate::builtins::io::repl_fs::exist")]
 async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    crate::builtins::common::output_count::validate_fixed_outputs(
+    crate::output_count::validate_fixed_outputs(
         &EXIST_DESCRIPTOR,
         &EXIST_ERROR_TOO_MANY_OUTPUTS,
         BUILTIN_NAME,

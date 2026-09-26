@@ -2,38 +2,52 @@
 #[path = "cmds/error.rs"]
 mod error;
 #[path = "cmds/axis.rs"]
-mod axis;
+pub(crate) mod axis;
+#[cfg(test)]
 pub use axis::axis_builtin;
-pub use runmat_builtins::{AXIS_DESCRIPTOR, AXIS_INTEGER_CAPABILITIES};
+#[cfg(test)]
+pub use runmat_builtins::AXIS_DESCRIPTOR;
 #[path = "cmds/box.rs"]
-mod r#box;
+pub(crate) mod r#box;
+#[cfg(test)]
 pub use r#box::box_builtin;
+#[cfg(test)]
 pub use runmat_builtins::BOX_DESCRIPTOR;
 #[path = "cmds/cla.rs"]
-mod cla;
+pub(crate) mod cla;
+#[cfg(test)]
 pub use cla::cla_builtin;
+#[cfg(test)]
 pub use runmat_builtins::CLA_DESCRIPTOR;
 #[path = "cmds/colorbar.rs"]
-mod colorbar;
+pub(crate) mod colorbar;
+#[cfg(test)]
 pub use colorbar::colorbar_builtin;
+#[cfg(test)]
 pub use runmat_builtins::COLORBAR_DESCRIPTOR;
 #[path = "cmds/colormap.rs"]
-mod colormap;
+pub(crate) mod colormap;
+#[cfg(test)]
 pub use colormap::colormap_builtin;
-pub use runmat_builtins::{
-    COLORMAP_DESCRIPTOR, COLORMAP_EXTENSIONS, COLORMAP_INTEGER_CAPABILITIES,
-};
+#[cfg(test)]
+pub use runmat_builtins::COLORMAP_DESCRIPTOR;
 #[path = "cmds/grid.rs"]
-mod grid;
+pub(crate) mod grid;
+#[cfg(test)]
 pub use grid::grid_builtin;
+#[cfg(test)]
 pub use runmat_builtins::GRID_DESCRIPTOR;
 #[path = "cmds/hidden.rs"]
-mod hidden;
+pub(crate) mod hidden;
+#[cfg(test)]
 pub use hidden::hidden_builtin;
+#[cfg(test)]
 pub use runmat_builtins::HIDDEN_DESCRIPTOR;
 #[path = "cmds/shading.rs"]
-mod shading;
+pub(crate) mod shading;
+#[cfg(test)]
 pub use runmat_builtins::SHADING_DESCRIPTOR;
+#[cfg(test)]
 pub use shading::shading_builtin;
 
 #[cfg(test)]

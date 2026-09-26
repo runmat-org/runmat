@@ -13,7 +13,7 @@ mod tests;
 #[runtime_builtin(
     name = "shading",
     binding_variant = "default",
-    builtin_path = "crate::builtins::plotting::cmds"
+    builtin_path = "crate::builtins::plotting::cmds::shading"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     crate::output_count::validate_fixed_outputs(

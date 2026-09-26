@@ -1,6 +1,6 @@
 //! Shape and emptiness predicates.
 
-use super::{tensor, CharArray, ComplexTensor, RuntimeError, SparseTensor, Value};
+use super::{tensor, RuntimeError, Value};
 
 pub fn value_shape_2d(value: &Value) -> (usize, usize) {
     match value {
