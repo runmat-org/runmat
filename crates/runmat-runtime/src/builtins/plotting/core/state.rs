@@ -25,6 +25,13 @@ use crate::{BuiltinResult, RuntimeError};
 
 #[path = "state/colorbar.rs"]
 mod colorbar;
+#[path = "state/colormap.rs"]
+mod colormap;
+pub use colormap::{
+    colormap_length_for_axes, current_colormap_length, figure_colormap_snapshot,
+    set_colormap_for_axes, set_colormap_for_axes_with_length, set_colormap_for_figure_with_length,
+    set_colormap_with_length,
+};
 #[path = "state/clear_axes.rs"]
 mod clear_axes;
 pub use clear_axes::{clear_axes_target, clear_current_axes};
@@ -336,7 +343,6 @@ struct FigureState {
     line_style_cycles: HashMap<usize, LineStyleCycle>,
     line_color_cycles: HashMap<usize, LineColorCycle>,
     figure_color_order: Option<Vec<Vec4>>,
-    colormap_lengths: HashMap<usize, usize>,
     zoom_mode: ZoomModeState,
     last_enabled_zoom_motion: ZoomMotion,
     zoom_axes_modes: HashMap<usize, ZoomModeState>,
@@ -361,7 +367,6 @@ impl FigureState {
             line_style_cycles: HashMap::new(),
             line_color_cycles: HashMap::new(),
             figure_color_order: None,
-            colormap_lengths: HashMap::new(),
             zoom_mode: ZoomModeState::default(),
             last_enabled_zoom_motion: ZoomMotion::Both,
             zoom_axes_modes: HashMap::new(),
@@ -3437,118 +3442,6 @@ pub fn legend_entries_snapshot(
         });
     }
     Ok(state.figure.legend_entries_for_axes(axes_index))
-}
-
-pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
-    let (handle, figure_clone) = {
-        let mut reg = registry();
-        let handle = reg.current;
-        let direct_images = direct_image_limits_updates(&reg.plot_children, handle, None);
-        let state = get_state_mut(&mut reg, handle);
-        let axes = state.active_axes;
-        state.figure.set_axes_colormap(axes, colormap);
-        state.colormap_lengths.insert(axes, length);
-        refresh_direct_image_limits(&direct_images, axes, length, &mut state.figure);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-}
-
-pub fn set_colormap_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    colormap: ColorMap,
-) -> Result<(), FigureError> {
-    set_colormap_for_axes_with_length(handle, axes_index, colormap, DEFAULT_COLORMAP_LENGTH)
-}
-
-pub fn set_colormap_for_axes_with_length(
-    handle: FigureHandle,
-    axes_index: usize,
-    colormap: ColorMap,
-    length: usize,
-) -> Result<(), FigureError> {
-    with_axes_target_mut(handle, axes_index, |state| {
-        state.figure.set_axes_colormap(axes_index, colormap);
-        state.colormap_lengths.insert(axes_index, length);
-    })?;
-    let figure_clone = {
-        let mut reg = registry();
-        let direct_images =
-            direct_image_limits_updates(&reg.plot_children, handle, Some(axes_index));
-        if let Some(state) = reg.figures.get_mut(&handle) {
-            refresh_direct_image_limits(&direct_images, axes_index, length, &mut state.figure);
-            state.figure.clone()
-        } else {
-            return Err(FigureError::InvalidHandle(handle.0));
-        }
-    };
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
-fn direct_image_limits_updates(
-    children: &HashMap<u64, PlotChildHandleState>,
-    figure: FigureHandle,
-    axes_index: Option<usize>,
-) -> Vec<(usize, usize, bool)> {
-    children
-        .values()
-        .filter_map(|child| match child {
-            PlotChildHandleState::Image(image)
-                if image.figure == figure
-                    && axes_index.is_none_or(|axes| image.axes_index == axes)
-                    && image.c_data_mapping == "direct" =>
-            {
-                Some((
-                    image.axes_index,
-                    image.plot_index,
-                    image
-                        .c_data
-                        .as_ref()
-                        .is_some_and(|tensor| tensor.integer_storage().is_some()),
-                ))
-            }
-            _ => None,
-        })
-        .collect()
-}
-
-fn refresh_direct_image_limits(
-    direct_images: &[(usize, usize, bool)],
-    axes_index: usize,
-    length: usize,
-    plot_figure: &mut Figure,
-) {
-    for &(_, plot_index, integer) in direct_images
-        .iter()
-        .filter(|(axes, _, _)| *axes == axes_index)
-    {
-        if let Some(runmat_plot::plots::figure::PlotElement::Surface(surface)) =
-            plot_figure.get_plot_mut(plot_index)
-        {
-            surface.set_color_limits(Some(
-                crate::builtins::plotting::image::direct_colormap_limits(integer, length),
-            ));
-        }
-    }
-}
-
-pub fn colormap_length_for_axes(handle: FigureHandle, axes_index: usize) -> usize {
-    let reg = registry();
-    reg.figures
-        .get(&handle)
-        .and_then(|state| state.colormap_lengths.get(&axes_index).copied())
-        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
-}
-
-pub fn current_colormap_length() -> usize {
-    let reg = registry();
-    reg.figures
-        .get(&reg.current)
-        .and_then(|state| state.colormap_lengths.get(&state.active_axes).copied())
-        .unwrap_or(DEFAULT_COLORMAP_LENGTH)
 }
 
 pub fn set_surface_shading(mode: ShadingMode) {

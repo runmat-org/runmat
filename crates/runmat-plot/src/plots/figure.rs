@@ -15,6 +15,8 @@ use log::trace;
 use std::collections::HashMap;
 #[path = "figure/axes_reset.rs"]
 mod axes_reset;
+#[path = "figure/colormap.rs"]
+mod colormap;
 #[path = "figure/y_direction.rs"]
 mod y_direction;
 pub use y_direction::YDirection;
@@ -63,6 +65,9 @@ pub struct Figure {
 
     /// Global colormap and colorbar
     pub colormap: ColorMap,
+    /// Figure-owned defaults for new/reset axes, distinct from the active-axes mirror.
+    pub default_colormap: ColorMap,
+    pub default_colormap_length: usize,
     pub colorbar_enabled: bool,
 
     /// Color mapping limits for all color-mapped plots in this figure (caxis)
@@ -140,6 +145,7 @@ impl Default for LegendStyle {
 
 #[derive(Debug, Clone, Default)]
 pub struct AxesMetadata {
+    pub colormap_length: usize,
     pub y_direction: YDirection,
     pub axes_kind: AxesKind,
     pub overlay_parent: Option<usize>,
@@ -285,6 +291,7 @@ impl Figure {
             legend_enabled: true,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
+            colormap_length: 256,
             color_limits: None,
             ..Default::default()
         }
@@ -315,6 +322,8 @@ impl Figure {
             y_log: false,
             axis_equal: false,
             colormap: ColorMap::Parula,
+            default_colormap: ColorMap::Parula,
+            default_colormap_length: 256,
             colorbar_enabled: false,
             color_limits: None,
             bounds: None,
@@ -330,7 +339,7 @@ impl Figure {
 
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
-            self.axes_metadata.push(Self::default_axes_metadata());
+            self.axes_metadata.push(self.inherited_axes_metadata());
         }
     }
 
@@ -1059,9 +1068,7 @@ impl Figure {
                 .is_some_and(|meta| meta.overlay_parent.is_some())
             {
                 self.clear_axes(axes_index);
-                if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
-                    *meta = Self::default_axes_metadata();
-                }
+                self.axes_metadata[axes_index] = self.inherited_axes_metadata();
             }
         }
         self.active_axes_index = self.active_axes_index.min(
@@ -1145,6 +1152,9 @@ impl Figure {
     pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            if let ColorMap::Listed(colors) = &cmap {
+                meta.colormap_length = colors.len();
+            }
             meta.colormap = cmap.clone();
         }
         for (idx, plot) in self.plots.iter_mut().enumerate() {

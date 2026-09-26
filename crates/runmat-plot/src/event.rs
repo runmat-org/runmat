@@ -702,6 +702,13 @@ impl FigureScene {
         self.validate_schema_version()?;
 
         let mut figure = Figure::new();
+        let default_map = self
+            .metadata
+            .default_colormap
+            .as_deref()
+            .map(parse_colormap_name)
+            .unwrap_or(ColorMap::Parula);
+        figure.set_figure_colormap(default_map, self.metadata.default_colormap_length);
         figure.set_subplot_grid(
             self.layout.axes_rows as usize,
             self.layout.axes_cols as usize,
@@ -1048,6 +1055,10 @@ pub struct FigureMetadata {
     pub background_rgba: [f32; 4],
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colormap: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_colormap: Option<String>,
+    #[serde(default = "default_colormap_length")]
+    pub default_colormap_length: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1095,6 +1106,8 @@ impl FigureMetadata {
                 .unwrap_or_else(|| "auto".into()),
             background_rgba: vec4_to_rgba(figure.background_color),
             colormap: Some(figure.colormap.to_serialized_token()),
+            default_colormap: Some(figure.default_colormap.to_serialized_token()),
+            default_colormap_length: figure.default_colormap_length,
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
             z_limits: figure.z_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
@@ -1113,6 +1126,10 @@ impl FigureMetadata {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_colormap_length() -> usize {
+    256
 }
 
 fn is_true(value: &bool) -> bool {
@@ -1317,6 +1334,8 @@ pub struct SerializedAxesMetadata {
     #[serde(default)]
     pub colorbar_enabled: bool,
     pub colormap: String,
+    #[serde(default = "default_colormap_length")]
+    pub colormap_length: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_order: Option<Vec<[f32; 3]>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1512,6 +1531,7 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: value.colormap.to_serialized_token(),
+            colormap_length: value.colormap_length,
             color_order: value
                 .color_order
                 .map(|colors| colors.into_iter().map(|c| [c.x, c.y, c.z]).collect()),
@@ -1574,6 +1594,7 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             legend_enabled: value.legend_enabled,
             colorbar_enabled: value.colorbar_enabled,
             colormap: parse_colormap_name(&value.colormap),
+            colormap_length: value.colormap_length,
             color_order: value.color_order.map(|colors| {
                 colors
                     .into_iter()

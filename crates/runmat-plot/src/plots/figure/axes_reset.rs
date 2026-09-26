@@ -6,7 +6,7 @@ impl Figure {
         let Some(previous) = self.axes_metadata.get(axes_index) else {
             return;
         };
-        let mut reset = Self::default_axes_metadata();
+        let mut reset = self.inherited_axes_metadata();
         reset.position = previous.position;
         reset.position_explicit = previous.position_explicit;
         reset.units = previous.units.clone();

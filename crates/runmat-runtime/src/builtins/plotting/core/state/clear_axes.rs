@@ -142,7 +142,6 @@ pub fn clear_axes_target(
             state.hold_per_axes.remove(&axes_index);
             state.line_style_cycles.remove(&axes_index);
             state.line_color_cycles.remove(&axes_index);
-            state.colormap_lengths.remove(&axes_index);
             state.zoom_baselines.remove(&axes_index);
             state.zoom_axes_modes.remove(&axes_index);
             state.pan_axes_modes.remove(&axes_index);
