@@ -30,9 +30,14 @@ fn field_construction_scratch_is_composed_before_assembly() {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let schedule = workload.solve_schedule().unwrap();
         let step = &workload.model.sequence.steps[0];
-        let facts =
-            ThermalPreassemblyResourceFacts::derive(&workload.model, step, &mesh, &schedule)
-                .unwrap();
+        let facts = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            step,
+            &mesh,
+            &schedule,
+            &admitted_identity(&workload, &mesh),
+        )
+        .unwrap();
         let scratch = facts.field_construction.reservation_bytes().0;
         assert!(scratch > 0);
         assert_eq!(
@@ -62,7 +67,9 @@ fn field_construction_scratch_is_composed_before_assembly() {
             .accuracy
             .resources
             .maximum_resident_bytes = required;
-        workload.execute(&mesh).unwrap();
+        let result = workload.execute(&mesh).unwrap();
+        assert_eq!(result.run.identity, facts.admitted_identity);
+        assert_eq!(result.run.identity, admitted_identity(&workload, &mesh));
         let mut overflow = facts;
         overflow
             .field_construction
@@ -81,6 +88,7 @@ fn manifest_catalog_is_admitted_with_checked_retained_and_validation_costs() {
         &workload.model.sequence.steps[0],
         &mesh,
         &schedule,
+        &admitted_identity(&workload, &mesh),
     )
     .unwrap();
     let catalog = facts.manifest_catalog.reservation_bytes().unwrap().0;
@@ -173,9 +181,14 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let schedule = workload.solve_schedule().unwrap();
-        let preassembly =
-            ThermalPreassemblyResourceFacts::derive(&workload.model, &step, &mesh, &schedule)
-                .unwrap();
+        let preassembly = ThermalPreassemblyResourceFacts::derive(
+            &workload.model,
+            &step,
+            &mesh,
+            &schedule,
+            &admitted_identity(&workload, &mesh),
+        )
+        .unwrap();
         assert_eq!(
             preassembly.metadata.assignment_diagnostics,
             facts.assignment_diagnostics
@@ -184,7 +197,13 @@ fn assignment_diagnostics_are_admitted_and_checked_before_retention() {
         bounded.accuracy.resources.maximum_resident_bytes =
             preassembly.reservation_bytes().unwrap().0 - 1;
         assert!(matches!(
-            ThermalPreassemblyResourceFacts::derive(&workload.model, &bounded, &mesh, &schedule),
+            ThermalPreassemblyResourceFacts::derive(
+                &workload.model,
+                &bounded,
+                &mesh,
+                &schedule,
+                &admitted_identity(&workload, &mesh)
+            ),
             Err(ResourcePlanningError::AccuracyCeiling { .. })
         ));
     }
@@ -210,7 +229,8 @@ fn mesh_validation_is_admitted_before_projection_in_derivation_and_execution() {
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
-            &schedule
+            &schedule,
+            &admitted_identity(&workload, &mesh)
         ),
         Err(ResourcePlanningError::AccuracyCeiling { .. })
     ));
@@ -284,6 +304,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
             &workload.model.sequence.steps[0],
             &mesh,
             &schedule,
+            &admitted_identity(&workload, &mesh),
         )
         .unwrap();
         workload.model.model_id.0 = "large_model_identifier".repeat(512);
@@ -292,6 +313,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
             &workload.model.sequence.steps[0],
             &mesh,
             &schedule,
+            &admitted_identity(&workload, &mesh),
         )
         .unwrap();
         assert!(grown.model_materialization_bytes.0 > base.model_materialization_bytes.0);
@@ -311,6 +333,7 @@ fn model_materialization_is_composed_and_enforced_before_assembly() {
                 + grown.property_compilation_bytes.0
                 + grown.field_construction.reservation_bytes().0
                 + grown.manifest_catalog.reservation_bytes().unwrap().0
+                + grown.manifest_metadata.reservation_bytes().0
         );
         workload.model.sequence.steps[0]
             .accuracy
@@ -399,7 +422,8 @@ fn oversized_input_strings_fail_the_shared_codec_limit() {
         &workload.model,
         &workload.model.sequence.steps[0],
         &mesh,
-        &schedule
+        &schedule,
+        &admitted_identity(&workload, &mesh)
     )
     .is_err());
 }
@@ -415,6 +439,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
             &workload.model.sequence.steps[0],
             &mesh,
             &schedule,
+            &admitted_identity(&workload, &mesh),
         )
         .unwrap();
         workload.model.materials[0].name = "long_material_description".repeat(512);
@@ -423,6 +448,7 @@ fn retained_property_metadata_is_reserved_before_assembly() {
             &workload.model.sequence.steps[0],
             &mesh,
             &schedule,
+            &admitted_identity(&workload, &mesh),
         )
         .unwrap();
         assert!(facts.property_compilation_bytes.0 > base.property_compilation_bytes.0);
@@ -444,4 +470,19 @@ fn retained_property_metadata_is_reserved_before_assembly() {
             .maximum_resident_bytes = required;
         workload.execute(&mesh).unwrap();
     }
+}
+
+fn admitted_identity(
+    workload: &ThermalWorkload,
+    mesh: &runmat_meshing_core::SolverMeshArtifact,
+) -> crate::admission::AnalysisRunIdentity {
+    crate::admission::admit_nonstructural(
+        runmat_analysis_core::PhysicsFamily::Thermal,
+        workload.procedure.procedure(),
+        Some(mesh),
+        runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+        runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+        workload.formulation_requirement,
+    )
+    .unwrap()
 }

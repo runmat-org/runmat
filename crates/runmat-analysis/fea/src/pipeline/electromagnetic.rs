@@ -744,7 +744,7 @@ pub fn run_electromagnetic_with_options(
     } else {
         runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection
     };
-    let identity = super::admission::admit_nonstructural(
+    let identity = crate::admission::admit_nonstructural(
         runmat_analysis_core::PhysicsFamily::Electromagnetic,
         options.procedure,
         options.solver_mesh.as_ref(),

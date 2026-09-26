@@ -207,16 +207,35 @@ fn thermal_volume_and_flux_evidence_match_inventory_and_resident_ceiling() {
             .iter()
             .all(|evidence| evidence.accepted));
         let schedule = workload.solve_schedule().unwrap();
-        let total = ThermalPreassemblyResourceFacts::derive(
+        let admitted = ThermalPreassemblyResourceFacts::derive(
             &workload.model,
             &workload.model.sequence.steps[0],
             &mesh,
             &schedule,
+            &crate::admission::admit_nonstructural(
+                runmat_analysis_core::PhysicsFamily::Thermal,
+                workload.procedure.procedure(),
+                Some(&mesh),
+                runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+                runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                workload.formulation_requirement,
+            )
+            .unwrap(),
         )
-        .unwrap()
-        .reservation_bytes()
-        .unwrap()
-        .0;
+        .unwrap();
+        let manifest = crate::execution::ThermalSolverResultManifest::from_result(&result).unwrap();
+        let actual = runmat_canonical_codec::profile_serialized(
+            &manifest,
+            runmat_canonical_codec::CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
+        )
+        .unwrap();
+        let bound = admitted.manifest_metadata.complete_header;
+        assert!(actual.encoded_bytes_upper_bound <= bound.encoded_bytes_upper_bound);
+        assert!(
+            actual.materialization_resident_bytes_estimate
+                <= bound.materialization_resident_bytes_estimate
+        );
+        let total = admitted.reservation_bytes().unwrap().0;
         workload.model.sequence.steps[0]
             .accuracy
             .resources

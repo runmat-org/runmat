@@ -1,16 +1,13 @@
 use runmat_analysis_core::{
-    AnalysisModel, AnalysisProcedure, BoundaryTransferImplementation, CoupledPhysicsFamily,
-    FormulationRequirement, PhysicsFamily, ProcedureStep, SolutionSpace, SourceImplementation,
-    StructuralConstraintKind, TopologyImplementation,
+    AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily, FormulationRequirement, PhysicsFamily,
+    ProcedureStep, SolutionSpace, StructuralConstraintKind,
 };
-
-use runmat_meshing_core::{ElementOrder, SolverMeshArtifact};
 
 use crate::{
     admission::{
-        admit_formulation, registered_formulations, require_qualified_formulation,
-        structural_exact_realization, thermomechanical_exact_realization, AnalysisRunIdentity,
-        FormulationAdmissionRequest, StructuralRealizationInput, ThermomechanicalRealizationInput,
+        admit_formulation, require_qualified_formulation, structural_exact_realization,
+        thermomechanical_exact_realization, AnalysisRunIdentity, FormulationAdmissionRequest,
+        StructuralRealizationInput, ThermomechanicalRealizationInput,
     },
     assembly::AssemblySummary,
     contracts::FeaRunError,
@@ -172,62 +169,6 @@ pub(super) fn admit_structural(
         family: step.family,
         procedure: step.procedure,
         solution_space: step.solution_space,
-        requirement,
-        realization,
-    })
-    .map(|receipt| receipt.into_identity())
-    .map_err(Into::into)
-}
-
-pub(super) fn admit_nonstructural(
-    family: PhysicsFamily,
-    procedure: AnalysisProcedure,
-    solver_mesh: Option<&SolverMeshArtifact>,
-    source: SourceImplementation,
-    boundary_transfer: BoundaryTransferImplementation,
-    requirement: FormulationRequirement,
-) -> Result<AnalysisRunIdentity, FeaRunError> {
-    let topology = if let Some(mesh) = solver_mesh {
-        match mesh.resolved_request.element_order {
-            ElementOrder::Tet4 => TopologyImplementation::CanonicalSolverMeshTet4,
-            ElementOrder::Tet10 => TopologyImplementation::CanonicalSolverMeshTet10,
-        }
-    } else {
-        match family {
-            PhysicsFamily::Electromagnetic => TopologyImplementation::DofAdjacency,
-            _ => {
-                return Err(FeaRunError::InvalidModel(format!(
-                    "no meshless FEA pipeline admission branch is defined for {family:?}"
-                )))
-            }
-        }
-    };
-    let realization = registered_formulations(family, procedure)
-        .into_iter()
-        .find(|entry| {
-            let realization = entry.realization();
-            let has_topology = realization
-                .components
-                .iter()
-                .any(|component| component.topologies.contains(&topology));
-            let has_source = realization
-                .components
-                .iter()
-                .any(|component| component.sources.contains(&source));
-            has_topology
-                && has_source
-                && realization.boundary_transfers.contains(&boundary_transfer)
-        })
-        .map(|entry| entry.realization().clone())
-        .ok_or_else(|| {
-            FeaRunError::InvalidModel(format!(
-                "no exact formulation is registered for {family:?} {procedure:?} topology {topology:?}, source {source:?}, and boundary transfer {boundary_transfer:?}"
-            ))
-        })?;
-    admit_formulation(FormulationAdmissionRequest {
-        family,
-        procedure,
-        solution_space: SolutionSpace::Direct,
         requirement,
         realization,
     })

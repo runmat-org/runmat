@@ -133,6 +133,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         &workload.model.sequence.steps[0],
         &mesh,
         &schedule,
+        &runmat_analysis_fea::admission::admit_nonstructural(
+            runmat_analysis_core::PhysicsFamily::Thermal,
+            workload.procedure.procedure(),
+            Some(&mesh),
+            runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+            runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+            workload.formulation_requirement,
+        )?,
     )?;
     let expected_evidence = samples
         .checked_mul(source_count)

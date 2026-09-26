@@ -489,6 +489,18 @@ history and resident ceiling; metadata growth and missing records are rejected. 
 source-history serialization component, not the remaining full manifest wrapper/array metadata
 or transport lifetime bound.
 
+Complete canonical header scratch is now admitted separately from retained producer evidence.
+The projection uses the actual manifest serializer with empty variable collections and the same
+registry-issued formulation identity later used by the solver. Exact nonstructural admission is
+shared by planning and execution, rather than reconstructed by the estimator. Typed repeated
+node/element IDs, time points, residuals and energy records fill the inventory bound without dummy
+arrays; existing initial-state, diagnostic, backend, source and catalog profiles are added with
+checked arithmetic. Shared-codec estimates are positive linear sums plus fixed overhead, so this
+composition conservatively double-counts wrappers rather than dropping their cost. Tet4/Tet10
+steady and transient headers are compared against this bound, including source-bearing results
+and exact resident-ceiling rejection. This is canonical materialization scratch, not a claim that
+all retained manifest clones, numerical-identity buffers and transport lifetimes are yet qualified.
+
 `AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
 entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
 counts and total-byte arithmetic before changing retained content. Canonical chunks still restart

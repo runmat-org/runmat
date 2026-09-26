@@ -102,6 +102,15 @@ fn realization_budget_is_composed_and_enforced_for_both_element_orders() {
             &workload.model.sequence.steps[0],
             &mesh,
             &workload.solve_schedule().unwrap(),
+            &crate::admission::admit_nonstructural(
+                runmat_analysis_core::PhysicsFamily::Thermal,
+                workload.procedure.procedure(),
+                Some(&mesh),
+                runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+                runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                workload.formulation_requirement,
+            )
+            .unwrap(),
         )
         .unwrap();
         let required = facts.reservation_bytes().unwrap().0;

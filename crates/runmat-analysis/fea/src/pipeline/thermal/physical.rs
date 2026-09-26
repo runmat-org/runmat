@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisModel, IndependentDomain, PhysicsFamily, SignalSampleApproach};
+use runmat_analysis_core::{AnalysisModel, IndependentDomain, SignalSampleApproach};
 
 use crate::{
     contracts::{
@@ -65,15 +65,7 @@ pub(super) fn run(
     let domain = model.thermal.as_ref().ok_or_else(|| {
         FeaRunError::InvalidModel("thermal solve requires model.thermal".to_string())
     })?;
-    let procedure = options.procedure.procedure();
-    let identity = super::super::admission::admit_nonstructural(
-        PhysicsFamily::Thermal,
-        procedure,
-        Some(mesh),
-        runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
-        runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
-        options.formulation_requirement,
-    )?;
+    let identity = facts.admitted_identity.clone();
 
     let time_origin_s = schedule.points_s()[0];
     let active_model = super::super::activation::model_with_active_constraints(model, thermal_step);

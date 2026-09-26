@@ -1,7 +1,8 @@
 //! Composition of thermal preassembly component estimates; not whole-process admission.
 use super::{
     ByteCount, ResourcePlanningError, ThermalFieldConstructionResourceFacts,
-    ThermalHistoryResourceFacts, ThermalManifestCatalogResourceFacts, ThermalMetadataResourceFacts,
+    ThermalHistoryResourceFacts, ThermalManifestCatalogResourceFacts,
+    ThermalManifestMetadataResourceFacts, ThermalMetadataResourceFacts,
     ThermalObservationResourceFacts, ThermalOperatorResourceFacts, ThermalRealizationResourceFacts,
     ThermalSourceEvidenceResourceFacts,
 };
@@ -10,6 +11,7 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_meshing_core::SolverMeshArtifact;
 
 pub struct ThermalPreassemblyResourceFacts {
+    pub(crate) admitted_identity: crate::admission::AnalysisRunIdentity,
     pub(crate) properties: crate::properties::CompiledPropertyMap,
     /// Compiler selection, owned properties and concurrent canonical identity scratch estimate.
     pub property_compilation_bytes: ByteCount,
@@ -21,18 +23,30 @@ pub struct ThermalPreassemblyResourceFacts {
     pub metadata: ThermalMetadataResourceFacts,
     pub field_construction: ThermalFieldConstructionResourceFacts,
     pub manifest_catalog: ThermalManifestCatalogResourceFacts,
+    pub manifest_metadata: ThermalManifestMetadataResourceFacts,
     /// Shared codec estimate for authored model materialization plus a possible filtered copy.
     /// The usual unfiltered numerical path borrows the model and uses less than this envelope.
     pub model_materialization_bytes: ByteCount,
 }
 
 impl ThermalPreassemblyResourceFacts {
+    /// Estimate the selected mesh after exact formulation admission. `identity` must be the
+    /// registry receipt for this mesh; the numerical pipeline obtains it immediately before
+    /// this call. These estimates do not replace formulation or mesh admission.
     pub fn derive(
         model: &AnalysisModel,
         step: &ProcedureStep,
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
+        identity: &crate::admission::AnalysisRunIdentity,
     ) -> Result<Self, ResourcePlanningError> {
+        if identity.family() != runmat_analysis_core::PhysicsFamily::Thermal
+            || identity.procedure() != step.procedure
+        {
+            return Err(ResourcePlanningError::Invalid(
+                "thermal resource identity differs from the selected procedure".into(),
+            ));
+        }
         let history = ThermalHistoryResourceFacts::derive(mesh, schedule)?;
         history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
         // Reuse the workload's bounded input envelope; do not allocate canonical bytes or a
@@ -71,6 +85,14 @@ impl ThermalPreassemblyResourceFacts {
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
         let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;
         let manifest_catalog = ThermalManifestCatalogResourceFacts::derive(mesh, schedule)?;
+        let manifest_metadata = ThermalManifestMetadataResourceFacts::derive(
+            identity,
+            mesh,
+            schedule,
+            &metadata,
+            &sources,
+            &manifest_catalog,
+        )?;
         let catalog_bytes = manifest_catalog.reservation_bytes()?.0;
         let base = component_bytes(
             &history,
@@ -83,6 +105,7 @@ impl ThermalPreassemblyResourceFacts {
         )?
         .checked_add(field_construction.reservation_bytes().0)
         .and_then(|bytes| bytes.checked_add(catalog_bytes))
+        .and_then(|bytes| bytes.checked_add(manifest_metadata.reservation_bytes().0))
         .ok_or(ResourcePlanningError::Overflow(
             "thermal field construction reservation",
         ))?;
@@ -114,6 +137,7 @@ impl ThermalPreassemblyResourceFacts {
             .validate_thermal_solid_capabilities()
             .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
         Ok(Self {
+            admitted_identity: identity.clone(),
             properties,
             property_compilation_bytes,
             history,
@@ -124,6 +148,7 @@ impl ThermalPreassemblyResourceFacts {
             metadata,
             field_construction,
             manifest_catalog,
+            manifest_metadata,
             model_materialization_bytes,
         })
     }
@@ -142,6 +167,7 @@ impl ThermalPreassemblyResourceFacts {
         .checked_add(self.property_compilation_bytes.0)
         .and_then(|bytes| bytes.checked_add(self.field_construction.reservation_bytes().0))
         .and_then(|bytes| bytes.checked_add(catalog_bytes))
+        .and_then(|bytes| bytes.checked_add(self.manifest_metadata.reservation_bytes().0))
         .map(ByteCount)
         .ok_or(ResourcePlanningError::Overflow(
             "thermal preassembly reservation",

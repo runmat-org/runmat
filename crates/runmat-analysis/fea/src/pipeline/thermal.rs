@@ -86,9 +86,17 @@ fn execute_validated_model(
     step: &ProcedureStep,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
     validate_step(step, options.procedure)?;
+    let identity = crate::admission::admit_nonstructural(
+        PhysicsFamily::Thermal,
+        options.procedure.procedure(),
+        Some(mesh),
+        runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+        runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+        options.formulation_requirement,
+    )?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
     let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
-        model, step, mesh, &schedule,
+        model, step, mesh, &schedule, &identity,
     )?;
     facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
     physical::run(model, backend, options, mesh, step, &schedule, &facts)

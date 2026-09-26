@@ -153,6 +153,15 @@ fn thermal_observation_preflight_accounts_catalog_and_combined_ceiling() {
             step,
             &mesh,
             &workload.solve_schedule().unwrap(),
+            &crate::admission::admit_nonstructural(
+                runmat_analysis_core::PhysicsFamily::Thermal,
+                workload.procedure.procedure(),
+                Some(&mesh),
+                runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+                runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+                workload.formulation_requirement,
+            )
+            .unwrap(),
         )
         .unwrap()
         .reservation_bytes()

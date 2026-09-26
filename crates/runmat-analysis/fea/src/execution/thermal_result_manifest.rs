@@ -18,6 +18,7 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 #[path = "thermal_result_manifest_tests.rs"]
 mod tests;
 
+mod admission_profile;
 mod profile;
 pub use profile::ThermalResultEncodingProfile;
 

@@ -1,4 +1,5 @@
 mod identity;
+mod nonstructural;
 mod realizations;
 mod registry;
 mod structural;
@@ -12,6 +13,7 @@ use runmat_analysis_core::{
 use serde::{Deserialize, Serialize};
 
 pub use identity::AnalysisRunIdentity;
+pub use nonstructural::admit_nonstructural;
 pub use realizations::{registered_formulations, RegisteredFormulation};
 pub use structural::{
     structural_exact_realization, thermomechanical_exact_realization, StructuralRealizationInput,

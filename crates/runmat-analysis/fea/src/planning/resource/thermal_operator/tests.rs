@@ -185,6 +185,15 @@ fn thermal_numerical_reservation_is_enforced_before_solve() {
         &workload.model.sequence.steps[0],
         &mesh,
         &workload.solve_schedule().unwrap(),
+        &crate::admission::admit_nonstructural(
+            runmat_analysis_core::PhysicsFamily::Thermal,
+            workload.procedure.procedure(),
+            Some(&mesh),
+            runmat_analysis_core::SourceImplementation::CanonicalVolumeProjection,
+            runmat_analysis_core::BoundaryTransferImplementation::CanonicalBoundaryProjection,
+            workload.formulation_requirement,
+        )
+        .unwrap(),
     )
     .unwrap()
     .reservation_bytes()
