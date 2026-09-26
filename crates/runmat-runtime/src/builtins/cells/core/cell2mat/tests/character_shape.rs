@@ -2,6 +2,22 @@ use super::*;
 use runmat_value::{CharArray, Tensor};
 
 #[test]
+fn nd_cell_grid_positions_follow_semantic_linear_order() {
+    for shape in [vec![2, 2], vec![2, 2, 2], vec![2, 1, 2, 3]] {
+        let expected = (1..=shape.iter().product::<usize>())
+            .map(|n| n as f64)
+            .collect::<Vec<_>>();
+        let values = expected.iter().copied().map(Value::Num).collect();
+        let cells = runmat_value::CellArray::from_column_major(values, shape.clone()).unwrap();
+        let Value::Tensor(result) = run(Value::Cell(cells)).unwrap() else {
+            panic!("numeric result")
+        };
+        assert_eq!(result.shape, shape);
+        assert_eq!(result.materialize_f64(), expected);
+    }
+}
+
+#[test]
 fn nd_character_contents_are_rejected_without_truncating_shape() {
     let chars = CharArray::new_with_shape(vec!['a', 'b', 'c', 'd'], vec![1, 2, 2]).unwrap();
     let cell = crate::make_cell(vec![Value::CharArray(chars)], 1, 1).unwrap();

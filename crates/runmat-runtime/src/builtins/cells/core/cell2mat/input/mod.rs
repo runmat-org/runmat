@@ -54,7 +54,7 @@ pub(super) async fn gather(
 ) -> BuiltinResult<(ElementKind, Vec<CellEntry>)> {
     let mut entries = Vec::with_capacity(cells.data.len());
     let mut kind = None;
-    for value in &cells.data {
+    for value in cells.iter_column_major() {
         let entry = parse::value(gather_if_needed_async(value).await?)?;
         if entry.len() > 0 {
             if kind.is_some_and(|expected| expected != entry.kind) {
