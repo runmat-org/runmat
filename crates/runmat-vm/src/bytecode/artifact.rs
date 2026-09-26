@@ -11,3 +11,7 @@ pub use error::{InterpreterPayloadError, InterpreterPayloadForm, InterpreterRevi
 #[cfg(test)]
 #[path = "artifact/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "artifact/float_tests.rs"]
+mod float_tests;

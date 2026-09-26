@@ -31,7 +31,9 @@ pub enum FunctionArgValidator {
     ScalarOrEmpty,
     Real,
     Integer,
-    Vector { allow_all_empties: bool },
+    Vector {
+        allow_all_empties: bool,
+    },
     Positive,
     Negative,
     Nonnegative,
@@ -44,11 +46,15 @@ pub enum FunctionArgValidator {
     ValidVariableName,
     UnderlyingType(Vec<String>),
     Member(Vec<FunctionArgValidationLiteral>),
-    InRange(f64, f64, FunctionArgRangeInclusivity),
-    GreaterThanOrEqual(f64),
-    LessThanOrEqual(f64),
-    GreaterThan(f64),
-    LessThan(f64),
+    InRange(
+        #[serde(with = "crate::serde_f64")] f64,
+        #[serde(with = "crate::serde_f64")] f64,
+        FunctionArgRangeInclusivity,
+    ),
+    GreaterThanOrEqual(#[serde(with = "crate::serde_f64")] f64),
+    LessThanOrEqual(#[serde(with = "crate::serde_f64")] f64),
+    GreaterThan(#[serde(with = "crate::serde_f64")] f64),
+    LessThan(#[serde(with = "crate::serde_f64")] f64),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
@@ -81,7 +87,7 @@ impl FunctionArgRangeInclusivity {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgValidationLiteral {
-    Number(f64),
+    Number(#[serde(with = "crate::serde_f64")] f64),
     Integer(IntegerLiteral),
     Text(String),
     Bool(bool),
@@ -89,7 +95,7 @@ pub enum FunctionArgValidationLiteral {
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub enum FunctionArgDefaultValue {
-    Number(f64),
+    Number(#[serde(with = "crate::serde_f64")] f64),
     Integer(IntegerLiteral),
     Bool(bool),
     String(String),

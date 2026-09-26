@@ -78,8 +78,9 @@ pub async fn execute_benchmark(
                     });
                 }
                 eprintln!(
-                    "{}: {error}",
-                    presentation::stderr().error("Benchmark error")
+                    "{}: {}",
+                    presentation::stderr().error("Benchmark error"),
+                    benchmark_error_display(&outcome.diagnostics)
                 );
                 return Err(AlreadyReportedCliError.into());
             }
@@ -177,7 +178,10 @@ pub async fn execute_benchmark(
                     provider: capture_provider_snapshot(),
                 });
             }
-            error!("Benchmark iteration {i} failed: {error}");
+            error!(
+                "Benchmark iteration {i} failed: {}",
+                benchmark_error_display(&outcome.diagnostics)
+            );
             return Err(AlreadyReportedCliError.into());
         }
 
@@ -237,6 +241,19 @@ pub async fn execute_benchmark(
     Ok(())
 }
 
+fn benchmark_error_display(diagnostics: &[runmat_core::abi::RuntimeDiagnostic]) -> String {
+    match diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    {
+        Some(diagnostic) if !diagnostic.message.is_empty() => {
+            format!("{}: {}", diagnostic.code, diagnostic.message)
+        }
+        Some(diagnostic) => diagnostic.code.clone(),
+        None => "runtime_error".to_string(),
+    }
+}
+
 fn resolve_benchmark_input(file: PathBuf) -> Result<PathBuf> {
     let cwd = std::env::current_dir().context("failed to resolve current working directory")?;
     resolve_project_source_input_from(&cwd, &file).map_err(|err| match err {
@@ -252,10 +269,37 @@ fn resolve_benchmark_input(file: PathBuf) -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_benchmark_input;
+    use super::{benchmark_error_display, resolve_benchmark_input};
     use crate::test_support::ScopedCurrentDir;
     use std::fs;
     use std::path::PathBuf;
+
+    #[test]
+    fn benchmark_errors_display_message_without_changing_stable_code() {
+        use runmat_core::abi::{DiagnosticSeverity, RuntimeDiagnostic};
+        let mut diagnostic = RuntimeDiagnostic {
+            code: "RunMat:NativeExecution".to_string(),
+            severity: DiagnosticSeverity::Error,
+            message: "native value reference is stale or invalid".to_string(),
+            span: None,
+            callstack: Vec::new(),
+            callstack_elided: 0,
+        };
+        let mut warning = diagnostic.clone();
+        warning.severity = DiagnosticSeverity::Warning;
+        warning.message = "not the failure".to_string();
+        assert_eq!(
+            benchmark_error_display(&[warning, diagnostic.clone()]),
+            "RunMat:NativeExecution: native value reference is stale or invalid"
+        );
+        assert_eq!(diagnostic.code, "RunMat:NativeExecution");
+        diagnostic.message.clear();
+        assert_eq!(
+            benchmark_error_display(&[diagnostic]),
+            "RunMat:NativeExecution"
+        );
+        assert_eq!(benchmark_error_display(&[]), "runtime_error");
+    }
 
     #[test]
     fn resolves_named_entrypoint_to_manifest_path_target() {

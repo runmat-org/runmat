@@ -5,6 +5,7 @@ pub mod fact;
 pub mod identity;
 pub mod integer_literal;
 pub mod rules;
+pub mod serde_f64;
 pub mod source;
 pub mod symbolic;
 pub mod version;

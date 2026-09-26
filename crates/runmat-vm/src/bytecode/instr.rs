@@ -191,7 +191,7 @@ pub enum EmitLabel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PropertyDefaultLiteral {
-    Num(f64),
+    Num(#[serde(with = "runmat_types::serde_f64")] f64),
     Int(IntValue),
     Bool(bool),
     String(String),
@@ -221,9 +221,12 @@ pub struct BytecodeClassMethod {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     // Constant and variable loads.
-    LoadConst(f64),
+    LoadConst(#[serde(with = "runmat_types::serde_f64")] f64),
     LoadInt(IntValue),
-    LoadComplex(f64, f64),
+    LoadComplex(
+        #[serde(with = "runmat_types::serde_f64")] f64,
+        #[serde(with = "runmat_types::serde_f64")] f64,
+    ),
     LoadBool(bool),
     LoadString(String),
     LoadCharRow(String),

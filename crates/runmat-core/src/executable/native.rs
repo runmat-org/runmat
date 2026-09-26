@@ -341,6 +341,70 @@ mod tests {
     use crate::{ExecutableSource, RunMatSession};
 
     #[test]
+    fn native_capture_retention_preserves_nonfinite_literals_before_pruning() {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-nonfinite-capture@1",
+                "nonfinite_retention.m",
+                r#"
+helper(1)
+function output = helper(input)
+  output = input + Inf;
+  function output = unused_nested(input)
+    output = input + NaN;
+  end
+end
+"#,
+            ),
+            None,
+        ))
+        .expect("compile nonfinite capture fixture");
+        let retained = unit
+            .reachability_report()
+            .retained_function_ids()
+            .map(|function| runmat_types::ProgramFunctionId(u32::try_from(function).unwrap()))
+            .collect::<BTreeSet<_>>();
+        let input = unit
+            .prepare_native_compilation()
+            .expect("capture all functions");
+        let complete = runmat_vm::decode_interpreter_program_v2(&input.program_capture)
+            .expect("decode before pruning unreachable nonfinite function");
+        let constants = |registry: &runmat_vm::FunctionRegistry| {
+            registry
+                .functions
+                .values()
+                .flat_map(|function| &function.instructions)
+                .filter_map(|instruction| match instruction {
+                    runmat_vm::Instr::LoadConst(value) => Some(value.to_bits()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let complete_constants = constants(&complete);
+        assert!(complete_constants.contains(&f64::INFINITY.to_bits()));
+        assert!(complete_constants
+            .iter()
+            .any(|bits| f64::from_bits(*bits).is_nan()));
+        let input = input
+            .retain_functions(&retained)
+            .expect("retain reachable functions");
+        let registry = runmat_vm::decode_interpreter_program_v2(&input.program_capture)
+            .expect("decode retained native capture");
+        assert!(registry.names.contains_key("helper"));
+        assert!(!registry.names.contains_key("unused_nested"));
+        let retained_constants = constants(&registry);
+        assert!(retained_constants.contains(&f64::INFINITY.to_bits()));
+        assert!(!retained_constants
+            .iter()
+            .any(|bits| f64::from_bits(*bits).is_nan()));
+        assert_eq!(
+            runmat_vm::encode_interpreter_program_v2(&registry).unwrap(),
+            input.program_capture
+        );
+    }
+
+    #[test]
     fn native_retention_prunes_code_analysis_contracts_and_registry_together() {
         let mut session = RunMatSession::with_options(false, false).expect("session init");
         let unit = block_on(session.compile_executable_unit(

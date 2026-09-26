@@ -123,7 +123,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions {
                 source: concat!(
-                    "assert(all(isinf(gather(A(:))))); ",
+                    "host = gather(A); prototype = gather(G); ",
+                    "assert(all(isinf(host(:)))); ",
+                    "assert(strcmp(class(host), class(prototype))); ",
                     "assert(isequal(size(A), [2 2])); ",
                     "assert(isgpuarray(A));",
                 ),
