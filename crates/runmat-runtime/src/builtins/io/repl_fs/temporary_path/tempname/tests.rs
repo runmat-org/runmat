@@ -62,3 +62,31 @@ fn rejects_invalid_inputs_before_filesystem_access() {
         assert_eq!(run(arguments).expect_err("error").message(), message);
     }
 }
+
+#[test]
+fn nd_characters_are_not_flattened_into_a_folder() {
+    let folder =
+        Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
+    assert_eq!(
+        run(vec![folder]).unwrap_err().identifier(),
+        Some("RunMat:tempname:InvalidFolder")
+    );
+}
+
+#[test]
+fn fixed_output_counts_reject_without_selecting_a_path() {
+    for name in ["tempdir", "tempname", "pathsep"] {
+        let error =
+            futures::executor::block_on(crate::call_builtin_async_with_outputs(name, &[], 2))
+                .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            Some(format!("RunMat:{name}:TooManyOutputs").as_str())
+        );
+    }
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    assert_eq!(
+        run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
+        Some("RunMat:tempname:InvalidFolder")
+    );
+}

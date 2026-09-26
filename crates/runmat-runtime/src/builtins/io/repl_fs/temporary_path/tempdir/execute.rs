@@ -6,6 +6,11 @@ use super::super::{error, output};
 const IDENTITY: &str = "tempdir";
 
 pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::TEMPDIR_DESCRIPTOR,
+        &runmat_builtins::TEMPDIR_ERROR_TOO_MANY_OUTPUTS,
+        IDENTITY,
+    )?;
     if !args.is_empty() {
         return Err(error::builtin(IDENTITY, &TEMPDIR_ERROR_TOO_MANY_INPUTS));
     }
