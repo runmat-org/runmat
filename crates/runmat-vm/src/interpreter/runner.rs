@@ -194,6 +194,7 @@ async fn invoke_semantic_function_value_with_input_residency(
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(invoke_semantic_function_value_with_input_residency_inner(
             function,
@@ -448,6 +449,7 @@ pub async fn interpret_with_vars_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_with_vars_inner(
@@ -466,11 +468,20 @@ pub async fn interpret_resume_in_context(
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> VmResult<InterpreterOutcome> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(runmat_runtime::data::with_tx_registry_scope(
             interpret_resume_inner(bytecode, resume, current_function_name, runtime.clone()),
         ))
         .await
+}
+
+fn with_default_acceleration_service(
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> runmat_runtime::context::RuntimeContext {
+    #[cfg(feature = "native-accel")]
+    let runtime = runmat_accelerate::native_auto::install_preparation_service(runtime);
+    runtime
 }
 
 /// Install immutable bytecode metadata that native execution does not visit as
@@ -1506,6 +1517,7 @@ async fn interpret_function_with_counts_in_context(
     missing_input_slots: HashSet<usize>,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let runtime = with_default_acceleration_service(runtime);
     runtime
         .scope(interpret_function_with_counts_in_context_inner(
             bytecode,
