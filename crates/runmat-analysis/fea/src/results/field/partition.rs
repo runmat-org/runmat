@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 
 mod profile;
 
+#[cfg(test)]
+mod tests;
+
 use super::{
     RecoveredField, RecoveredFieldDefinition, RecoveredFieldError, RecoveredFieldIdentity,
     RecoveredFieldSample, RecoveredFieldView,
@@ -191,6 +194,7 @@ impl RecoveredFieldPartition {
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
         self.definition.validate()?;
         self.sample.validate()?;
+        self.definition.validate_storage_shape(&self.storage)?;
         let expected_shape = self.definition.storage_shape(self.source_indices.len())?;
         if self.schema_version != 1
             || self.source_indices.is_empty()
@@ -198,7 +202,6 @@ impl RecoveredFieldPartition {
                 .source_indices
                 .windows(2)
                 .any(|pair| pair[0] >= pair[1])
-            || self.storage.field_id != self.definition.field_id()
             || self.storage.shape != expected_shape
             || self
                 .storage

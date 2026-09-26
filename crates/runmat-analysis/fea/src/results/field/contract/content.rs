@@ -65,26 +65,7 @@ impl RecoveredField {
     ) -> Result<RecoveredFieldIdentity, RecoveredFieldError> {
         definition.validate()?;
         sample.validate()?;
-        if storage.field_id != definition.field_id {
-            return Err(RecoveredFieldError::StorageIdentifierMismatch);
-        }
-        let expected = storage
-            .shape
-            .iter()
-            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
-        let actual = match &storage.values {
-            AnalysisFieldValues::HostF64(values) => values.len(),
-            AnalysisFieldValues::DeviceRef(reference) => reference.element_count,
-        };
-        let entity_count = storage
-            .shape
-            .first()
-            .copied()
-            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
-        if expected != actual || storage.shape != definition.storage_shape(entity_count)? {
-            return Err(RecoveredFieldError::StorageShapeMismatch);
-        }
+        definition.validate_storage_shape(storage)?;
         encode_contract(
             FIELD_PREFIX,
             "recovered-field-identity",
@@ -109,5 +90,35 @@ impl RecoveredField {
 
     fn derive_identity(&self) -> Result<RecoveredFieldIdentity, RecoveredFieldError> {
         Self::identity_for(&self.definition, self.sample, &self.storage)
+    }
+}
+
+impl RecoveredFieldDefinition {
+    /// Shared storage cardinality boundary for complete fields and compact partitions.
+    pub(crate) fn validate_storage_shape(
+        &self,
+        storage: &AnalysisField,
+    ) -> Result<(), RecoveredFieldError> {
+        if storage.field_id != self.field_id {
+            return Err(RecoveredFieldError::StorageIdentifierMismatch);
+        }
+        let expected = storage
+            .shape
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+        let actual = match &storage.values {
+            AnalysisFieldValues::HostF64(values) => values.len(),
+            AnalysisFieldValues::DeviceRef(reference) => reference.element_count,
+        };
+        let entity_count = storage
+            .shape
+            .first()
+            .copied()
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
+        if expected != actual || storage.shape != self.storage_shape(entity_count)? {
+            return Err(RecoveredFieldError::StorageShapeMismatch);
+        }
+        Ok(())
     }
 }
