@@ -17,14 +17,6 @@ use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(feature = "native-accel")]
-fn map_prepare_builtin_args_error(err: impl std::fmt::Display) -> RuntimeError {
-    mex(
-        "AccelerationOperationFailed",
-        &format!("prepare builtin args: {err}"),
-    )
-}
-
 #[derive(Clone, Copy)]
 enum VmIntrinsicBuiltin {
     Nargin,
@@ -1378,14 +1370,5 @@ mod tests {
         // The f64 mirror is intentionally plausible but must never decide an
         // integer-only argument bound.
         assert!(parse_finite_arity_bound(&Value::Tensor(tensor), "narginchk", "minArgs",).is_err());
-    }
-
-    #[cfg(feature = "native-accel")]
-    #[test]
-    fn prepare_builtin_args_error_maps_to_accel_identifier() {
-        let err = super::map_prepare_builtin_args_error("boom");
-        assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
-        assert!(err.message().contains("prepare builtin args"));
-        assert!(err.message().contains("boom"));
     }
 }

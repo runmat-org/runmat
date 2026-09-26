@@ -40,9 +40,7 @@ use runmat_value::{Tensor, Value};
 use serde::{Deserialize, Serialize};
 
 mod builtin_call;
-pub use builtin_call::{
-    prepare_builtin_call, BuiltinCallGuard, BuiltinCallObservation, PreparedBuiltinCall,
-};
+pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
 const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;

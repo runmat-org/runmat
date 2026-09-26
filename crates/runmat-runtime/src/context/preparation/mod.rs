@@ -36,7 +36,7 @@ pub async fn prepare_admitted(
 /// Keep ownership/observation alive across every poll of the admitted body.
 /// Returned aliases are visible to the service's completion/adoption hook.
 /// Dropping this future (including cancellation) records an abort, not success.
-pub async fn execute_prepared<F, Fut>(
+pub(crate) async fn execute_prepared<F, Fut>(
     mut prepared: PreparedBuiltinOperands,
     execute: F,
 ) -> Result<Value, RuntimeError>
@@ -46,11 +46,11 @@ where
 {
     prepared.begin_execution();
     let result = execute(prepared.take_operands()).await;
-    prepared.finish(&result);
+    prepared.finish(&result)?;
     result
 }
 
-pub async fn execute_admitted<F, Fut>(
+pub(crate) async fn execute_admitted<F, Fut>(
     context: &RuntimeContext,
     request: AdmittedBuiltinPreparation,
     execute: F,
@@ -65,7 +65,7 @@ where
 /// Transitional adapter for the existing args-only builtin ABI. S2/L23 owns
 /// eliminating this single ambient lookup when bindings carry explicit context.
 /// No context or session is fabricated for direct runtime calls.
-pub async fn execute_current_invocation<F, Fut>(
+pub(crate) async fn execute_current_invocation<F, Fut>(
     admission: BuiltinPreparationAdmission,
     operands: Vec<Value>,
     execute: F,

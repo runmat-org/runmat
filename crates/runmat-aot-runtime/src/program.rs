@@ -190,7 +190,7 @@ fn isolated_runtime(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
     let ports = runtime.service_ports().clone().without_workspace();
-    runtime.with_service_ports(ports)
+    runmat_accelerate::native_auto::install_preparation_service(runtime.with_service_ports(ports))
 }
 
 fn normalize_outputs(

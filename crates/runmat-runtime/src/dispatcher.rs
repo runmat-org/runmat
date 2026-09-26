@@ -337,25 +337,46 @@ async fn call_builtin_async_impl(
     let implementations = matching_bindings
         .into_iter()
         .rev()
-        .map(|binding| binding.implementation)
+        .map(|binding| (false, binding.implementation))
         .chain(
             no_category
                 .into_iter()
                 .rev()
                 .chain(categorized.into_iter().rev())
-                .map(|builtin| builtin.implementation),
+                .map(|builtin| (true, builtin.implementation)),
         );
 
     // Try each builtin until one succeeds. Within each group, prefer later-registered
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
-    for implementation in implementations {
+    for (legacy, implementation) in implementations {
+        // Resolve methods and scoped overrides before legacy preparation. This
+        // bridge preserves the old transfer contract only for selected inventory
+        // implementations; canonical bodies own their admitted preparation.
+        let prepared = if legacy {
+            if let Some(context) = crate::context::legacy::active() {
+                if let Some(service) = context.service_ports().acceleration().cloned() {
+                    Some(
+                        service
+                            .prepare_legacy(context, name.to_owned(), args.to_vec())
+                            .await?,
+                    )
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let execution_args = prepared.as_deref().unwrap_or(args);
         let f = implementation;
-        match (f)(args).await {
+        match (f)(execution_args).await {
             Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
-                if should_retry_with_gpu_gather(&err, args) {
-                    match gather_args_for_retry_async(args).await {
+                if should_retry_with_gpu_gather(&err, execution_args) {
+                    match gather_args_for_retry_async(execution_args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => {
                                 return compatibility_checked_builtin_result(name, args, result);
@@ -1104,6 +1125,8 @@ async fn gather_args_for_retry_async(args: &[Value]) -> Result<Option<Vec<Value>
 
 #[cfg(test)]
 mod gpu_visit_tests;
+#[cfg(test)]
+mod preparation_tests;
 #[cfg(test)]
 mod tests {
     use super::{

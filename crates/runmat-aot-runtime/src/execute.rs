@@ -198,7 +198,7 @@ fn standalone_runtime(
     };
     runtime.set_language_mode(mode);
     runtime.set_runmat_extensions_enabled(matches!(mode, RuntimeLanguageMode::RunMat));
-    runtime
+    runmat_accelerate::native_auto::install_preparation_service(runtime)
 }
 
 #[cfg(test)]

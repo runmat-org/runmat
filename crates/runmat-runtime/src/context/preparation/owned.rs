@@ -6,12 +6,14 @@ use runmat_value::Value;
 /// No timing assumptions are imposed by the runtime.
 pub trait BuiltinPreparationObservation {
     fn begin_execution(&mut self) {}
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>);
+    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError>;
     fn abort(self: Box<Self>);
 }
 
 /// This carrier deliberately has no Clone or into-values escape hatch: a pending
 /// observation cannot accidentally outlive or detach from its execution scope.
+/// Its operands are consumed only by private admitted runtime bodies, never by
+/// an embedding caller's arbitrary callback that could publish temporary aliases.
 pub struct PreparedBuiltinOperands {
     operands: Vec<Value>,
     observation: Option<Box<dyn BuiltinPreparationObservation>>,
@@ -32,7 +34,7 @@ impl PreparedBuiltinOperands {
         Self::new(operands, None)
     }
 
-    pub fn operands(&self) -> &[Value] {
+    pub(crate) fn operands(&self) -> &[Value] {
         &self.operands
     }
 
@@ -46,10 +48,14 @@ impl PreparedBuiltinOperands {
         }
     }
 
-    pub(super) fn finish(&mut self, result: &Result<Value, RuntimeError>) {
+    pub(super) fn finish(
+        &mut self,
+        result: &Result<Value, RuntimeError>,
+    ) -> Result<(), RuntimeError> {
         if let Some(observation) = self.observation.take() {
-            observation.finish(result);
+            observation.finish(result)?;
         }
+        Ok(())
     }
 }
 

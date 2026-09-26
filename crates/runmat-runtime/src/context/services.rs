@@ -131,6 +131,18 @@ pub trait RuntimeErrorService {
 pub trait RuntimeAccelerationService {
     fn supports_operation(&self, operation: &str) -> bool;
 
+    /// Transitional transfer-ownership preparation for an already selected
+    /// inventory implementation. Never applies to canonical or overridden calls.
+    /// L23 removes this port once their owning domains declare admitted forms.
+    fn prepare_legacy(
+        &self,
+        _context: super::RuntimeContext,
+        _name: String,
+        args: Vec<Value>,
+    ) -> RuntimeServiceFuture<Result<Vec<Value>, RuntimeError>> {
+        Box::pin(async move { Ok(args) })
+    }
+
     /// Called only after the owning domain has admitted the complete call.
     /// Controls and parsed options remain in that domain, never in this service.
     /// Implementations must guard fresh resources across preparation itself:
@@ -140,7 +152,8 @@ pub trait RuntimeAccelerationService {
         &self,
         _context: super::RuntimeContext,
         request: super::preparation::AdmittedBuiltinPreparation,
-    ) -> RuntimeServiceFuture<Result<super::preparation::PreparedBuiltinOperands, RuntimeError>> {
+    ) -> RuntimeServiceFuture<Result<super::preparation::PreparedBuiltinOperands, RuntimeError>>
+    {
         Box::pin(async move {
             Ok(super::preparation::PreparedBuiltinOperands::passthrough(
                 request.into_operands(),

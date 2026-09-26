@@ -238,14 +238,35 @@ fn malformed_selected_signature_returns_error_without_panicking() {
 
 type Events = Rc<RefCell<Vec<&'static str>>>;
 struct Observation(Events);
+
+struct RejectedCompletion;
+impl BuiltinPreparationObservation for RejectedCompletion {
+    fn finish(self: Box<Self>, _: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
+        Err(RuntimeError::new(
+            "result ownership could not be established",
+        ))
+    }
+    fn abort(self: Box<Self>) {}
+}
+
+#[test]
+fn failed_completion_does_not_publish_a_successful_body_result() {
+    let prepared = PreparedBuiltinOperands::new(vec![], Some(Box::new(RejectedCompletion)));
+    let result = futures::executor::block_on(execute_prepared(prepared, |_| async {
+        Ok(Value::Num(42.))
+    }));
+    assert!(result.is_err());
+}
+
 impl BuiltinPreparationObservation for Observation {
     fn begin_execution(&mut self) {
         self.0.borrow_mut().push("begin");
     }
-    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) {
+    fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError> {
         self.0
             .borrow_mut()
             .push(if result.is_ok() { "success" } else { "error" });
+        Ok(())
     }
     fn abort(self: Box<Self>) {
         self.0.borrow_mut().push("abort");
