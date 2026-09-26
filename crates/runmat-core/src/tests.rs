@@ -2,6 +2,9 @@ use crate::*;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_workspace_reconciliation.rs"]
 mod native_workspace_reconciliation;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_optional_profile.rs"]
+mod native_optional_profile;
 
 use futures::executor::block_on;
 use std::path::{Path, PathBuf};

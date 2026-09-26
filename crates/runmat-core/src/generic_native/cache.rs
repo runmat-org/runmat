@@ -123,7 +123,7 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        invocation_profile: &RepresentationProfile,
+        invocation_profile: Option<&RepresentationProfile>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
@@ -133,10 +133,15 @@ impl GenericNativeCache {
         let availability = self
             .entries
             .availability(&key, &current, self.pending.len());
-        match self.tiering.decide(&site, &availability) {
-            TierDecision::Interpret => Ok(None),
-            TierDecision::ExecuteGeneric => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::ExecuteSpecialized { profile }
+        let decision = if invocation_profile.is_some() {
+            self.tiering.decide(&site, &availability)
+        } else {
+            self.tiering.decide_generic(&site, &availability)
+        };
+        match (decision, invocation_profile) {
+            (TierDecision::Interpret, _) => Ok(None),
+            (TierDecision::ExecuteGeneric, _) => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::ExecuteSpecialized { profile }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 Ok(self
@@ -144,8 +149,10 @@ impl GenericNativeCache {
                     .resolve_specialized(&key, profile, &current)
                     .or_else(|| self.entries.resolve(&key, &current)))
             }
-            TierDecision::ExecuteSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::CompileGeneric { mode } => {
+            (TierDecision::ExecuteSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
+            (TierDecision::CompileGeneric { mode }, _) => {
                 let compilation = CompilationKey {
                     entry: key.clone(),
                     tier: CompilationTier::Generic,
@@ -194,7 +201,7 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { profile, mode }
+            (TierDecision::CompileSpecialized { profile, mode }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 let compilation = CompilationKey {
@@ -234,7 +241,9 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::CompileSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
         }
     }
 
@@ -242,14 +251,16 @@ impl GenericNativeCache {
         &self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
         elapsed_ns: u64,
     ) -> Result<(), runmat_runtime::RuntimeError> {
         let key = entry_key(unit, preferred_function);
         let site = tier_site(unit, preferred_function, &key)?;
-        self.tiering
-            .observe_invocation(site, profile, elapsed_ns)
-            .map_err(|error| super::error::stage("NativeTierFeedback", error))
+        match profile {
+            Some(profile) => self.tiering.observe_invocation(site, profile, elapsed_ns),
+            None => self.tiering.observe_unprofiled_invocation(site, elapsed_ns),
+        }
+        .map_err(|error| super::error::stage("NativeTierFeedback", error))
     }
 
     pub(crate) fn observe_loop_backedges(
@@ -285,9 +296,12 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
     ) -> Result<Option<(PublishedEntry, runmat_types::ProgramPointId)>, runmat_runtime::RuntimeError>
     {
+        let Some(profile) = profile else {
+            return Ok(None);
+        };
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
         self.publish_completed(&current)?;

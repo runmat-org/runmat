@@ -97,7 +97,7 @@ impl RunMatSession {
         unit: &crate::ExecutableUnit,
     ) -> Option<(
         runmat_native_executor::execute::NativeWorkspaceInput,
-        runmat_jit::tiering::RepresentationProfile,
+        Option<runmat_jit::tiering::RepresentationProfile>,
     )> {
         if !self.native_tiering_enabled {
             return None;
@@ -132,9 +132,12 @@ impl RunMatSession {
             bindings,
         };
         let profile_values = workspace.profile_values();
-        self.generic_native_cache
-            .representation_profile(&profile_values)
-            .map(|profile| (workspace, profile))
+        let profile = self
+            .generic_native_cache
+            .representation_profile(&profile_values);
+        // Generic execution and feedback do not require a bounded specialization
+        // profile. The complete workspace still reaches native execution.
+        Some((workspace, profile))
     }
 
     /// Execute only an already-admitted native product. `None` preserves the
@@ -145,7 +148,7 @@ impl RunMatSession {
         &mut self,
         unit: &crate::ExecutableUnit,
         workspace: &runmat_native_executor::execute::NativeWorkspaceInput,
-        profile: &runmat_jit::tiering::RepresentationProfile,
+        profile: Option<&runmat_jit::tiering::RepresentationProfile>,
     ) -> std::result::Result<Option<crate::generic_native::NativeExecution>, RuntimeError> {
         let published = self
             .generic_native_cache
@@ -191,7 +194,7 @@ impl RunMatSession {
     pub(super) fn observe_tiered_interactive(
         &self,
         unit: &crate::ExecutableUnit,
-        profile: &runmat_jit::tiering::RepresentationProfile,
+        profile: Option<&runmat_jit::tiering::RepresentationProfile>,
         elapsed: std::time::Duration,
         backedges: &BTreeMap<runmat_types::ProgramPointId, u64>,
     ) {
@@ -219,19 +222,17 @@ impl RunMatSession {
         if !self.native_tiering_enabled {
             return self.invoke_entrypoint_interpreted(unit).await;
         }
-        let Some(profile) = self.generic_native_cache.representation_profile(&[]) else {
-            return self.invoke_entrypoint_interpreted(unit).await;
-        };
+        let profile = self.generic_native_cache.representation_profile(&[]);
         let started = std::time::Instant::now();
-        let published = self
-            .generic_native_cache
-            .resolve_or_schedule(unit, None, &profile)?;
+        let published =
+            self.generic_native_cache
+                .resolve_or_schedule(unit, None, profile.as_ref())?;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
         {
             self.generic_native_cache
-                .resolve_or_schedule_osr(unit, None, &profile)?
+                .resolve_or_schedule_osr(unit, None, profile.as_ref())?
         } else {
             None
         };
@@ -282,7 +283,7 @@ impl RunMatSession {
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             None,
-            &profile,
+            profile.as_ref(),
             runmat_time::duration_ns_saturating(started.elapsed()),
         ) {
             log::warn!("native tier feedback was not recorded: {error}");
@@ -310,21 +311,17 @@ impl RunMatSession {
                 .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
                 .await;
         }
-        let Some(profile) = self.generic_native_cache.representation_profile(&arguments) else {
-            return self
-                .invoke_procedure_interpreted(unit, function, arguments, requested_outputs)
-                .await;
-        };
+        let profile = self.generic_native_cache.representation_profile(&arguments);
         let started = std::time::Instant::now();
         let published =
             self.generic_native_cache
-                .resolve_or_schedule(unit, Some(name), &profile)?;
+                .resolve_or_schedule(unit, Some(name), profile.as_ref())?;
         let osr = if published
             .as_ref()
             .is_some_and(|entry| matches!(entry.tier, runmat_jit::entry::PublishedTier::Generic))
         {
             self.generic_native_cache
-                .resolve_or_schedule_osr(unit, Some(name), &profile)?
+                .resolve_or_schedule_osr(unit, Some(name), profile.as_ref())?
         } else {
             None
         };
@@ -376,7 +373,7 @@ impl RunMatSession {
         if let Err(error) = self.generic_native_cache.observe_invocation(
             unit,
             Some(name),
-            &profile,
+            profile.as_ref(),
             runmat_time::duration_ns_saturating(started.elapsed()),
         ) {
             log::warn!("native tier feedback was not recorded: {error}");
