@@ -109,6 +109,85 @@ fn domain_admitted_output_count_including_padding_is_preserved() {
     }
 }
 
+struct OutputCountService {
+    admitted: Rc<RefCell<Vec<Option<usize>>>>,
+    events: Events,
+}
+
+impl RuntimeAccelerationService for OutputCountService {
+    fn supports_operation(&self, _: &str) -> bool {
+        true
+    }
+
+    fn prepare_admitted(
+        &self,
+        _: RuntimeContext,
+        request: AdmittedBuiltinPreparation,
+    ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
+        self.admitted
+            .borrow_mut()
+            .push(request.admission().requested_outputs);
+        self.events.borrow_mut().push("prepare");
+        let observation = Observation(self.events.clone());
+        Box::pin(async move {
+            Ok(PreparedBuiltinOperands::new(
+                request.into_operands(),
+                Some(Box::new(observation)),
+            ))
+        })
+    }
+}
+
+#[test]
+fn admitted_zero_and_padded_outputs_execute_body_once_with_and_without_service() {
+    for installed in [false, true] {
+        for requested_outputs in [None, Some(0), Some(1), Some(4)] {
+            let admitted = Rc::new(RefCell::new(Vec::new()));
+            let events = Events::default();
+            let mut context = context();
+            if installed {
+                context = context.with_service_ports(
+                    RuntimeServicePorts::default().with_acceleration(Rc::new(OutputCountService {
+                        admitted: admitted.clone(),
+                        events: events.clone(),
+                    })),
+                );
+            }
+            let request = request_with(
+                BuiltinPreparationAdmission {
+                    requested_outputs,
+                    ..admission()
+                },
+                vec![Value::Num(3.0)],
+            )
+            .unwrap();
+            // The domain, not preparation, owns output construction/padding.
+            // Zero outputs must still invoke its effectful admitted body once.
+            let domain_result =
+                Value::OutputList(vec![Value::Num(3.0); requested_outputs.unwrap_or(1)]);
+            let expected = domain_result.clone();
+            let body_events = events.clone();
+            let result = block_on(execute_admitted(&context, request, |operands| async move {
+                body_events.borrow_mut().push("body");
+                assert_eq!(operands, vec![Value::Num(3.0)]);
+                Ok(domain_result)
+            }))
+            .unwrap();
+            assert_eq!(result, expected);
+            if installed {
+                assert_eq!(*admitted.borrow(), vec![requested_outputs]);
+                assert_eq!(
+                    *events.borrow(),
+                    vec!["prepare", "begin", "body", "success"]
+                );
+            } else {
+                assert!(admitted.borrow().is_empty());
+                assert_eq!(*events.borrow(), vec!["body"]);
+            }
+        }
+    }
+}
+
 #[test]
 fn ambiguous_selected_form_or_binding_is_rejected() {
     let mut entry = SIN_CATALOG_ENTRY;
