@@ -28,6 +28,7 @@ pub const DECOMPOSITION_UPLUS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalo
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Host,

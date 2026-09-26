@@ -28,6 +28,7 @@ pub const DECOMPOSITION_UMINUS_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Host,

@@ -1,6 +1,9 @@
 use runmat_types::NumericClass;
 use serde::Serialize;
 
+mod preparation;
+pub use preparation::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinPortability {
     NativeAndWasm,
@@ -70,6 +73,8 @@ impl BuiltinDistributedMapContract {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct BuiltinPlacementContract {
+    /// Operand preparation is independent of inference and backend eligibility.
+    pub preparation: BuiltinOperandPreparation,
     pub portability: BuiltinPortability,
     pub accelerator: BuiltinAcceleratorPolicy,
     pub residency: BuiltinResidencyPolicy,

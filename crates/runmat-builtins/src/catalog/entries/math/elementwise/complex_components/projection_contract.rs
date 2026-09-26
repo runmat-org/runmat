@@ -90,6 +90,7 @@ macro_rules! define_component_projection {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::PreserveInputs,

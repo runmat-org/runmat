@@ -162,6 +162,7 @@ macro_rules! define_equality {
                 ],
             },
             placement: crate::BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::GatherToHost,

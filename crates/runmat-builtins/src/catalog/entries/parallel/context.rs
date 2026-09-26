@@ -51,6 +51,7 @@ const SIZE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &[],
 };
 const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
+    preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
     portability: BuiltinPortability::NativeAndWasm,
     accelerator: BuiltinAcceleratorPolicy::Forbidden,
     residency: BuiltinResidencyPolicy::Host,

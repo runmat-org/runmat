@@ -33,6 +33,7 @@ pub const NUM_ARGUMENTS_FROM_SUBSCRIPT_CATALOG_ENTRY: BuiltinCatalogEntry = Buil
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

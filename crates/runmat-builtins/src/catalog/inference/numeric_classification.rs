@@ -205,6 +205,7 @@ mod tests {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::PreserveInputs,

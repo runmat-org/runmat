@@ -81,6 +81,7 @@ pub const NOT_CATALOG_ENTRY: crate::BuiltinCatalogEntry = crate::BuiltinCatalogE
         capabilities: &[],
     },
     placement: crate::BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: crate::BuiltinPortability::NativeAndWasm,
         accelerator: crate::BuiltinAcceleratorPolicy::Optional,
         residency: crate::BuiltinResidencyPolicy::PreserveInputs,

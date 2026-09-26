@@ -32,6 +32,7 @@ pub(in crate::catalog::entries::parallel) const PARALLEL_RUNTIME: [CapabilityReq
 
 pub(in crate::catalog::entries::parallel) const CURRENT_PLACEMENT: BuiltinPlacementContract =
     BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::Host,
@@ -40,6 +41,7 @@ pub(in crate::catalog::entries::parallel) const CURRENT_PLACEMENT: BuiltinPlacem
     };
 pub(in crate::catalog::entries::parallel) const PARALLEL_PLACEMENT: BuiltinPlacementContract =
     BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Forbidden,
         residency: BuiltinResidencyPolicy::Dynamic,
@@ -48,6 +50,7 @@ pub(in crate::catalog::entries::parallel) const PARALLEL_PLACEMENT: BuiltinPlace
     };
 pub(in crate::catalog::entries::parallel) const DISTRIBUTED_INSPECTION_PLACEMENT:
     BuiltinPlacementContract = BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
     distributed: crate::BuiltinDistributedPolicy::InspectHandles,
     ..PARALLEL_PLACEMENT
 };

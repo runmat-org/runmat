@@ -61,6 +61,7 @@ pub(super) const fn entry(
             capabilities: &[],
         },
         placement: BuiltinPlacementContract {
+            preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
             portability: BuiltinPortability::NativeAndWasm,
             accelerator: BuiltinAcceleratorPolicy::Optional,
             residency: BuiltinResidencyPolicy::Dynamic,

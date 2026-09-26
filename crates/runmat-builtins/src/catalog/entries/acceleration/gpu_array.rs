@@ -345,6 +345,7 @@ pub const GPUARRAY_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &CAPABILITIES,
     },
     placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Required,
         residency: BuiltinResidencyPolicy::ProduceResident,

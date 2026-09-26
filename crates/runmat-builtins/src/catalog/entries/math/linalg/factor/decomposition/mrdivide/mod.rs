@@ -28,6 +28,7 @@ pub const DECOMPOSITION_MRDIVIDE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCat
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
+        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

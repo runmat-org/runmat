@@ -176,6 +176,7 @@ macro_rules! define_floating_conversion_contract {
                 capabilities: &[],
             },
             placement: BuiltinPlacementContract {
+                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
                 portability: BuiltinPortability::NativeAndWasm,
                 accelerator: BuiltinAcceleratorPolicy::Optional,
                 residency: BuiltinResidencyPolicy::Dynamic,

@@ -30,6 +30,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ..BuiltinDocumentation::EMPTY
 };
 const PLACEMENT: BuiltinPlacementContract = BuiltinPlacementContract {
+    preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
     portability: BuiltinPortability::NativeAndWasm,
     accelerator: BuiltinAcceleratorPolicy::Optional,
     residency: BuiltinResidencyPolicy::PreserveInputs,
