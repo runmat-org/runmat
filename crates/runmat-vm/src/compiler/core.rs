@@ -3815,10 +3815,11 @@ impl Compiler {
                 .with_identifier(IDENT_MIR_AGGREGATE_SHAPE_INVALID));
         }
         let rows = row_lengths.len();
+        let columns = row_lengths.first().copied().unwrap_or(0);
         let rectangular_columns = row_lengths
-            .first()
-            .copied()
-            .filter(|columns| row_lengths.iter().all(|candidate| candidate == columns));
+            .iter()
+            .all(|candidate| *candidate == columns)
+            .then_some(columns);
 
         if elements.iter().any(|element| {
             matches!(
