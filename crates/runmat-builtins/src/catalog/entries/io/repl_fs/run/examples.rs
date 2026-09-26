@@ -9,18 +9,20 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
             id: BuiltinExampleFixtureId {
-                local_name: "current-folder",},
+                local_name: "current-folder",
+            },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
                 BuiltinFilesystemEntry::File {
                     relative_path: "setup_experiment.m",
-                    content: BuiltinFixtureContent::Utf8("configured_gain = 21;\n"),}
+                    content: BuiltinFixtureContent::Utf8("configured_gain = 21;\n"),
+            }
             ],
-        }
-        ),
+        }),
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(result == 42);",},
+            source: "assert(result == 42);",
+            },
     },
     BuiltinExample {
         id: "search-path",
@@ -31,18 +33,20 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
             id: BuiltinExampleFixtureId {
-                local_name: "search-path",},
+                local_name: "search-path",
+            },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
                 BuiltinFilesystemEntry::File {
                     relative_path: "examples/fm_demo.m",
-                    content: BuiltinFixtureContent::Utf8("t = [0; 1]; demodulated = [2; 4];\n"),}
+                    content: BuiltinFixtureContent::Utf8("t = [0; 1]; demodulated = [2; 4];\n"),
+            }
             ],
-        }
-        ),
+        }),
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isequal(demodulated, [2; 4]));",},
+            source: "assert(isequal(demodulated, [2; 4]));",
+            },
     },
     BuiltinExample {
         id: "catch-missing",
@@ -53,15 +57,16 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
             id: BuiltinExampleFixtureId {
-                local_name: "catch-missing",},
+                local_name: "catch-missing",
+            },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
             ],
-        }
-        ),
+        }),
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(caught);",},
+            source: "assert(caught);",
+            },
     },
     BuiltinExample {
         id: "partial-assignments",
@@ -72,18 +77,19 @@ pub(super) const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BuiltinExampleFixture::Filesystem(BuiltinFilesystemFixture {
             id: BuiltinExampleFixtureId {
-                local_name: "partial-assignments",},
+                local_name: "partial-assignments",
+            },
             root: BuiltinFilesystemRoot::IsolatedWorkspace,
             entries: &[
                 BuiltinFilesystemEntry::File {
                     relative_path: "partial_script.m",
-                    content: BuiltinFixtureContent::Utf8("partial_value = 7; script_context = mfilename; error('example:scriptFailure', 'intentional failure');\n"),}
+                    content: BuiltinFixtureContent::Utf8("partial_value = 7; script_context = mfilename; error('example:scriptFailure', 'intentional failure');\n"),
+            }
             ],
-        }
-        ),
+        }),
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(caught); assert(partial_value == 7); assert(strcmp(script_context, 'partial_script'));",},
+            source: "assert(caught); assert(partial_value == 7); assert(strcmp(script_context, 'partial_script'));",
+            },
     },
-]
-;
+];
