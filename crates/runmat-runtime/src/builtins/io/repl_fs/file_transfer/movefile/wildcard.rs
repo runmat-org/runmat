@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::super::outcome::TransferOutcome;
-use super::plan::MovePlanEntry;
+use super::plan::{DestinationPolicy, MovePlanEntry};
 
 pub(super) async fn move_matches(pattern: &str, destination: &str, force: bool) -> TransferOutcome {
     let matches = match super::super::target::wildcard_matches(pattern).await {
@@ -80,10 +80,10 @@ async fn plan_entry(
         return Ok(None);
     }
     let target_display = super::super::target::display(&target);
-    let replace_directory = match vfs::symlink_metadata_async(&target).await {
+    let destination_policy = match vfs::symlink_metadata_async(&target).await {
         Ok(_) if !force => return Err(super::result::destination_exists(&target_display)),
-        Ok(metadata) => Some(metadata.is_dir()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Ok(_) => DestinationPolicy::ReplaceCompatible,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => DestinationPolicy::New,
         Err(error) => {
             return Err(super::result::filesystem(
                 &source_display,
@@ -97,6 +97,6 @@ async fn plan_entry(
         source_display,
         target,
         target_display,
-        replace_directory,
+        destination_policy,
     }))
 }

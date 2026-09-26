@@ -8,6 +8,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+mod rename;
+
 #[derive(Clone, Debug)]
 pub struct MemoryFsProvider {
     default_current_dir: PathBuf,
@@ -208,33 +210,7 @@ impl MemoryFsProvider {
             ));
         }
         let mut guard = self.inner.lock().expect("memory filesystem lock poisoned");
-        let entry = guard
-            .entries
-            .get(&from)
-            .cloned()
-            .ok_or_else(|| not_found(&from))?;
-        ensure_parent_dirs(&mut guard, &to)?;
-        if matches!(entry, MemoryEntry::Directory) {
-            let descendants = guard
-                .entries
-                .iter()
-                .filter(|(candidate, _)| is_descendant(&from, candidate))
-                .map(|(candidate, entry)| (candidate.clone(), entry.clone()))
-                .collect::<Vec<_>>();
-            guard.entries.insert(to.clone(), entry);
-            for (candidate, child) in descendants.iter() {
-                let suffix = candidate.strip_prefix(&from).unwrap_or(Path::new(""));
-                guard.entries.insert(to.join(suffix), child.clone());
-            }
-            for (candidate, _) in descendants {
-                guard.entries.remove(&candidate);
-            }
-            guard.entries.remove(&from);
-        } else {
-            guard.entries.insert(to, entry);
-            guard.entries.remove(&from);
-        }
-        Ok(())
+        rename::execute(&mut guard, &from, &to)
     }
 
     fn create_dir_all_sync(&self, path: &Path) -> io::Result<()> {
@@ -375,6 +351,10 @@ impl FsProvider for MemoryFsProvider {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.rename_project_path(from, to)
+    }
+
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.rename_project_path(from, to)
     }
 

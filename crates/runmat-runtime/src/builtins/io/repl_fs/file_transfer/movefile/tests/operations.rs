@@ -83,6 +83,28 @@ fn wildcard_moves_every_match() {
 }
 
 #[test]
+fn force_preserves_nonempty_destination_directory_on_replacement_failure() {
+    let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
+        .lock()
+        .unwrap();
+    let temp = tempdir().unwrap();
+    let source = temp.path().join("source");
+    let parent = temp.path().join("destination");
+    let target = parent.join("source");
+    fs::create_dir(&source).unwrap();
+    fs::create_dir_all(&target).unwrap();
+    fs::write(source.join("new"), b"source payload").unwrap();
+    fs::write(target.join("keep"), b"destination payload").unwrap();
+    let result = evaluate(&[text(&source), text(&parent), Value::from("f")]).unwrap();
+    assert_eq!(result.status(), 0.0);
+    assert_eq!(fs::read(source.join("new")).unwrap(), b"source payload");
+    assert_eq!(
+        fs::read(target.join("keep")).unwrap(),
+        b"destination payload"
+    );
+}
+
+#[test]
 fn identical_path_and_containing_directory_are_successful_noops() {
     let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
         .lock()

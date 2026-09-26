@@ -3,7 +3,7 @@ use std::io;
 use std::path::PathBuf;
 
 use super::super::outcome::TransferOutcome;
-use super::plan::MovePlanEntry;
+use super::plan::{DestinationPolicy, MovePlanEntry};
 
 pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> TransferOutcome {
     let source_path = PathBuf::from(source);
@@ -20,7 +20,7 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
     }
 
     let mut target = destination_path.clone();
-    let mut replace_directory = None;
+    let mut destination_policy = DestinationPolicy::New;
     let destination_metadata = match vfs::metadata_async(&destination_path).await {
         Ok(metadata) => Some(metadata),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -45,14 +45,14 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
             if super::super::target::same_path(&target, &source_path).await {
                 return super::result::success();
             }
-            replace_directory = match vfs::symlink_metadata_async(&target).await {
+            destination_policy = match vfs::symlink_metadata_async(&target).await {
                 Ok(_) if !force => {
                     return super::result::destination_exists(&super::super::target::display(
                         &target,
                     ));
                 }
-                Ok(metadata) => Some(metadata.is_dir()),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+                Ok(_) => DestinationPolicy::ReplaceCompatible,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => DestinationPolicy::New,
                 Err(error) => {
                     return super::result::filesystem(
                         source,
@@ -64,7 +64,7 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
         } else if !force {
             return super::result::destination_exists(destination);
         } else {
-            replace_directory = Some(false);
+            destination_policy = DestinationPolicy::ReplaceCompatible;
         }
     }
     let entry = MovePlanEntry {
@@ -72,7 +72,7 @@ pub(super) async fn move_path(source: &str, destination: &str, force: bool) -> T
         source_display: super::super::target::display(&source_path),
         target: target.clone(),
         target_display: super::super::target::display(&target),
-        replace_directory,
+        destination_policy,
     };
     complete(super::plan::execute(&[entry]).await)
 }

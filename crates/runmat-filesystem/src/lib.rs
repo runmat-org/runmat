@@ -343,6 +343,18 @@ pub trait FsProvider: Send + Sync + 'static {
     async fn remove_dir(&self, path: &Path) -> io::Result<()>;
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    /// Replace a compatible destination as part of one provider-owned rename.
+    ///
+    /// Implementations must not delete the destination before attempting the move.
+    /// Unsupported replacement, incompatible types, and nonempty destination
+    /// directories must fail without discarding either existing tree. This does
+    /// not require cross-volume emulation or a transaction across multiple moves.
+    async fn rename_replace(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "filesystem provider does not support safe rename replacement",
+        ))
+    }
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
 
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
@@ -795,6 +807,13 @@ pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::R
     provider.rename(&resolved_from, &resolved_to).await
 }
 
+pub async fn rename_replace_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+    let resolved_from = resolve_path(from.as_ref());
+    let resolved_to = resolve_path(to.as_ref());
+    let provider = current_provider();
+    provider.rename_replace(&resolved_from, &resolved_to).await
+}
+
 pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let from = from.as_ref().to_path_buf();
     let to = to.as_ref().to_path_buf();
@@ -952,6 +971,14 @@ mod tests {
     }
 
     struct UnsupportedProvider;
+
+    #[test]
+    fn unimplemented_replacement_fails_before_any_provider_operation() {
+        let result = futures::executor::block_on(
+            UnsupportedProvider.rename_replace(Path::new("/source"), Path::new("/target")),
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::Unsupported);
+    }
 
     struct AsyncOpenProvider {
         opened_async: Arc<Mutex<bool>>,

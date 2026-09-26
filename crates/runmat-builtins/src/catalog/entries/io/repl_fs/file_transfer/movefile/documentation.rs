@@ -5,7 +5,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Move and rename files",
         paragraphs: &[
             "`movefile(source, destination)` renames one file or directory or moves it to another directory. A source containing wildcards moves every match into an existing destination directory.",
-            "Pass `'f'` as the third argument to replace an existing destination. Without that flag, an existing target is preserved and the operation reports failure.",
+            "Pass `'f'` as the third argument to replace a compatible existing destination. Without that flag, an existing target is preserved and the operation reports failure. Replacement uses the filesystem provider's rename operation; it does not delete the destination first. Incompatible types, nonempty destination directories, unsupported providers, and cross-filesystem moves can fail while preserving the source and destination.",
         ],
     },
     BuiltinDocumentationSection {

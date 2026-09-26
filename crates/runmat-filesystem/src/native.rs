@@ -90,6 +90,10 @@ impl FsProvider for NativeFsProvider {
         fs::rename(from, to)
     }
 
+    async fn rename_replace(&self, from: &Path, to: &Path) -> io::Result<()> {
+        fs::rename(from, to)
+    }
+
     async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         let mut perms = fs::metadata(path)?.permissions();
         perms.set_readonly(readonly);
