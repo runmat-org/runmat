@@ -1392,7 +1392,7 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
     );
     assert_eq!(
         result.identity.realization().components[1].spatial_operator,
-        runmat_analysis_core::SpatialOperatorImplementation::PrescribedThermalCouplingProfile
+        runmat_analysis_core::SpatialOperatorImplementation::IntegratedPrescribedSolidThermoelasticLoad
     );
     assert_eq!(
         result.identity.realization().components[1].sources,
@@ -1446,8 +1446,43 @@ fn thermo_mechanical_linear_static_emits_coupled_fields() {
         .field_id,
         fea_thermo_mechanical_coupling_residual_field_id(0)
     );
-    assert_thermo_mechanical_consistency_diagnostic(&result.diagnostics);
-    assert_thermo_mechanical_temperature_field_diagnostic(&result.diagnostics);
+    let temperature = field(&result, &fea_thermo_mechanical_temperature_field_id(0));
+    assert!(temperature
+        .as_host_f64()
+        .unwrap()
+        .iter()
+        .all(|value| (*value - 358.15).abs() < 1.0e-12));
+    let thermal_strain = field(&result, &fea_thermo_mechanical_thermal_strain_field_id(0));
+    assert!(thermal_strain.as_host_f64().unwrap()[..3]
+        .iter()
+        .all(|value| (*value - 7.8e-4).abs() < 1.0e-15));
+    let eigenstress = field(&result, &fea_thermo_mechanical_thermal_stress_field_id(0));
+    for stress in &eigenstress.as_host_f64().unwrap()[..3] {
+        assert!(
+            (*stress - 3.9e8).abs() < 3.9e8 * 1.0e-12,
+            "unexpected element thermal eigenstress {stress}"
+        );
+    }
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_TM_CONSISTENCY"
+            && diagnostic
+                .message
+                .contains("element_owned_thermal_eigenstress")
+    }));
+    assert!(result.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == "FEA_TM_TEMPERATURE_FIELD"
+            && diagnostic
+                .message
+                .contains("temperature_field_basis=prescribed_uniform")
+    }));
+    let density = host_field(&result, FEA_FIELD_STRUCTURAL_STRAIN_ENERGY_DENSITY)[0];
+    let total_energy = host_field(&result, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0];
+    assert!(density >= 0.0);
+    assert_close(
+        total_energy,
+        density / 6.0,
+        density.abs() * 1.0e-10 + 1.0e-9,
+    );
 }
 
 #[test]

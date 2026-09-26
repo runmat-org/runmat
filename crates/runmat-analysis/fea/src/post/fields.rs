@@ -63,7 +63,6 @@ pub fn recover_result_fields(
     let internal_force = apply_k(&summary.operator, &solve_result.solution);
     let reaction_values = recover_reaction_force(summary, &internal_force, node_count);
     let reaction_moment_values = recover_reaction_moment(summary, &internal_force);
-    let strain_energy = recover_total_strain_energy(&solve_result.solution, &internal_force);
     let residual_metrics = recover_residual_metrics(summary, &solve_result.solution);
     let mut fields = recover_deformation_result_fields_with_plan(
         summary,
@@ -71,6 +70,15 @@ pub fn recover_result_fields(
         local_execution,
         DeformationRecoveryDetail::Complete,
     )?;
+    let strain_energy = if summary
+        .structural_solid_recovery
+        .iter()
+        .any(|element| element.thermal_eigenstrain.is_some())
+    {
+        super::thermoelastic_energy::total_elastic_energy(summary, &fields)?
+    } else {
+        recover_total_strain_energy(&solve_result.solution, &internal_force)
+    };
     fields.extend([
         AnalysisField::host_f64(
             FEA_FIELD_STRUCTURAL_REACTION_FORCE,

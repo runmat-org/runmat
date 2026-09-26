@@ -106,11 +106,15 @@ fn recover_solid_fields_checked(
             .zip(&point_stress)
             .zip(recovered.integration_weight_m3)
             .map(|((point_strain, point_stress), weight)| {
+                let eigenstrain = element.thermal_eigenstrain.unwrap_or(0.0);
                 0.5 * weight
                     * point_strain
                         .iter()
+                        .enumerate()
                         .zip(point_stress)
-                        .map(|(strain, stress)| strain * stress)
+                        .map(|((component, strain), stress)| {
+                            (strain - if component < 3 { eigenstrain } else { 0.0 }) * stress
+                        })
                         .sum::<f64>()
             })
             .sum::<f64>()
@@ -263,11 +267,17 @@ fn recover_element_stress(
             element_id: element.element_id.clone(),
         }
     })?;
-    let trace = strain[0] + strain[1] + strain[2];
+    let eigenstrain = element.thermal_eigenstrain.unwrap_or(0.0);
+    let mechanical_normal_strain = [
+        strain[0] - eigenstrain,
+        strain[1] - eigenstrain,
+        strain[2] - eigenstrain,
+    ];
+    let trace = mechanical_normal_strain.iter().sum::<f64>();
     let stress = [
-        lambda * trace + 2.0 * mu * strain[0],
-        lambda * trace + 2.0 * mu * strain[1],
-        lambda * trace + 2.0 * mu * strain[2],
+        lambda * trace + 2.0 * mu * mechanical_normal_strain[0],
+        lambda * trace + 2.0 * mu * mechanical_normal_strain[1],
+        lambda * trace + 2.0 * mu * mechanical_normal_strain[2],
         mu * strain[3],
         mu * strain[4],
         mu * strain[5],
@@ -280,6 +290,10 @@ fn recover_element_stress(
         })
     }
 }
+
+#[cfg(test)]
+#[path = "solid/thermoelastic_tests.rs"]
+mod thermoelastic_tests;
 
 #[cfg(test)]
 mod tests {
@@ -302,6 +316,7 @@ mod tests {
                 poisson_ratio: 0.25,
                 density_kg_per_m3: 1.0,
             },
+            thermal_eigenstrain: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices: [0, 1, 2, 3],
                 coordinates_m: [
@@ -347,12 +362,14 @@ mod tests {
                 element_id: "soft".into(),
                 region_id: "soft-region".into(),
                 material: material(10.0),
+                thermal_eigenstrain: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
                 element_id: "hard".into(),
                 region_id: "hard-region".into(),
                 material: material(20.0),
+                thermal_eigenstrain: None,
                 geometry,
             },
         ];
@@ -429,6 +446,7 @@ mod tests {
                 poisson_ratio: 0.25,
                 density_kg_per_m3: 1.0,
             },
+            thermal_eigenstrain: None,
             geometry: SolidRecoveryGeometry::Tetrahedron4 {
                 node_indices,
                 coordinates_m: node_indices.map(|node| coordinates[node]),
@@ -540,12 +558,14 @@ mod tests {
                 element_id: "soft".into(),
                 region_id: "soft-region".into(),
                 material: material(10.0),
+                thermal_eigenstrain: None,
                 geometry: geometry.clone(),
             },
             SolidRecoveryElementSummary {
                 element_id: "hard".into(),
                 region_id: "hard-region".into(),
                 material: material(30.0),
+                thermal_eigenstrain: None,
                 geometry,
             },
         ];

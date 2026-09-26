@@ -5,6 +5,7 @@ mod preflight;
 mod prepared;
 mod solve;
 mod static_diagnostics;
+mod static_thermomechanical;
 use crate::{
     algebra::apply_k,
     assembly::{
@@ -17,7 +18,6 @@ use crate::{
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_EQUATION_SCALE,
         FEA_FIELD_STRUCTURAL_REACTION_MOMENT, FEA_FIELD_STRUCTURAL_RESIDUAL_NORM,
         FEA_FIELD_STRUCTURAL_STRESS, FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY,
-        FEA_FIELD_STRUCTURAL_VON_MISES,
     },
     diagnostics::{
         builders::{extend_common_run_diagnostics, CommonRunDiagnosticInputs},
@@ -28,7 +28,6 @@ use crate::{
         RealizedExcitations,
     },
     pipeline::electro_thermal::recover_electro_thermal_fields,
-    pipeline::thermo_mechanical::recover_thermo_mechanical_snapshots,
     post::{
         fields::{
             recover_result_fields, structural_field_recovery_metrics,
@@ -129,7 +128,12 @@ fn run_linear_static_with_constraint_plan(
         model,
         &excitations,
         options.solver_mesh.clone(),
-        StructuralFormulationRequirement::ExperimentalSyntheticOperator,
+        if options.solver_mesh.is_some() || preflight::model_has_explicit_structural_elements(model)
+        {
+            StructuralFormulationRequirement::PhysicalDiscretization
+        } else {
+            StructuralFormulationRequirement::ExperimentalSyntheticOperator
+        },
         assembly_constraint_plan,
         options.local_execution,
     )
@@ -257,14 +261,8 @@ fn run_linear_static_with_constraint_plan(
             crate::post::StructuralFieldRecoveryError::Cancelled => FeaRunError::Cancelled,
             other => FeaRunError::Assembly(other.to_string()),
         })?;
-    let thermo_mechanical_fields = recover_thermo_mechanical_snapshots(
-        summary.thermo_mechanical.as_ref(),
-        &[1.0],
-        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_DISPLACEMENT),
-        &field_snapshot(&fields, FEA_FIELD_STRUCTURAL_VON_MISES),
-        &[solve_result.residual_norm],
-        element_count_for_dofs(summary.dof_count),
-    );
+    let thermo_mechanical_fields =
+        static_thermomechanical::recover(&summary, &fields, solve_result.residual_norm)?;
     fields.extend(thermo_mechanical_fields.temperature_snapshots);
     fields.extend(thermo_mechanical_fields.thermal_strain_snapshots);
     fields.extend(thermo_mechanical_fields.thermal_stress_snapshots);

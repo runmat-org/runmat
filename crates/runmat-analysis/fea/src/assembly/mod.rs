@@ -15,6 +15,7 @@ mod reduced_material_summary;
 mod reduced_rhs;
 mod solid_matrix;
 mod solid_properties;
+mod solid_recovery;
 pub mod solver_solid;
 mod solver_solid_boundary;
 mod structural_inputs;
@@ -59,8 +60,8 @@ use self::{
         assemble_explicit_elements, validate_explicit_topology, ExplicitElementAssembly,
     },
     solver_solid::{
-        assemble_solver_solid_operators_with_execution, resolve_element_material,
-        solver_solid_topology, SolverSolidAssemblyError,
+        assemble_solver_solid_operators_with_execution, solver_solid_topology,
+        SolverSolidAssemblyError,
     },
     structural_inputs::{
         apply_synthetic_structural_rhs, explicit_load_kind, requested_moment_norm,
@@ -694,6 +695,8 @@ pub struct SolidRecoveryElementSummary {
     pub element_id: String,
     pub region_id: String,
     pub material: SolidMaterial,
+    /// Element-owned isotropic thermal eigenstrain per normal component, if thermomechanical.
+    pub thermal_eigenstrain: Option<f64>,
     pub geometry: SolidRecoveryGeometry,
 }
 
@@ -1065,7 +1068,7 @@ pub(super) fn assemble_linear_system_impl(
         };
     }
 
-    if let Some(context) = thermo_mechanical_context {
+    if let Some(context) = thermo_mechanical_context.as_ref() {
         let physical_thermal_load = solver_mesh
             .filter(|_| {
                 structural_requirement
@@ -1073,7 +1076,7 @@ pub(super) fn assemble_linear_system_impl(
             })
             .zip(solid_properties.as_ref())
             .map(|(mesh, properties)| {
-                thermoelastic_load::assemble_uniform_temperature_load(mesh, properties, &context)
+                thermoelastic_load::assemble_uniform_temperature_load(mesh, properties, context)
             })
             .transpose()
             .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
@@ -1112,7 +1115,7 @@ pub(super) fn assemble_linear_system_impl(
             context.applied_temperature_delta_k,
             &mut dof_adjustments,
         );
-        let spatial_field = apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
+        let spatial_field = apply_thermo_spatial_field(context, dof_count, &mut dof_adjustments);
         let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
         for i in 0..mesh_dof_count {
             let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
@@ -1165,7 +1168,7 @@ pub(super) fn assemble_linear_system_impl(
             spatial_coverage_ratio: spatial_field.coverage_ratio,
             region_delta_count: context.region_temperature_deltas.len(),
             coupling_fingerprint: thermo_mechanical_fingerprint(
-                &context,
+                context,
                 ThermoMechanicalFingerprintInputs {
                     dof_count,
                     constitutive_temperature_factor,
@@ -1176,7 +1179,7 @@ pub(super) fn assemble_linear_system_impl(
                     spatial_gradient_index: spatial_field.gradient_index,
                 },
             ),
-            profile_sources: thermomechanical_profile_sources(&context),
+            profile_sources: thermomechanical_profile_sources(context),
         });
     }
 
@@ -1223,7 +1226,16 @@ pub(super) fn assemble_linear_system_impl(
     let structural_solid_recovery = solver_mesh
         .filter(|_| structural_requirement.is_some())
         .zip(solid_properties.as_ref())
-        .map(|(mesh, properties)| solid_recovery_from_solver_mesh(mesh, properties))
+        .map(|(mesh, properties)| {
+            solid_recovery::build(
+                mesh,
+                properties,
+                thermo_mechanical_context.as_ref().filter(|_| {
+                    structural_requirement
+                        == Some(StructuralFormulationRequirement::PhysicalDiscretization)
+                }),
+            )
+        })
         .transpose()
         .map_err(LinearAssemblyError::SolidOperator)?
         .unwrap_or_default();
@@ -1599,92 +1611,6 @@ pub(super) fn assemble_linear_system_impl(
             .expect("assembled structural system is finite and dimensionally consistent")
         },
     })
-}
-
-fn solid_recovery_from_solver_mesh(
-    mesh: &SolverMeshArtifact,
-    properties: &crate::properties::CompiledPropertyMap,
-) -> Result<Vec<SolidRecoveryElementSummary>, SolverSolidAssemblyError> {
-    let node_indices = mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-
-    mesh.topology
-        .volume_elements
-        .iter()
-        .map(|element| {
-            let material = resolve_element_material(element, properties)?;
-            let geometry = match element.order {
-                ElementOrder::Tet4 => {
-                    let (node_indices, coordinates_m) = recovery_geometry::<4>(
-                        element.element_id,
-                        &element.node_ids,
-                        &node_indices,
-                        mesh,
-                    )?;
-                    SolidRecoveryGeometry::Tetrahedron4 {
-                        node_indices,
-                        coordinates_m,
-                    }
-                }
-                ElementOrder::Tet10 => {
-                    let (node_indices, coordinates_m) = recovery_geometry::<10>(
-                        element.element_id,
-                        &element.node_ids,
-                        &node_indices,
-                        mesh,
-                    )?;
-                    SolidRecoveryGeometry::Tetrahedron10 {
-                        node_indices,
-                        coordinates_m,
-                    }
-                }
-            };
-            Ok(SolidRecoveryElementSummary {
-                element_id: element.element_id.to_string(),
-                region_id: element.region_id.source_topology_id.clone(),
-                material: SolidMaterial {
-                    youngs_modulus_pa: material.youngs_modulus_pa,
-                    poisson_ratio: material.poisson_ratio,
-                    density_kg_per_m3: material.density_kg_per_m3,
-                },
-                geometry,
-            })
-        })
-        .collect()
-}
-
-fn recovery_geometry<const N: usize>(
-    element_id: u64,
-    node_ids: &[u64],
-    node_indices: &BTreeMap<u64, usize>,
-    mesh: &SolverMeshArtifact,
-) -> Result<([usize; N], [[f64; 3]; N]), SolverSolidAssemblyError> {
-    if node_ids.len() != N {
-        return Err(SolverSolidAssemblyError::InvalidElementNodeCount {
-            element_id,
-            expected: N,
-            actual: node_ids.len(),
-        });
-    }
-    let mut indices = [0; N];
-    let mut coordinates_m = [[0.0; 3]; N];
-    for (local, node_id) in node_ids.iter().copied().enumerate() {
-        let node_index =
-            *node_indices
-                .get(&node_id)
-                .ok_or(SolverSolidAssemblyError::UnknownElementNode {
-                    element_id,
-                    node_id,
-                })?;
-        indices[local] = node_index;
-        coordinates_m[local] = mesh.topology.nodes[node_index].coordinates_m;
-    }
-    Ok((indices, coordinates_m))
 }
 
 fn electro_thermal_fingerprint(

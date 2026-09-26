@@ -7,6 +7,9 @@ use runmat_analysis_core::{
     TopologyImplementation,
 };
 
+mod thermo_mechanical;
+pub use thermo_mechanical::thermomechanical_exact_realization;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StructuralRealizationInput {
     pub assemblies: Vec<StructuralFormulationRealization>,
@@ -136,56 +139,6 @@ const fn structural_operator_order(operator: StructuralOperatorImplementation) -
         StructuralOperatorImplementation::Mitc3TriangularShell => 3,
         StructuralOperatorImplementation::SyntheticDiagonalChain => 4,
     }
-}
-
-pub fn thermomechanical_exact_realization(
-    mut input: ThermomechanicalRealizationInput,
-) -> Result<ExactFormulationRealization, FormulationAdmissionRejectionReason> {
-    if input.structural.coupling != CouplingImplementation::OnePassPrescribedThermomechanicalProfile
-    {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::Coupling,
-        ));
-    }
-    canonicalize_sources(&mut input.profile_sources);
-    if input.profile_sources.is_empty()
-        || input.profile_sources.iter().any(|source| {
-            !matches!(
-                source,
-                SourceImplementation::PrescribedTemperatureDeltaProfile
-                    | SourceImplementation::OrdinalRegionTemperatureDistribution
-            )
-        })
-        || !input
-            .profile_sources
-            .contains(&SourceImplementation::PrescribedTemperatureDeltaProfile)
-    {
-        return Err(FormulationAdmissionRejectionReason::IncompatibleAxis(
-            FormulationAxis::Source,
-        ));
-    }
-    let procedure = input.structural.procedure;
-    let structural_boundaries = input.structural.boundary_transfers.clone();
-    let mut realization = structural_exact_realization(StructuralRealizationInput {
-        coupling: CouplingImplementation::Uncoupled,
-        ..input.structural
-    })?;
-    realization.components.push(ExactFormulationComponent {
-        spatial_operator: SpatialOperatorImplementation::PrescribedThermalCouplingProfile,
-        constitutive: ConstitutiveImplementation::ReducedThermalCoefficientProfile,
-        recovery: RecoveryImplementation::PrescribedThermomechanicalProfileDerivedFields,
-        topologies: vec![TopologyImplementation::DofAdjacency],
-        sources: input.profile_sources,
-    });
-    let structural_temporal = structural_temporal(procedure)
-        .ok_or(FormulationAdmissionRejectionReason::UnsupportedFamilyProcedure)?;
-    realization.temporals = vec![
-        structural_temporal,
-        TemporalImplementation::PrescribedThermomechanicalProfileApplication,
-    ];
-    realization.coupling = CouplingImplementation::OnePassPrescribedThermomechanicalProfile;
-    realization.boundary_transfers = structural_boundaries;
-    Ok(realization)
 }
 
 fn canonicalize_sources(sources: &mut Vec<SourceImplementation>) {

@@ -11,6 +11,8 @@ pub enum StructuralFieldRecoveryError {
     DisplacementShapeMismatch { expected: usize, actual: usize },
     #[error("solid recovery has {actual} element values; expected {expected}")]
     ElementValueCountMismatch { expected: usize, actual: usize },
+    #[error("physical thermoelastic recovery requires a host strain-energy-density field")]
+    MissingThermoelasticEnergyDensity,
     #[error("solid recovery element {element_id} references absent node {node_index}")]
     InvalidNodeIndex {
         element_id: String,

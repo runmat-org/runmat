@@ -422,7 +422,7 @@ pub(super) fn assemble_mixed_structural_system(
         structural_connector_plan: Some(connector_summary.plan),
         structural_solid_element_count: mesh.topology.volume_elements.len(),
         structural_solid_total_mass_kg: solid.total_mass_kg,
-        structural_solid_recovery: super::solid_recovery_from_solver_mesh(mesh, &solid_properties)
+        structural_solid_recovery: super::solid_recovery::build(mesh, &solid_properties, None)
             .map_err(LinearAssemblyError::SolidOperator)?,
         structural_dof_layout: layout,
         structural_beam_recovery: beam_recovery,

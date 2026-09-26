@@ -4,6 +4,7 @@ mod constraint_fields;
 mod error;
 pub mod fields;
 mod solid;
+mod thermoelastic_energy;
 mod volume_weighted;
 
 pub use complex_fields::{
