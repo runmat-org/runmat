@@ -190,13 +190,17 @@ pub(crate) fn assemble(
         ));
     }
     let mut conductivity = RealSparseAssembler::with_pattern(
-        support.clone(),
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
         OperatorRole::Conductivity,
         MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
     )
     .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?;
     let mut capacity = RealSparseAssembler::with_pattern(
-        support.clone(),
+        support
+            .try_clone()
+            .map_err(|error| ThermalAssemblyError::SparseOperator(error.to_string()))?,
         OperatorRole::Capacity,
         MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
     )

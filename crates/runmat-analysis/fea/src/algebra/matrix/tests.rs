@@ -1,6 +1,59 @@
 use super::*;
 
 #[test]
+fn direct_identity_elimination_matches_dense_reference_for_every_mask() {
+    let source = RealSparseMatrix::try_new(
+        SparsePattern::try_new(4, 4, vec![0, 2, 4, 5, 6], vec![1, 2, 0, 1, 3, 2]).unwrap(),
+        vec![2.0, 0.0, 3.0, 4.0, 5.0, 6.0],
+        OperatorRole::Conductivity,
+        MatrixProperties::GENERAL,
+        vec![ContributionProvenance {
+            domain: ContributionDomain::Thermal,
+            contribution_id: ContributionId("source".into()),
+        }],
+    )
+    .unwrap();
+    for bits in 0..16 {
+        let mask = (0..4)
+            .map(|index| bits & (1 << index) != 0)
+            .collect::<Vec<_>>();
+        let mut dense = source.to_dense();
+        for row in 0..4 {
+            for column in 0..4 {
+                if mask[row] || mask[column] {
+                    dense[row * 4 + column] = if row == column && mask[row] { 1.0 } else { 0.0 };
+                }
+            }
+        }
+        let actual = source.with_identity_constraints(&mask).unwrap();
+        assert_eq!(actual.to_dense(), dense, "mask {bits}");
+        assert!(actual.values().iter().all(|value| *value != 0.0));
+        assert_eq!(actual.contributions[0], source.contributions[0]);
+        assert_eq!(
+            actual.contributions[1].domain,
+            ContributionDomain::Constraint
+        );
+        let reference =
+            RealSparseMatrix::from_dense(&dense, 4, source.role, source.properties).unwrap();
+        assert_eq!(
+            actual.numerical_identity().unwrap(),
+            reference.numerical_identity().unwrap()
+        );
+    }
+    assert_eq!(
+        source.with_identity_constraints(&[true]),
+        Err(RealSparseMatrixError::ShapeMismatch)
+    );
+    let empty =
+        RealSparseMatrix::diagonal(vec![], OperatorRole::Mass, MatrixProperties::GENERAL).unwrap();
+    assert!(empty
+        .with_identity_constraints(&[])
+        .unwrap()
+        .values()
+        .is_empty());
+}
+
+#[test]
 fn sparse_finalization_preserves_cancelled_rows_order_and_provenance() {
     let mut assembler =
         RealSparseAssembler::new(3, 4, OperatorRole::Conductivity, MatrixProperties::GENERAL);

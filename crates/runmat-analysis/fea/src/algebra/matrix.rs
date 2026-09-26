@@ -380,27 +380,50 @@ impl RealSparseMatrix {
         if self.rows() != self.columns() || constrained.len() != self.rows() {
             return Err(RealSparseMatrixError::ShapeMismatch);
         }
-        let mut assembler = RealSparseAssembler::square(self.rows(), self.role, self.properties);
-        for contribution in &self.contributions {
-            assembler.add_contribution(contribution.clone());
+        // Select rows/columns directly from canonical CSR. Essential rows may introduce a
+        // diagonal missing from the original pattern; no sparse-map discovery is needed.
+        let entries = |row: usize| {
+            constrained[row]
+                .then_some((row as u64, 1.0))
+                .into_iter()
+                .chain(self.pattern.row_range(row).filter_map(move |entry| {
+                    let column = self.pattern.column(entry);
+                    (!constrained[row] && !constrained[column] && self.values[entry] != 0.0)
+                        .then_some((column as u64, self.values[entry]))
+                }))
+        };
+        let count = (0..self.rows()).try_fold(0_usize, |total, row| {
+            total
+                .checked_add(entries(row).count())
+                .ok_or(SparsePatternError::DimensionOverflow)
+        })?;
+        let mut offsets = reserve_payload(
+            self.rows()
+                .checked_add(1)
+                .ok_or(SparsePatternError::DimensionOverflow)?,
+        )?;
+        let mut columns = reserve_payload(count)?;
+        let mut values = reserve_payload(count)?;
+        offsets.push(0);
+        for row in 0..self.rows() {
+            for (column, value) in entries(row) {
+                columns.push(column);
+                values.push(value);
+            }
+            offsets.push(values.len() as u64);
         }
-        assembler.add_contribution(ContributionProvenance {
+        let mut contributions = self.contributions.clone();
+        contributions.push(ContributionProvenance {
             domain: ContributionDomain::Constraint,
             contribution_id: ContributionId("essential_elimination".to_string()),
         });
-        for row in 0..self.rows() {
-            if constrained[row] {
-                assembler.add(row, row, 1.0);
-                continue;
-            }
-            for entry in self.pattern.row_range(row) {
-                let column = self.pattern.column(entry);
-                if !constrained[column] {
-                    assembler.add(row, column, self.values[entry]);
-                }
-            }
-        }
-        assembler.finish()
+        Self::try_new(
+            SparsePattern::try_new(self.rows() as u64, self.columns() as u64, offsets, columns)?,
+            values,
+            self.role,
+            self.properties,
+            contributions,
+        )
     }
 
     pub fn scaled_sum(

@@ -4,6 +4,8 @@ use std::fmt;
 use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_execution::Digest;
 
+mod operations;
+
 const PATTERN_IDENTITY_PREFIX: &[u8] = b"runmat-fea-sparse-pattern/v1\0";
 const PATTERN_IDENTITY_DOMAIN: &str = "analysis.fea.sparse-pattern/v1";
 const PATTERN_IDENTITY_LIMITS: CanonicalLimits =
@@ -18,6 +20,9 @@ pub enum SparseIndexWidth {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SparsePatternError {
     DimensionOverflow,
+    StorageAllocation {
+        elements: usize,
+    },
     OffsetExceedsHostWidth {
         entry: usize,
         offset: u64,
@@ -237,56 +242,7 @@ impl SparsePattern {
         .map(Digest::sha256)
     }
 
-    /// Returns the deterministic row-wise union of two canonical sparse patterns.
-    pub fn union(&self, other: &Self) -> Result<Self, SparsePatternError> {
-        if self.rows != other.rows || self.columns != other.columns {
-            return Err(SparsePatternError::ShapeMismatch);
-        }
-        let mut row_offsets = Vec::with_capacity(self.rows().saturating_add(1));
-        let mut column_indices = Vec::with_capacity(
-            self.column_indices
-                .len()
-                .saturating_add(other.column_indices.len()),
-        );
-        row_offsets.push(0);
-        for row in 0..self.rows() {
-            let left = &self.column_indices[self.row_range(row)];
-            let right = &other.column_indices[other.row_range(row)];
-            let (mut left_index, mut right_index) = (0, 0);
-            while left_index < left.len() || right_index < right.len() {
-                let next = match (left.get(left_index), right.get(right_index)) {
-                    (Some(left), Some(right)) if left < right => {
-                        left_index += 1;
-                        *left
-                    }
-                    (Some(left), Some(right)) if right < left => {
-                        right_index += 1;
-                        *right
-                    }
-                    (Some(left), Some(_)) => {
-                        left_index += 1;
-                        right_index += 1;
-                        *left
-                    }
-                    (Some(left), None) => {
-                        left_index += 1;
-                        *left
-                    }
-                    (None, Some(right)) => {
-                        right_index += 1;
-                        *right
-                    }
-                    (None, None) => unreachable!(),
-                };
-                column_indices.push(next);
-            }
-            row_offsets.push(
-                u64::try_from(column_indices.len())
-                    .map_err(|_| SparsePatternError::DimensionOverflow)?,
-            );
-        }
-        Self::try_new(self.rows, self.columns, row_offsets, column_indices)
-    }
+    // Allocation-aware union and clone operations live in a focused child module.
 }
 
 #[cfg(test)]

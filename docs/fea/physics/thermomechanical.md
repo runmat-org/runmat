@@ -171,9 +171,12 @@ of recovery scratch. It also reuses `TopologyResourceFacts` for the two live pro
 topology figure is the shared estimate, not a measured or exact metadata bound. Thermal conductivity,
 capacity, and backward-Euler effective operators now accumulate into preplanned shared CSR buffers,
 rejecting nonzero entries outside admitted support. Zero entries are compacted in place, preserving
-canonical numerical identities without sparse-map builders for those operators. Constraint
-preparation still uses discovered sparse rows; its builders, model/property/evidence metadata,
-observations, and transport still require admission.
+canonical numerical identities without sparse-map builders for those operators. Essential
+identity elimination now constructs its canonical rows directly, also without sparse-map builders,
+including constrained diagonals absent from the original operator. Effective-pattern union counts
+its actual unique entries before fallible reservation; thermal support copies use fallible index
+allocation. General matrix clones and dynamic model/property/evidence metadata, observations,
+and transport still require complete allocation accounting.
 Passing this partial reservation is not whole-process memory admission or GPU qualification.
 
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
