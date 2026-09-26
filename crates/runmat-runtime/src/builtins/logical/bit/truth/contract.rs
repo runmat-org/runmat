@@ -3,6 +3,7 @@ use runmat_builtins::{
 };
 
 pub(super) struct BinaryContract {
+    pub(super) entry: &'static runmat_builtins::BuiltinCatalogEntry,
     pub(super) name: &'static str,
     pub(super) invalid: &'static BuiltinErrorDescriptor,
     pub(super) mismatch: &'static BuiltinErrorDescriptor,
@@ -13,6 +14,7 @@ pub(super) struct BinaryContract {
 pub(super) fn binary(operation: LogicalBinaryOperator) -> BinaryContract {
     match operation {
         LogicalBinaryOperator::And => BinaryContract {
+            entry: &runmat_builtins::AND_CATALOG_ENTRY,
             name: "and",
             invalid: &runmat_builtins::AND_ERROR_INVALID_INPUT,
             mismatch: &runmat_builtins::AND_ERROR_SIZE_MISMATCH,
@@ -20,6 +22,7 @@ pub(super) fn binary(operation: LogicalBinaryOperator) -> BinaryContract {
             character_extension: Some(&runmat_builtins::AND_CHARACTER_INPUT_EXTENSION),
         },
         LogicalBinaryOperator::Or => BinaryContract {
+            entry: &runmat_builtins::OR_CATALOG_ENTRY,
             name: "or",
             invalid: &runmat_builtins::OR_ERROR_INVALID_INPUT,
             mismatch: &runmat_builtins::OR_ERROR_SIZE_MISMATCH,
@@ -27,6 +30,7 @@ pub(super) fn binary(operation: LogicalBinaryOperator) -> BinaryContract {
             character_extension: Some(&runmat_builtins::OR_CHARACTER_INPUT_EXTENSION),
         },
         LogicalBinaryOperator::Xor => BinaryContract {
+            entry: &runmat_builtins::XOR_CATALOG_ENTRY,
             name: "xor",
             invalid: &runmat_builtins::XOR_ERROR_INVALID_INPUT,
             mismatch: &runmat_builtins::XOR_ERROR_SIZE_MISMATCH,

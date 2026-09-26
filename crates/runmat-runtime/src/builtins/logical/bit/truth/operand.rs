@@ -14,6 +14,7 @@ pub(super) async fn from_value(
     value: Value,
     invalid: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<LogicalBuffer> {
+    admitted_shape(builtin, &value, invalid)?;
     match value {
         Value::LogicalArray(array) => from_logical(array),
         Value::Bool(value) => Ok(scalar(value)),
@@ -29,6 +30,28 @@ pub(super) async fn from_value(
                 .map_err(|error| error_with_detail(builtin, invalid, error))?;
             Box::pin(from_value(builtin, gathered, invalid)).await
         }
+        other => Err(error_with_detail(
+            builtin,
+            invalid,
+            format!("unsupported input type {other:?}"),
+        )),
+    }
+}
+
+/// Shared operand admission without conversion, gather or provider effects.
+/// Conversion and preparation use this same class/shape authority.
+pub(super) fn admitted_shape<'a>(
+    builtin: &'static str,
+    value: &'a Value,
+    invalid: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<&'a [usize]> {
+    match value {
+        Value::Bool(_) | Value::Num(_) | Value::Int(_) | Value::Complex(_, _) => Ok(&[1, 1]),
+        Value::LogicalArray(array) => Ok(&array.shape),
+        Value::Tensor(array) => Ok(&array.shape),
+        Value::ComplexTensor(array) => Ok(&array.shape),
+        Value::CharArray(array) => Ok(&array.shape),
+        Value::GpuTensor(handle) => Ok(&handle.shape),
         other => Err(error_with_detail(
             builtin,
             invalid,
