@@ -3,6 +3,29 @@ use super::*;
 use crate::builtins::plotting::get::get_builtin;
 use runmat_value::IntegerStorage;
 #[test]
+fn invalid_later_limits_do_not_create_figure_or_mutate_earlier_pairs() {
+    let _guard = setup();
+    let bad = || {
+        Value::Tensor(
+            Tensor::new(vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 9.0, 8.0], vec![1, 8]).unwrap(),
+        )
+    };
+    assert!(axis_builtin(vec![bad()]).is_err());
+    assert!(current_figure_handle_if_exists().is_none());
+    axis_builtin(vec![Value::Tensor(
+        Tensor::new(vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0], vec![1, 8]).unwrap(),
+    )])
+    .unwrap();
+    let state = current_axes_state();
+    let before = axes_metadata_snapshot(state.handle, state.active_index).unwrap();
+    assert!(axis_builtin(vec![bad()]).is_err());
+    let after = axes_metadata_snapshot(state.handle, state.active_index).unwrap();
+    assert_eq!(before.x_limits, after.x_limits);
+    assert_eq!(before.y_limits, after.y_limits);
+    assert_eq!(before.z_limits, after.z_limits);
+    assert_eq!(before.color_limits, after.color_limits);
+}
+#[test]
 fn axis_accepts_six_element_3d_limits() {
     let _guard = setup();
     let ax = crate::builtins::plotting::subplot::subplot_builtin(

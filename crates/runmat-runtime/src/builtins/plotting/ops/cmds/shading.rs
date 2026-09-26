@@ -8,6 +8,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
+#[cfg(test)]
+#[path = "shading/tests.rs"]
+mod tests;
 const SHADING_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "ok",
     ty: BuiltinParamType::LogicalArray,
@@ -52,6 +55,13 @@ pub const SHADING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    if args.len() != 1 {
+        return Err(cmd_error_with_message(
+            "shading",
+            "shading: expected one mode argument",
+            &SHADING_ERROR_INVALID_ARGUMENT,
+        ));
+    }
     let Some(arg) = args.first() else {
         return Err(cmd_error_with_message(
             "shading",

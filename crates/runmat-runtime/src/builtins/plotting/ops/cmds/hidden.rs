@@ -99,10 +99,6 @@ type HiddenAxesTarget = Option<(crate::builtins::plotting::state::FigureHandle, 
 )]
 pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     let (target, rest) = parse_hidden_target(args)?;
-    let (handle, axes_index) = target.unwrap_or_else(|| {
-        let axes = current_axes_state();
-        (current_figure_handle(), axes.active_index)
-    });
     let requested = parse_on_off("hidden", rest.first()).map_err(|err| {
         cmd_error_with_message(
             "hidden",
@@ -121,6 +117,10 @@ pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
             &HIDDEN_ERROR_INVALID_ARGUMENT,
         ));
     }
+    let (handle, axes_index) = target.unwrap_or_else(|| {
+        let axes = current_axes_state();
+        (current_figure_handle(), axes.active_index)
+    });
     let current = axes_metadata_snapshot(handle, axes_index)
         .map_err(|err| {
             cmd_error_with_message(

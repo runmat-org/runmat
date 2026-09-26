@@ -3,9 +3,10 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::builtins::plotting::op_common::cmd_parsing::as_lower_str;
 use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
 use crate::builtins::plotting::state::{
-    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, color_limits_snapshot,
-    current_axes_state, set_axes_style_for_axes, set_axis_equal, set_axis_equal_and_limits,
-    set_axis_limits, set_color_limits_runtime, set_z_limits, z_limits_snapshot, FigureHandle,
+    axes_metadata_snapshot, axis_display_bounds_snapshot_for_axes, current_axes_state,
+    current_figure_handle_if_exists, set_axes_style_for_axes, set_axis_equal,
+    set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime, set_z_limits,
+    FigureHandle,
 };
 use crate::builtins::plotting::type_resolvers::axis_type;
 use crate::RuntimeError;
@@ -158,25 +159,45 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     if let Value::Tensor(t) = &args[0] {
         if matches!(tensor_utils::tensor_element_len(t), 4 | 6 | 8) {
             let values = tensor_utils::tensor_values_f64(t);
-            let state = current_axes_state();
-            let bounds = axis_display_bounds_snapshot_for_axes(state.handle, state.active_index)
-                .ok()
-                .flatten()
+            let state = current_figure_handle_if_exists().map(|_| current_axes_state());
+            let bounds = state
+                .as_ref()
+                .and_then(|state| {
+                    axis_display_bounds_snapshot_for_axes(state.handle, state.active_index)
+                        .ok()
+                        .flatten()
+                })
                 .unwrap_or((0.0, 1.0, 0.0, 1.0));
+            let meta = state
+                .as_ref()
+                .and_then(|state| axes_metadata_snapshot(state.handle, state.active_index).ok());
             let x = axis_limit_pair(values[0], values[1], bounds.0, bounds.1)?;
             let y = axis_limit_pair(values[2], values[3], bounds.2, bounds.3)?;
+            let z = if values.len() >= 6 {
+                let z_auto = meta
+                    .as_ref()
+                    .and_then(|meta| meta.z_limits)
+                    .unwrap_or((0.0, 1.0));
+                Some(axis_limit_pair(values[4], values[5], z_auto.0, z_auto.1)?)
+            } else {
+                None
+            };
+            let c = if values.len() == 8 {
+                let c_auto = meta
+                    .as_ref()
+                    .and_then(|meta| meta.color_limits)
+                    .unwrap_or((0.0, 1.0));
+                Some(axis_limit_pair(values[6], values[7], c_auto.0, c_auto.1)?)
+            } else {
+                None
+            };
+            // Admit every requested pair before publishing any limit change.
             set_axis_limits(Some(x), Some(y));
-            if values.len() >= 6 {
-                let z_auto = z_limits_snapshot().unwrap_or((0.0, 1.0));
-                set_z_limits(Some(axis_limit_pair(
-                    values[4], values[5], z_auto.0, z_auto.1,
-                )?));
+            if let Some(z) = z {
+                set_z_limits(Some(z));
             }
-            if values.len() == 8 {
-                let c_auto = color_limits_snapshot().unwrap_or((0.0, 1.0));
-                set_color_limits_runtime(Some(axis_limit_pair(
-                    values[6], values[7], c_auto.0, c_auto.1,
-                )?));
+            if let Some(c) = c {
+                set_color_limits_runtime(Some(c));
             }
             return Ok(Value::Bool(true));
         }
@@ -302,8 +323,10 @@ fn set_current_axis_visibility(visible: bool) -> crate::BuiltinResult<()> {
 }
 
 fn axis_query_value(target: Option<(FigureHandle, usize)>) -> crate::BuiltinResult<Value> {
-    let state = current_axes_state();
-    let (handle, axes_index) = target.unwrap_or((state.handle, state.active_index));
+    let (handle, axes_index) = target.unwrap_or_else(|| {
+        let state = current_axes_state();
+        (state.handle, state.active_index)
+    });
     let meta = axes_metadata_snapshot(handle, axes_index).map_err(|_| axis_invalid_argument())?;
     let bounds = axis_display_bounds_snapshot_for_axes(handle, axes_index)
         .map_err(|_| axis_invalid_argument())?

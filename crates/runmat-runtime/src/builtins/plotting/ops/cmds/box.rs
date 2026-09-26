@@ -8,6 +8,9 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
+#[cfg(test)]
+#[path = "box/tests.rs"]
+mod tests;
 const BOX_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "enabled",
     ty: BuiltinParamType::LogicalArray,
@@ -60,6 +63,13 @@ pub const BOX_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    if args.len() > 1 {
+        return Err(cmd_error_with_message(
+            "box",
+            "box: expected at most one mode argument",
+            &BOX_ERROR_INVALID_ARGUMENT,
+        ));
+    }
     match parse_on_off("box", args.first()).map_err(|err| {
         cmd_error_with_message(
             "box",

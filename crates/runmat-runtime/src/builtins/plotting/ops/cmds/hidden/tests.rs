@@ -4,6 +4,17 @@ use crate::builtins::plotting::get::get_builtin;
 use crate::builtins::plotting::set::set_builtin;
 use runmat_value::Value;
 #[test]
+fn invalid_mode_and_extra_arguments_do_not_create_figure() {
+    let _guard = setup();
+    for args in [
+        vec![Value::String("invalid".into())],
+        vec![Value::String("on".into()), Value::String("off".into())],
+    ] {
+        assert!(hidden_builtin(args).is_err());
+        assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
+    }
+}
+#[test]
 fn hidden_toggles_and_sets_current_axes_hidden_line_removal() {
     let _guard = setup();
     let ax = crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap();
