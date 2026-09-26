@@ -1,0 +1,66 @@
+//! Legacy histogram counting with explicit bin endpoints.
+mod admission;
+mod compute;
+mod edges;
+mod error;
+mod shape;
+#[cfg(test)]
+mod tests;
+use crate::builtins::common::{gpu_helpers, tensor};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use admission::*;
+pub use compute::{evaluate, HistcResult};
+use edges::EdgeSets;
+use error::*;
+use runmat_builtins::{
+    BuiltinErrorDescriptor, HISTC_ERROR_INTERNAL as ERROR_INTERNAL,
+    HISTC_ERROR_INVALID_ARGUMENT as ERROR_INVALID_ARGUMENT, HISTC_GPU_EXTENSION,
+    HISTC_LOGICAL_EXTENSION, HISTC_WIDE_INTEGER_EXTENSION,
+};
+use runmat_macros::runtime_builtin;
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
+use shape::*;
+const NAME: &str = "histc";
+const MAX_DIMENSION_ARGUMENT: usize = 32;
+#[runtime_builtin(
+    name = "histc",
+    descriptor(runmat_builtins::HISTC_DESCRIPTOR),
+    binding_variant = "default",
+    builtin_path = "crate::builtins::stats::hist::histc"
+)]
+async fn histc_builtin(x: Value, binranges: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(invalid_argument("histc: too many output arguments"));
+    }
+    let dim = match rest.as_slice() {
+        [] => None,
+        [value] => Some(
+            tensor::dimension_from_value_async(value, NAME, false)
+                .await
+                .map_err(invalid_argument)?
+                .ok_or_else(|| invalid_argument("histc: dim must be numeric"))
+                .and_then(validate_dimension_argument)?,
+        ),
+        _ => {
+            return Err(invalid_argument(
+                "histc: expected x, binranges, and optional dim",
+            ))
+        }
+    };
+    ensure_histc_input_extensions(&x)?;
+    ensure_histc_input_extensions(&binranges)?;
+    let eval = evaluate(x, binranges, dim).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![Value::Tensor(eval.counts)]));
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![Value::Tensor(eval.counts), Value::Tensor(eval.indices)],
+        ));
+    }
+    Ok(Value::Tensor(eval.counts))
+}
