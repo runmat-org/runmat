@@ -67,7 +67,14 @@ async fn empty_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         crate::compatibility::ensure_builtin_extension_enabled(&EMPTY_TYPENAME_EXTENSION, LABEL)?;
     }
     let shape = parse_shape(&size_args).await?;
-    build_empty(class, shape).await
+    let protected = size_args
+        .iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    build_empty_protecting(class, shape, &protected).await
 }
 fn validate_outputs() -> BuiltinResult<()> {
     if matches!(crate::output_count::current_output_count(),Some(count) if count > 1) {
@@ -350,6 +357,14 @@ fn parse_numeric_dimension(value: f64) -> BuiltinResult<usize> {
 }
 
 async fn build_empty(class: EmptyClass, shape: Vec<usize>) -> BuiltinResult<Value> {
+    build_empty_protecting(class, shape, &[]).await
+}
+
+async fn build_empty_protecting(
+    class: EmptyClass,
+    shape: Vec<usize>,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> BuiltinResult<Value> {
     match class {
         EmptyClass::Double => Tensor::new(Vec::new(), shape)
             .map(tensor::tensor_into_value)
@@ -391,8 +406,10 @@ async fn build_empty(class: EmptyClass, shape: Vec<usize>) -> BuiltinResult<Valu
                 runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
             };
             let host = Tensor::new_with_dtype(Vec::new(), shape, dtype).map_err(internal_error)?;
-            let mut handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &host)
-                .map_err(|err| internal_error(format!("empty: {err}")))?;
+            let mut handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting(
+                provider, &host, protected,
+            )
+            .map_err(|err| internal_error(format!("empty: {err}")))?;
             runmat_accelerate_api::mark_handle_explicit(&mut handle);
             Ok(Value::GpuTensor(handle))
         }
