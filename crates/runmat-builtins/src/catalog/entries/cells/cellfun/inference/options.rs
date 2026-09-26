@@ -99,7 +99,10 @@ fn validate_error_handler(
     };
     if !matches!(
         value.kind,
-        runmat_types::ValueKindFact::Callable(_) | runmat_types::ValueKindFact::Unknown
+        runmat_types::ValueKindFact::Callable(_)
+            | runmat_types::ValueKindFact::String
+            | runmat_types::ValueKindFact::Character
+            | runmat_types::ValueKindFact::Unknown
     ) {
         diagnostics.push(argument_error(
             "RM-CATALOG-CELLFUN-ERROR-HANDLER",

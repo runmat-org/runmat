@@ -8,9 +8,9 @@ use super::errors::ERRORS;
 const OUTPUTS: &[BuiltinParamDescriptor] = &[BuiltinParamDescriptor {
     name: "Y",
     ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
+    arity: BuiltinParamArity::Variadic,
     default: None,
-    description: "Mapped callback output.",
+    description: "One mapped collection for each requested callback output.",
 }];
 
 const FUNC: BuiltinParamDescriptor = BuiltinParamDescriptor {
@@ -74,6 +74,11 @@ const BOTH: &[BuiltinParamDescriptor] = &[
 ];
 
 const SIGNATURES: &[BuiltinSignatureDescriptor] = &[
+    BuiltinSignatureDescriptor {
+        label: "[Y1, Y2, ...] = cellfun(func, C...)",
+        inputs: BASIC,
+        outputs: OUTPUTS,
+    },
     BuiltinSignatureDescriptor {
         label: "Y = cellfun(func, C)",
         inputs: BASIC,

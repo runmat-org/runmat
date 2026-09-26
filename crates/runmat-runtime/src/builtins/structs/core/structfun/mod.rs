@@ -22,7 +22,6 @@ pub(super) const BUILTIN_NAME: &str = "structfun";
 #[runtime_builtin(
     name = "structfun",
     binding_variant = "default",
-    execution_stack = "process",
     builtin_path = "crate::builtins::structs::core::structfun"
 )]
 async fn structfun_builtin(

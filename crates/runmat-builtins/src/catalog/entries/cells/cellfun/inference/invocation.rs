@@ -23,6 +23,25 @@ impl Plan {
             ));
         }
         validate_callable(request, &mut diagnostics);
+        if request
+            .outputs
+            .requested
+            .known_count()
+            .is_some_and(|count| count > 1)
+            && request
+                .literals
+                .literal_args
+                .first()
+                .and_then(crate::catalog::inference::literal_text)
+                .and_then(|name| super::super::shorthand::CellfunShorthand::parse(&name))
+                .is_some()
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-CELLFUN-OUTPUT-COUNT",
+                "cellfun shorthand functions return at most one output",
+                0,
+            ));
+        }
         let mut cell_indices = Vec::new();
         let mut extra_indices = Vec::new();
         let mut constants_started = false;

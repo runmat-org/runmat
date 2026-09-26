@@ -4,6 +4,7 @@ use runmat_types::{
 };
 
 use super::super::shorthand::CellfunShorthand;
+use crate::catalog::inference::gathered_value_fact;
 use runmat_types::FactJoin;
 
 pub(super) struct Result {
@@ -45,7 +46,8 @@ pub(super) fn infer(
             .chain(
                 extra_indices
                     .iter()
-                    .filter_map(|i| request.arguments.get(*i).cloned()),
+                    .filter_map(|i| request.arguments.get(*i))
+                    .map(gathered_value_fact),
             )
             .collect();
         let inferred = crate::infer_callable_call(
@@ -93,7 +95,8 @@ fn primary(
     arguments.extend(
         extra_indices
             .iter()
-            .filter_map(|index| request.arguments.get(*index).cloned()),
+            .filter_map(|index| request.arguments.get(*index))
+            .map(gathered_value_fact),
     );
     let literals = LiteralContext::new(
         std::iter::repeat_n(LiteralValue::Unknown, cell_indices.len())
@@ -132,8 +135,37 @@ fn callable(value: &ValueFact) -> Option<&CallableFact> {
 
 fn cell_element(value: &ValueFact) -> ValueFact {
     match &value.kind {
-        ValueKindFact::Cell(cell) => (*cell.element).clone(),
+        ValueKindFact::Cell(cell) => gathered_value_fact(&cell.element),
         _ => ValueFact::unknown(DynamicReason::RuntimeValue),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_types::{
+        CellFact, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact,
+    };
+
+    #[test]
+    fn callback_input_materialization_preserves_sparse_class() {
+        let mut input = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::UInt64,
+            domain: NumericDomain::Real,
+        }));
+        input.residency = ResidencyFact::Device {
+            provider: Some("test".into()),
+        };
+        input.storage = StorageFact::Sparse;
+        let cell = ValueFact::scalar(ValueKindFact::Cell(CellFact {
+            element: Box::new(input.clone()),
+            elements: vec![input],
+            elements_complete: true,
+        }));
+        let actual = cell_element(&cell);
+        assert_eq!(actual.residency, ResidencyFact::Host);
+        assert_eq!(actual.storage, StorageFact::Sparse);
+        assert_eq!(actual.numeric().unwrap().class, NumericClass::UInt64);
     }
 }
 

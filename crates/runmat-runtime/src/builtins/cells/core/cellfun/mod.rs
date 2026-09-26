@@ -22,7 +22,6 @@ pub(super) const BUILTIN_NAME: &str = "cellfun";
 #[runtime_builtin(
     name = "cellfun",
     binding_variant = "default",
-    execution_stack = "process",
     builtin_path = "crate::builtins::cells::core::cellfun"
 )]
 async fn cellfun_builtin(func: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

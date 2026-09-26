@@ -14,6 +14,56 @@ fn numeric(class: NumericClass) -> ValueFact {
 }
 
 #[test]
+fn nonuniform_results_recursively_materialize_callback_payloads() {
+    let mut device = numeric(NumericClass::Single);
+    device.storage = runmat_types::StorageFact::Sparse;
+    device.residency = runmat_types::ResidencyFact::Device {
+        provider: Some("test".into()),
+    };
+    let nested = structure(&[("resident", device)]);
+    let mut callback = callable("unused");
+    let ValueKindFact::Callable(fact) = &mut callback.kind else {
+        unreachable!()
+    };
+    fact.identity = None;
+    fact.outputs = vec![nested];
+    fact.outputs_complete = true;
+    let result = infer(
+        vec![
+            callback,
+            structure(&[("a", numeric(NumericClass::Double))]),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        LiteralContext::new(vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("UniformOutput".into()),
+            LiteralValue::Bool(false),
+        ]),
+        RequestedOutputCount::One,
+    );
+    let ValueKindFact::Struct(output) = &result.outputs[0].kind else {
+        panic!("struct")
+    };
+    let ValueKindFact::Struct(nested) = &output.fields["a"].kind else {
+        panic!("nested struct")
+    };
+    assert_eq!(
+        nested.fields["resident"].residency,
+        runmat_types::ResidencyFact::Host
+    );
+    assert_eq!(
+        nested.fields["resident"].storage,
+        runmat_types::StorageFact::Sparse
+    );
+    assert_eq!(
+        nested.fields["resident"].numeric().unwrap().class,
+        NumericClass::Single
+    );
+}
+
+#[test]
 fn error_handler_capabilities_survive_an_unknown_primary_callback() {
     let mut handler = callable("unused");
     let ValueKindFact::Callable(fact) = &mut handler.kind else {

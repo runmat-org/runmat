@@ -1,3 +1,4 @@
+use crate::catalog::inference::gathered_value_fact;
 use runmat_types::FactJoin;
 use runmat_types::{
     CallRequest, CapabilitySet, DynamicReason, EffectSet, InferenceDiagnostic, LiteralContext,
@@ -32,6 +33,7 @@ pub(super) fn infer(request: &CallRequest, count: usize) -> InferredFields {
         let field = outputs
             .pop()
             .expect("field discovery produces one input fact per field");
+        let field = gathered_value_fact(&field);
         if let Some(callable) = callable {
             let mut inferred = crate::infer_callable_call(
                 callable,
@@ -84,6 +86,9 @@ pub(super) fn infer(request: &CallRequest, count: usize) -> InferredFields {
             for (output, recovery) in outputs.iter_mut().zip(recovered.outputs) {
                 *output = output.join(&recovery);
             }
+        }
+        for output in outputs {
+            *output = gathered_value_fact(output);
         }
     }
     result

@@ -1,7 +1,6 @@
 use crate::{gather_if_needed_async, BuiltinResult};
 use runmat_value::Value;
 
-use super::error;
 use super::error_context;
 use super::options::Invocation;
 use super::plan::Plan;
