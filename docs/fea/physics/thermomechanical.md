@@ -103,8 +103,11 @@ The Rust numerical library provides the narrower executable path:
    `Reuse` transition requiring identical topology and preserved reference temperature.
 3. Call `run_linear_static_from_thermal_state` with the retained state and canonical solver mesh.
 
-The result includes the thermal transition and a source-linked `SolverResultIdentity`. Missing
-declared state, incompatible topology/reference, and an active prescribed temperature field that
+The result includes the thermal transition and a source-linked `SolverResultIdentity`. Completed
+thermal results retain the producer step identity
+and persistent node IDs in field order, and publication checks both against its context. Source
+identity also covers retained gradient, heat-flux, storage-rate, and initial-state evidence.
+Missing declared state, incompatible topology/reference, and an active prescribed temperature field that
 conflicts with the retained source reject. Temperature/eigenstrain/eigenstress snapshots are
 integration-point fields, not fabricated nodal fields. Recovery means deriving strain, stress,
 and energy from retained solutions—not reconstructing lost data.

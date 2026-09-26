@@ -105,6 +105,18 @@ impl CanonicalSemanticState {
                 "thermal result must match exactly one authored thermal producer step".into(),
             ));
         };
+        let producer = StepIdentity::from_solver_contract(sequence, step)?;
+        if result.producer != producer
+            || !result.ordered_node_ids.iter().copied().eq(mesh
+                .topology
+                .nodes
+                .iter()
+                .map(|node| node.node_id))
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "thermal result producer or node ordering differs from the publication context",
+            ));
+        }
         if !matches!(
             step.procedure,
             AnalysisProcedure::Static | AnalysisProcedure::TransientResponse
@@ -188,12 +200,7 @@ impl CanonicalSemanticState {
         let temperature = result.temperature_snapshots[terminal_index].clone();
         let payload = CanonicalThermalStatePayload {
             temperature,
-            ordered_node_ids: mesh
-                .topology
-                .nodes
-                .iter()
-                .map(|node| node.node_id)
-                .collect(),
+            ordered_node_ids: result.ordered_node_ids.clone(),
             reference_temperature_k: result.reference_temperature_k,
             sample_time_s: result.time_points_s[terminal_index],
             maximum_relative_linear_residual: result
@@ -203,7 +210,6 @@ impl CanonicalSemanticState {
                 .fold(0.0_f64, f64::max),
         };
         payload.validate()?;
-        let producer = StepIdentity::from_solver_contract(sequence, step)?;
         let topology_digest = Digest::from_bytes(*mesh.canonical_digest.bytes());
         if result.topology_digest != topology_digest {
             return Err(AnalysisExecutionError::Identity(
@@ -217,9 +223,15 @@ impl CanonicalSemanticState {
                 &result.run.identity,
                 &result.time_points_s,
                 &result.temperature_snapshots,
+                &result.temperature_gradient_snapshots,
+                &result.heat_flux_snapshots,
+                &result.energy_storage_rate_snapshots,
                 &result.residual_norms,
                 result.reference_temperature_k,
                 result.topology_digest,
+                result.producer,
+                &result.ordered_node_ids,
+                &result.initial_state,
             ),
             STATE_LIMITS,
         )?);
@@ -297,6 +309,33 @@ mod tests {
             CanonicalSemanticState::from_canonical_bytes(&state.canonical_bytes().unwrap())
                 .unwrap();
         assert_eq!(decoded, state);
+
+        let mut reordered = result.clone();
+        reordered.ordered_node_ids.swap(0, 1);
+        assert!(matches!(
+            CanonicalSemanticState::from_thermal_result(&model, &mesh, &reordered),
+            Err(AnalysisExecutionError::Identity(_))
+        ));
+        let mut substituted_producer = result.clone();
+        substituted_producer.producer = StepIdentity::new(
+            SequenceIdentity::new(Digest::sha256("another-sequence")).unwrap(),
+            Digest::sha256("another-step"),
+        )
+        .unwrap();
+        assert!(matches!(
+            CanonicalSemanticState::from_thermal_result(&model, &mesh, &substituted_producer),
+            Err(AnalysisExecutionError::Identity(_))
+        ));
+        let mut changed_flux = result.clone();
+        if let runmat_analysis_core::AnalysisFieldValues::HostF64(values) =
+            &mut changed_flux.heat_flux_snapshots[0].values
+        {
+            values[0] += 1.0;
+        }
+        let changed_state =
+            CanonicalSemanticState::from_thermal_result(&model, &mesh, &changed_flux).unwrap();
+        assert_ne!(state.source_result, changed_state.source_result);
+        assert_eq!(state.payload, changed_state.payload);
 
         let mut forged_result = result.clone();
         forged_result.topology_digest = Digest::sha256("another-mesh");
