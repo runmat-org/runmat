@@ -76,6 +76,13 @@ impl ThermalWorkload {
         )
     }
 
+    pub fn solve_schedule(&self) -> Result<super::ThermalSolveSchedule, FeaRunError> {
+        let step = self
+            .validated_step()
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+        super::ThermalSolveSchedule::derive(&self.model, step, self.procedure)
+    }
+
     /// Executes the selected step without rewriting the authored sequence or its producer identity.
     /// Resource planning and portable worker task admission must surround this numerical entry.
     pub fn execute(&self, mesh: &SolverMeshArtifact) -> Result<FeaThermalRunResult, FeaRunError> {

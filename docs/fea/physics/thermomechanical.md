@@ -143,6 +143,16 @@ and coupled families pending their executable contracts. Multiple thermal steps 
 individually without rewriting their sequence identity; this is not sequence orchestration. The
 local entry does not yet supply thermal producer resource admission or a portable worker task.
 
+Thermal execution and workload preflight now share `ThermalSolveSchedule`: the sorted unique union
+of grid points, active signal breakpoints, and required history coordinates, preserving left-limit
+evaluation at jumps. The authored sample ceiling applies to this expanded inventory before
+assembly, not just the requested snapshot count. Shared time-grid construction rejects count
+overflow, nonfinite spans and indistinguishable floating-point coordinates. Preflight also counts
+the four mandatory retained histories exactly as `samples * (nodes + 7 * elements)` f64 values
+and rejects a resident-memory ceiling smaller than those values alone. This is a necessary memory
+floor, not an upper bound: simultaneous assemblies, sparse builders, solver/coercivity workspace,
+metadata, observation storage and serialization/transport still require full resource admission.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

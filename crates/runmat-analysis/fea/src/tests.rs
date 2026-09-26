@@ -1,3 +1,5 @@
+mod thermal_schedule_admission;
+
 use crate::{
     fea_nonlinear_contact_gap_field_id, fea_nonlinear_contact_pressure_field_id,
     fea_nonlinear_equivalent_plastic_strain_field_id, fea_nonlinear_load_factor_field_id,

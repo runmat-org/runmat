@@ -27,19 +27,26 @@ use crate::{
 pub(crate) fn required_time_history_samples(
     step: &ProcedureStep,
 ) -> Result<Vec<f64>, ObservationError> {
-    required_scalar_history_samples(step, ScalarHistoryDomain::TimeSeconds)
+    required_scalar_history_samples(step, ScalarHistoryDomain::TimeSeconds, None)
+}
+
+pub(crate) fn required_bounded_time_history_samples(
+    step: &ProcedureStep,
+    maximum: usize,
+) -> Result<Vec<f64>, ObservationError> {
+    required_scalar_history_samples(step, ScalarHistoryDomain::TimeSeconds, Some(maximum))
 }
 
 pub(crate) fn required_load_factor_history_samples(
     step: &ProcedureStep,
 ) -> Result<Vec<f64>, ObservationError> {
-    required_scalar_history_samples(step, ScalarHistoryDomain::LoadFactor)
+    required_scalar_history_samples(step, ScalarHistoryDomain::LoadFactor, None)
 }
 
 pub(crate) fn required_frequency_history_samples(
     step: &ProcedureStep,
 ) -> Result<Vec<f64>, ObservationError> {
-    required_scalar_history_samples(step, ScalarHistoryDomain::FrequencyHertz)
+    required_scalar_history_samples(step, ScalarHistoryDomain::FrequencyHertz, None)
 }
 
 pub(crate) fn required_mode_history_indices(
@@ -67,8 +74,9 @@ enum ScalarHistoryDomain {
 fn required_scalar_history_samples(
     step: &ProcedureStep,
     domain: ScalarHistoryDomain,
+    maximum: Option<usize>,
 ) -> Result<Vec<f64>, ObservationError> {
-    let coordinates = required_history_coordinates(step)?;
+    let coordinates = required_history_coordinates_bounded(step, maximum)?;
     let mut samples = coordinates
         .into_iter()
         .map(|coordinate| match (domain, coordinate) {
@@ -96,6 +104,13 @@ fn required_scalar_history_samples(
 fn required_history_coordinates(
     step: &ProcedureStep,
 ) -> Result<Vec<RecoveredFieldSample>, ObservationError> {
+    required_history_coordinates_bounded(step, None)
+}
+
+fn required_history_coordinates_bounded(
+    step: &ProcedureStep,
+    maximum: Option<usize>,
+) -> Result<Vec<RecoveredFieldSample>, ObservationError> {
     let mut samples = Vec::new();
     for request in &step.observations {
         let ObservationRequest::History(spec) = request else {
@@ -121,6 +136,16 @@ fn required_history_coordinates(
                     )
                 })?;
                 samples.extend(coordinates);
+                if let Some(maximum) = maximum {
+                    samples.sort_by(compare_coordinates);
+                    samples.dedup();
+                    if samples.len() > maximum {
+                        return Err(ObservationError::Invalid(
+                            "combined history sample schedule exceeds the solve sample ceiling"
+                                .into(),
+                        ));
+                    }
+                }
             }
             SamplingPolicy::Adaptive { .. } => {
                 return Err(ObservationError::Unsupported(

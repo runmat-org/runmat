@@ -7,14 +7,13 @@ use crate::{
         ComputeBackend, ExecutionBackend, FeaRunError, FeaRunResult, FeaThermalRunResult,
         ThermalProcedureControl, ThermalSolveOptions,
     },
-    excitation::{realize_step_excitations, time_breakpoints, ExcitationSamplePoint},
+    excitation::{realize_step_excitations, ExcitationSamplePoint},
     physics::thermal::{
         assembly::{assemble as assemble_thermal_operator, ThermalEnergyBalance},
         initial_state,
     },
     pipeline::observation_history::{
-        evaluate_field_histories, required_time_history_samples, HistoryFieldSeries,
-        HistoryTopology,
+        evaluate_field_histories, HistoryFieldSeries, HistoryTopology,
     },
     progress::{check_cancelled, emit_phase, FeaProgressPhase, FeaProgressStatus},
     solve::{
@@ -41,6 +40,7 @@ pub(super) fn run(
     options: ThermalSolveOptions,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     thermal_step: &runmat_analysis_core::ProcedureStep,
+    schedule: &crate::execution::ThermalSolveSchedule,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
     emit_phase(
         "fea.run_thermal",
@@ -63,17 +63,7 @@ pub(super) fn run(
         options.formulation_requirement,
     )?;
 
-    let required_history_samples = required_time_history_samples(thermal_step)
-        .map_err(|error| FeaRunError::Observation(error.to_string()))?;
-    let time_origin_s = match &thermal_step.independent_domain {
-        IndependentDomain::TimeSeconds { start, .. } => *start,
-        IndependentDomain::Static => 0.0,
-        _ => {
-            return Err(FeaRunError::InvalidModel(
-                "thermal solve requires a static or time-domain procedure step".into(),
-            ));
-        }
-    };
+    let time_origin_s = schedule.points_s()[0];
     let active_model = super::super::activation::model_with_active_constraints(model, thermal_step);
     let initial_sample = sample_point(thermal_step, time_origin_s, SignalSampleApproach::At)?;
     let initial_excitations =
@@ -124,24 +114,16 @@ pub(super) fn run(
             requested_solver_backend,
             algebra.as_ref(),
         )?,
-        ThermalProcedureControl::BackwardEuler { snapshot_count } => {
-            let time_grid = crate::excitation::ProcedureTimeGrid::from_sample_count(
-                thermal_step,
-                snapshot_count,
-            )
-            .map_err(FeaRunError::InvalidModel)?;
-            solve_transient(TransientSolveInput {
-                model: &active_model,
-                mesh,
-                step: thermal_step,
-                initial_assembly: &initial_assembly,
-                initial_temperature_k: &initial.temperature_k,
-                time_grid,
-                required_history_samples: &required_history_samples,
-                requested_solver_backend,
-                algebra: algebra.as_ref(),
-            })?
-        }
+        ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
+            model: &active_model,
+            mesh,
+            step: thermal_step,
+            initial_assembly: &initial_assembly,
+            initial_temperature_k: &initial.temperature_k,
+            schedule,
+            requested_solver_backend,
+            algebra: algebra.as_ref(),
+        })?,
     };
     emit_phase(
         "fea.run_thermal",
@@ -349,30 +331,13 @@ struct TransientSolveInput<'a> {
     step: &'a runmat_analysis_core::ProcedureStep,
     initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
     initial_temperature_k: &'a [f64],
-    time_grid: crate::excitation::ProcedureTimeGrid,
-    required_history_samples: &'a [f64],
+    schedule: &'a crate::execution::ThermalSolveSchedule,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
 }
 
 fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
-    let events = time_breakpoints(
-        input.model,
-        input.step,
-        input.time_grid.start_s(),
-        input.time_grid.end_s(),
-    )
-    .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let mut solve_times = input
-        .time_grid
-        .points_s()
-        .iter()
-        .copied()
-        .chain(events.iter().copied())
-        .chain(input.required_history_samples.iter().copied())
-        .collect::<Vec<_>>();
-    solve_times.sort_by(f64::total_cmp);
-    solve_times.dedup_by(|left, right| left.to_bits() == right.to_bits());
+    let solve_times = input.schedule.points_s();
     let mut time_points_s = Vec::with_capacity(solve_times.len());
     let mut recovered = RecoveredSnapshots::with_capacity(solve_times.len());
     let mut residual_norms = Vec::with_capacity(solve_times.len() - 1);
@@ -383,10 +348,10 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         input.initial_assembly,
         &previous,
         None,
-        input.time_grid.nominal_interval_s(),
+        solve_times[1] - solve_times[0],
         &mut recovered,
     )?;
-    time_points_s.push(input.time_grid.start_s());
+    time_points_s.push(solve_times[0]);
     let mut last_solve = None;
     let mut host_sync_count = 0_u32;
     let mut device_apply_count = 0_u32;
@@ -405,14 +370,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             Some(step_index as u64),
             Some(solve_times.len() as u64),
         );
-        let approach = if events
-            .binary_search_by(|event| event.total_cmp(&time_s))
-            .is_ok()
-        {
-            SignalSampleApproach::LeftLimit
-        } else {
-            SignalSampleApproach::At
-        };
+        let approach = input.schedule.approach(step_index);
         let sample = sample_point(input.step, time_s, approach)?;
         let excitations = realize_excitations_for_step(input.model, input.step, sample)?;
         let assembly = assemble_thermal_operator(input.model, input.mesh, &excitations, sample)

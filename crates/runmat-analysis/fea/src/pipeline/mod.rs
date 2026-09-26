@@ -23,6 +23,7 @@ mod activation;
 mod admission;
 pub(crate) mod homogeneous_static;
 mod observation_history;
+pub(crate) use observation_history::required_bounded_time_history_samples;
 pub(crate) mod structural_nodal;
 
 use runmat_analysis_core::{
