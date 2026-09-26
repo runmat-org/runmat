@@ -17,6 +17,9 @@ pub(super) fn validate_type_compatibility(
     matrix: &Value,
     decomp_type: DecompositionType,
 ) -> BuiltinResult<()> {
+    if decomp_type == DecompositionType::Chol {
+        ensure_chol_numeric_boundary(matrix)?;
+    }
     let (rows, cols) = matrix_dims(matrix);
     match decomp_type {
         DecompositionType::Lu
@@ -45,6 +48,7 @@ pub(super) fn validate_type_compatibility(
 
 pub(super) async fn validate_chol_positive_definite(matrix: &Value) -> BuiltinResult<()> {
     use crate::builtins::math::linalg::factor::cholesky::factor_upper;
+    ensure_chol_numeric_boundary(matrix)?;
     let (order, _) = matrix_dims(matrix);
     let factor = match matrix {
         Value::Tensor(value) => {
@@ -71,6 +75,21 @@ pub(super) async fn validate_chol_positive_definite(matrix: &Value) -> BuiltinRe
     }
     .map_err(|_| internal("decomposition: unable to allocate Cholesky validation workspace"))?;
     if factor.info != 0 {
+        return Err(invalid(
+            "decomposition: type 'chol' requires a positive definite coefficient matrix",
+        ));
+    }
+    Ok(())
+}
+
+/// Cholesky's floating mathematical boundary is narrower than the opaque
+/// object's exact structural storage. Check before even the Hermitian probe
+/// can materialize integer coefficients as binary64.
+fn ensure_chol_numeric_boundary(matrix: &Value) -> BuiltinResult<()> {
+    if crate::builtins::common::validation::is_typed_complex_integer(matrix)
+        || ensure_exact_integer_scalar_boundary(matrix, "coefficient matrix").is_err()
+    {
+        // Preserve the constructor's former nested-Cholesky error mapping.
         return Err(invalid(
             "decomposition: type 'chol' requires a positive definite coefficient matrix",
         ));
