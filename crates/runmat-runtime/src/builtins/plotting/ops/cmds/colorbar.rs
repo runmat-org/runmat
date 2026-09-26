@@ -1,93 +1,111 @@
 use super::error::cmd_error_with_message;
 use crate::builtins::plotting::op_common::cmd_parsing::parse_on_off;
-use crate::builtins::plotting::state::{set_colorbar_enabled, toggle_colorbar};
-use crate::builtins::plotting::type_resolvers::bool_type;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+use crate::builtins::plotting::properties::{resolve_plot_handle, PlotHandle};
+use crate::builtins::plotting::state::{
+    axes_metadata_snapshot, current_axes_state, ensure_colorbar_for_axes,
+    set_colorbar_enabled_for_axes,
 };
-use runmat_macros::runtime_builtin;
+use runmat_builtins::{
+    COLORBAR_DESCRIPTOR, COLORBAR_ERROR_INVALID_ARGUMENT, COLORBAR_ERROR_OUTPUTS,
+};
 use runmat_value::Value;
 #[cfg(test)]
 #[path = "colorbar/tests.rs"]
 mod tests;
-const COLORBAR_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "enabled",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Colorbar enabled state after command execution.",
-}];
-const COLORBAR_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const COLORBAR_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"toggle\""),
-    description: "Colorbar mode token ('on'|'off').",
-}];
-const COLORBAR_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "enabled = colorbar()",
-        inputs: &COLORBAR_INPUTS_NONE,
-        outputs: &COLORBAR_OUTPUT_ENABLED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "enabled = colorbar(mode)",
-        inputs: &COLORBAR_INPUTS_MODE,
-        outputs: &COLORBAR_OUTPUT_ENABLED,
-    },
-];
-const COLORBAR_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.COLORBAR.INVALID_ARGUMENT",
-    identifier: Some("RunMat:colorbar:InvalidArgument"),
-    when: "Colorbar mode argument is unsupported.",
-    message: "colorbar: invalid argument",
-};
-const COLORBAR_ERRORS: [BuiltinErrorDescriptor; 1] = [COLORBAR_ERROR_INVALID_ARGUMENT];
-pub const COLORBAR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COLORBAR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &COLORBAR_ERRORS,
-};
 
-#[runtime_builtin(
+#[runmat_macros::runtime_builtin(
     name = "colorbar",
-    category = "plotting",
-    summary = "Show, hide, or toggle colorbars.",
-    keywords = "colorbar,plotting",
-    suppress_auto_output = true,
-    type_resolver(bool_type),
-    descriptor(crate::builtins::plotting::cmds::COLORBAR_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
-    if args.len() > 1 {
+pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &COLORBAR_DESCRIPTOR,
+        &COLORBAR_ERROR_OUTPUTS,
+        "colorbar",
+    )?;
+    if args.len() > 2 {
         return Err(cmd_error_with_message(
             "colorbar",
-            "colorbar: expected at most one mode argument",
+            "colorbar: expected an optional axes handle and mode",
             &COLORBAR_ERROR_INVALID_ARGUMENT,
         ));
     }
-    match parse_on_off("colorbar", args.first()).map_err(|err| {
+    let (target, rest) = if let Some(first) = args.first() {
+        if let Ok(PlotHandle::Axes(handle, axes)) = resolve_plot_handle(first, "colorbar") {
+            (Some((handle, axes)), &args[1..])
+        } else {
+            (None, args.as_slice())
+        }
+    } else {
+        (None, args.as_slice())
+    };
+    if rest.len() > 1 {
+        return Err(cmd_error_with_message(
+            "colorbar",
+            "colorbar: expected at most one mode",
+            &COLORBAR_ERROR_INVALID_ARGUMENT,
+        ));
+    }
+    let mode = parse_on_off("colorbar", rest.first()).map_err(|error| {
         cmd_error_with_message(
             "colorbar",
-            format!(
-                "{}: {}",
-                COLORBAR_ERROR_INVALID_ARGUMENT.message,
-                err.message()
-            ),
+            error.message(),
             &COLORBAR_ERROR_INVALID_ARGUMENT,
         )
-    })? {
-        Some(enabled) => {
-            set_colorbar_enabled(enabled);
-            Ok(enabled)
+    })?;
+    let runmat = crate::compatibility::runmat_extensions_enabled();
+    if !runmat && mode == Some(false) && crate::output_count::current_output_count() == Some(1) {
+        return Err(cmd_error_with_message(
+            "colorbar",
+            "colorbar: off has no output in MATLAB compatibility mode",
+            &COLORBAR_ERROR_OUTPUTS,
+        ));
+    }
+    let (handle, axes) = target.unwrap_or_else(|| {
+        let state = current_axes_state();
+        (state.handle, state.active_index)
+    });
+    let enabled = match mode {
+        Some(enabled) => enabled,
+        None if runmat => {
+            !axes_metadata_snapshot(handle, axes)
+                .map_err(|error| {
+                    cmd_error_with_message(
+                        "colorbar",
+                        format!("colorbar: {error}"),
+                        &COLORBAR_ERROR_INVALID_ARGUMENT,
+                    )
+                })?
+                .colorbar_enabled
         }
-        None => {
-            let enabled = toggle_colorbar();
-            Ok(enabled)
-        }
+        None => true,
+    };
+    if enabled {
+        let bar = ensure_colorbar_for_axes(handle, axes).map_err(|error| {
+            cmd_error_with_message(
+                "colorbar",
+                format!("colorbar: {error}"),
+                &COLORBAR_ERROR_INVALID_ARGUMENT,
+            )
+        })?;
+        Ok(if runmat {
+            Value::Bool(true)
+        } else {
+            Value::Num(bar)
+        })
+    } else {
+        set_colorbar_enabled_for_axes(handle, axes, false).map_err(|error| {
+            cmd_error_with_message(
+                "colorbar",
+                format!("colorbar: {error}"),
+                &COLORBAR_ERROR_INVALID_ARGUMENT,
+            )
+        })?;
+        Ok(if runmat {
+            Value::Bool(false)
+        } else {
+            Value::OutputList(Vec::new())
+        })
     }
 }

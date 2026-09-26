@@ -37,7 +37,9 @@ mod clear_axes;
 pub use clear_axes::{clear_axes_target, clear_current_axes};
 #[path = "state/axes_modes.rs"]
 mod axes_modes;
-pub use axes_modes::{lock_axes_limits, set_y_direction_for_axes};
+pub use axes_modes::{
+    lock_axes_limits, set_hidden_line_removal_for_axes, set_y_direction_for_axes,
+};
 pub use colorbar::{
     colorbar_handle_for_axes, colorbar_handles_for_figure, ensure_colorbar_for_axes,
     set_colorbar_enabled, set_colorbar_enabled_for_axes, set_colorbar_visible, toggle_colorbar,
@@ -1465,20 +1467,6 @@ pub fn set_box_enabled_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_box_enabled(axes_index, enabled);
-    })?;
-    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
-    Ok(())
-}
-
-pub fn set_hidden_line_removal_for_axes(
-    handle: FigureHandle,
-    axes_index: usize,
-    enabled: bool,
-) -> Result<(), FigureError> {
-    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
-        state
-            .figure
-            .set_axes_hidden_line_removal(axes_index, enabled);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())
@@ -3451,6 +3439,9 @@ pub fn set_surface_shading(mode: ShadingMode) {
         let state = get_state_mut(&mut reg, handle);
         let plot_count = state.figure.len();
         for idx in 0..plot_count {
+            if state.figure.plot_axes_indices().get(idx).copied() != Some(state.active_axes) {
+                continue;
+            }
             if let Some(PlotElement::Surface(surface)) = state.figure.get_plot_mut(idx) {
                 *surface = surface.clone().with_shading(mode);
             }

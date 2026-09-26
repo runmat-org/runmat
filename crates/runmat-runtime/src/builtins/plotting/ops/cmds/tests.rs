@@ -1,4 +1,65 @@
 use super::*;
+use runmat_value::Value;
+
+type Command = fn(Vec<Value>) -> crate::BuiltinResult<()>;
+
+fn command_cases() -> [(Command, Vec<Value>); 8] {
+    [
+        (
+            |args| axis_builtin(args).map(|_| ()),
+            vec![Value::String("manual".into())],
+        ),
+        (|args| box_builtin(args).map(|_| ()), vec![]),
+        (|args| cla_builtin(args).map(|_| ()), vec![]),
+        (|args| colorbar_builtin(args).map(|_| ()), vec![]),
+        (|args| colormap_builtin(args).map(|_| ()), vec![]),
+        (|args| grid_builtin(args).map(|_| ()), vec![]),
+        (|args| hidden_builtin(args).map(|_| ()), vec![]),
+        (
+            |args| shading_builtin(args).map(|_| ()),
+            vec![Value::String("flat".into())],
+        ),
+    ]
+}
+
+#[test]
+fn graphics_commands_reject_excess_outputs_before_creation() {
+    let _guard = test_support::setup();
+    for (command, arguments) in command_cases() {
+        crate::builtins::plotting::state::reset_plot_state();
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        assert!(command(arguments).is_err());
+        assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
+    }
+}
+
+#[test]
+fn graphics_commands_accept_zero_outputs_in_strict_mode() {
+    let _guard = test_support::setup();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    let _outputs = crate::output_count::push_output_count(Some(0));
+    for (command, arguments) in command_cases() {
+        crate::builtins::plotting::state::reset_plot_state();
+        command(arguments).unwrap();
+        assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_some());
+    }
+}
+
+#[test]
+fn graphics_commands_reject_resident_controls_without_creating_graphics() {
+    let _guard = test_support::setup();
+    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
+        buffer_id: 918_771,
+        shape: vec![1, 1],
+        device_id: 8_181,
+        descriptor: Default::default(),
+    });
+    for (command, _) in command_cases() {
+        crate::builtins::plotting::state::reset_plot_state();
+        assert!(command(vec![resident.clone()]).is_err());
+        assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
+    }
+}
 #[test]
 fn command_descriptors_cover_core_forms() {
     let grid_labels: Vec<&str> = GRID_DESCRIPTOR

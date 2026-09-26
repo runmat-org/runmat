@@ -1,60 +1,33 @@
 use super::error::cmd_error_with_message;
 use crate::builtins::plotting::op_common::cmd_parsing::as_lower_str;
 use crate::builtins::plotting::state::set_surface_shading;
-use crate::builtins::plotting::type_resolvers::bool_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    SHADING_DESCRIPTOR, SHADING_ERROR_INVALID_ARGUMENT, SHADING_ERROR_OUTPUTS,
+    SHADING_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 #[cfg(test)]
 #[path = "shading/tests.rs"]
 mod tests;
-const SHADING_OUTPUT_OK: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ok",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True on successful shading mode update.",
-}];
-const SHADING_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Shading mode token: 'flat'|'interp'|'faceted'.",
-}];
-const SHADING_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "ok = shading(mode)",
-    inputs: &SHADING_INPUTS_MODE,
-    outputs: &SHADING_OUTPUT_OK,
-}];
-const SHADING_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.SHADING.INVALID_ARGUMENT",
-    identifier: Some("RunMat:shading:InvalidArgument"),
-    when: "Shading mode is missing, non-string, or unsupported.",
-    message: "shading: invalid argument",
-};
-const SHADING_ERRORS: [BuiltinErrorDescriptor; 1] = [SHADING_ERROR_INVALID_ARGUMENT];
-pub const SHADING_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SHADING_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &SHADING_ERRORS,
-};
-
 #[runtime_builtin(
     name = "shading",
-    category = "plotting",
-    summary = "Set surface shading mode (flat, interp, or faceted).",
-    keywords = "shading,plotting",
-    suppress_auto_output = true,
-    type_resolver(bool_type),
-    descriptor(crate::builtins::plotting::cmds::SHADING_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    crate::output_count::validate_fixed_outputs(
+        &SHADING_DESCRIPTOR,
+        &SHADING_ERROR_OUTPUTS,
+        "shading",
+    )?;
+    if crate::output_count::current_output_count() == Some(1) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &SHADING_STATE_OUTPUT_EXTENSION,
+            "shading",
+        )?;
+    }
+
     if args.len() != 1 {
         return Err(cmd_error_with_message(
             "shading",

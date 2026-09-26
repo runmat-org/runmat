@@ -3,6 +3,94 @@ use super::*;
 use crate::builtins::plotting::clone_figure;
 use crate::builtins::plotting::current_figure_handle;
 use runmat_value::{IntegerStorage, Tensor};
+
+fn map_length(value: Value) -> usize {
+    let Value::Tensor(map) = value else {
+        panic!("RGB matrix");
+    };
+    assert_eq!(map.shape[1], 3);
+    map.shape[0]
+}
+
+#[test]
+fn colormap_preserves_rank_one_and_trailing_singleton_rgb_representations() {
+    let _guard = setup();
+    for (shape, data, rows) in [
+        (vec![3], vec![1., 0., 0.], 1),
+        (vec![2, 3, 1], vec![1., 0., 0., 1., 0., 0.], 2),
+    ] {
+        assert_eq!(
+            map_length(
+                colormap_builtin(vec![Value::Tensor(Tensor::new(data, shape).unwrap())]).unwrap()
+            ),
+            rows
+        );
+    }
+    assert!(colormap_builtin(vec![Value::Tensor(
+        Tensor::new(vec![0.; 12], vec![2, 3, 2]).unwrap()
+    )])
+    .is_err());
+}
+
+#[test]
+fn colormap_strict_setter_sets_figure_default_and_returns_new_palette() {
+    let _guard = setup();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+    crate::builtins::plotting::state::reset_plot_state();
+    let figure = current_axes_state().handle;
+    let palette = colormap_tensor(runmat_plot::plots::surface::ColorMap::Hot, 7);
+    let returned = colormap_builtin(vec![Value::Tensor(palette.clone())]).unwrap();
+    assert_eq!(
+        Tensor::try_from(&returned).unwrap().materialize_f64(),
+        palette.materialize_f64()
+    );
+    crate::builtins::plotting::state::configure_subplot(1, 2, 1).unwrap();
+    assert_eq!(colormap_length_for_axes(figure, 1), 7);
+    let map = colormap_builtin(vec![Value::String("jet".into())]).unwrap();
+    assert_eq!(map_length(map), 7);
+    assert_eq!(colormap_length_for_axes(figure, 0), 7);
+    assert_eq!(map_length(colormap_builtin(vec![]).unwrap()), 7);
+    assert_eq!(
+        map_length(colormap_builtin(vec![Value::String("default".into())]).unwrap()),
+        256
+    );
+}
+
+#[test]
+fn colormap_runmat_axes_local_and_named_explicit_target_lengths_preserve_selection() {
+    let _guard = setup();
+    let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+    crate::builtins::plotting::state::reset_plot_state();
+    let figure = current_axes_state().handle;
+    crate::builtins::plotting::state::configure_subplot(1, 2, 0).unwrap();
+    colormap_builtin(vec![Value::Tensor(colormap_tensor(
+        runmat_plot::plots::surface::ColorMap::Hot,
+        7,
+    ))])
+    .unwrap();
+    crate::builtins::plotting::state::configure_subplot(1, 2, 1).unwrap();
+    assert_eq!(map_length(colormap_builtin(vec![]).unwrap()), 256);
+    let target = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+        figure, 0,
+    ));
+    assert_eq!(
+        map_length(colormap_builtin(vec![target, Value::String("jet".into())]).unwrap()),
+        7
+    );
+    assert_eq!(current_axes_state().active_index, 1);
+    assert_eq!(
+        map_length(colormap_builtin(vec![Value::Num(figure.as_u32() as f64)]).unwrap()),
+        256
+    );
+}
+
+#[test]
+fn colormap_invalid_named_map_does_not_create_figure() {
+    let _guard = setup();
+    crate::builtins::plotting::state::reset_plot_state();
+    assert!(colormap_builtin(vec![Value::String("not-a-map".into())]).is_err());
+    assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
+}
 #[test]
 fn colormap_accepts_rgb_matrix_lookup_tables() {
     let _guard = setup();

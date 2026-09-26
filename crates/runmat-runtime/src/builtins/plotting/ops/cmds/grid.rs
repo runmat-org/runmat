@@ -3,71 +3,30 @@ use crate::builtins::plotting::op_common::cmd_parsing::as_lower_str;
 use crate::builtins::plotting::state::{
     set_grid_and_minor_grid_enabled, toggle_grid, toggle_minor_grid,
 };
-use crate::builtins::plotting::type_resolvers::bool_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    GRID_DESCRIPTOR, GRID_ERROR_INVALID_ARGUMENT, GRID_ERROR_OUTPUTS, GRID_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-const GRID_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "enabled",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Grid enabled state after command execution.",
-}];
-const GRID_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const GRID_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"toggle\""),
-    description: "Grid mode token ('on'|'off'|'minor').",
-}];
-const GRID_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "enabled = grid()",
-        inputs: &GRID_INPUTS_NONE,
-        outputs: &GRID_OUTPUT_ENABLED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "enabled = grid(mode)",
-        inputs: &GRID_INPUTS_MODE,
-        outputs: &GRID_OUTPUT_ENABLED,
-    },
-];
-const GRID_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GRID.INVALID_ARGUMENT",
-    identifier: Some("RunMat:grid:InvalidArgument"),
-    when: "Grid mode argument is unsupported.",
-    message: "grid: invalid argument",
-};
-const GRID_ERRORS: [BuiltinErrorDescriptor; 1] = [GRID_ERROR_INVALID_ARGUMENT];
-pub const GRID_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &GRID_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &GRID_ERRORS,
-};
-
 enum GridMode {
     ToggleMajor,
     Major(bool),
     ToggleMinor,
 }
-
 #[runtime_builtin(
     name = "grid",
-    category = "plotting",
-    summary = "Toggle axes grid lines.",
-    keywords = "grid,plotting",
-    suppress_auto_output = true,
-    type_resolver(bool_type),
-    descriptor(crate::builtins::plotting::cmds::GRID_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    crate::output_count::validate_fixed_outputs(&GRID_DESCRIPTOR, &GRID_ERROR_OUTPUTS, "grid")?;
+    if crate::output_count::current_output_count() == Some(1) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &GRID_STATE_OUTPUT_EXTENSION,
+            "grid",
+        )?;
+    }
+
     match parse_grid_mode(&args)? {
         GridMode::ToggleMajor => {
             let enabled = toggle_grid();

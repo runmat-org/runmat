@@ -5,99 +5,31 @@ use crate::builtins::plotting::state::{
     axes_metadata_snapshot, current_axes_state, current_figure_handle,
     set_hidden_line_removal_for_axes,
 };
-use crate::builtins::plotting::type_resolvers::bool_type;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    HIDDEN_DESCRIPTOR, HIDDEN_ERROR_INVALID_ARGUMENT, HIDDEN_ERROR_OUTPUTS,
+    HIDDEN_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
-const HIDDEN_OUTPUT_ENABLED: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "enabled",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Hidden-line-removal state after command execution.",
-}];
-const HIDDEN_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const HIDDEN_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Optional,
-    default: Some("\"toggle\""),
-    description: "Hidden-line-removal mode token ('on'|'off').",
-}];
-const HIDDEN_INPUTS_AX: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::AxesHandle,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Target axes handle.",
-}];
-const HIDDEN_INPUTS_AX_MODE: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::AxesHandle,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "mode",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"toggle\""),
-        description: "Hidden-line-removal mode token ('on'|'off').",
-    },
-];
-const HIDDEN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "enabled = hidden()",
-        inputs: &HIDDEN_INPUTS_NONE,
-        outputs: &HIDDEN_OUTPUT_ENABLED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "enabled = hidden(mode)",
-        inputs: &HIDDEN_INPUTS_MODE,
-        outputs: &HIDDEN_OUTPUT_ENABLED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "enabled = hidden(ax)",
-        inputs: &HIDDEN_INPUTS_AX,
-        outputs: &HIDDEN_OUTPUT_ENABLED,
-    },
-    BuiltinSignatureDescriptor {
-        label: "enabled = hidden(ax, mode)",
-        inputs: &HIDDEN_INPUTS_AX_MODE,
-        outputs: &HIDDEN_OUTPUT_ENABLED,
-    },
-];
-const HIDDEN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.HIDDEN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:hidden:InvalidArgument"),
-    when: "Hidden-line-removal mode or axes target is unsupported.",
-    message: "hidden: invalid argument",
-};
-const HIDDEN_ERRORS: [BuiltinErrorDescriptor; 1] = [HIDDEN_ERROR_INVALID_ARGUMENT];
-pub const HIDDEN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &HIDDEN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &HIDDEN_ERRORS,
-};
 type HiddenAxesTarget = Option<(crate::builtins::plotting::state::FigureHandle, usize)>;
-
 #[runtime_builtin(
     name = "hidden",
-    category = "plotting",
-    summary = "Set axes hidden-line-removal state.",
-    keywords = "hidden,hiddenline,plotting,surface,mesh",
-    suppress_auto_output = true,
-    type_resolver(bool_type),
-    descriptor(crate::builtins::plotting::cmds::HIDDEN_DESCRIPTOR),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn hidden_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
+    crate::output_count::validate_fixed_outputs(
+        &HIDDEN_DESCRIPTOR,
+        &HIDDEN_ERROR_OUTPUTS,
+        "hidden",
+    )?;
+    if crate::output_count::current_output_count() == Some(1) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &HIDDEN_STATE_OUTPUT_EXTENSION,
+            "hidden",
+        )?;
+    }
+
     let (target, rest) = parse_hidden_target(args)?;
     let requested = parse_on_off("hidden", rest.first()).map_err(|err| {
         cmd_error_with_message(

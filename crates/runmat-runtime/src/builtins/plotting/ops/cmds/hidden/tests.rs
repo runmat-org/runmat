@@ -55,6 +55,11 @@ fn hidden_accepts_axes_target_without_selecting_current_axes() {
     hidden_builtin(vec![Value::Num(ax1), Value::String("off".into())]).unwrap();
 
     assert_eq!(
+        crate::builtins::plotting::gca::gca_builtin(vec![]).unwrap(),
+        Value::Num(ax2)
+    );
+
+    assert_eq!(
         get_builtin(vec![
             Value::Num(ax1),
             Value::String("HiddenLineRemoval".into())

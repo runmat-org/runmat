@@ -8,152 +8,36 @@ use crate::builtins::plotting::state::{
     set_axis_equal_and_limits, set_axis_limits, set_color_limits_runtime, set_z_limits,
     FigureHandle,
 };
-use crate::builtins::plotting::type_resolvers::axis_type;
 use crate::RuntimeError;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
+    AXIS_DESCRIPTOR, AXIS_ERROR_INVALID_ARGUMENT, AXIS_ERROR_OUTPUTS, AXIS_STATE_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
-const AXIS_OUTPUT_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "lim",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Current x/y limits, with z limits included for a configured 3-D view.",
-}];
-const AXIS_OUTPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const AXIS_INPUTS_NONE: [BuiltinParamDescriptor; 0] = [];
-const AXIS_INPUTS_TARGET: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "ax",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Existing axes handle whose limits are queried.",
-}];
-const AXIS_INPUTS_LIMITS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "limits",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Four-, six-, or eight-element x/y, x/y/z, or x/y/z/color limits vector.",
-}];
-const AXIS_INPUTS_MODE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "mode",
-    ty: BuiltinParamType::StringScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Mode token: 'equal'|'image'|'auto'|'tight'|'manual'|'ij'|'xy'|'on'|'off'.",
-}];
-const AXIS_INPUTS_VISIBILITY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "visibility",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Axes visibility as on/off, logical true/false, or numeric 1/0.",
-}];
-const AXIS_SIGNATURES: [BuiltinSignatureDescriptor; 5] = [
-    BuiltinSignatureDescriptor {
-        label: "lim = axis()",
-        inputs: &AXIS_INPUTS_NONE,
-        outputs: &AXIS_OUTPUT_LIMITS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "lim = axis(ax)",
-        inputs: &AXIS_INPUTS_TARGET,
-        outputs: &AXIS_OUTPUT_LIMITS,
-    },
-    BuiltinSignatureDescriptor {
-        label: "axis([xmin xmax ymin ymax | ... cmin cmax])",
-        inputs: &AXIS_INPUTS_LIMITS,
-        outputs: &AXIS_OUTPUTS_NONE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "axis(mode)",
-        inputs: &AXIS_INPUTS_MODE,
-        outputs: &AXIS_OUTPUTS_NONE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "axis(visibility)",
-        inputs: &AXIS_INPUTS_VISIBILITY,
-        outputs: &AXIS_OUTPUTS_NONE,
-    },
-];
-const AXIS_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.AXIS.INVALID_ARGUMENT",
-    identifier: Some("RunMat:axis:InvalidArgument"),
-    when: "Axis argument is unsupported, malformed, non-finite, or has invalid bounds ordering.",
-    message: "axis: invalid argument",
-};
-const AXIS_ERRORS: [BuiltinErrorDescriptor; 1] = [AXIS_ERROR_INVALID_ARGUMENT];
-pub const AXIS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &AXIS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &AXIS_ERRORS,
-};
-
-const AXIS_LIMIT_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "limits",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Four-, six-, and eight-element limit vectors accept every built-in integer class.",
-    }];
-const AXIS_VISIBILITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "visibility",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Current numeric visibility syntax accepts scalar zero or one; logical false/true is the noninteger counterpart.",
-    }];
-pub const AXIS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "axis(integer_limits)",
-        inputs: &AXIS_LIMIT_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Authoritative integer storage is shape- and order-validated before one conversion into host f64 graphics limits; the separate query form returns double limits.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "axis(integer_visibility)",
-        inputs: &AXIS_VISIBILITY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Only exact scalar zero and one are accepted, without provider dispatch or integer output.",
-    },
-];
-
 #[runtime_builtin(
     name = "axis",
-    category = "plotting",
-    summary = "Query or set axis limits, visibility, and aspect behavior.",
-    keywords = "axis,plotting",
-    suppress_auto_output = true,
-    type_resolver(axis_type),
-    descriptor(crate::builtins::plotting::cmds::AXIS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::plotting::cmds::AXIS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::plotting::cmds"
 )]
 pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(&AXIS_DESCRIPTOR, &AXIS_ERROR_OUTPUTS, "axis")?;
+
     if args.is_empty() {
         return axis_query_value(None);
     }
     if args.len() != 1 {
         return Err(axis_invalid_argument());
+    }
+    if crate::output_count::current_output_count() == Some(1)
+        && !matches!(
+            resolve_plot_handle(&args[0], "axis"),
+            Ok(PlotHandle::Axes(_, _))
+        )
+    {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &AXIS_STATE_OUTPUT_EXTENSION,
+            "axis",
+        )?;
     }
 
     if let Value::Tensor(t) = &args[0] {
