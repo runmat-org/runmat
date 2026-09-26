@@ -433,7 +433,7 @@ fn checked_dof_offset(
         .ok_or(ResourcePlanningError::Overflow("structural DOF offset"))
 }
 
-fn pattern_from_rows(
+pub(super) fn pattern_from_rows(
     rows: Vec<BTreeSet<usize>>,
     columns: usize,
 ) -> Result<SparsePattern, ResourcePlanningError> {

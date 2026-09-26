@@ -137,7 +137,7 @@ pub(crate) fn solve_linear_system_with_execution_admitted(
     )
 }
 
-fn solve_operator_system_scoped(
+pub(crate) fn solve_operator_system_scoped(
     operator: &AssembledRealSystem,
     preconditioner_kind: SpdPreconditionerKind,
     backend_kind: LinearAlgebraBackendKind,

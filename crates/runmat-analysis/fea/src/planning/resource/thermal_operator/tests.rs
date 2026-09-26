@@ -1,0 +1,144 @@
+use super::*;
+use crate::{
+    algebra::{MatrixProperties, OperatorRole, RealSparseAssembler},
+    execution::ThermalWorkload,
+};
+use runmat_analysis_core::{
+    AnalysisBoundary, AnalysisSequence, BoundaryOperator, HeatTransferCoefficient, PrescribedValue,
+    ProcedureStep, RegionTarget, Temperature, ThermalDomain,
+};
+use runmat_meshing_core::{
+    fixtures::{canonical_tetrahedron_solver_mesh, three_region_tetrahedron_solver_mesh},
+    ElementOrder,
+};
+
+fn workload() -> ThermalWorkload {
+    let mut model =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    model.thermal = Some(ThermalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    model.sequence =
+        AnalysisSequence::from_steps("heat", vec![ProcedureStep::thermal_transient("heat")]);
+    ThermalWorkload {
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: crate::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        procedure: crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 3 },
+        residual_target: 1e-4,
+    }
+}
+
+#[test]
+fn thermal_support_covers_actual_operators_and_exact_proof_work() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+        let projection = AnalysisProjection::derive(&mesh).unwrap();
+        let mut workload = workload();
+        workload.model.boundaries.push(AnalysisBoundary {
+            boundary_id: "robin".into(),
+            target: RegionTarget::boundary(
+                projection.boundary_faces[0].provenance[0]
+                    .analysis_selection_id()
+                    .unwrap(),
+            ),
+            operator: BoundaryOperator::ThermalConvection {
+                ambient_temperature: PrescribedValue::Constant(Temperature::new(293.15)),
+                coefficient: HeatTransferCoefficient::new(10.0),
+            },
+        });
+        let sample = crate::excitation::ExcitationSamplePoint::time(0.0);
+        let excitations = crate::excitation::realize_step_excitations(
+            &workload.model,
+            &workload.model.sequence.steps[0],
+            sample,
+        )
+        .unwrap();
+        let assembly = crate::physics::thermal::assembly::assemble(
+            &workload.model,
+            &mesh,
+            &excitations,
+            sample,
+        )
+        .unwrap();
+        facts.verify_matrix(&assembly.conductivity).unwrap();
+        facts.verify_matrix(&assembly.capacity).unwrap();
+        for operator in [
+            assembly.steady_operator().unwrap(),
+            assembly
+                .transient_operator(0.25, &vec![293.15; projection.nodes.len()])
+                .unwrap(),
+        ] {
+            let prepared = operator.prepare_linear().unwrap();
+            facts.verify_matrix(prepared.matrix()).unwrap();
+            let certificate = prepared.admissibility().unwrap().coercivity();
+            assert!(facts.solver_admission().admits_certificate(certificate));
+            let mut insufficient = facts.solver_admission().clone();
+            insufficient.factor_nonzero_upper_bound = Count(0);
+            assert!(!insufficient.admits_certificate(certificate));
+        }
+        let result = workload.execute(&mesh).unwrap();
+        assert!(result.temperature_snapshots.iter().all(|field| field
+            .as_host_f64()
+            .unwrap()
+            .iter()
+            .all(|value| (*value - 293.15).abs() < 1e-8)));
+    }
+}
+
+#[test]
+fn disconnected_thermal_support_rejects_unplanned_cross_body_coupling() {
+    let mesh = three_region_tetrahedron_solver_mesh();
+    let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let dimension = facts.support().rows();
+    let unconnected = (1..dimension)
+        .find(|column| {
+            !facts.support().column_indices()[facts.support().row_range(0)]
+                .contains(&(*column as u64))
+        })
+        .unwrap();
+    let mut extra = RealSparseAssembler::square(
+        dimension,
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    );
+    extra.add(0, unconnected, 1.0);
+    extra.add(unconnected, 0, 1.0);
+    assert!(facts.verify_matrix(&extra.finish().unwrap()).is_err());
+    let wrong_shape = crate::algebra::RealSparseMatrix::diagonal(
+        vec![1.0; dimension + 1],
+        OperatorRole::Stiffness,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    assert!(facts.verify_matrix(&wrong_shape).is_err());
+}
+
+#[test]
+fn thermal_numerical_reservation_is_enforced_before_solve() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let mut workload = workload();
+    let facts = ThermalOperatorResourceFacts::derive(&mesh).unwrap();
+    let history =
+        ThermalHistoryResourceFacts::derive(&mesh, &workload.solve_schedule().unwrap()).unwrap();
+    let required = facts.numerical_reservation_bytes(&history).unwrap().0;
+    assert!(required > history.retained_field_bytes.0);
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = required - 1;
+    let error = workload.execute(&mesh).unwrap_err();
+    assert!(
+        matches!(error, crate::FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling { required: actual, maximum, .. }) if actual == required && maximum == required - 1),
+        "{error}"
+    );
+    workload.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = required;
+    workload.execute(&mesh).unwrap();
+    assert!(csr_bytes(u64::MAX, 1).is_err());
+    assert!(csr_bytes(1, u64::MAX).is_err());
+}

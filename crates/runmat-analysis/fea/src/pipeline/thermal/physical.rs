@@ -20,7 +20,7 @@ use crate::{
         backend::{
             build_backend, kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend,
         },
-        linear::{solve_operator_system, LinearSolveResult},
+        linear::{solve_operator_system_scoped, LinearSolveResult},
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -41,6 +41,7 @@ pub(super) fn run(
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     thermal_step: &runmat_analysis_core::ProcedureStep,
     schedule: &crate::execution::ThermalSolveSchedule,
+    operators: &crate::planning::resource::ThermalOperatorResourceFacts,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
     emit_phase(
         "fea.run_thermal",
@@ -71,6 +72,8 @@ pub(super) fn run(
     let initial_assembly =
         assemble_thermal_operator(&active_model, mesh, &initial_excitations, initial_sample)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    operators.verify_matrix(&initial_assembly.conductivity)?;
+    operators.verify_matrix(&initial_assembly.capacity)?;
     let initial = initial_state::realize(
         &active_model,
         &initial_assembly.projection,
@@ -113,6 +116,7 @@ pub(super) fn run(
             time_origin_s,
             requested_solver_backend,
             algebra.as_ref(),
+            operators,
         )?,
         ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
             model: &active_model,
@@ -121,6 +125,7 @@ pub(super) fn run(
             initial_assembly: &initial_assembly,
             initial_temperature_k: &initial.temperature_k,
             schedule,
+            operators,
             requested_solver_backend,
             algebra: algebra.as_ref(),
         })?,
@@ -297,6 +302,7 @@ fn solve_steady(
     time_origin_s: f64,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
+    operators: &crate::planning::resource::ThermalOperatorResourceFacts,
 ) -> Result<ProcedureOutcome, FeaRunError> {
     let operator = assembly
         .steady_operator()
@@ -307,6 +313,7 @@ fn solve_steady(
         requested_solver_backend,
         algebra,
         Some(initial_temperature_k),
+        operators,
     )?;
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, &mut recovered)?;
@@ -332,6 +339,7 @@ struct TransientSolveInput<'a> {
     initial_assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
     initial_temperature_k: &'a [f64],
     schedule: &'a crate::execution::ThermalSolveSchedule,
+    operators: &'a crate::planning::resource::ThermalOperatorResourceFacts,
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &'a dyn LinearAlgebraBackend,
 }
@@ -375,6 +383,8 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
         let excitations = realize_excitations_for_step(input.model, input.step, sample)?;
         let assembly = assemble_thermal_operator(input.model, input.mesh, &excitations, sample)
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+        input.operators.verify_matrix(&assembly.conductivity)?;
+        input.operators.verify_matrix(&assembly.capacity)?;
         source_evidence.extend(assembly.source_evidence.clone());
         let operator = assembly
             .transient_operator(time_step_s, &previous)
@@ -385,6 +395,7 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             input.requested_solver_backend,
             input.algebra,
             Some(&previous),
+            input.operators,
         )?;
         host_sync_count = host_sync_count.saturating_add(solve.host_sync_count);
         device_apply_count = device_apply_count.saturating_add(solve.device_apply_k_count);
@@ -423,14 +434,25 @@ fn solve_checked(
     requested_solver_backend: LinearAlgebraBackendKind,
     algebra: &dyn LinearAlgebraBackend,
     initial_guess: Option<&[f64]>,
+    facts: &crate::planning::resource::ThermalOperatorResourceFacts,
 ) -> Result<LinearSolveResult, FeaRunError> {
-    let solve = solve_operator_system(
+    for matrix in [
+        operator.operators().stiffness(),
+        operator.operators().mass(),
+        operator.operators().damping(),
+    ] {
+        facts.verify_matrix(matrix)?;
+    }
+    let solve = solve_operator_system_scoped(
         operator,
         SpdPreconditionerKind::Jacobi,
         requested_solver_backend,
         algebra,
         initial_guess,
-    );
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        Some(facts.solver_admission()),
+    )
+    .map_err(|error| FeaRunError::Solve(error.to_string()))?;
     if solve.converged {
         Ok(solve)
     } else {

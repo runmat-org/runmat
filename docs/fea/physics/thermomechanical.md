@@ -153,6 +153,18 @@ and rejects a resident-memory ceiling smaller than those values alone. This is a
 floor, not an upper bound: simultaneous assemblies, sparse builders, solver/coercivity workspace,
 metadata, observation storage and serialization/transport still require full resource admission.
 
+`ThermalOperatorResourceFacts` additionally derives value-independent scalar support from volume
+and boundary connectivity before assembly. Every assembled conductivity/capacity and derived
+system matrix must fit that support. The solver uses the existing shared coercivity-work envelope
+and checks the exact prepared-system certificate against its reserved work, without assuming that
+a symbolic factorization of a support superset bounds every subset's reordered fill. Preflight
+reserves eight full-support CSR payloads plus diagonal damping, shared proof workspace, and the
+retained field values. This covers the counted simultaneous logical matrix payloads (including a
+possible accelerator prepared-system clone), not spare vector capacity, retained symbolic support,
+or provider-owned storage. Sparse assembly builders, numerical
+vectors, model/projection/evidence metadata, observations, and transport are still outside this
+partial reservation. Passing it is not whole-process memory admission or GPU qualification.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature

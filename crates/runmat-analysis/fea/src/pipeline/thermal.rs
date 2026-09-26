@@ -89,9 +89,11 @@ fn execute_validated_model(
     mesh.validate_canonical()
         .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
-    crate::planning::resource::ThermalHistoryResourceFacts::derive(mesh, &schedule)?
-        .require_fits(step.accuracy.resources.maximum_resident_bytes)?;
-    physical::run(model, backend, options, mesh, step, &schedule)
+    let history = crate::planning::resource::ThermalHistoryResourceFacts::derive(mesh, &schedule)?;
+    history.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
+    let operators = crate::planning::resource::ThermalOperatorResourceFacts::derive(mesh)?;
+    operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
+    physical::run(model, backend, options, mesh, step, &schedule, &operators)
 }
 
 pub(crate) fn validate_controls(
