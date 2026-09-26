@@ -146,6 +146,16 @@ Use the same fusion categories as the library matrix:
 | `T` | Transpose or permutation. |
 | `P` | Pipeline or fuse-friendly operation. |
 
+### Automatic operand preparation
+
+Declare shared preparation in `BuiltinPlacementContract::preparation`. Each `BuiltinPreparationForm` identifies its binding variant, applicable descriptor signatures, data-argument positions, operation, and provider requirements. Other arguments remain controls in the builtin's implementation. `RuntimeOwned` means the implementation owns preparation, including any supported provider execution; it does not mean host-only.
+
+Select a preparation form after the builtin's existing output-count, compatibility, option, and operand checks. Retain parsed options in their domain types, construct an `AdmittedBuiltinPreparation` containing only the declared data operands, and use `context::preparation::execute_admitted` around execution. Do not add another option parser to the acceleration planner or call the builtin again through dispatch. Catalog validation checks declaration consistency; it does not perform runtime argument admission.
+
+The runtime service prepares operands and keeps an ownership/observation guard alive through execution. Its implementation must release newly allocated temporary buffers on partial preparation failure, call failure, cancellation, or abandonment, without releasing borrowed inputs or aliases published in results. With no acceleration service installed, operands pass through and the builtin retains its ordinary execution behavior.
+
+Test invalid calls before new provider uploads, unchanged controls and prototypes, output aliasing, partial-upload rollback, and dropped call futures. GPU submission is not completed device execution; do not report submission latency as an execution-cost sample.
+
 ## Tests
 
 Every builtin should have focused tests for:
