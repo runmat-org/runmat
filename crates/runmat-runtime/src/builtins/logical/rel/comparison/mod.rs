@@ -1,6 +1,7 @@
 mod errors;
 mod identity;
 mod operands;
+mod preparation;
 
 #[cfg(test)]
 mod tests;
@@ -27,6 +28,24 @@ pub(super) async fn evaluate(
     operator: RelationalOperator,
 ) -> crate::BuiltinResult<Value> {
     let output_source = select_comparison_output_source(&lhs, &rhs, operator.name())?;
+    if (matches!(lhs, Value::Tensor(_)) || matches!(rhs, Value::Tensor(_)))
+        && super::integer_comparison::admit_numeric_pair(&lhs, &rhs)
+            .map_err(|error| runtime_error(operator, ComparisonError::from(error)))?
+    {
+        return preparation::execute(lhs, rhs, operator, |lhs, rhs| async move {
+            evaluate_admitted(lhs, rhs, operator, output_source).await
+        })
+        .await;
+    }
+    evaluate_admitted(lhs, rhs, operator, output_source).await
+}
+
+async fn evaluate_admitted(
+    lhs: Value,
+    rhs: Value,
+    operator: RelationalOperator,
+    output_source: Option<runmat_accelerate_api::GpuTensorHandle>,
+) -> crate::BuiltinResult<Value> {
     if let (Value::GpuTensor(lhs), Value::GpuTensor(rhs)) = (&lhs, &rhs) {
         if let Some(result) = compare_resident(lhs, rhs, operator).await {
             return result;

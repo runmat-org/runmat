@@ -127,7 +127,11 @@ macro_rules! define_relational_entry {
                 capabilities: &[],
             },
             placement: crate::BuiltinPlacementContract {
-                preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+                preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+                    id: crate::BuiltinPreparationFormId(0), binding_variant: "default", signatures: &[0], data_arguments: &[0, 1],
+                    operation: crate::BuiltinPreparationOperation::ElementwiseBinary,
+                    provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+                }]),
                 portability: crate::BuiltinPortability::NativeAndWasm,
                 accelerator: crate::BuiltinAcceleratorPolicy::Optional,
                 residency: crate::BuiltinResidencyPolicy::PreserveInputs,

@@ -10,6 +10,25 @@ use crate::builtins::common::broadcast::BroadcastPlan;
 
 use super::{IntegerComparisonError, IntegerComparisonOp};
 
+/// Reuse exact comparison operand admission without evaluating any elements.
+/// Non-numeric identity/text/symbolic/table routes remain with their domains.
+pub(crate) fn admit_numeric_pair(lhs: &Value, rhs: &Value) -> Result<bool, IntegerComparisonError> {
+    fn shape(value: &Value) -> Option<Vec<usize>> {
+        real_operand(value)
+            .map(|operand| operand.shape)
+            .or_else(|| complex_operand(value).map(|operand| operand.shape))
+            .or_else(|| match value {
+                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                _ => None,
+            })
+    }
+    let (Some(lhs), Some(rhs)) = (shape(lhs), shape(rhs)) else {
+        return Ok(false);
+    };
+    BroadcastPlan::new(&lhs, &rhs).map_err(|_| IntegerComparisonError::SizeMismatch)?;
+    Ok(true)
+}
+
 /// Performs a comparison when native integer storage is compared against other
 /// native integer storage or real numeric storage. This keeps integer values
 /// exact even when the other operand is an f64 array.
