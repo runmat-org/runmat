@@ -9,11 +9,11 @@ use runmat_execution::{
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    AnalysisNumericalObjectKind, FieldRecoveryRequestIdentity, ObservationAssemblyRequestIdentity,
-    ObservationHistoryCheckpointRequestIdentity, ObservationPartitionEvaluationRequestIdentity,
-    ObservationPartitionReductionRequestIdentity, SolverResultIdentity,
-    StructuralBucklingWorkloadIdentity, StructuralFrequencyEntryRequestIdentity,
-    StructuralFrequencyResultAssemblyRequestIdentity,
+    AnalysisNumericalObjectKind, AnalysisWorkloadIdentity, FieldRecoveryRequestIdentity,
+    ObservationAssemblyRequestIdentity, ObservationHistoryCheckpointRequestIdentity,
+    ObservationPartitionEvaluationRequestIdentity, ObservationPartitionReductionRequestIdentity,
+    SolverResultIdentity, StructuralBucklingWorkloadIdentity,
+    StructuralFrequencyEntryRequestIdentity, StructuralFrequencyResultAssemblyRequestIdentity,
     StructuralModalResponseSpectrumAssemblyRequestIdentity,
     StructuralModalResponseSpectrumDirectionRequestIdentity, StructuralModalWorkloadIdentity,
     StructuralRandomResponseAssemblyRequestIdentity,
@@ -23,7 +23,9 @@ use crate::execution::{
 mod assembly_demand;
 mod error;
 mod modal_demand;
+mod prepared;
 mod random_response_demand;
+mod thermal_demand;
 mod transient_block_demand;
 mod transient_recovery_demand;
 mod transient_scope_demand;
@@ -37,7 +39,12 @@ pub use error::ResourcePlanningError;
 pub use modal_demand::{
     StructuralModalResourceDemand, StructuralModalResponseSpectrumDirectionResourceDemand,
 };
+pub use prepared::{
+    PreparedInputResourceFacts, PreparedOutputResourceFacts, PreparedOutputSetResourceFacts,
+    PreparedPhaseResourceFacts, PreparedStructuralModalResourceFacts,
+};
 pub use random_response_demand::StructuralRandomResponseIntervalResourceDemand;
+pub use thermal_demand::ThermalSolveResourceDemand;
 pub use transient_block_demand::StructuralTransientBlockResourceDemand;
 pub use transient_recovery_demand::StructuralTransientFieldRecoveryResourceDemand;
 pub use transient_scope_demand::StructuralTransientScopeResourceDemand;
@@ -49,7 +56,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 25;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 26;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -221,6 +228,7 @@ pub enum PartitioningPolicy {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "request")]
 pub enum FeaResourcePhase {
+    ThermalSolve(AnalysisWorkloadIdentity),
     StructuralLinearPipeline,
     StructuralModalExtraction(StructuralModalWorkloadIdentity),
     StructuralBuckling(StructuralBucklingWorkloadIdentity),
@@ -274,55 +282,6 @@ pub struct StructuralBucklingResourceDemand {
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
     pub receipt_output: PreparedOutputResourceFacts,
-}
-
-/// Prepared transport envelopes for the two modal task outputs and their shared output-set root.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreparedStructuralModalResourceFacts {
-    pub inputs: PreparedInputResourceFacts,
-    pub result_output: PreparedOutputResourceFacts,
-    pub receipt_output: PreparedOutputResourceFacts,
-    pub output_set: PreparedOutputSetResourceFacts,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PreparedInputResourceFacts {
-    /// Canonical numerical payload bytes before object chunking.
-    pub encoded_payload_bytes: ByteCount,
-    /// Unique content-addressed object bytes imported by the worker.
-    pub transport_closure_bytes: ByteCount,
-    /// Conservative admission budget for decoded numerical objects that coexist at phase
-    /// execution. Actual scheduler accounting remains authoritative.
-    pub decoded_resident_bytes_admission_budget: ByteCount,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PreparedOutputResourceFacts {
-    /// Canonical numerical payload bytes emitted before object chunking.
-    pub encoded_payload_bytes_upper_bound: ByteCount,
-    /// Content-addressed chunks and manifest for this numerical output. The single shared
-    /// output-set root is accounted separately at the workload level.
-    pub transport_closure_bytes_upper_bound: ByteCount,
-    /// Conservative admission budget for output values and encoding buffers that coexist during
-    /// construction. Actual scheduler accounting remains authoritative.
-    pub construction_resident_bytes_admission_budget: ByteCount,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PreparedOutputSetResourceFacts {
-    /// The one output-set root shared by every numerical output of a workload.
-    pub encoded_bytes_upper_bound: ByteCount,
-}
-
-/// Prepared transport and materialization facts shared by one independently admitted phase.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreparedPhaseResourceFacts {
-    pub inputs: PreparedInputResourceFacts,
-    pub output: PreparedOutputResourceFacts,
-    pub output_set: PreparedOutputSetResourceFacts,
 }
 
 /// Exact prepared-object inputs imported by an independently scheduled structural-frequency
@@ -410,6 +369,7 @@ pub struct ObservationAssemblyResourceDemand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
 pub enum FeaResourceDemand {
+    ThermalSolve(ThermalSolveResourceDemand),
     StructuralLinearPipeline(StructuralOperatorResourceDemand),
     StructuralModalExtraction(StructuralModalResourceDemand),
     StructuralBuckling(StructuralBucklingResourceDemand),
@@ -440,6 +400,12 @@ impl FeaResourceDemand {
         kind: AnalysisNumericalObjectKind,
     ) -> Option<&PreparedOutputResourceFacts> {
         match (self, kind) {
+            (Self::ThermalSolve(demand), AnalysisNumericalObjectKind::SolverResult) => {
+                Some(&demand.result_output)
+            }
+            (Self::ThermalSolve(demand), AnalysisNumericalObjectKind::NumericalReceipt) => {
+                Some(&demand.receipt_output)
+            }
             (
                 Self::StructuralModalExtraction(demand),
                 AnalysisNumericalObjectKind::SolverResult,
@@ -557,6 +523,7 @@ pub struct FeaResourcePlanningInput {
 impl FeaResourcePlanningInput {
     pub const fn topology_digest(&self) -> Digest {
         match &self.demand {
+            FeaResourceDemand::ThermalSolve(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralLinearPipeline(demand) => demand.topology_digest,
             FeaResourceDemand::StructuralModalExtraction(demand) => demand.operator.topology_digest,
             FeaResourceDemand::StructuralBuckling(demand) => demand.operator.topology_digest,
@@ -594,6 +561,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn observations(&self) -> Option<&ObservationResourceFacts> {
         match &self.demand {
+            FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(&demand.observations),
             FeaResourceDemand::StructuralModalExtraction(demand) => {
                 Some(&demand.operator.observations)
@@ -631,6 +599,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn partitioning(&self) -> &PartitioningPolicy {
         match &self.demand {
+            FeaResourceDemand::ThermalSolve(_) => &PartitioningPolicy::Monolithic,
             FeaResourceDemand::StructuralLinearPipeline(demand) => &demand.partitioning,
             FeaResourceDemand::StructuralModalExtraction(demand) => &demand.operator.partitioning,
             FeaResourceDemand::StructuralBuckling(demand) => &demand.operator.partitioning,
@@ -673,6 +642,7 @@ impl FeaResourcePlanningInput {
 
     pub const fn structural_operator(&self) -> Option<&StructuralOperatorResourceDemand> {
         match &self.demand {
+            FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&demand.operator),
@@ -700,6 +670,7 @@ impl FeaResourcePlanningInput {
 
     pub fn structural_operator_mut(&mut self) -> Option<&mut StructuralOperatorResourceDemand> {
         match &mut self.demand {
+            FeaResourceDemand::ThermalSolve(_) => None,
             FeaResourceDemand::StructuralLinearPipeline(demand) => Some(demand),
             FeaResourceDemand::StructuralModalExtraction(demand) => Some(&mut demand.operator),
             FeaResourceDemand::StructuralBuckling(demand) => Some(&mut demand.operator),

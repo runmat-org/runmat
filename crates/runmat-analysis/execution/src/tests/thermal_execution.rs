@@ -27,6 +27,66 @@ fn workload(procedure: ThermalProcedureControl) -> ThermalWorkload {
 }
 
 #[test]
+fn thermal_input_preparation_derives_real_transport_facts() {
+    use runmat_analysis_fea::planning::resource::{FeaResourceDemand, FeaResourcePlan};
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let workload = workload(ThermalProcedureControl::BackwardEuler { snapshot_count: 3 });
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        for chunk_bytes in [1024, 8192] {
+            let policy =
+                AnalysisOutputPolicy::new(chunk_bytes, ObjectInventoryLimits::default()).unwrap();
+            let prepared = prepare_thermal_inputs(&workload, &mesh, policy).unwrap();
+            assert_eq!(prepared.inputs.len(), 2);
+            assert_eq!(
+                prepared.inputs[0].manifest.kind,
+                AnalysisNumericalObjectKind::ThermalWorkload
+            );
+            assert_eq!(
+                ThermalWorkload::from_canonical_bytes(&prepared.inputs[0].payload()).unwrap(),
+                workload
+            );
+            let FeaResourceDemand::ThermalSolve(demand) = &prepared.resource_plan.input.demand
+            else {
+                panic!("wrong demand")
+            };
+            assert_eq!(
+                demand.inputs,
+                prepared_input_resource_facts(&prepared.inputs).unwrap()
+            );
+            let profile = workload
+                .prepare(&mesh)
+                .unwrap()
+                .transport_profile(chunk_bytes)
+                .unwrap();
+            assert_eq!(
+                demand.result_output,
+                projected_transport_output_resource_facts(&profile).unwrap()
+            );
+            assert!(
+                prepared.resource_plan.breakdown.phase_retained_bytes.0
+                    >= demand.inputs.transport_closure_bytes.0
+            );
+            assert_eq!(
+                FeaResourcePlan::from_canonical_bytes(
+                    &prepared.resource_plan.canonical_bytes().unwrap()
+                )
+                .unwrap(),
+                prepared.resource_plan
+            );
+            let tiny = AnalysisOutputPolicy::new(
+                chunk_bytes,
+                ObjectInventoryLimits {
+                    max_objects: 1,
+                    ..ObjectInventoryLimits::default()
+                },
+            )
+            .unwrap();
+            assert!(prepare_thermal_inputs(&workload, &mesh, tiny).is_err());
+        }
+    }
+}
+
+#[test]
 fn presolve_transport_bounds_postsolve_closure_and_preserves_numerical_result() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         for procedure in [

@@ -10,7 +10,9 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
 const PREFIX: &[u8] = b"runmat-thermal-numerical-receipt/v1\0";
-const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 4096, 4096, 32);
+pub const THERMAL_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
+const LIMITS: CanonicalLimits =
+    CanonicalLimits::new(THERMAL_RECEIPT_MAX_ENCODED_BYTES as usize, 4096, 4096, 32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

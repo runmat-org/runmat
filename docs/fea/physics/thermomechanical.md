@@ -624,6 +624,19 @@ integrity of every field body; publication must still validate the complete tran
 It is not an independent accuracy assessment. Tests cover Tet4/Tet10 steady/transient parity,
 workload substitution, altered header bytes and missing inventory entries, and header-only access.
 
+Thermal host resource planning now has a dedicated workload-bound phase and demand (resource
+estimation revision 26), rather than using structural operator facts. It consumes the numerical
+preassembly reservation and adds decoded inputs, retained input transport, authorizing plan
+storage, result and receipt construction, the shared output-set root, and worker overhead through
+shared monolithic host accounting. `prepare_thermal_inputs` derives the input and output facts
+through the bridge's canonical-object and transport projectors at the effective chunk policy.
+The lower-level planner accepts supplied prepared facts; worker integration must rederive these
+from immutable inputs rather than trust submitted byte counts. Only an explicit CPU backend is
+admitted by this new plan builder. Tests cover source/phase binding, canonical plan round trips,
+additive receipt storage, exact/one-byte-short memory ceilings and undersized output inventory.
+These are planning tests, not a measured portable-worker admission claim. The executable thermal
+workkind, task wiring, native dispatch and independent accuracy/release gates remain pending.
+
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for
 connected Tet10/4,097 samples (both unforced constant-temperature references, zero temperature

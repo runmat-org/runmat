@@ -20,7 +20,9 @@ mod scoped_execution;
 mod solve_policy;
 mod structural_facts;
 mod symbolic;
+mod thermal;
 mod thermal_backend_evidence;
+pub use thermal::{build_thermal_resource_plan, PreparedThermalResourceFacts};
 mod thermal_field_construction;
 mod thermal_history;
 mod thermal_manifest_catalog;
@@ -79,8 +81,8 @@ pub use contract::{
     StructuralRandomResponseAssemblyResourceDemand, StructuralRandomResponseIntervalResourceDemand,
     StructuralTransientBlockResourceDemand, StructuralTransientFieldRecoveryResourceDemand,
     StructuralTransientResultAssemblyResourceDemand, StructuralTransientScopeResourceDemand,
-    TopologyResourceFacts, WorkerResourcePolicy, RESOURCE_ESTIMATION_MODEL_REVISION,
-    RESOURCE_PLAN_MAX_ENCODED_BYTES,
+    ThermalSolveResourceDemand, TopologyResourceFacts, WorkerResourcePolicy,
+    RESOURCE_ESTIMATION_MODEL_REVISION, RESOURCE_PLAN_MAX_ENCODED_BYTES,
 };
 pub use estimate::build_resource_plan;
 pub use frequency::{

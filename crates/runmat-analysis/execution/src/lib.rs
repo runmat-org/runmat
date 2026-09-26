@@ -57,6 +57,8 @@ mod structural_transient_recovery;
 mod structural_transient_sequence;
 mod task;
 mod thermal_execution;
+mod thermal_plan;
+pub use thermal_plan::{prepare_thermal_inputs, PreparedThermalInputs};
 mod thermal_result_access;
 mod transient_block_task;
 mod transient_object_access;

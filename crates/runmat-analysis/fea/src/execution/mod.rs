@@ -46,7 +46,9 @@ mod study_workloads;
 mod sweep;
 mod thermal_receipt;
 mod thermal_result;
-pub use thermal_receipt::{ThermalNumericalReceipt, ThermalNumericalReceiptArtifact};
+pub use thermal_receipt::{
+    ThermalNumericalReceipt, ThermalNumericalReceiptArtifact, THERMAL_RECEIPT_MAX_ENCODED_BYTES,
+};
 mod thermal_result_manifest;
 pub use thermal_result_manifest::{ThermalResultEncodingProfile, ThermalSolverResultManifest};
 mod thermal_schedule;
