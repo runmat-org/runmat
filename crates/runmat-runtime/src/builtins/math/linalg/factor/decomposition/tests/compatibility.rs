@@ -66,54 +66,6 @@ fn integer_check_condition_has_an_independent_strict_mode_gate() {
 }
 
 #[test]
-fn all_integer_classes_and_logical_coefficients_solve_only_in_runmat_mode() {
-    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    for storage in all_integer_coefficient_storages() {
-        let dtype = storage.numeric_dtype();
-        let class = storage.class_name();
-        let d = call_constructor(vec![typed_int_tensor(storage, vec![2, 2])])
-            .unwrap_or_else(|error| panic!("{class} construction failed: {error}"));
-        let stored = object_to_spec(&d).expect("stored decomposition").matrix;
-        assert!(
-            matches!(stored, Value::Tensor(ref tensor) if tensor.integer_storage().is_some_and(|storage| storage.numeric_dtype() == dtype)),
-            "{class} must remain exact before solve"
-        );
-        let result = call_mldivide(d, tensor(&[8.0, 12.0], 2, 1))
-            .unwrap_or_else(|error| panic!("{class} solve failed: {error}"));
-        assert_eq!(approx_vec(result), vec![4.0, 3.0], "{class}");
-    }
-
-    let logical = Value::LogicalArray(
-        LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).expect("logical identity"),
-    );
-    let d = call_constructor(vec![logical]).expect("logical decomposition");
-    assert!(matches!(
-        object_to_spec(&d).expect("stored decomposition").matrix,
-        Value::LogicalArray(_)
-    ));
-    assert_eq!(
-        approx_vec(call_mldivide(d, tensor(&[8.0, 12.0], 2, 1)).expect("logical solve")),
-        vec![8.0, 12.0]
-    );
-}
-
-#[test]
-fn integer_decomposition_right_solve_promotes_at_the_solve_boundary() {
-    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let d = call_constructor(vec![typed_int_tensor(
-        IntegerStorage::U64(vec![2, 0, 0, 4]),
-        vec![2, 2],
-    )])
-    .expect("integer decomposition");
-    let result = call_mrdivide(tensor(&[8.0, 12.0], 1, 2), d).expect("right solve");
-    let Value::Tensor(result) = result else {
-        panic!("expected promoted double tensor")
-    };
-    assert_eq!(result.numeric_dtype(), NumericDType::F64);
-    assert_eq!(result.materialize_f64(), vec![4.0, 3.0]);
-}
-
-#[test]
 fn nonfloating_object_methods_recheck_the_compatibility_gate() {
     let d = {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);

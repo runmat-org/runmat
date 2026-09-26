@@ -80,7 +80,9 @@ pub(super) fn approx_vec(value: Value) -> Vec<f64> {
     }
 }
 
-mod cases_0;
-mod cases_1;
-mod cases_2;
+mod compatibility;
+mod integer_storage;
+mod solves;
+mod properties;
+mod construction;
 mod cutover;

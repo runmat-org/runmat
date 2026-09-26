@@ -22,8 +22,8 @@ pub const DECOMPOSITION_MTIMES_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatal
         workspace_effect: None,
         environment_effect: None,
         effects: &[
-            runmat_types::EffectKind::MayThrow,
             runmat_types::EffectKind::MaySuspend,
+            runmat_types::EffectKind::MayThrow,
         ],
         capabilities: &[],
     },

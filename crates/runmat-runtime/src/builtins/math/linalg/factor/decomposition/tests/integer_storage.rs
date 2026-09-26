@@ -1,79 +1,6 @@
 use super::*;
 
 #[test]
-fn decomposition_ldivide_is_not_a_public_method() {
-    let _ = call_constructor(vec![tensor(&[1.0], 1, 1)]).expect("register class");
-    let class =
-        crate::class_registry::get_class(&CLASS_IDENTITY.owned()).expect("decomposition class");
-    assert!(!class.methods.contains_key("ldivide"));
-
-    assert!(runmat_builtins::builtin_function_by_name("decomposition.ldivide").is_none());
-}
-
-#[test]
-fn decomposition_left_solve_reuses_mldivide_semantics() {
-    let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
-    let b = tensor(&[8.0, 12.0], 2, 1);
-    let d = call_constructor(vec![a]).expect("decomposition");
-
-    let result = call_mldivide(d, b).expect("solve");
-
-    let values = approx_vec(result);
-    assert!((values[0] - 4.0).abs() < 1e-12);
-    assert!((values[1] - 3.0).abs() < 1e-12);
-}
-
-#[test]
-fn decomposition_right_solve_uses_rhs_object() {
-    let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
-    let b = tensor(&[8.0, 12.0], 1, 2);
-    let d = call_constructor(vec![a]).expect("decomposition");
-
-    let result = call_mrdivide(b, d).expect("right solve");
-
-    let values = approx_vec(result);
-    assert!((values[0] - 4.0).abs() < 1e-12);
-    assert!((values[1] - 3.0).abs() < 1e-12);
-}
-
-#[test]
-fn scalar_multiply_and_divide_adjust_solve_matrix() {
-    let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
-    let b = tensor(&[8.0, 12.0], 2, 1);
-    let d = call_constructor(vec![a]).expect("decomposition");
-    let scaled = call_mtimes(Value::Num(2.0), d).expect("scale");
-    let divided = call_rdivide(scaled, Value::Num(4.0)).expect("divide");
-
-    let result = call_mldivide(divided, b).expect("solve");
-
-    let values = approx_vec(result);
-    assert!((values[0] - 8.0).abs() < 1e-12);
-    assert!((values[1] - 6.0).abs() < 1e-12);
-}
-
-#[test]
-fn ctranspose_toggles_property_and_solves_transposed_system() {
-    let a = tensor(&[1.0, 0.0, 2.0, 1.0], 2, 2);
-    let b = tensor(&[3.0, 1.0], 2, 1);
-    let d = call_constructor(vec![a]).expect("decomposition");
-    let dt = call_ctranspose(d).expect("ctranspose");
-
-    let prop = block_on(decomposition_subsref(
-        dt.clone(),
-        OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(IS_CONJUGATE_TRANSPOSED_FIELD.to_string()),
-    ))
-    .expect("property");
-    assert_eq!(prop, Value::Bool(true));
-
-    let result = call_mldivide(dt, b).expect("solve");
-
-    let values = approx_vec(result);
-    assert!((values[0] - 3.0).abs() < 1e-12);
-    assert!((values[1] + 5.0).abs() < 1e-12);
-}
-
-#[test]
 fn stored_matrix_helpers_read_typed_integer_storage_exactly() {
     let matrix = typed_int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4, 5, 6]), vec![2, 3]);
 
@@ -241,24 +168,33 @@ fn structure_predicates_read_typed_integer_storage_exactly() {
 }
 
 #[test]
-fn properties_expose_type_size_and_flags() {
+fn decomposition_scalar_operands_read_typed_integer_storage_exactly() {
+    let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
     let a = tensor(&[2.0, 0.0, 0.0, 4.0], 2, 2);
-    let d =
-        call_constructor(vec![a, Value::String("diagonal".to_string())]).expect("decomposition");
+    let d = call_constructor(vec![a]).expect("decomposition");
+    let scale = Tensor::new_integer(IntegerStorage::I16(vec![3]), vec![1, 1]).expect("scale");
 
-    let ty = block_on(decomposition_subsref(
-        d.clone(),
+    let scaled = call_mtimes(d, Value::Tensor(scale.clone())).expect("scale");
+    let prop = block_on(decomposition_subsref(
+        scaled,
         OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(TYPE_FIELD.to_string()),
+        Value::String(SCALE_FACTOR_FIELD.to_string()),
     ))
-    .expect("Type");
-    assert_eq!(ty, Value::String("diagonal".to_string()));
+    .expect("ScaleFactor");
+    assert_eq!(approx_vec(prop), vec![3.0]);
+    assert_eq!(
+        complex_scalar(&Value::Tensor(scale), "scale").unwrap(),
+        (3.0, 0.0)
+    );
 
-    let size = block_on(decomposition_subsref(
-        d,
-        OBJECT_INDEX_MEMBER.to_string(),
-        Value::String(MATRIX_SIZE_FIELD.to_string()),
-    ))
-    .expect("MatrixSize");
-    assert_eq!(approx_vec(size), vec![2.0, 2.0]);
+    let storage = runmat_value::IntegerComplexStorage::new(
+        IntegerStorage::I16(vec![4]),
+        IntegerStorage::I16(vec![-2]),
+    )
+    .expect("typed complex storage");
+    let complex_scale = ComplexTensor::new_integer(storage, vec![1, 1]).expect("complex scale");
+    assert_eq!(
+        complex_scalar(&Value::ComplexTensor(complex_scale), "scale").unwrap(),
+        (4.0, -2.0)
+    );
 }
