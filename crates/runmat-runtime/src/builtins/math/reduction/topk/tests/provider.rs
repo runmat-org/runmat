@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn resident_integer_controls_do_not_round_through_binary64() {
+    crate::builtins::common::test_support::with_test_provider(|provider| {
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let exact = if usize::BITS == 64 {
+            u64::MAX
+        } else {
+            u64::from(u32::MAX)
+        };
+        let control = Tensor::new_integer(IntegerStorage::U64(vec![exact]), vec![1, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &control).unwrap();
+        for kind in [TopKKind::Max, TopKKind::Min] {
+            let k = futures::executor::block_on(parse_k(kind, &Value::GpuTensor(handle.clone())))
+                .unwrap();
+            assert_eq!(k, usize::MAX);
+            let args = futures::executor::block_on(parse_topk_args(
+                kind,
+                &[Value::Num(1.), Value::GpuTensor(handle.clone())],
+            ))
+            .unwrap();
+            assert_eq!(args.dim, Some(usize::MAX));
+        }
+        provider.free(&handle).unwrap();
+    });
+}
+
+#[test]
 fn topk_gpu_extension_gates_before_gather_and_preserves_residency() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let input = Tensor::new_integer(

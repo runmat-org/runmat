@@ -23,7 +23,10 @@ pub(super) async fn parse_topk_args(kind: TopKKind, rest: &[Value]) -> BuiltinRe
             }
         }
         if dim.is_none() {
-            if let Some(parsed) = tensor::dimension_from_value_async(&rest[idx], kind.name(), false)
+            let host = gpu_helpers::gather_value_async(&rest[idx])
+                .await
+                .map_err(|error| topk_invalid_argument(kind, error.message()))?;
+            if let Some(parsed) = tensor::dimension_from_value_async(&host, kind.name(), false)
                 .await
                 .map_err(|message| topk_invalid_argument(kind, message))?
             {
@@ -38,10 +41,15 @@ pub(super) async fn parse_topk_args(kind: TopKKind, rest: &[Value]) -> BuiltinRe
 }
 
 pub(super) async fn parse_k(kind: TopKKind, value: &Value) -> BuiltinResult<usize> {
-    if let Some(integer) = tensor::scalar_integer_value(value) {
+    // A resident integer selector must cross the owner boundary as native
+    // integer storage, not through the generic scalar-double adapter.
+    let host = gpu_helpers::gather_value_async(value)
+        .await
+        .map_err(|error| topk_invalid_argument(kind, error.message()))?;
+    if let Some(integer) = tensor::scalar_integer_value(&host) {
         return parse_integer_k(kind, &integer);
     }
-    let Some(raw) = tensor::scalar_f64_from_value_async(value)
+    let Some(raw) = tensor::scalar_f64_from_value_async(&host)
         .await
         .map_err(|message| topk_invalid_argument(kind, message))?
     else {
