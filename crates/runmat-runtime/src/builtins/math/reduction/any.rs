@@ -13,15 +13,16 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-pub(super) const CONFIG: super::logical::LogicalReductionConfig = super::logical::LogicalReductionConfig {
-    entry: &ANY_CATALOG_ENTRY,
-    kind: LogicalReductionKind::Any,
-    invalid_argument: &ANY_ERROR_INVALID_ARGUMENT,
-    invalid_input: &ANY_ERROR_INVALID_INPUT,
-    internal: &ANY_ERROR_INTERNAL,
-    too_many_outputs: &ANY_ERROR_TOO_MANY_OUTPUTS,
-    nanflag_extension: &ANY_NANFLAG_EXTENSION,
-};
+pub(super) const CONFIG: super::logical::LogicalReductionConfig =
+    super::logical::LogicalReductionConfig {
+        entry: &ANY_CATALOG_ENTRY,
+        kind: LogicalReductionKind::Any,
+        invalid_argument: &ANY_ERROR_INVALID_ARGUMENT,
+        invalid_input: &ANY_ERROR_INVALID_INPUT,
+        internal: &ANY_ERROR_INTERNAL,
+        too_many_outputs: &ANY_ERROR_TOO_MANY_OUTPUTS,
+        nanflag_extension: &ANY_NANFLAG_EXTENSION,
+    };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::reduction::any")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

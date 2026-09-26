@@ -194,7 +194,11 @@ mod tests {
         runmat_accelerate::ensure_residency_hooks();
         let handle = runmat_accelerate_api::GpuTensorHandle::new(vec![1, 1], u32::MAX - 23, 98231);
         runmat_accelerate_api::mark_residency(&handle);
-        let error = block_on(syms_builtin(vec![Value::from("x"), Value::GpuTensor(handle.clone())])).unwrap_err();
+        let error = block_on(syms_builtin(vec![
+            Value::from("x"),
+            Value::GpuTensor(handle.clone()),
+        ]))
+        .unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
         assert!(workspace::lookup("x").is_none());
         assert!(runmat_accelerate::fusion_residency::is_resident(&handle));

@@ -56,12 +56,7 @@ fn invalid_types_and_shapes_are_rejected_before_preparation() {
             op
         ))
         .is_err());
-        let value = block_on(super::super::binary::execute(
-            data(),
-            Value::Bool(true),
-            op,
-        ))
-        .unwrap();
+        let value = block_on(super::super::binary::execute(data(), Value::Bool(true), op)).unwrap();
         assert!(matches!(value, Value::LogicalArray(_)));
     }
     assert_eq!(calls.get(), 3);
