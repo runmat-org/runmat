@@ -120,6 +120,16 @@ fn compiled_map_rejects_gaps_overlaps_wrong_roles_and_stale_scopes() {
             ..
         })
     ));
+    overlap
+        .material_assignments
+        .push(overlap.material_assignments[0].clone());
+    assert!(matches!(
+        compile_solid_property_map(&overlap, &mesh),
+        Err(PropertyCompilationError::InvalidCoverage {
+            assignment_count: 3,
+            ..
+        })
+    ));
 
     let mut wrong_role = model.clone();
     wrong_role.material_assignments[0].target =
@@ -272,6 +282,39 @@ fn compiled_map_projects_explicit_beam_and_shell_domains_without_cross_role_fall
 }
 
 #[test]
+fn explicit_properties_reject_duplicate_and_missing_sections() {
+    for fixture in [
+        FixtureId::StructuralBeamCantileverEndMomentReference,
+        FixtureId::StructuralShellPlateMomentReference,
+    ] {
+        let model = fixture_model(fixture);
+        for duplicate in [false, true] {
+            let mut invalid = model.clone();
+            let structural = invalid.structural.as_mut().unwrap();
+            if !structural.beam_sections.is_empty() {
+                if duplicate {
+                    structural
+                        .beam_sections
+                        .push(structural.beam_sections[0].clone());
+                } else {
+                    structural.beam_sections.clear();
+                }
+            } else if duplicate {
+                structural
+                    .shell_sections
+                    .push(structural.shell_sections[0].clone());
+            } else {
+                structural.shell_sections.clear();
+            }
+            assert!(matches!(
+                compile_property_map(&invalid, None),
+                Err(PropertyCompilationError::InvalidSection { .. })
+            ));
+        }
+    }
+}
+
+#[test]
 fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_ownership() {
     use runmat_analysis_core::{
         LaminatePlyModel, LaminateShellSectionModel, PlyOrderDirection, ShellReferenceSurface,
@@ -301,6 +344,7 @@ fn laminate_property_identity_round_trips_and_rejects_competing_homogeneous_owne
     })];
 
     let compiled = compile_property_map(&model, None).expect("compiled laminate property map");
+    super::identity::tests::assert_legacy_identity(&compiled);
     assert_eq!(compiled.shell_properties().len(), 1);
     assert!(matches!(
         compiled.shell_properties().next().unwrap().owner,

@@ -199,11 +199,10 @@ fn compile_solids(
     for element in &mesh.topology.volume_elements {
         let matching = assignments
             .iter()
-            .filter(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element))
-            .collect::<Vec<_>>();
+            .filter(|(_, assignment, _)| solid_scope_matches(assignment.target.scope(), element));
         let (assignment_index, assignment, material) = require_one(
             "solid",
-            element.element_id.to_string(),
+            || element.element_id.to_string(),
             &element.region_id.source_topology_id,
             matching,
         )?;
@@ -263,15 +262,12 @@ fn compile_explicit(
         .map_err(|error| PropertyCompilationError::InvalidExplicitTopology(error.to_string()))?;
         match &element.kind {
             StructuralElementKind::Beam(beam) => {
-                let matching = beams
-                    .iter()
-                    .filter(|(_, assignment, _)| {
-                        explicit_scope_matches(assignment.target.scope(), &element.region_id)
-                    })
-                    .collect::<Vec<_>>();
+                let matching = beams.iter().filter(|(_, assignment, _)| {
+                    explicit_scope_matches(assignment.target.scope(), &element.region_id)
+                });
                 let (assignment_index, assignment, material) = require_one(
                     "beam",
-                    element.element_id.clone(),
+                    || element.element_id.clone(),
                     &element.region_id,
                     matching,
                 )?;
@@ -284,12 +280,12 @@ fn compile_explicit(
                         MaterialCapability::MassDensity,
                     ],
                 )?;
-                let sections = structural
+                let mut sections = structural
                     .beam_sections
                     .iter()
-                    .filter(|section| section.section_id == beam.section_id)
-                    .collect::<Vec<_>>();
-                let [section] = sections.as_slice() else {
+                    .filter(|section| section.section_id == beam.section_id);
+                let section = sections.next();
+                let Some(section) = section.filter(|_| sections.next().is_none()) else {
                     return Err(PropertyCompilationError::InvalidSection {
                         role: "beam",
                         element_id: element.element_id.clone(),
@@ -303,36 +299,33 @@ fn compile_explicit(
                         element_id: element.element_id.clone(),
                         element_identity: identity,
                         material: (*material).clone(),
-                        section: (*section).clone(),
+                        section: section.clone(),
                         reference_axis: beam.reference_axis,
                     },
                 );
                 audit.push(audit_entry(identity, *assignment_index, assignment)?);
             }
             StructuralElementKind::Shell(shell) => {
-                let sections = structural
+                let mut sections = structural
                     .shell_sections
                     .iter()
-                    .filter(|section| section.section_id() == shell.section_id)
-                    .collect::<Vec<_>>();
-                let [section] = sections.as_slice() else {
+                    .filter(|section| section.section_id() == shell.section_id);
+                let section = sections.next();
+                let Some(section) = section.filter(|_| sections.next().is_none()) else {
                     return Err(PropertyCompilationError::InvalidSection {
                         role: "shell",
                         element_id: element.element_id.clone(),
                         section_id: shell.section_id.clone(),
                     });
                 };
-                let matching = shells
-                    .iter()
-                    .filter(|(_, assignment, _)| {
-                        explicit_scope_matches(assignment.target.scope(), &element.region_id)
-                    })
-                    .collect::<Vec<_>>();
+                let matching = shells.iter().filter(|(_, assignment, _)| {
+                    explicit_scope_matches(assignment.target.scope(), &element.region_id)
+                });
                 let owner = match section {
                     ShellSectionModel::Homogeneous(section) => {
                         let (assignment_index, assignment, material) = require_one(
                             "shell",
-                            element.element_id.clone(),
+                            || element.element_id.clone(),
                             &element.region_id,
                             matching,
                         )?;
@@ -353,10 +346,11 @@ fn compile_explicit(
                         }
                     }
                     ShellSectionModel::Laminate(section) => {
-                        if !matching.is_empty() {
+                        let assignment_count = matching.count();
+                        if assignment_count != 0 {
                             return Err(PropertyCompilationError::LaminateMaterialOverlap {
                                 element_id: element.element_id.clone(),
-                                assignment_count: matching.len(),
+                                assignment_count,
                             });
                         }
                         let plies = section
@@ -484,19 +478,23 @@ fn assignments_for<'a>(
 
 fn require_one<'a>(
     role: &'static str,
-    element_id: String,
+    element_id: impl FnOnce() -> String,
     region_id: &str,
-    matching: Vec<&'a Assignment<'a>>,
+    mut matching: impl Iterator<Item = &'a Assignment<'a>>,
 ) -> Result<&'a Assignment<'a>, PropertyCompilationError> {
-    if matching.len() != 1 {
-        return Err(PropertyCompilationError::InvalidCoverage {
-            role,
-            element_id,
-            region_id: region_id.to_string(),
-            assignment_count: matching.len(),
-        });
+    let first = matching.next();
+    let remaining = matching.count();
+    if remaining == 0 {
+        if let Some(assignment) = first {
+            return Ok(assignment);
+        }
     }
-    Ok(matching[0])
+    Err(PropertyCompilationError::InvalidCoverage {
+        role,
+        element_id: element_id(),
+        region_id: region_id.to_string(),
+        assignment_count: usize::from(first.is_some()) + remaining,
+    })
 }
 
 fn reject_unmatched(

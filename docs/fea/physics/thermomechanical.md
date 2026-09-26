@@ -288,6 +288,13 @@ streaming them without a temporary entry array. This accounts for retained map r
 the compiler's temporary ownership maps, identity construction, or peak allocation before the
 post-compilation estimate is available.
 
+Property owner/section matching streams candidates without per-element candidate arrays, while
+retaining exact coverage counts and missing/duplicate-section rejection. Semantic/audit identity
+views stream solid, beam, shell, and laminate-ply sequences
+without per-element temporary arrays. Integrity checking uses in-place unstable identity sorting
+and releases those validation vectors before canonical rehashing. Canonical value trees and encoded
+bytes still allocate; compiler-owned selection and pre-materialization peak admission remain open.
+
 This path remains experimental. Evidence includes a solved-temperature-to-restrained Tet4
 expansion reference with displacement, stress, reaction balance, and energy checks, plus separate
 Tet4/Tet10 load and linear-temperature recovery references. Affine Tet10 quadratic-temperature
