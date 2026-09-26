@@ -12,6 +12,8 @@ use runmat_types::{ProgramPointId, RegionContract, RegionId, RegionValueId};
 pub(crate) struct OptimizedRegionPlan {
     pub region: RegionId,
     pub entry: SiteIdentity,
+    /// First site outside the linear region, from the compiler's exit contract.
+    pub exit: ProgramPointId,
     pub inputs: Vec<RegionValueId>,
     pub outputs: Vec<RegionOutput>,
     pub program: NumericRegionProgram,
@@ -194,6 +196,7 @@ fn derive_plan(
     Some(OptimizedRegionPlan {
         region: contract.id,
         entry,
+        exit: contract.exits[0],
         inputs,
         outputs,
         program,

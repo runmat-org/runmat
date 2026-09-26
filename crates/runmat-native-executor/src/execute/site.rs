@@ -18,6 +18,41 @@ pub(super) fn execute(
     request: NativeSiteRequest,
     exit: &mut NativeExit,
 ) -> NativeExecutorResult<NativeSiteOutcome> {
+    if state.region_observation.is_some() && !request_matches_function(state, request) {
+        state.region_observation = None;
+    } else {
+        super::region::observation::before_site(state, request);
+    }
+    let result = execute_inner(state, call, request, exit);
+    super::region::observation::after_site(state, request, &result);
+    result
+}
+
+fn request_matches_function(state: &HostState, request: NativeSiteRequest) -> bool {
+    request.function == state.function.id.0
+        && state
+            .function
+            .blocks
+            .iter()
+            .find(|block| block.id.0 == request.block)
+            .is_some_and(|block| {
+                if request.phase == NativeSitePhase::TERMINATOR {
+                    ensure_site(&block.terminator, request).is_ok()
+                } else {
+                    block
+                        .instructions
+                        .iter()
+                        .any(|instruction| site_matches(instruction, request))
+                }
+            })
+}
+
+fn execute_inner(
+    state: &mut HostState,
+    call: &mut NativeCall,
+    request: NativeSiteRequest,
+    exit: &mut NativeExit,
+) -> NativeExecutorResult<NativeSiteOutcome> {
     if request.function != state.function.id.0 {
         return Err(NativeExecutorError::Host(
             "native site function identity mismatch".into(),
