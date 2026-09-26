@@ -439,8 +439,9 @@ runtime provenance. The largest-contract estimate is reported, not a process-mem
 
 Manifest descriptors and transport preparation now use the shared validated `RecoveredFieldView`
 over immutable borrowed snapshots. Canonical extraction yields one owned partition at a time;
-descriptor construction drops its numerical values before advancing, and transport retains its
-encoded bytes but drops the numerical partition. Neither consumer clones a full numerical snapshot
+descriptor construction drops its numerical values before advancing, and transport appends each
+encoded partition to the shared incremental chunk builder before dropping both temporary buffers.
+Neither consumer clones a full numerical snapshot
 or retains all extracted numerical partitions. Manifest identity reuses the field identities already
 computed for its entries. Source, partition and result identities and canonical wire formats are
 unchanged. The owned collecting API delegates to the same iterator for consumers needing all parts.
@@ -449,8 +450,23 @@ unchanged. The owned collecting API delegates to the same iterator for consumers
 traversal separately from initial full-field identity construction. For scalar fields with 4 and 48
 canonical partitions (524,288 and 6,291,456 source bytes), additional peak Rust heap was 1,577,498 B
 in both cases. This is bounded traversal evidence only: full-field identity encoding still
-materializes a canonical buffer, and transport retains all encoded payloads while constructing
-chunks. These overlaps and manifest validation still need complete resource admission.
+materializes a serde value tree and canonical buffer. These temporaries, retained output chunks,
+and manifest validation still need complete resource admission.
+
+`AnalysisPayloadBuilder` is the single incremental chunking authority; the bulk borrowed-slice
+entrypoint delegates to it. Each append checks nonempty/unique partition identity, chunk/partition
+counts and total-byte arithmetic before changing retained content. Canonical chunks still restart
+at each semantic partition boundary. Thermal preparation no longer retains an all-payload inventory
+alongside those chunks. Chunks move into transport objects through the existing validated bridge.
+Tests compare complete Tet4/Tet10 thermal prepared closures against collected-input preparation,
+including two chunk sizes, and independently specify small partition/chunk digest expectations.
+
+`cargo test -p runmat-analysis-fea --test incremental_chunk_residency -- --nocapture` includes
+generated input buffers and retained output chunks. With 512 KiB partitions and 64 KiB chunks,
+8,388,608 output bytes required 8,924,720 B peak additional Rust heap; 33,554,432 output bytes
+required 34,124,256 B. The bound tested is output bytes plus one source partition and metadata,
+not full thermal serialization or producer residency. Initial field identity materialization and
+post-projection whole-lifetime admission remain separate work.
 
 The release `thermal_history_memory` diagnostic separately measured identity-construction growth
 above the retained-result baseline: 331,318 B for connected Tet4/257 samples and 5,231,479 B for

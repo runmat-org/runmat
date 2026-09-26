@@ -1,7 +1,8 @@
 //! Thermal result transport through shared numerical objects and recovered-field partitions.
 use runmat_analysis_fea::execution::{
-    AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadPartition,
-    CanonicalSemanticState, SemanticStatePublicationRequest, ThermalSolverResultManifest,
+    AnalysisNumericalObjectKind, AnalysisObjectManifest, AnalysisPayloadBuilder,
+    AnalysisPayloadPartition, CanonicalSemanticState, SemanticStatePublicationRequest,
+    ThermalSolverResultManifest,
 };
 use runmat_analysis_fea::results::field::{RecoveredFieldPartition, RecoveredFieldView};
 use runmat_analysis_fea::FeaThermalRunResult;
@@ -11,7 +12,7 @@ use runmat_execution_artifact::{
 };
 
 use crate::{
-    import_analysis_partition, prepare_partitioned_analysis_objects, AnalysisBridgeError,
+    import_analysis_partition, object::prepare_chunked_analysis_objects, AnalysisBridgeError,
     AnalysisBridgeResult, AnalysisPartitionImport, PreparedAnalysisObjects,
 };
 
@@ -34,7 +35,15 @@ pub fn prepare_thermal_solver_result_objects(
             "thermal canonical payload projection exceeds output inventory limits".into(),
         ));
     }
-    let mut payloads = vec![(manifest.identity().digest(), manifest.canonical_bytes()?)];
+    let mut builder = AnalysisPayloadBuilder::new(
+        AnalysisNumericalObjectKind::SolverResult,
+        manifest.identity().digest(),
+        chunk_bytes,
+    )?;
+    builder.push(AnalysisPayloadPartition {
+        logical_identity: manifest.identity().digest(),
+        payload: &manifest.canonical_bytes()?,
+    })?;
     let histories = [
         &result.temperature_snapshots,
         &result.temperature_gradient_snapshots,
@@ -52,28 +61,14 @@ pub fn prepare_thermal_solver_result_objects(
             }
             for partition in field.canonical_partitions().map_err(field_error)? {
                 let partition = partition.map_err(field_error)?;
-                payloads.push((
-                    partition.identity.digest(),
-                    partition.canonical_bytes().map_err(field_error)?,
-                ));
+                builder.push(AnalysisPayloadPartition {
+                    logical_identity: partition.identity.digest(),
+                    payload: &partition.canonical_bytes().map_err(field_error)?,
+                })?;
             }
         }
     }
-    let partitions = payloads
-        .iter()
-        .map(|(logical_identity, payload)| AnalysisPayloadPartition {
-            logical_identity: *logical_identity,
-            payload,
-        })
-        .collect::<Vec<_>>();
-    prepare_partitioned_analysis_objects(
-        AnalysisNumericalObjectKind::SolverResult,
-        manifest.identity().digest(),
-        &partitions,
-        chunk_bytes,
-        namespace,
-        limits,
-    )
+    prepare_chunked_analysis_objects(builder.finish()?, namespace, limits)
 }
 
 /// Decode only the terminal temperature from an already prepared closure.

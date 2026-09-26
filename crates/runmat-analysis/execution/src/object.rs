@@ -565,7 +565,7 @@ pub fn prepare_partitioned_analysis_objects(
     prepare_chunked_analysis_objects(chunked, namespace, limits)
 }
 
-fn prepare_chunked_analysis_objects(
+pub(crate) fn prepare_chunked_analysis_objects(
     chunked: ChunkedAnalysisPayload,
     namespace: ObjectNamespace,
     limits: ObjectInventoryLimits,

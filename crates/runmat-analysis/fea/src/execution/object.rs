@@ -17,6 +17,9 @@ const MANIFEST_LIMITS: CanonicalLimits = CanonicalLimits::new(8 * 1024 * 1024, 1
 pub const ANALYSIS_MANIFEST_MAX_ENCODED_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_CHUNKS: usize = 1_000_000;
 
+mod incremental;
+pub use incremental::AnalysisPayloadBuilder;
+
 #[cfg(test)]
 #[path = "object_tests.rs"]
 mod tests;
@@ -301,78 +304,9 @@ pub fn chunk_partitioned_numerical_payload(
     partitions: &[AnalysisPayloadPartition<'_>],
     chunk_bytes: usize,
 ) -> AnalysisExecutionResult<ChunkedAnalysisPayload> {
-    if partitions.is_empty()
-        || partitions
-            .iter()
-            .any(|partition| partition.payload.is_empty())
-    {
-        return Err(AnalysisExecutionError::Invalid(
-            "numerical object partitions must be non-empty".into(),
-        ));
+    let mut builder = AnalysisPayloadBuilder::new(kind, logical_identity, chunk_bytes)?;
+    for partition in partitions {
+        builder.push(*partition)?;
     }
-    if chunk_bytes == 0 {
-        return Err(AnalysisExecutionError::Invalid(
-            "chunk byte limit must be non-zero".into(),
-        ));
-    }
-    let chunk_count = partitions
-        .iter()
-        .try_fold(0_usize, |count, partition| {
-            count.checked_add(partition.payload.len().div_ceil(chunk_bytes))
-        })
-        .ok_or(AnalysisExecutionError::Limit(
-            "numerical object chunk count",
-        ))?;
-    if chunk_count > MAX_CHUNKS || chunk_count > u32::MAX as usize {
-        return Err(AnalysisExecutionError::Limit(
-            "numerical object chunk count",
-        ));
-    }
-    let mut payload_chunks = Vec::with_capacity(chunk_count);
-    let mut chunks = Vec::with_capacity(chunk_count);
-    let mut descriptors = Vec::with_capacity(partitions.len());
-    let mut payload_hash = Sha256::new();
-    let mut encoded_length = 0_u64;
-    let mut identities = std::collections::BTreeSet::new();
-    for (partition_ordinal, partition) in partitions.iter().enumerate() {
-        if !identities.insert(partition.logical_identity) {
-            return Err(AnalysisExecutionError::Invalid(
-                "numerical object partition identities must be unique".into(),
-            ));
-        }
-        let first_chunk_ordinal = chunks.len() as u32;
-        for bytes in partition.payload.chunks(chunk_bytes) {
-            chunks.push(AnalysisChunkDescriptor {
-                ordinal: chunks.len() as u32,
-                digest: Digest::sha256(bytes),
-                encoded_length: bytes.len() as u64,
-            });
-            payload_chunks.push(bytes.to_vec());
-        }
-        descriptors.push(AnalysisPayloadPartitionDescriptor {
-            ordinal: partition_ordinal as u32,
-            logical_identity: partition.logical_identity,
-            payload_digest: Digest::sha256(partition.payload),
-            encoded_length: partition.payload.len() as u64,
-            first_chunk_ordinal,
-            chunk_count: chunks.len() as u32 - first_chunk_ordinal,
-        });
-        payload_hash.update(partition.payload);
-        encoded_length = encoded_length
-            .checked_add(partition.payload.len() as u64)
-            .ok_or(AnalysisExecutionError::Limit("object byte length overflow"))?;
-    }
-    let manifest = AnalysisObjectManifest {
-        schema_version: 1,
-        kind,
-        logical_identity,
-        payload_digest: Digest::from_bytes(payload_hash.finalize().into()),
-        encoded_length,
-        chunks,
-        partitions: descriptors,
-    };
-    Ok(ChunkedAnalysisPayload {
-        manifest,
-        chunks: payload_chunks,
-    })
+    builder.finish()
 }

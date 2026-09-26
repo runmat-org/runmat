@@ -75,6 +75,7 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
                 ObjectInventoryLimits::default(),
             )
             .unwrap();
+            assert_eq!(prepared, collected_reference(&result, chunk_bytes));
             assert_eq!(
                 prepared.manifest.partitions.len() as u64,
                 encoding.contract_count
@@ -223,4 +224,57 @@ fn thermal_terminal_publication_reads_only_selected_validated_closure() {
             assert!(import(&store, &request, ObjectInventoryLimits::default()).is_err());
         }
     }
+}
+
+// Retained-input reference exercises the bulk bridge boundary for byte-for-byte closure parity.
+fn collected_reference(
+    result: &runmat_analysis_fea::FeaThermalRunResult,
+    chunk_bytes: usize,
+) -> PreparedAnalysisObjects {
+    use runmat_analysis_fea::results::field::{canonical_field_partitions, RecoveredField};
+    let manifest = ThermalSolverResultManifest::from_result(result).unwrap();
+    let mut payloads = vec![(
+        manifest.identity().digest(),
+        manifest.canonical_bytes().unwrap(),
+    )];
+    let histories = [
+        &result.temperature_snapshots,
+        &result.temperature_gradient_snapshots,
+        &result.heat_flux_snapshots,
+        &result.energy_storage_rate_snapshots,
+    ];
+    for (ordinal, entries) in manifest.fields.iter().enumerate() {
+        for (entry, history) in entries.iter().zip(histories) {
+            let field = RecoveredField::new(
+                entry.definition.clone(),
+                entry.sample,
+                history[ordinal].clone(),
+            )
+            .unwrap();
+            for partition in canonical_field_partitions(&field).unwrap() {
+                payloads.push((
+                    partition.identity.digest(),
+                    partition.canonical_bytes().unwrap(),
+                ));
+            }
+        }
+    }
+    let partitions = payloads
+        .iter()
+        .map(
+            |(identity, bytes)| runmat_analysis_fea::execution::AnalysisPayloadPartition {
+                logical_identity: *identity,
+                payload: bytes,
+            },
+        )
+        .collect::<Vec<_>>();
+    prepare_partitioned_analysis_objects(
+        AnalysisNumericalObjectKind::SolverResult,
+        manifest.identity().digest(),
+        &partitions,
+        chunk_bytes,
+        ObjectNamespace::ResultValue,
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap()
 }
