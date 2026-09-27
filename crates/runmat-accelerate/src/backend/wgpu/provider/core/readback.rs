@@ -56,16 +56,30 @@ pub(super) fn read(
     size_bytes: u64,
     context: &str,
 ) -> impl std::future::Future<Output = Result<Vec<u8>>> + '_ {
-    // Establish guarded teardown before constructing the future: dropping an
-    // unpolled readback must not release the raw buffer outside access either.
+    read_with(access, buffer, context, move |data| {
+        let size = usize::try_from(size_bytes)
+            .map_err(|_| anyhow!("{context}: readback size overflow"))?;
+        if data.len() != size {
+            return Err(anyhow!("{context}: mapped readback size mismatch"));
+        }
+        Ok(data.to_vec())
+    })
+}
+
+pub(super) fn read_with<'a, T: 'a>(
+    access: WgpuDeviceAccess,
+    buffer: wgpu::Buffer,
+    context: &'a str,
+    decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+) -> impl std::future::Future<Output = Result<T>> + 'a {
+    // Establish ownership before constructing the future. Unpolled teardown
+    // needs only ordinary Buffer Drop; active mapping needs explicit unmap.
     let mut staging = Readback {
         access,
         buffer: Some(buffer),
         map_registered: false,
     };
     async move {
-        let size = usize::try_from(size_bytes)
-            .map_err(|_| anyhow!("{context}: readback size overflow"))?;
         let (send, receive) = oneshot::channel();
         staging.access.with_shared(|_| {
             staging.map_registered = true;
@@ -83,17 +97,17 @@ pub(super) fn read(
         receive
             .await
             .map_err(|_| anyhow!("{context}: map_async callback dropped"))??;
-        let mut output = vec![0; size];
-        staging.access.with_shared(|_| {
+        let output = staging.access.with_shared(|_| {
             let data = staging
                 .buffer
                 .as_ref()
                 .expect("readback owns staging")
                 .slice(..)
                 .get_mapped_range();
-            output.copy_from_slice(&data);
+            let output = decode(&data);
             drop(data);
-        })?;
+            output
+        })??;
         staging.cleanup()?;
         Ok(output)
     }

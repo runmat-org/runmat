@@ -58,6 +58,15 @@ impl WgpuProvider {
         readback::read(self.access.clone(), staging, size_bytes, context)
     }
 
+    pub(super) fn map_readback_with<'a, T: 'a>(
+        &'a self,
+        staging: wgpu::Buffer,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        readback::read_with(self.access.clone(), staging, context, decode)
+    }
+
     pub(super) fn map_readback_bytes_sync(
         &self,
         staging: wgpu::Buffer,

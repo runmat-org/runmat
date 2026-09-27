@@ -242,19 +242,29 @@ impl WgpuProvider {
                 entry.len
             ));
         }
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-read-scalar-staging"),
-            size: elem_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-read-scalar-enc"),
+        let staging = self.with_emission(|emission, pending| -> Result<_> {
+            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-read-scalar-staging"),
+                size: elem_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), total_bytes, &staging, 0, elem_size);
-        self.submit(encoder);
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-read-scalar-enc"),
+                    });
+            encoder.copy_buffer_to_buffer(
+                entry.buffer.as_ref(),
+                total_bytes,
+                &staging,
+                0,
+                elem_size,
+            );
+            self.submit(emission, pending, encoder)?;
+            Ok(staging)
+        })??;
         let bytes = self.map_readback_bytes_sync(staging, elem_size, "read_scalar")?;
         let value = match entry.precision {
             NumericPrecision::F64 => {
@@ -286,14 +296,14 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let buffer =
-            if len == 0 {
-                self.create_storage_buffer(0, "runmat-upload-empty")
+        let buffer = self.with_emission(|emission, _| -> Result<_> {
+            let buffer = if len == 0 {
+                self.create_storage_buffer(emission, 0, "runmat-upload-empty")?
             } else {
                 match self.precision {
                     NumericPrecision::F64 => {
                         let contents = cast_slice(host.data);
-                        Arc::new(self.device.create_buffer_init(
+                        Arc::new(emission.device().create_buffer_init(
                             &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-upload-buffer"),
                                 contents,
@@ -306,7 +316,7 @@ impl WgpuProvider {
                     NumericPrecision::F32 => {
                         let data_f32: Vec<f32> = host.data.iter().map(|v| *v as f32).collect();
                         let contents = cast_slice(&data_f32);
-                        Arc::new(self.device.create_buffer_init(
+                        Arc::new(emission.device().create_buffer_init(
                             &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-upload-buffer"),
                                 contents,
@@ -318,6 +328,8 @@ impl WgpuProvider {
                     }
                 }
             };
+            Ok(buffer)
+        })??;
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
         self.register_existing_buffer(buffer, shape, len)
@@ -406,36 +418,39 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let buffer = if len == 0 {
-            self.create_storage_buffer(0, "runmat-numeric-upload-empty")
-        } else {
-            let contents = match host.data {
-                HostNumericDataView::F64(values) => cast_slice(values),
-                HostNumericDataView::F32(values) => cast_slice(values),
-                HostNumericDataView::I8(_)
-                | HostNumericDataView::I16(_)
-                | HostNumericDataView::I32(_)
-                | HostNumericDataView::I64(_)
-                | HostNumericDataView::U8(_)
-                | HostNumericDataView::U16(_)
-                | HostNumericDataView::U32(_)
-                | HostNumericDataView::U64(_) => cast_slice(
-                    integer_words
-                        .as_ref()
-                        .expect("integer numeric upload words"),
-                ),
-            };
-            Arc::new(
-                self.device
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-numeric-upload-buffer"),
-                        contents,
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    }),
-            )
-        };
+        let buffer = self.with_emission(|emission, _| -> Result<_> {
+            let buffer =
+                if len == 0 {
+                    self.create_storage_buffer(emission, 0, "runmat-numeric-upload-empty")?
+                } else {
+                    let contents = match host.data {
+                        HostNumericDataView::F64(values) => cast_slice(values),
+                        HostNumericDataView::F32(values) => cast_slice(values),
+                        HostNumericDataView::I8(_)
+                        | HostNumericDataView::I16(_)
+                        | HostNumericDataView::I32(_)
+                        | HostNumericDataView::I64(_)
+                        | HostNumericDataView::U8(_)
+                        | HostNumericDataView::U16(_)
+                        | HostNumericDataView::U32(_)
+                        | HostNumericDataView::U64(_) => cast_slice(
+                            integer_words
+                                .as_ref()
+                                .expect("integer numeric upload words"),
+                        ),
+                    };
+                    Arc::new(emission.device().create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-numeric-upload-buffer"),
+                            contents,
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    ))
+                };
+            Ok(buffer)
+        })??;
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
         self.register_numeric_buffer_produced(
@@ -490,25 +505,29 @@ impl WgpuProvider {
         let bytes = if entry.allocated_bytes == 0 {
             Vec::new()
         } else {
-            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-numeric-download-staging"),
-                size: entry.allocated_bytes,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-numeric-download-encoder"),
+            let staging = self.with_emission(|emission, pending| -> Result<_> {
+                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-numeric-download-staging"),
+                    size: entry.allocated_bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
-            encoder.copy_buffer_to_buffer(
-                entry.buffer.as_ref(),
-                0,
-                &staging,
-                0,
-                entry.allocated_bytes,
-            );
-            self.submit(encoder);
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-numeric-download-encoder"),
+                        });
+                encoder.copy_buffer_to_buffer(
+                    entry.buffer.as_ref(),
+                    0,
+                    &staging,
+                    0,
+                    entry.allocated_bytes,
+                );
+                self.submit(emission, pending, encoder)?;
+                Ok(staging)
+            })??;
             self.map_readback_bytes(staging, entry.allocated_bytes, "numeric download")
                 .await?
         };
@@ -594,9 +613,7 @@ impl WgpuProvider {
         }
 
         let size_bytes = entry.allocated_bytes;
-        let finish_readback = |staging: wgpu::Buffer, size_bytes: u64| -> Result<HostTensorOwned> {
-            let slice = staging.slice(..);
-            let data = slice.get_mapped_range();
+        let finish_readback = |mut out: Vec<f64>| -> Result<HostTensorOwned> {
             log::trace!(
                 "wgpu download copying data id={} len={} bytes={}",
                 handle.buffer_id(),
@@ -604,18 +621,6 @@ impl WgpuProvider {
                 size_bytes
             );
 
-            let mut out = vec![0.0f64; entry.len];
-            match entry.precision {
-                NumericPrecision::F64 => out.copy_from_slice(cast_slice(&data)),
-                NumericPrecision::F32 => {
-                    let f32_slice: &[f32] = cast_slice(&data);
-                    for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
-                        *dst = *src as f64;
-                    }
-                }
-            }
-            drop(data);
-            staging.unmap();
             log::trace!("wgpu download finished copy id={}", handle.buffer_id());
             self.telemetry.record_download_bytes(size_bytes);
             record_provider_copy(runmat_value::HostCopyReason::ProviderReadback, size_bytes);
@@ -673,50 +678,39 @@ impl WgpuProvider {
             handle.buffer_id(),
             size_bytes
         );
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-download-staging"),
-            size: size_bytes,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-download-encoder"),
+        let staging = self.with_emission(|emission, pending| -> Result<_> {
+            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-download-staging"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-        encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
-        self.submit(encoder);
-        let slice = staging.slice(..);
-        let (tx, rx) = oneshot::channel();
-
-        let map_buffer_id = handle.buffer_id();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            log::trace!(
-                "wgpu download map_async callback id={} status={:?}",
-                map_buffer_id,
-                res
-            );
-            let _ = tx.send(res);
-        });
-        log::trace!(
-            "wgpu download awaiting map_async completion id={} bytes={}",
-            handle.buffer_id(),
-            size_bytes
-        );
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.device.poll(wgpu::Maintain::Wait);
-        }
-        let map_result = rx.await.map_err(|_| {
-            anyhow!(
-                "map_async callback dropped for buffer {}",
-                handle.buffer_id()
-            )
-        })?;
-
-        log::trace!("wgpu download map_async success id={}", handle.buffer_id());
-        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        finish_readback(staging, size_bytes)
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-download-encoder"),
+                    });
+            encoder.copy_buffer_to_buffer(entry.buffer.as_ref(), 0, &staging, 0, size_bytes);
+            self.submit(emission, pending, encoder)?;
+            Ok(staging)
+        })??;
+        let out = self
+            .map_readback_with(staging, "download", |data| {
+                let mut out = vec![0.0f64; entry.len];
+                match entry.precision {
+                    NumericPrecision::F64 => out.copy_from_slice(cast_slice(data)),
+                    NumericPrecision::F32 => {
+                        let f32_slice: &[f32] = cast_slice(data);
+                        for (dst, src) in out.iter_mut().zip(f32_slice.iter()) {
+                            *dst = *src as f64;
+                        }
+                    }
+                }
+                Ok(out)
+            })
+            .await?;
+        finish_readback(out)
     }
 
     pub(crate) fn device_info_exec(&self) -> String {
@@ -746,6 +740,63 @@ impl WgpuProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+    fn readback_decode_error_and_unpolled_drop_preserve_source() {
+        let provider =
+            WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
+        let handle = provider
+            .upload_exec(&HostTensorView {
+                data: &[1.25, -3.5],
+                shape: &[2, 1],
+            })
+            .expect("upload");
+        let staging = || {
+            let entry = provider
+                .get_entry_raw(&handle)
+                .expect("source remains live");
+            provider
+                .with_emission(|emission, pending| -> Result<_> {
+                    let buffer = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("readback-cleanup-regression"),
+                        size: entry.allocated_bytes,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                    let mut encoder = emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                    encoder.copy_buffer_to_buffer(
+                        &entry.buffer,
+                        0,
+                        &buffer,
+                        0,
+                        entry.allocated_bytes,
+                    );
+                    provider.submit(emission, pending, encoder)?;
+                    Ok(buffer)
+                })
+                .expect("emission access")
+                .expect("copy")
+        };
+        let error = futures::executor::block_on(provider.map_readback_with(
+            staging(),
+            "injected decode",
+            |_| -> Result<()> { Err(anyhow!("decode sentinel")) },
+        ))
+        .expect_err("decode must remain fallible");
+        assert_eq!(error.to_string(), "decode sentinel");
+        let unpolled = provider.map_readback_with(staging(), "unpolled", |_| -> Result<()> {
+            panic!("unpolled decoder must not execute")
+        });
+        drop(unpolled);
+        let host = futures::executor::block_on(provider.download_exec(&handle))
+            .expect("source survives both cleanup paths");
+        assert_eq!(host.shape, vec![2, 1]);
+        assert_eq!(host.data, vec![1.25, -3.5]);
+        handle.release().expect("final owner release");
+    }
 
     #[test]
     #[ignore = "requires provisioned WGPU adapter; run with --ignored"]
