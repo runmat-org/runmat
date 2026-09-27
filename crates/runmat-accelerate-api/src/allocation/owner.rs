@@ -10,6 +10,20 @@ pub enum AllocationRegistrationError {
     NotLive,
 }
 
+impl std::fmt::Display for AllocationRegistrationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::UnknownAllocation => "allocation is unknown",
+            Self::WrongOwner => "allocation belongs to another owner",
+            Self::StaleGeneration => "allocation generation is stale",
+            Self::AlreadyRegistered => "allocation already has a registered lease",
+            Self::NotLive => "allocation is not live",
+        })
+    }
+}
+
+impl std::error::Error for AllocationRegistrationError {}
+
 /// Physical-retirement result recorded by the owning allocation state.
 /// This is not a provider execution-completion observation.
 #[derive(Clone, Debug, PartialEq, Eq)]

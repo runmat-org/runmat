@@ -4522,8 +4522,7 @@ pub enum ScaleOp {
     Divide,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MatmulEpilogue {
     /// Exact ordered arithmetic. Missing phases perform no arithmetic.
     #[serde(default)]

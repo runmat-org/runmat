@@ -9,6 +9,7 @@ pub enum MatmulOffset<T = f64> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct MatmulAffine<T = f64> {
     pub scale: Option<T>,
     pub offset: Option<MatmulOffset<T>>,
@@ -33,17 +34,20 @@ mod tests {
     #[test]
     fn descriptor_has_one_serialized_arithmetic_authority() {
         let descriptor = crate::MatmulEpilogue::noop();
-        let mut value = serde_json::to_value(&descriptor).unwrap();
+        let value = serde_json::to_value(&descriptor).unwrap();
         assert!(value.get("alpha").is_none() && value.get("beta").is_none());
+        // Only non-owning arithmetic facts round-trip. An execution epilogue
+        // retains live tensor leases and cannot be acquired by deserialization.
+        let mut value = value.get("affine").unwrap().clone();
         assert_eq!(
-            serde_json::from_value::<crate::MatmulEpilogue>(value.clone()).unwrap(),
-            descriptor
+            serde_json::from_value::<MatmulAffine>(value.clone()).unwrap(),
+            descriptor.affine
         );
         value
             .as_object_mut()
             .unwrap()
             .insert("alpha".into(), serde_json::json!(2.0));
-        assert!(serde_json::from_value::<crate::MatmulEpilogue>(value).is_err());
+        assert!(serde_json::from_value::<MatmulAffine>(value).is_err());
     }
 
     #[test]
