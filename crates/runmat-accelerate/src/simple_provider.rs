@@ -1955,7 +1955,7 @@ impl InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| anyhow!("polyder: unknown tensor handle {}", handle.buffer_id()))?
         };
@@ -2464,7 +2464,7 @@ fn simple_moving_window(
     let input_data = {
         let guard = registry(device).lock().unwrap();
         guard
-            .get(&request.input)
+            .get(request.input)
             .ok_or_else(|| anyhow!("buffer not found: {}", request.input.buffer_id()))?
             .clone()
     };
@@ -3741,7 +3741,7 @@ fn simple_trapezoid(
     let (data, spacing_data) = {
         let guard = registry(device).lock().unwrap();
         let data = guard
-            .get(&input)
+            .get(input)
             .ok_or_else(|| anyhow!("trapezoid: unknown tensor handle {}", input.buffer_id()))?
             .clone();
         let spacing_data = match spacing {
@@ -3752,7 +3752,7 @@ fn simple_trapezoid(
                     runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real,
                     "trapezoid: spacing tensor must be real"
                 );
-                let values = guard.get(&handle).ok_or_else(|| {
+                let values = guard.get(handle).ok_or_else(|| {
                     anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id())
                 })?;
                 SimpleTrapezoidSpacing::Scalar(
@@ -3769,7 +3769,7 @@ fn simple_trapezoid(
                 );
                 SimpleTrapezoidSpacing::Vector(
                     guard
-                        .get(&handle)
+                        .get(handle)
                         .ok_or_else(|| {
                             anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id())
                         })?
@@ -3783,7 +3783,7 @@ fn simple_trapezoid(
                 );
                 SimpleTrapezoidSpacing::Tensor(
                     guard
-                        .get(&handle)
+                        .get(handle)
                         .ok_or_else(|| {
                             anyhow!("trapezoid: unknown spacing handle {}", handle.buffer_id())
                         })?
@@ -3937,9 +3937,7 @@ impl AccelProvider for InProcessProvider {
             let guard = numeric_registry()
                 .lock_for(self.device_id)
                 .map_err(|_| anyhow!("gather_linear: allocation owner is poisoned"))?;
-            for input in [source] {
-                ensure!(guard.get(input).is_some(), "gather_linear: unknown buffer");
-            }
+            ensure!(guard.get(source).is_some(), "gather_linear: unknown buffer");
             if [source]
                 .iter()
                 .any(|input| input.physical().element_type() == NumericElementType::F32)
@@ -3965,7 +3963,7 @@ impl AccelProvider for InProcessProvider {
                 let guard = integer_registry(self.device_id)
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                guard.get(&source).cloned().ok_or_else(|| {
+                guard.get(source).cloned().ok_or_else(|| {
                     anyhow!(
                         "gather_linear: unknown integer buffer {}",
                         source.buffer_id()
@@ -3998,7 +3996,7 @@ impl AccelProvider for InProcessProvider {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             guard
-                .get(&source)
+                .get(source)
                 .cloned()
                 .ok_or_else(|| anyhow!("gather_linear: unknown buffer {}", source.buffer_id()))?
         };
@@ -4071,7 +4069,7 @@ impl AccelProvider for InProcessProvider {
                     let guard = integer_registry(self.device_id)
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
-                    guard.get(&values).cloned().ok_or_else(|| {
+                    guard.get(values).cloned().ok_or_else(|| {
                         anyhow!(
                             "scatter_linear: unknown integer values buffer {}",
                             values.buffer_id()
@@ -4129,7 +4127,7 @@ impl AccelProvider for InProcessProvider {
             let guard = registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            guard.get(&values).cloned().ok_or_else(|| {
+            guard.get(values).cloned().ok_or_else(|| {
                 anyhow!(
                     "scatter_linear: unknown values buffer {}",
                     values.buffer_id()
@@ -4217,7 +4215,7 @@ impl AccelProvider for InProcessProvider {
             let data = numeric_registry()
                 .lock_for(self.device_id)
                 .unwrap_or_else(|error| error.into_inner())
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id()))?;
             self.telemetry.record_download_bytes(data.byte_len());
@@ -4244,7 +4242,7 @@ impl AccelProvider for InProcessProvider {
             let data = numeric_registry()
                 .lock_for(self.device_id)
                 .unwrap_or_else(|error| error.into_inner())
-                .get(&h)
+                .get(h)
                 .cloned()
                 .ok_or_else(|| anyhow!("buffer not found: {}", h.buffer_id()))?;
             let (data, bytes) = match data {
@@ -4281,7 +4279,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&h)
+                .get(h)
                 .cloned()
                 .ok_or_else(|| anyhow!("integer buffer not found: {}", h.buffer_id()))?;
             self.telemetry
@@ -4344,7 +4342,7 @@ impl AccelProvider for InProcessProvider {
             let mut axes = Vec::with_capacity(request.output_count);
             for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
                 let data = guard
-                    .get(&axis.handle)
+                    .get(axis.handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id()))?;
                 if axis.handle.physical().storage() == GpuTensorStorage::ComplexInterleaved {
@@ -4465,7 +4463,7 @@ impl AccelProvider for InProcessProvider {
                     "black_scholes_price: complex input {} is not supported",
                     idx + 1
                 );
-                let data = guard.get(&input.handle).cloned().ok_or_else(|| {
+                let data = guard.get(input.handle).cloned().ok_or_else(|| {
                     anyhow!(
                         "black_scholes_price: unknown buffer {}",
                         input.handle.buffer_id()
@@ -4534,23 +4532,23 @@ impl AccelProvider for InProcessProvider {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             let parameters = guard
-                .get(&request.parameters)
+                .get(request.parameters)
                 .cloned()
                 .ok_or_else(|| anyhow!("adam_update: unknown parameters buffer"))?;
             let gradient = guard
-                .get(&request.gradient)
+                .get(request.gradient)
                 .cloned()
                 .ok_or_else(|| anyhow!("adam_update: unknown gradient buffer"))?;
             let average_grad = match request.average_grad {
                 Some(handle) => guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("adam_update: unknown averageGrad buffer"))?,
                 None => vec![0.0; parameter_len],
             };
             let average_sq_grad = match request.average_sq_grad {
                 Some(handle) => guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("adam_update: unknown averageSqGrad buffer"))?,
                 None => vec![0.0; parameter_len],
@@ -4631,18 +4629,18 @@ impl AccelProvider for InProcessProvider {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             let predictions = guard
-                .get(&request.predictions)
+                .get(request.predictions)
                 .cloned()
                 .ok_or_else(|| anyhow!("crossentropy_terms: unknown predictions buffer"))?;
             let targets = guard
-                .get(&request.targets)
+                .get(request.targets)
                 .cloned()
                 .ok_or_else(|| anyhow!("crossentropy_terms: unknown targets buffer"))?;
             let weights = request
                 .weights
                 .map(|handle| {
                     guard
-                        .get(&handle)
+                        .get(handle)
                         .cloned()
                         .ok_or_else(|| anyhow!("crossentropy_terms: unknown weights buffer"))
                 })
@@ -4651,7 +4649,7 @@ impl AccelProvider for InProcessProvider {
                 .mask
                 .map(|handle| {
                     guard
-                        .get(&handle)
+                        .get(handle)
                         .cloned()
                         .ok_or_else(|| anyhow!("crossentropy_terms: unknown mask buffer"))
                 })
@@ -4698,7 +4696,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("sortrows: unknown buffer {}", handle.buffer_id()))?
             };
@@ -4731,7 +4729,8 @@ impl AccelProvider for InProcessProvider {
                 let guard = numeric_registry()
                     .lock_for(self.device_id)
                     .map_err(|_| anyhow!("polyder_single: allocation owner is poisoned"))?;
-                for input in [polynomial] {
+                {
+                    let input = polynomial;
                     ensure!(guard.get(input).is_some(), "polyder_single: unknown buffer");
                 }
                 if [polynomial].iter().any(|input| {
@@ -4837,7 +4836,8 @@ impl AccelProvider for InProcessProvider {
             let guard = numeric_registry()
                 .lock_for(self.device_id)
                 .map_err(|_| anyhow!("polyint: allocation owner is poisoned"))?;
-            for input in [polynomial] {
+            {
+                let input = polynomial;
                 ensure!(guard.get(input).is_some(), "polyint: unknown buffer");
             }
             if [polynomial]
@@ -4850,10 +4850,10 @@ impl AccelProvider for InProcessProvider {
             }
         }
 
-        let orientation = poly_orientation_from_shape(&polynomial.shape())?;
+        let orientation = poly_orientation_from_shape(polynomial.shape())?;
         let coeffs = {
             let guard = registry(self.device_id).lock().unwrap();
-            guard.get(&polynomial).cloned().ok_or_else(|| {
+            guard.get(polynomial).cloned().ok_or_else(|| {
                 anyhow!("polyint: unknown tensor handle {}", polynomial.buffer_id())
             })?
         };
@@ -4881,9 +4881,9 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn diag_from_vector(&self, vector: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
-        ensure_diag_shape("diag", &vector.shape())?;
+        ensure_diag_shape("diag", vector.shape())?;
 
-        let (rows, cols) = rows_cols(&vector.shape());
+        let (rows, cols) = rows_cols(vector.shape());
         ensure!(
             is_vector_like(rows, cols, vector.shape().len()),
             "diag: input must be a vector"
@@ -4894,7 +4894,7 @@ impl AccelProvider for InProcessProvider {
                 .lock_for(self.device_id)
                 .unwrap_or_else(|error| error.into_inner());
             guard
-                .get(&vector)
+                .get(vector)
                 .map(InProcessNumericData::len)
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id()))?
         };
@@ -4914,9 +4914,9 @@ impl AccelProvider for InProcessProvider {
         out_rows: usize,
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
-        ensure_diag_shape("diag", &vector.shape())?;
+        ensure_diag_shape("diag", vector.shape())?;
 
-        let (rows, cols) = rows_cols(&vector.shape());
+        let (rows, cols) = rows_cols(vector.shape());
         ensure!(
             is_vector_like(rows, cols, vector.shape().len()),
             "diag: input must be a vector"
@@ -4927,7 +4927,7 @@ impl AccelProvider for InProcessProvider {
                 .lock_for(self.device_id)
                 .unwrap_or_else(|error| error.into_inner());
             guard
-                .get(&vector)
+                .get(vector)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", vector.buffer_id()))?
         };
@@ -4946,9 +4946,9 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn diag_extract(&self, matrix: &GpuTensorHandle, offset: isize) -> Result<GpuTensorHandle> {
-        ensure_diag_shape("diag", &matrix.shape())?;
+        ensure_diag_shape("diag", matrix.shape())?;
 
-        let (rows, cols) = rows_cols(&matrix.shape());
+        let (rows, cols) = rows_cols(matrix.shape());
         ensure!(
             !is_vector_like(rows, cols, matrix.shape().len()),
             "diag: matrix input required"
@@ -4959,7 +4959,7 @@ impl AccelProvider for InProcessProvider {
                 .lock_for(self.device_id)
                 .unwrap_or_else(|error| error.into_inner());
             guard
-                .get(&matrix)
+                .get(matrix)
                 .cloned()
                 .ok_or_else(|| anyhow!("diag: unknown buffer {}", matrix.buffer_id()))?
         };
@@ -4986,7 +4986,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("tril: unknown tensor handle {}", handle.buffer_id()))?
             };
@@ -5004,7 +5004,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("triu: unknown tensor handle {}", handle.buffer_id()))?
             };
@@ -5035,12 +5035,12 @@ impl AccelProvider for InProcessProvider {
 
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
-            guard.get(&matrix).cloned().ok_or_else(|| {
+            guard.get(matrix).cloned().ok_or_else(|| {
                 anyhow!("issymmetric: unknown tensor handle {}", matrix.buffer_id())
             })?
         };
         let skew = matches!(kind, ProviderSymmetryKind::Skew);
-        issymmetric_host_real_data(&matrix.shape(), &data, skew, tolerance).map_err(|e| anyhow!(e))
+        issymmetric_host_real_data(matrix.shape(), &data, skew, tolerance).map_err(|e| anyhow!(e))
     }
 
     fn ishermitian<'a>(
@@ -5066,12 +5066,12 @@ impl AccelProvider for InProcessProvider {
 
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&matrix).cloned().ok_or_else(|| {
+                guard.get(matrix).cloned().ok_or_else(|| {
                     anyhow!("ishermitian: unknown tensor handle {}", matrix.buffer_id())
                 })?
             };
             let skew = matches!(kind, ProviderHermitianKind::Skew);
-            ishermitian_host_real_data(&matrix.shape(), &data, skew, tolerance)
+            ishermitian_host_real_data(matrix.shape(), &data, skew, tolerance)
                 .map_err(|e| anyhow!(e))
         })
     }
@@ -5094,12 +5094,12 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&matrix)
+                .get(matrix)
                 .cloned()
                 .ok_or_else(|| anyhow!("bandwidth: unknown tensor handle {}", matrix.buffer_id()))?
         };
         let (lower, upper) =
-            bandwidth_host_real_data(&matrix.shape(), &data).map_err(|e| anyhow!(e))?;
+            bandwidth_host_real_data(matrix.shape(), &data).map_err(|e| anyhow!(e))?;
         Ok(ProviderBandwidth {
             lower: lower as u32,
             upper: upper as u32,
@@ -5124,11 +5124,11 @@ impl AccelProvider for InProcessProvider {
 
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&matrix).cloned().ok_or_else(|| {
+                guard.get(matrix).cloned().ok_or_else(|| {
                     anyhow!("symrcm: unknown tensor handle {}", matrix.buffer_id())
                 })?
             };
-            symrcm_host_real_data(&matrix.shape(), &data).map_err(|e| anyhow!(e))
+            symrcm_host_real_data(matrix.shape(), &data).map_err(|e| anyhow!(e))
         })
     }
 
@@ -5137,7 +5137,7 @@ impl AccelProvider for InProcessProvider {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let buf = guard
-            .get(&h)
+            .get(h)
             .ok_or_else(|| anyhow!("read_scalar: unknown buffer {}", h.buffer_id()))?;
         if linear_index >= buf.len() {
             return Err(anyhow!(
@@ -5296,7 +5296,7 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn eye_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.eye(&prototype.shape())
+        self.eye(prototype.shape())
     }
 
     fn linspace(&self, start: f64, stop: f64, count: usize) -> Result<GpuTensorHandle> {
@@ -5553,7 +5553,7 @@ impl AccelProvider for InProcessProvider {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
             let data = guard
-                .get(&matrix)
+                .get(matrix)
                 .cloned()
                 .ok_or_else(|| anyhow!("covariance_to_correlation: unknown buffer"))?;
             (data, matrix.shape().to_vec())
@@ -5629,10 +5629,10 @@ impl AccelProvider for InProcessProvider {
             let (out, shape) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let abuf = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
                 let bbuf = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
                 elementwise_pow_broadcast_data(
                     "elem_pow",
@@ -5677,7 +5677,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&real)
+                    .get(real)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", real.buffer_id()))?
                     .clone()
             };
@@ -5722,11 +5722,11 @@ impl AccelProvider for InProcessProvider {
             let (real_data, imag_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let real_data = guard
-                    .get(&real)
+                    .get(real)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", real.buffer_id()))?
                     .clone();
                 let imag_data = guard
-                    .get(&imag)
+                    .get(imag)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", imag.buffer_id()))?
                     .clone();
                 (real_data, imag_data)
@@ -5809,7 +5809,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&request.input)
+                    .get(request.input)
                     .ok_or_else(|| {
                         anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
                     })?
@@ -5898,7 +5898,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&request.input)
+                    .get(request.input)
                     .ok_or_else(|| {
                         anyhow::anyhow!("buffer not found: {}", request.input.buffer_id())
                     })?
@@ -5983,11 +5983,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_ne: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6035,11 +6035,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_ge: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6087,11 +6087,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_le: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6139,11 +6139,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_lt: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6191,11 +6191,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_gt: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6243,11 +6243,11 @@ impl AccelProvider for InProcessProvider {
             let (adata, bdata) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let a_vec = guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", a.buffer_id()))?
                     .clone();
                 let b_vec = guard
-                    .get(&b)
+                    .get(b)
                     .ok_or_else(|| anyhow!("elem_eq: unknown buffer {}", b.buffer_id()))?
                     .clone();
                 (a_vec, b_vec)
@@ -6291,11 +6291,11 @@ impl AccelProvider for InProcessProvider {
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", a.buffer_id()))?
                 .clone();
             let b_vec = guard
-                .get(&b)
+                .get(b)
                 .ok_or_else(|| anyhow!("logical_and: unknown buffer {}", b.buffer_id()))?
                 .clone();
             (a_vec, b_vec)
@@ -6338,11 +6338,11 @@ impl AccelProvider for InProcessProvider {
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", a.buffer_id()))?
                 .clone();
             let b_vec = guard
-                .get(&b)
+                .get(b)
                 .ok_or_else(|| anyhow!("logical_or: unknown buffer {}", b.buffer_id()))?
                 .clone();
             (a_vec, b_vec)
@@ -6385,11 +6385,11 @@ impl AccelProvider for InProcessProvider {
         let (adata, bdata) = {
             let guard = registry(self.device_id).lock().unwrap();
             let a_vec = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", a.buffer_id()))?
                 .clone();
             let b_vec = guard
-                .get(&b)
+                .get(b)
                 .ok_or_else(|| anyhow!("logical_xor: unknown buffer {}", b.buffer_id()))?
                 .clone();
             (a_vec, b_vec)
@@ -6434,7 +6434,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_not: unknown buffer {}", a.buffer_id()))?
                 .clone()
         };
@@ -6456,7 +6456,7 @@ impl AccelProvider for InProcessProvider {
         {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_isreal: unknown buffer {}", a.buffer_id()))?;
         }
         Ok(runmat_accelerate_api::handle_storage(a) != GpuTensorStorage::ComplexInterleaved)
@@ -6467,7 +6467,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_isfinite: unknown buffer {}", a.buffer_id()))?
                 .clone()
         };
@@ -6490,7 +6490,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_isnan: unknown buffer {}", a.buffer_id()))?
                 .clone()
         };
@@ -6513,7 +6513,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow!("logical_isinf: unknown buffer {}", a.buffer_id()))?
                 .clone()
         };
@@ -6539,10 +6539,10 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let bbuf = guard
-                .get(&b)
+                .get(b)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
             if a.shape() != b.shape() {
                 return Err(anyhow::anyhow!("shape mismatch"));
@@ -6567,10 +6567,10 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let ybuf = guard
-                .get(&y)
+                .get(y)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", y.buffer_id()))?;
             let xbuf = guard
-                .get(&x)
+                .get(x)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", x.buffer_id()))?;
             if y.shape() != x.shape() {
                 return Err(anyhow::anyhow!("shape mismatch"));
@@ -6599,7 +6599,7 @@ impl AccelProvider for InProcessProvider {
             let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
@@ -6641,7 +6641,7 @@ impl AccelProvider for InProcessProvider {
             );
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().copied().map(gammaln_scalar_host).collect();
             drop(guard);
@@ -6656,7 +6656,7 @@ impl AccelProvider for InProcessProvider {
             );
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().copied().map(erf_scalar_host).collect();
             drop(guard);
@@ -6674,7 +6674,7 @@ impl AccelProvider for InProcessProvider {
             );
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().copied().map(erfcinv_scalar_host).collect();
             drop(guard);
@@ -6688,7 +6688,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().copied().map(factorial_scalar_host).collect();
             drop(guard);
@@ -6702,7 +6702,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.asinh()).collect();
             drop(guard);
@@ -6717,7 +6717,7 @@ impl AccelProvider for InProcessProvider {
             let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
@@ -6746,7 +6746,7 @@ impl AccelProvider for InProcessProvider {
             let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
@@ -6775,7 +6775,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.asin()).collect();
             drop(guard);
@@ -6789,7 +6789,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.acos()).collect();
             drop(guard);
@@ -6803,7 +6803,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.acosh()).collect();
             drop(guard);
@@ -6816,7 +6816,7 @@ impl AccelProvider for InProcessProvider {
             let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
@@ -6844,7 +6844,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.tanh()).collect();
             drop(guard);
@@ -6859,7 +6859,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.atan()).collect();
             drop(guard);
@@ -6873,7 +6873,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.atanh()).collect();
             drop(guard);
@@ -6888,7 +6888,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.ceil()).collect();
             drop(guard);
@@ -6903,7 +6903,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.floor()).collect();
             drop(guard);
@@ -6918,7 +6918,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.round()).collect();
             drop(guard);
@@ -6942,7 +6942,7 @@ impl AccelProvider for InProcessProvider {
 
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf
                 .iter()
@@ -6963,7 +6963,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf
                 .iter()
@@ -6996,7 +6996,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if runmat_accelerate_api::handle_storage(a)
                 == GpuTensorStorage::ComplexInterleaved
@@ -7024,7 +7024,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?
                     .clone()
             };
@@ -7048,7 +7048,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?
                     .clone()
             };
@@ -7076,7 +7076,7 @@ impl AccelProvider for InProcessProvider {
             let storage = runmat_accelerate_api::handle_storage(a);
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = if storage == GpuTensorStorage::ComplexInterleaved {
                 ensure!(
@@ -7112,7 +7112,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().copied().map(heaviside_scalar_host).collect();
             drop(guard);
@@ -7135,7 +7135,7 @@ impl AccelProvider for InProcessProvider {
             );
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.exp_m1()).collect();
             drop(guard);
@@ -7155,7 +7155,7 @@ impl AccelProvider for InProcessProvider {
             );
             let guard = registry(self.device_id).lock().unwrap();
             let input = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out = input
                 .iter()
@@ -7189,7 +7189,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let guard = registry(self.device_id).lock().unwrap();
             let input = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let mut out = vec![0.0; input.len()];
             for row in 0..rows {
@@ -7268,7 +7268,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf.iter().map(|&x| x.exp2()).collect();
             drop(guard);
@@ -7283,7 +7283,7 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out: Vec<f64> = abuf
                 .iter()
@@ -7308,10 +7308,10 @@ impl AccelProvider for InProcessProvider {
     ) -> Result<GpuTensorHandle> {
         let guard = registry(self.device_id).lock().unwrap();
         let mbuf = guard
-            .get(&mantissa)
+            .get(mantissa)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", mantissa.buffer_id()))?;
         let ebuf = guard
-            .get(&exponent)
+            .get(exponent)
             .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", exponent.buffer_id()))?;
         if mantissa.shape() != exponent.shape() {
             return Err(anyhow::anyhow!("shape mismatch"));
@@ -7345,7 +7345,7 @@ impl AccelProvider for InProcessProvider {
         let out = {
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             ensure_storage_len("scalar_max", abuf, a.shape(), &storage)?;
             abuf.iter().map(|&value| value.max(scalar)).collect()
@@ -7437,10 +7437,10 @@ impl AccelProvider for InProcessProvider {
         let (signal_data, kernel_data) =
             {
                 let guard = registry(self.device_id).lock().unwrap();
-                let signal_buf = guard.get(&signal).cloned().ok_or_else(|| {
+                let signal_buf = guard.get(signal).cloned().ok_or_else(|| {
                     anyhow!("conv1d: unknown signal buffer {}", signal.buffer_id())
                 })?;
-                let kernel_buf = guard.get(&kernel).cloned().ok_or_else(|| {
+                let kernel_buf = guard.get(kernel).cloned().ok_or_else(|| {
                     anyhow!("conv1d: unknown kernel buffer {}", kernel.buffer_id())
                 })?;
                 (signal_buf, kernel_buf)
@@ -7470,10 +7470,10 @@ impl AccelProvider for InProcessProvider {
         kernel: &GpuTensorHandle,
         mode: ProviderConvMode,
     ) -> Result<GpuTensorHandle> {
-        ensure_diag_shape("conv2d", &signal.shape())?;
-        ensure_diag_shape("conv2d", &kernel.shape())?;
-        let (signal_rows, signal_cols) = rows_cols(&signal.shape());
-        let (kernel_rows, kernel_cols) = rows_cols(&kernel.shape());
+        ensure_diag_shape("conv2d", signal.shape())?;
+        ensure_diag_shape("conv2d", kernel.shape())?;
+        let (signal_rows, signal_cols) = rows_cols(signal.shape());
+        let (kernel_rows, kernel_cols) = rows_cols(kernel.shape());
 
         let signal_len: usize = signal.shape().iter().copied().product();
         let kernel_len: usize = kernel.shape().iter().copied().product();
@@ -7497,10 +7497,10 @@ impl AccelProvider for InProcessProvider {
         let (signal_data, kernel_data) =
             {
                 let guard = registry(self.device_id).lock().unwrap();
-                let signal_buf = guard.get(&signal).cloned().ok_or_else(|| {
+                let signal_buf = guard.get(signal).cloned().ok_or_else(|| {
                     anyhow!("conv2d: unknown signal buffer {}", signal.buffer_id())
                 })?;
-                let kernel_buf = guard.get(&kernel).cloned().ok_or_else(|| {
+                let kernel_buf = guard.get(kernel).cloned().ok_or_else(|| {
                     anyhow!("conv2d: unknown kernel buffer {}", kernel.buffer_id())
                 })?;
                 (signal_buf, kernel_buf)
@@ -7583,7 +7583,7 @@ impl AccelProvider for InProcessProvider {
                 "iir_filter: denominator coefficients must not be empty"
             );
 
-            let signal_elems = product(&x.shape());
+            let signal_elems = product(x.shape());
             let x_storage = runmat_accelerate_api::handle_storage(x);
             let lane_factor = match x_storage {
                 GpuTensorStorage::Real => 1usize,
@@ -7596,13 +7596,13 @@ impl AccelProvider for InProcessProvider {
 
             let (b_data, a_data, x_data, zi_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
-                let b_buf = guard.get(&b).cloned().ok_or_else(|| {
+                let b_buf = guard.get(b).cloned().ok_or_else(|| {
                     anyhow!("iir_filter: unknown numerator buffer {}", b.buffer_id())
                 })?;
-                let a_buf = guard.get(&a).cloned().ok_or_else(|| {
+                let a_buf = guard.get(a).cloned().ok_or_else(|| {
                     anyhow!("iir_filter: unknown denominator buffer {}", a.buffer_id())
                 })?;
-                let x_buf = guard.get(&x).cloned().ok_or_else(|| {
+                let x_buf = guard.get(x).cloned().ok_or_else(|| {
                     anyhow!("iir_filter: unknown signal buffer {}", x.buffer_id())
                 })?;
                 ensure!(
@@ -7635,7 +7635,7 @@ impl AccelProvider for InProcessProvider {
                         runmat_accelerate_api::handle_storage(zi_handle) == x_storage,
                         "iir_filter: initial conditions storage must match the signal"
                     );
-                    Some(guard.get(&zi_handle).cloned().ok_or_else(|| {
+                    Some(guard.get(zi_handle).cloned().ok_or_else(|| {
                         anyhow!(
                             "iir_filter: unknown initial state buffer {}",
                             zi_handle.buffer_id()
@@ -7804,7 +7804,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| {
                     anyhow!(
@@ -7823,7 +7823,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| anyhow!("permute: unknown tensor handle {}", handle.buffer_id()))?
                 .clone()
         };
@@ -7852,7 +7852,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| {
                     anyhow!("flip: unknown integer tensor handle {}", handle.buffer_id())
@@ -7866,7 +7866,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| anyhow!("flip: unknown tensor handle {}", handle.buffer_id()))?
                 .clone()
         };
@@ -7884,7 +7884,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| {
                     anyhow!(
@@ -7906,7 +7906,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| anyhow!("circshift: unknown tensor handle {}", handle.buffer_id()))?
                 .clone()
         };
@@ -7957,7 +7957,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| anyhow!("diff_dim: unknown tensor handle {}", handle.buffer_id()))?
                 .clone()
         };
@@ -7978,7 +7978,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| {
                     anyhow!("gradient_dim: unknown tensor handle {}", handle.buffer_id())
                 })?
@@ -8028,7 +8028,7 @@ impl AccelProvider for InProcessProvider {
         let (data, coordinate_data) = {
             let guard = registry(self.device_id).lock().unwrap();
             let data = guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| {
                     anyhow!(
                         "gradient_dim_with_coordinates: unknown tensor handle {}",
@@ -8037,7 +8037,7 @@ impl AccelProvider for InProcessProvider {
                 })?
                 .clone();
             let coordinate_data = guard
-                .get(&coordinates)
+                .get(coordinates)
                 .ok_or_else(|| {
                     anyhow!(
                         "gradient_dim_with_coordinates: unknown coordinates handle {}",
@@ -8097,7 +8097,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&handle)
+                    .get(handle)
                     .ok_or_else(|| anyhow!("unique: unknown tensor handle {}", handle.buffer_id()))?
                     .clone()
             };
@@ -8133,14 +8133,14 @@ impl AccelProvider for InProcessProvider {
             let data_a = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .cloned()
                     .ok_or_else(|| anyhow!("setdiff: unknown tensor handle {}", a.buffer_id()))?
             };
             let data_b = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&b)
+                    .get(b)
                     .cloned()
                     .ok_or_else(|| anyhow!("setdiff: unknown tensor handle {}", b.buffer_id()))?
             };
@@ -8168,7 +8168,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&handle)
+                .get(handle)
                 .cloned()
                 .ok_or_else(|| {
                     anyhow!(
@@ -8182,7 +8182,7 @@ impl AccelProvider for InProcessProvider {
         let data = {
             let guard = registry(self.device_id).lock().unwrap();
             guard
-                .get(&handle)
+                .get(handle)
                 .ok_or_else(|| anyhow!("repmat: unknown tensor handle {}", handle.buffer_id()))?
                 .clone()
         };
@@ -8215,7 +8215,7 @@ impl AccelProvider for InProcessProvider {
             }
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let s: f64 = abuf.iter().sum();
             drop(guard);
@@ -8239,7 +8239,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let (out, shape) = match dim {
                 0 => {
@@ -8299,7 +8299,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&a)
+                .get(a)
                 .cloned()
                 .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
             let (out, shape) = reduce_integer_data_dim(&data, a.shape(), dim, false)?;
@@ -8317,7 +8317,7 @@ impl AccelProvider for InProcessProvider {
             }
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let p: f64 = abuf.iter().product();
             drop(guard);
@@ -8341,7 +8341,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out = if dim == 0 {
                 let mut v = vec![1.0f64; cols];
@@ -8396,7 +8396,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&a)
+                .get(a)
                 .cloned()
                 .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
             let (out, shape) = reduce_integer_data_dim(&data, a.shape(), dim, true)?;
@@ -8423,7 +8423,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&a)
+                .get(a)
                 .cloned()
                 .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
             let (out, shape) = reduce_integer_mean_data_dim(&data, a.shape(), dim)?;
@@ -8440,7 +8440,7 @@ impl AccelProvider for InProcessProvider {
             let data = integer_registry(self.device_id)
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .get(&a)
+                .get(a)
                 .cloned()
                 .ok_or_else(|| anyhow!("integer buffer not found: {}", a.buffer_id()))?;
             let (out, shape) = reduce_integer_mean_data_dims(&data, a.shape(), dims_zero_based)?;
@@ -8458,7 +8458,7 @@ impl AccelProvider for InProcessProvider {
                 integer_registry(self.device_id)
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .get(&a)
+                    .get(a)
                     .cloned()
             };
             if let Some(data) = integer_data {
@@ -8469,7 +8469,7 @@ impl AccelProvider for InProcessProvider {
                 registry(self.device_id)
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .get(&a)
+                    .get(a)
                     .cloned()
             }
             .ok_or_else(|| anyhow!("buffer not found: {}", a.buffer_id()))?;
@@ -8488,7 +8488,7 @@ impl AccelProvider for InProcessProvider {
             }
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let mean = if abuf.is_empty() {
                 0.0
@@ -8516,7 +8516,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let out = if dim == 0 {
                 let mut v = vec![0.0f64; cols];
@@ -8558,7 +8558,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .cloned()
                     .ok_or_else(|| anyhow!("reduce_any: unknown tensor handle {}", a.buffer_id()))?
             };
@@ -8593,7 +8593,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&a).cloned().ok_or_else(|| {
+                guard.get(a).cloned().ok_or_else(|| {
                     anyhow!("reduce_any_dim: unknown tensor handle {}", a.buffer_id())
                 })?
             };
@@ -8651,7 +8651,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .cloned()
                     .ok_or_else(|| anyhow!("reduce_all: unknown tensor handle {}", a.buffer_id()))?
             };
@@ -8693,7 +8693,7 @@ impl AccelProvider for InProcessProvider {
             let cols = a.shape()[1];
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&a).cloned().ok_or_else(|| {
+                guard.get(a).cloned().ok_or_else(|| {
                     anyhow!("reduce_all_dim: unknown tensor handle {}", a.buffer_id())
                 })?
             };
@@ -8832,7 +8832,7 @@ impl AccelProvider for InProcessProvider {
         let data = integer_registry(self.device_id)
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&input)
+            .get(input)
             .cloned()
             .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
         let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 0, direction)?;
@@ -8848,7 +8848,7 @@ impl AccelProvider for InProcessProvider {
         let data = integer_registry(self.device_id)
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&input)
+            .get(input)
             .cloned()
             .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
         let (values, _) = scan_integer_data_dim(&data, input.shape(), dim, 1, direction)?;
@@ -8904,7 +8904,7 @@ impl AccelProvider for InProcessProvider {
         let data = integer_registry(self.device_id)
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&input)
+            .get(input)
             .cloned()
             .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
         let (values, indices) = scan_integer_data_dim(&data, input.shape(), dim, 2, direction)?;
@@ -8923,7 +8923,7 @@ impl AccelProvider for InProcessProvider {
         let data = integer_registry(self.device_id)
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&input)
+            .get(input)
             .cloned()
             .ok_or_else(|| anyhow!("integer buffer not found: {}", input.buffer_id()))?;
         let (values, indices) = scan_integer_data_dim(&data, input.shape(), dim, 3, direction)?;
@@ -8944,7 +8944,7 @@ impl AccelProvider for InProcessProvider {
         let (indices, rows, cols, values) = {
             let guard = registry(self.device_id).lock().unwrap();
             let data = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let total = data.len();
             let cap = match direction {
@@ -9026,7 +9026,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .cloned()
                     .ok_or_else(|| anyhow!("lu: unknown buffer {}", a.buffer_id()))?
             };
@@ -9066,7 +9066,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&a)
+                    .get(a)
                     .cloned()
                     .ok_or_else(|| anyhow!("chol: unknown buffer {}", a.buffer_id()))?
             };
@@ -9100,7 +9100,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&handle)
+                    .get(handle)
                     .cloned()
                     .ok_or_else(|| anyhow!("qr: unknown buffer {}", handle.buffer_id()))?
             };
@@ -9164,10 +9164,10 @@ impl AccelProvider for InProcessProvider {
             }
             let guard = registry(self.device_id).lock().unwrap();
             let abuf = guard
-                .get(&a)
+                .get(a)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
             let bbuf = guard
-                .get(&b)
+                .get(b)
                 .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
             let mut out = vec![0.0; ar * bc];
             // Column-major multiplication
@@ -9205,7 +9205,7 @@ impl AccelProvider for InProcessProvider {
             // Load optional scales from registry
             let row_scale: Option<Vec<f64>> = if let Some(ref h) = ep.row_scale {
                 let guard = registry(self.device_id).lock().unwrap();
-                Some(guard.get(&h).cloned().ok_or_else(|| {
+                Some(guard.get(h).cloned().ok_or_else(|| {
                     anyhow!(
                         "matmul_epilogue: unknown row scale buffer {}",
                         h.buffer_id()
@@ -9216,7 +9216,7 @@ impl AccelProvider for InProcessProvider {
             };
             let col_scale: Option<Vec<f64>> = if let Some(ref h) = ep.col_scale {
                 let guard = registry(self.device_id).lock().unwrap();
-                Some(guard.get(&h).cloned().ok_or_else(|| {
+                Some(guard.get(h).cloned().ok_or_else(|| {
                     anyhow!(
                         "matmul_epilogue: unknown col scale buffer {}",
                         h.buffer_id()
@@ -9227,7 +9227,7 @@ impl AccelProvider for InProcessProvider {
             };
             let mut diag_output: Option<Vec<f64>> = if let Some(ref h) = ep.diag_output {
                 let guard = registry(self.device_id).lock().unwrap();
-                let vec = guard.get(&h).cloned().ok_or_else(|| {
+                let vec = guard.get(h).cloned().ok_or_else(|| {
                     anyhow!(
                         "matmul_epilogue: unknown diag output buffer {}",
                         h.buffer_id()
@@ -9393,7 +9393,7 @@ impl AccelProvider for InProcessProvider {
 
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
-                guard.get(&input).cloned().ok_or_else(|| {
+                guard.get(input).cloned().ok_or_else(|| {
                     anyhow!("image_normalize: unknown buffer {}", input.buffer_id())
                 })?
             };
@@ -9482,11 +9482,11 @@ impl AccelProvider for InProcessProvider {
             let (lhs_data, rhs_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let lhs_buf = guard
-                    .get(&lhs)
+                    .get(lhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("linsolve: unknown buffer {}", lhs.buffer_id()))?;
                 let rhs_buf = guard
-                    .get(&rhs)
+                    .get(rhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("linsolve: unknown buffer {}", rhs.buffer_id()))?;
                 (lhs_buf, rhs_buf)
@@ -9529,7 +9529,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&matrix)
+                    .get(matrix)
                     .cloned()
                     .ok_or_else(|| anyhow!("inv: unknown buffer {}", matrix.buffer_id()))?
             };
@@ -9551,7 +9551,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&matrix)
+                    .get(matrix)
                     .cloned()
                     .ok_or_else(|| anyhow!("pinv: unknown buffer {}", matrix.buffer_id()))?
             };
@@ -9574,7 +9574,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&matrix)
+                    .get(matrix)
                     .cloned()
                     .ok_or_else(|| anyhow!("cond: unknown buffer {}", matrix.buffer_id()))?
             };
@@ -9595,7 +9595,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&tensor)
+                    .get(tensor)
                     .cloned()
                     .ok_or_else(|| anyhow!("norm: unknown buffer {}", tensor.buffer_id()))?
             };
@@ -9630,13 +9630,13 @@ impl AccelProvider for InProcessProvider {
             );
             let (x, y, xq) = {
                 let guard = registry(self.device_id).lock().unwrap();
-                let x = guard.get(&request.x).cloned().ok_or_else(|| {
+                let x = guard.get(request.x).cloned().ok_or_else(|| {
                     anyhow!("interp1: unknown X buffer {}", request.x.buffer_id())
                 })?;
-                let y = guard.get(&request.y).cloned().ok_or_else(|| {
+                let y = guard.get(request.y).cloned().ok_or_else(|| {
                     anyhow!("interp1: unknown Y buffer {}", request.y.buffer_id())
                 })?;
-                let xq = guard.get(&request.xq).cloned().ok_or_else(|| {
+                let xq = guard.get(request.xq).cloned().ok_or_else(|| {
                     anyhow!("interp1: unknown Xq buffer {}", request.xq.buffer_id())
                 })?;
                 (x, y, xq)
@@ -9686,7 +9686,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&matrix)
+                    .get(matrix)
                     .cloned()
                     .ok_or_else(|| anyhow!("rank: unknown buffer {}", matrix.buffer_id()))?
             };
@@ -9708,7 +9708,7 @@ impl AccelProvider for InProcessProvider {
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
-                    .get(&matrix)
+                    .get(matrix)
                     .cloned()
                     .ok_or_else(|| anyhow!("rcond: unknown buffer {}", matrix.buffer_id()))?
             };
@@ -9729,11 +9729,11 @@ impl AccelProvider for InProcessProvider {
             let (lhs_data, rhs_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let lhs_buf = guard
-                    .get(&lhs)
+                    .get(lhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("mldivide: unknown buffer {}", lhs.buffer_id()))?;
                 let rhs_buf = guard
-                    .get(&rhs)
+                    .get(rhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("mldivide: unknown buffer {}", rhs.buffer_id()))?;
                 (lhs_buf, rhs_buf)
@@ -9772,11 +9772,11 @@ impl AccelProvider for InProcessProvider {
             let (lhs_data, rhs_data) = {
                 let guard = registry(self.device_id).lock().unwrap();
                 let lhs_buf = guard
-                    .get(&lhs)
+                    .get(lhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("mrdivide: unknown buffer {}", lhs.buffer_id()))?;
                 let rhs_buf = guard
-                    .get(&rhs)
+                    .get(rhs)
                     .cloned()
                     .ok_or_else(|| anyhow!("mrdivide: unknown buffer {}", rhs.buffer_id()))?;
                 (lhs_buf, rhs_buf)
@@ -9849,7 +9849,7 @@ impl AccelProvider for InProcessProvider {
             let guard = registry(self.device_id).lock().unwrap();
             for handle in inputs {
                 let data = guard
-                    .get(&handle)
+                    .get(handle)
                     .ok_or_else(|| {
                         anyhow::anyhow!("sub2ind: unknown buffer {}", handle.buffer_id())
                     })?
