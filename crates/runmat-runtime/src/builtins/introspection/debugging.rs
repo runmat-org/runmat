@@ -1103,6 +1103,37 @@ mod tests {
             st.fields.get("name"),
             Some(&Value::String("callsite".into()))
         );
-        assert!(matches!(st.fields.get("stack"), Some(Value::Cell(_))));
+        let stack = st.fields.get("stack").expect("stack field");
+        assert_eq!(stack_len(stack), 1);
+        let frame = stack_element(stack, 0);
+        assert_eq!(frame.fields.get("name"), st.fields.get("name"));
+        assert_eq!(frame.fields.get("file"), st.fields.get("file"));
+        assert_eq!(frame.fields.get("line"), st.fields.get("line"));
+        assert_eq!(frame.fields.len(), 3);
+    }
+
+    #[test]
+    fn getcallinfo_preserves_ordered_structure_stack() {
+        let _outer = crate::debug_context::push_frame("outer", None, None);
+        let _inner = crate::debug_context::push_frame("inner", None, None);
+        let Value::Struct(info) = dispatch_getcallinfo(Vec::new()).expect("getcallinfo") else {
+            panic!("expected call information structure");
+        };
+        let stack = info.fields.get("stack").expect("stack field");
+        let Value::StructArray(array) = stack else {
+            panic!("expected structure array for two frames");
+        };
+        assert_eq!(array.shape(), [2, 1]);
+        assert_eq!(stack_len(stack), 2);
+        for (index, name) in ["inner", "outer"].into_iter().enumerate() {
+            assert_eq!(
+                stack_element(stack, index).fields.get("name"),
+                Some(&Value::String(name.into()))
+            );
+        }
+        assert_eq!(
+            info.fields.get("name"),
+            Some(&Value::String("inner".into()))
+        );
     }
 }
