@@ -1360,12 +1360,14 @@ pub(crate) mod tests {
     #[test]
     fn extractBetween_strict_mode_gates_resident_positions_before_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = extract_between_builtin(
             Value::String("abcd".into()),
             resident,
@@ -1377,6 +1379,12 @@ pub(crate) mod tests {
             error.identifier(),
             RESIDENT_POSITION_EXTENSION.error_identifier
         );
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

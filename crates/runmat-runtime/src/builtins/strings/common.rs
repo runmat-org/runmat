@@ -139,12 +139,14 @@ pub(crate) mod tests {
 
     #[test]
     fn text_admission_detects_residency_nested_in_typed_struct_arrays() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 41,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let mut first = runmat_value::StructValue::new();
         first.insert("payload", resident);
         let mut second = runmat_value::StructValue::new();
@@ -153,5 +155,14 @@ pub(crate) mod tests {
         let value = Value::StructArray(array);
         assert!(contains_resident_text_input(&value));
         assert!(contains_numeric_or_resident_text_input(&value));
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

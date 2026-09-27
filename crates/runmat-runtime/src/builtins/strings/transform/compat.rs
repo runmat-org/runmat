@@ -2516,32 +2516,35 @@ mod tests {
 
     #[test]
     fn append_rejects_resident_integer_handles_before_provider_gather() {
-        for (offset, element_type) in [
-            (0, runmat_accelerate_api::IntegerElementType::I8),
-            (1, runmat_accelerate_api::IntegerElementType::I16),
-            (2, runmat_accelerate_api::IntegerElementType::I32),
-            (3, runmat_accelerate_api::IntegerElementType::I64),
-            (4, runmat_accelerate_api::IntegerElementType::U8),
-            (5, runmat_accelerate_api::IntegerElementType::U16),
-            (6, runmat_accelerate_api::IntegerElementType::U32),
-            (7, runmat_accelerate_api::IntegerElementType::U64),
+        for element_type in [
+            runmat_accelerate_api::IntegerElementType::I8,
+            runmat_accelerate_api::IntegerElementType::I16,
+            runmat_accelerate_api::IntegerElementType::I32,
+            runmat_accelerate_api::IntegerElementType::I64,
+            runmat_accelerate_api::IntegerElementType::U8,
+            runmat_accelerate_api::IntegerElementType::U16,
+            runmat_accelerate_api::IntegerElementType::U32,
+            runmat_accelerate_api::IntegerElementType::U64,
         ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 350 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
             let result = block(append_builtin(vec![
-                Value::GpuTensor(handle.clone()),
+                Value::GpuTensor(allocation.handle.clone()),
                 Value::String("suffix".into()),
             ]));
             let error = result.expect_err("resident numeric append input must reject");
             assert!(error.message().contains("expected string"), "{error}");
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+            assert_eq!(allocation.probe.retirements(), 0);
         }
     }
 
@@ -2784,12 +2787,16 @@ mod tests {
     #[test]
     fn insertion_compatibility_gates_precede_resident_gather() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = block(insert_after_builtin(
             Value::String("abc".into()),
             vec![resident, Value::String("X".into())],
@@ -2977,12 +2984,16 @@ mod tests {
 
     #[test]
     fn erase_text_builtins_reject_resident_numeric_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let url_error = block(erase_urls_builtin(resident.clone())).unwrap_err();
         assert_eq!(
             url_error.identifier(),

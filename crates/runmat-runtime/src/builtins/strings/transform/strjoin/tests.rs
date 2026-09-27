@@ -147,12 +147,14 @@ fn strict_matrix_numeric_provider_and_output_count_reject_before_work() {
     ))
     .unwrap_err();
     assert_eq!(error.identifier(), STRJOIN_ERROR_INVALID_INPUT.identifier);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let resident = Value::GpuTensor(allocation.handle.clone());
     for value in [
         Value::Num(1.0),
         Value::Int(runmat_value::IntValue::U64(u64::MAX)),
