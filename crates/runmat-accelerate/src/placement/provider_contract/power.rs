@@ -10,8 +10,10 @@ pub(crate) enum HookProfile {
 }
 
 pub(crate) struct PowerWork {
+    #[cfg(feature = "wgpu")]
     pub(crate) elements: u64,
     pub(crate) temporary_bytes: u64,
+    #[cfg(feature = "wgpu")]
     pub(crate) readback_bytes: u64,
     pub(crate) dispatches: u32,
     output: ProviderRepresentation,
@@ -186,8 +188,10 @@ fn work(
         }
     }
     let result = PowerWork {
+        #[cfg(feature = "wgpu")]
         elements,
         temporary_bytes: 0,
+        #[cfg(feature = "wgpu")]
         readback_bytes: 0,
         dispatches: 0,
         output,
