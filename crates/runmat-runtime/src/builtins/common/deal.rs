@@ -47,33 +47,39 @@ mod tests {
 
     #[test]
     fn nested_resident_aliases_pass_without_owner_access_and_counts_fail_first() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let nested = Value::Cell(
-            runmat_value::CellArray::new(vec![Value::GpuTensor(handle)], 1, 1).unwrap(),
-        );
-        {
-            let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = call(vec![nested.clone(), Value::Num(1.0)], 1).unwrap_err();
-            assert_eq!(
-                error.identifier(),
-                Some("RunMat:deal:InputOutputCountMismatch")
+        runmat_gc::gc_test_context(|| {
+            let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            let handle = allocation.handle;
+            let nested = Value::Cell(
+                runmat_value::CellArray::new(vec![Value::GpuTensor(handle)], 1, 1).unwrap(),
             );
-            let error = call(vec![nested.clone()], 0).unwrap_err();
+            {
+                let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+                let error = call(vec![nested.clone(), Value::Num(1.0)], 1).unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:deal:InputOutputCountMismatch")
+                );
+                let error = call(vec![nested.clone()], 0).unwrap_err();
+                assert_eq!(
+                    error.identifier(),
+                    DEAL_RESIDENT_INPUT_EXTENSION.error_identifier
+                );
+            }
+            let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             assert_eq!(
-                error.identifier(),
-                DEAL_RESIDENT_INPUT_EXTENSION.error_identifier
+                call(vec![nested.clone()], 2).unwrap(),
+                Value::OutputList(vec![nested.clone(), nested])
             );
-        }
-        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        assert_eq!(
-            call(vec![nested.clone()], 2).unwrap(),
-            Value::OutputList(vec![nested.clone(), nested])
-        );
+            runmat_gc::gc_collect_major().unwrap();
+            assert_eq!(allocation.probe.retirements(), 1);
+        });
     }
 
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
@@ -188,9 +194,10 @@ mod tests {
                         provider
                     ));
                 }
-                provider
-                    .free(&handle)
-                    .expect("free resident integer tensor");
+                let physical = handle.allocation_lease().downgrade();
+                assert!(block_on(provider.download_integer(&handle)).is_ok());
+                handle.release().expect("release resident integer tensor");
+                assert!(physical.acquire().is_none());
             }
         });
     }

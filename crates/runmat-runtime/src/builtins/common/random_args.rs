@@ -308,38 +308,40 @@ mod constructor_dimension_tests {
 
     #[test]
     fn constructor_validation_releases_rejected_output_through_its_actual_owner() {
-        use runmat_accelerate_api::{
-            AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision,
-        };
+        use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, ProviderPrecision};
         crate::builtins::common::test_support::with_rejecting_native_result_provider(|provider| {
             // This fixture deliberately returns an allocation owned by another provider.
-            let dummy = GpuTensorHandle::new(vec![1, 1], provider.device_id(), 0);
-            let mut output = provider
+            let dummy = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[1.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let output = provider
                 .cross(&dummy, &dummy, None)
                 .expect("foreign-owner result");
-            output.descriptor.storage = Some(GpuTensorStorage::Real);
-            let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&output)
-                .expect("registered output owner");
-            assert_ne!(owner.device_id(), provider.device_id());
+            assert_ne!(output.device_id(), provider.device_id());
             let retained = output.clone();
+            let physical = output.allocation_lease().downgrade();
             let before = provider.free_count();
             let error = validate_constructor_gpu_output(
                 "constructor",
                 provider,
                 output,
                 &[1, 1],
-                GpuTensorStorage::Real,
+                GpuTensorStorage::ComplexInterleaved,
                 Some(ProviderPrecision::F64),
                 None,
                 false,
             )
             .expect_err("wrong owner must not be adopted");
             assert!(error.contains("invalid constructor result"));
+            assert_eq!(provider.free_count(), before);
+            retained.allocation_lease().validate_live().unwrap();
+            drop(retained);
+            assert!(physical.acquire().is_none());
             assert_eq!(provider.free_count(), before + 1);
-            assert!(
-                block_on(owner.download(&retained)).is_err(),
-                "actual owner released allocation"
-            );
+            assert!(block_on(provider.download(&dummy)).is_ok());
         });
     }
 
@@ -484,7 +486,7 @@ mod constructor_dimension_tests {
             )
             .expect("durable integer descriptor must override stale side metadata");
             assert_eq!(
-                output.descriptor.element_type,
+                output.descriptor().element_type,
                 Some(runmat_accelerate_api::NumericElementType::I32)
             );
         });
