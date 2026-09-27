@@ -246,51 +246,53 @@ fn logical_gpu_output(
                 format!("{name}: GPU prototype has no owning provider"),
             )
         })?;
-    let result = match if fill {
-        provider.ones(shape)
-    } else {
-        provider.zeros(shape)
-    } {
+    let result = match provider.logical_fill(shape, fill) {
         Ok(result) => result,
-        Err(_) => {
-            let len = shape.iter().product();
-            let host = match provider.precision() {
-                runmat_accelerate_api::ProviderPrecision::F32 => runmat_value::Tensor::from_f32(
-                    vec![if fill { 1.0 } else { 0.0 }; len],
-                    shape.to_vec(),
-                ),
-                runmat_accelerate_api::ProviderPrecision::F64 => runmat_value::Tensor::new(
-                    vec![if fill { 1.0 } else { 0.0 }; len],
-                    shape.to_vec(),
-                ),
-            }
-            .map_err(|error| builtin_error(name, format!("{name}: {error}")))?;
-            crate::builtins::common::gpu_helpers::upload_tensor_protecting(
+        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+            let len = if shape.contains(&0) {
+                0
+            } else {
+                shape
+                    .iter()
+                    .try_fold(1usize, |n, &d| n.checked_mul(d))
+                    .ok_or_else(|| builtin_error(name, format!("{name}: dimensions overflow")))?
+            };
+            let data = vec![u8::from(fill); len];
+            runmat_accelerate_api::upload_logical_protecting(
                 provider,
-                &host,
+                &runmat_accelerate_api::HostLogicalTensorView { data: &data, shape },
                 &[prototype],
             )
-            .map_err(|error| builtin_error(name, format!("{name}: {error}")))?
+            .map_err(|cause| {
+                build_runtime_error(format!("{name}: logical upload failed: {cause}"))
+                    .with_builtin(name)
+                    .with_source(cause)
+                    .build()
+            })?
+        }
+        Err(cause) => {
+            return Err(
+                build_runtime_error(format!("{name}: logical fill failed: {cause}"))
+                    .with_builtin(name)
+                    .with_source(cause)
+                    .build(),
+            )
         }
     };
-    // ones/zeros allocate a numeric buffer. Validate its physical floating
-    // representation and ownership before converting this fresh result to
-    // logical. In particular, never relabel or free a borrowed prototype alias.
+    // Logical intent is certified by the producing allocation owner, never
+    // inferred from the current values or attached to a numeric allocation.
     let result = crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
         name,
         provider,
         result,
         shape,
         runmat_accelerate_api::GpuTensorStorage::Real,
-        Some(provider.precision()),
         None,
-        false,
+        None,
+        true,
         &[prototype],
-    )
-    .map_err(|error| builtin_error(name, error))?;
-    Ok(crate::builtins::common::gpu_helpers::logical_gpu_value(
-        result,
-    ))
+    )?;
+    crate::builtins::common::gpu_helpers::logical_gpu_value(result)
 }
 
 struct LogicalDims {
