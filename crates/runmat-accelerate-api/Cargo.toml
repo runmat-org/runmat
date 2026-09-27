@@ -19,7 +19,7 @@ runmat-time = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
-tracing = { workspace = true }
+tracing = "0.1"
 once_cell = "1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

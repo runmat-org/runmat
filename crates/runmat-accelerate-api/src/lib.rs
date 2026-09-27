@@ -4121,11 +4121,14 @@ pub struct HostNumericTensorView<'a> {
 
 impl HostNumericTensorView<'_> {
     pub fn validate(self) -> anyhow::Result<()> {
-        let logical_len = self
-            .shape
-            .iter()
-            .try_fold(1usize, |len, &dim| len.checked_mul(dim))
-            .ok_or_else(|| anyhow!("numeric transfer shape overflows usize"))?;
+        let logical_len = if self.shape.contains(&0) {
+            0
+        } else {
+            self.shape
+                .iter()
+                .try_fold(1usize, |len, &dim| len.checked_mul(dim))
+                .ok_or_else(|| anyhow!("numeric transfer shape overflows usize"))?
+        };
         let expected = match self.storage {
             GpuTensorStorage::Real => logical_len,
             GpuTensorStorage::ComplexInterleaved => logical_len
@@ -4855,6 +4858,22 @@ mod tests {
             storage: GpuTensorStorage::Real,
         };
         assert!(overflow.validate().is_err());
+
+        for shape in [
+            [0, usize::MAX, usize::MAX],
+            [usize::MAX, 0, usize::MAX],
+            [usize::MAX, usize::MAX, 0],
+        ] {
+            for storage in [GpuTensorStorage::Real, GpuTensorStorage::ComplexInterleaved] {
+                HostNumericTensorView {
+                    data: HostNumericDataView::U64(&[]),
+                    shape: &shape,
+                    storage,
+                }
+                .validate()
+                .expect("zero extent wins independently of dimension order");
+            }
+        }
     }
 
     #[test]
