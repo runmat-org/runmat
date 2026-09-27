@@ -1728,9 +1728,9 @@ mod tests {
     fn ecdf_classifies_resident_integer_y_before_provider_access() {
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![2, 1],
                 runmat_accelerate_api::NumericElementType::I16,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![2, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;
@@ -1749,9 +1749,9 @@ mod tests {
         let resident = Value::GpuTensor(
             runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
+                    vec![1, 1],
                     runmat_accelerate_api::NumericElementType::F64,
                     runmat_accelerate_api::GpuTensorStorage::Real,
-                    vec![1, 1],
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle,

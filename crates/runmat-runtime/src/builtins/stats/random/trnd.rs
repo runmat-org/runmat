@@ -494,9 +494,9 @@ mod tests {
 
             let resident_nu = runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
+                    vec![1, 1],
                     runmat_accelerate_api::NumericElementType::U16,
                     runmat_accelerate_api::GpuTensorStorage::Real,
-                    vec![1, 1],
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle;
@@ -509,9 +509,9 @@ mod tests {
 
             let resident_size = runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
+                    vec![1, 2],
                     runmat_accelerate_api::NumericElementType::U16,
                     runmat_accelerate_api::GpuTensorStorage::Real,
-                    vec![1, 2],
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle;

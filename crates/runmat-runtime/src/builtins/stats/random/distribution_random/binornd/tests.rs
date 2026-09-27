@@ -162,9 +162,9 @@ fn compatibility_gates_each_extension_before_gather() {
 
     let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
         .allocate_zeroed(
+            vec![1, 1],
             runmat_accelerate_api::NumericElementType::I16,
             runmat_accelerate_api::GpuTensorStorage::Real,
-            vec![1, 1],
         )
         .expect("genuine unregistered resident fixture")
         .handle;

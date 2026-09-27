@@ -1942,9 +1942,9 @@ mod tests {
     fn kstest_residency_gate_distinguishes_automatic_and_explicit_handles() {
         let automatic = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![2, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![2, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;
@@ -1958,9 +1958,9 @@ mod tests {
 
         let explicit = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![2, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![2, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;
@@ -1992,9 +1992,9 @@ mod tests {
 
         let explicit = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![2, 2],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![2, 2],
             )
             .expect("genuine unregistered resident fixture")
             .handle;
@@ -2018,9 +2018,9 @@ mod tests {
     fn kstest_rejects_malformed_or_text_only_roles_before_resident_access() {
         let poison = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![1, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![1, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;

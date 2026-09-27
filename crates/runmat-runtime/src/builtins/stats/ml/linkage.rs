@@ -1139,9 +1139,9 @@ mod tests {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![1, 3],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![1, 3],
             )
             .expect("genuine unregistered resident fixture")
             .handle;

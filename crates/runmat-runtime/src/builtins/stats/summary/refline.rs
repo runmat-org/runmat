@@ -730,9 +730,9 @@ mod tests {
     fn refline_strict_mode_gates_explicit_gpu_before_provider_access() {
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![1, 2],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![1, 2],
             )
             .expect("genuine unregistered resident fixture")
             .handle;

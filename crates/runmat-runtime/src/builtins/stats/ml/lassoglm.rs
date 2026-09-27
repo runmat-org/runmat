@@ -2163,9 +2163,9 @@ mod tests {
     fn residency_policy_distinguishes_automatic_and_explicit_handles() {
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![1, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![1, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;
@@ -2199,9 +2199,9 @@ mod tests {
     fn call_surface_validation_precedes_residency_policy() {
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![1, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![1, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle

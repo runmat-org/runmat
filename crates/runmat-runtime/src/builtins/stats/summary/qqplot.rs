@@ -893,9 +893,9 @@ mod tests {
     fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
         let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
+                vec![2, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-                vec![2, 1],
             )
             .expect("genuine unregistered resident fixture")
             .handle;

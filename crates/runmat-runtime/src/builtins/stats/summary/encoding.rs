@@ -1993,9 +1993,9 @@ mod tests {
         let resident = Value::GpuTensor(
             runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
+                    vec![2, 1],
                     runmat_accelerate_api::NumericElementType::F64,
                     runmat_accelerate_api::GpuTensorStorage::Real,
-                    vec![2, 1],
                 )
                 .expect("genuine unregistered resident fixture")
                 .handle,

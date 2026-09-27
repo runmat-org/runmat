@@ -2163,9 +2163,9 @@ mod tests {
         fn resident(shape: Vec<usize>, _fixture_id: u64) -> Value {
             let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
                 .allocate_zeroed(
+                    shape,
                     runmat_accelerate_api::NumericElementType::U64,
                     runmat_accelerate_api::GpuTensorStorage::Real,
-                    shape,
                 )
                 .expect("genuine unregistered integer fixture")
                 .handle;
