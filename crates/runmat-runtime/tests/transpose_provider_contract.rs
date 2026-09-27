@@ -359,7 +359,10 @@ fn logical_transpose_retains_producer_class_without_conjugation() {
         };
         assert!(handle_is_logical(&output));
         assert_eq!(output.shape(), [3, 2]);
-        assert_eq!(output.physical().element_type(), input.physical().element_type());
+        assert_eq!(
+            output.physical().element_type(),
+            input.physical().element_type()
+        );
         assert!(
             matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [1., 1., 0., 0., 1., 0.])
         );
