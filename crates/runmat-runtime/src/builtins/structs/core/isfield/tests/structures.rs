@@ -52,12 +52,16 @@ fn nested_resident_values_are_not_gathered() {
     let mut structure = StructValue::new();
     structure.fields.insert(
         "resident".into(),
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        }),
+        Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("authentic unregistered allocation")
+                .handle,
+        ),
     );
     assert_eq!(
         run(Value::Struct(structure), Value::from("resident")).unwrap(),

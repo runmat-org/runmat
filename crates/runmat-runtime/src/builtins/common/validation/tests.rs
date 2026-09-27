@@ -483,7 +483,7 @@ fn resident_secondary_validator_operands_reject_forged_physical_facts() {
                 .downgrade()
                 .acquire_tensor(&forged)
                 .unwrap_err(),
-            runmat_accelerate_api::AllocationAcquisitionError::PhysicalMismatch,
+            runmat_accelerate_api::allocation::AllocationAcquisitionError::PhysicalMismatch,
         );
         ok(
             "mustBeGreaterThan",

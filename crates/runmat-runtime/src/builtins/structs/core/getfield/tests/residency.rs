@@ -2,16 +2,14 @@ use super::*;
 
 #[test]
 fn getfield_direct_resident_integer_field_preserves_handle_without_provider_access() {
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 1],
-        device_id: u32::MAX - 1,
-        buffer_id: u64::MAX - 1,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::U64,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("authentic unregistered allocation")
+        .handle;
     let mut st = StructValue::new();
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle.clone()));
@@ -19,17 +17,27 @@ fn getfield_direct_resident_integer_field_preserves_handle_without_provider_acce
     let result = run_getfield(Value::Struct(st), vec![Value::from("values")])
         .expect("direct resident field");
     assert_eq!(result, Value::GpuTensor(handle.clone()));
+    let weak = handle.downgrade();
+    drop(handle);
+    assert!(
+        weak.acquire().is_ok(),
+        "returned field retains its allocation"
+    );
+    drop(result);
+    assert!(weak.acquire().is_err());
 }
 
 #[test]
 fn getfield_strict_indexed_resident_field_rejects_before_provider_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 1],
-        device_id: u32::MAX - 2,
-        buffer_id: u64::MAX - 2,
-        descriptor: Default::default(),
-    };
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("authentic unregistered allocation")
+        .handle;
     let mut st = StructValue::new();
     st.fields
         .insert("values".to_string(), Value::GpuTensor(handle));
@@ -69,7 +77,7 @@ fn getfield_gpu_tensor_indexing() {
     let direct = run_getfield(Value::Struct(st.clone()), vec![Value::from("values")])
         .expect("direct gpu field");
     match direct {
-        Value::GpuTensor(out) => assert_eq!(out.buffer_id, handle.buffer_id),
+        Value::GpuTensor(out) => assert!(out.shares_allocation_with(&handle)),
         other => panic!("expected gpu tensor, got {other:?}"),
     }
 

@@ -277,7 +277,6 @@ fn validate_field_name(name: &str) -> BuiltinResult<()> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::{CellArray, IntValue, StringArray, StructArray, StructValue, Tensor};
 
     #[cfg(feature = "wgpu")]
@@ -547,34 +546,45 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_preserves_gpu_tensor_handles() {
-        let handle = GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 1,
-            buffer_id: 99,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("authentic unregistered allocation")
+            .handle;
         let args = vec![Value::from("data"), Value::GpuTensor(handle.clone())];
         let Value::Struct(s) = run_struct(args).expect("struct") else {
             panic!("expected struct value");
         };
         assert!(matches!(s.fields.get("data"), Some(Value::GpuTensor(h)) if h == &handle));
+        let weak = handle.downgrade();
+        drop(handle);
+        assert!(weak.acquire().is_ok(), "field retains its allocation");
+        drop(s);
+        assert!(weak.acquire().is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn struct_struct_array_preserves_gpu_handles() {
-        let first = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 2,
-            buffer_id: 11,
-            descriptor: Default::default(),
-        };
-        let second = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 2,
-            buffer_id: 12,
-            descriptor: Default::default(),
-        };
+        let first = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("authentic unregistered allocation")
+            .handle;
+        let second = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("authentic unregistered allocation")
+            .handle;
         let cell = CellArray::new(
             vec![
                 Value::GpuTensor(first.clone()),

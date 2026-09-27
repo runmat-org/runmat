@@ -1,17 +1,19 @@
 use super::*;
 
-fn fake_resident_handle() -> runmat_accelerate_api::GpuTensorHandle {
-    runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![2, 1],
-        device_id: u32::MAX - 3,
-        buffer_id: u64::MAX - 3,
-        descriptor: Default::default(),
-    }
+fn unregistered_resident_handle() -> runmat_accelerate_api::GpuTensorHandle {
+    runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![2, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("authentic unregistered allocation")
+        .handle
 }
 
 #[test]
 fn setfield_direct_resident_replacement_preserves_handle_without_provider_access() {
-    let handle = fake_resident_handle();
+    let handle = unregistered_resident_handle();
     let root = StructValue::new();
     let updated = run_setfield(
         Value::Struct(root),
@@ -21,10 +23,14 @@ fn setfield_direct_resident_replacement_preserves_handle_without_provider_access
     let Value::Struct(updated) = updated else {
         panic!("expected structure");
     };
+    let weak = handle.downgrade();
     assert_eq!(
         updated.fields.get("values"),
         Some(&Value::GpuTensor(handle))
     );
+    assert!(weak.acquire().is_ok(), "replacement retains its allocation");
+    drop(updated);
+    assert!(weak.acquire().is_err());
 }
 
 #[test]
@@ -33,7 +39,7 @@ fn setfield_strict_indexed_resident_field_rejects_before_provider_access() {
     let mut root = StructValue::new();
     root.fields.insert(
         "values".to_string(),
-        Value::GpuTensor(fake_resident_handle()),
+        Value::GpuTensor(unregistered_resident_handle()),
     );
     let selector = CellArray::new_with_shape(vec![Value::Int(IntValue::I32(1))], vec![1, 1])
         .expect("selector");

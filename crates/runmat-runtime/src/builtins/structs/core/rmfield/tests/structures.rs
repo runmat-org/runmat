@@ -67,12 +67,14 @@ fn retained_integer_classes_remain_exact() {
 
 #[test]
 fn nested_resident_values_are_not_gathered() {
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    };
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("authentic unregistered allocation")
+        .handle;
     let target = structure(&[
         ("keep", Value::GpuTensor(handle.clone())),
         ("drop", Value::Num(1.0)),
