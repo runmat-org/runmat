@@ -13,7 +13,7 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture, AccelProvider,
     AccelProviderFuture, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
-    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerDataView,
+    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned,
     HostIntegerTensorOwned, HostIntegerTensorView, HostNumericDataOwned, HostNumericDataView,
     HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned, HostTensorView,
     ImfilterOptions, IntegerElementType, NumericElementType, PagefunRequest,
@@ -10617,7 +10617,7 @@ mod tests {
     use super::*;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
-        IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
+        HostIntegerDataView, IntegerElementType, ProviderBlackScholesPriceInput, ProviderNdgridAxis,
     };
     use runmat_value::{IntValue, IntegerStorage};
 
