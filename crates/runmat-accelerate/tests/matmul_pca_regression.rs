@@ -1,5 +1,7 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use bytemuck::cast_slice;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderQrOptions, ProviderQrPivot};
@@ -118,7 +120,7 @@ async fn matmul_pca_zero_regression() {
             .await
             .expect("invoke qr_power_iter")
             .expect("device qr path");
-        provider.free(&product_handle).ok();
+        retirement::release_all([product_handle]);
 
         let gpu_host = provider
             .download(&result.q)
@@ -137,6 +139,7 @@ async fn matmul_pca_zero_regression() {
             max_gpu
         );
 
+        retirement::release_all([rhs_handle]);
         rhs_handle = result.q;
     }
 
@@ -158,4 +161,5 @@ async fn matmul_pca_zero_regression() {
         .fold(0.0f64, |acc, value| acc.max(value.abs()));
 
     println!("CPU product max_abs={:.6e}", max_cpu);
+    retirement::release_all([lhs_handle, rhs_handle]);
 }

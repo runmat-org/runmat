@@ -1,5 +1,7 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
@@ -62,9 +64,9 @@ async fn matmul_output_reuse_from_pool() {
             "matmul result deviates from CPU reference: max_err={}",
             max_err
         );
-        provider.free(&gpu_out).expect("free matmul output");
+        retirement::release_all([gpu_out]);
     }
 
-    provider.free(&lhs_handle).expect("free lhs");
-    provider.free(&rhs_handle).expect("free rhs");
+    retirement::release_all([lhs_handle]);
+    retirement::release_all([rhs_handle]);
 }
