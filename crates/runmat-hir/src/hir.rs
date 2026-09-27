@@ -149,6 +149,16 @@ pub struct FunctionAbi {
     pub implicit_nargout: Option<BindingId>,
 }
 
+impl FunctionAbi {
+    /// Fixed result bindings in declaration order, excluding the separately
+    /// expanded `varargout` binding retained in the stored declaration list.
+    pub fn fixed_output_bindings(&self) -> impl Iterator<Item = &BindingId> {
+        self.fixed_outputs
+            .iter()
+            .filter(|binding| Some(**binding) != self.varargout)
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct FunctionArgumentValidation {
     pub binding: BindingId,
@@ -864,6 +874,30 @@ mod tests {
         assert_eq!(abi.fixed_inputs[0], abi.fixed_outputs[0]);
         assert_eq!(abi.implicit_nargin, Some(BindingId(1)));
         assert_eq!(abi.implicit_nargout, Some(BindingId(2)));
+    }
+
+    #[test]
+    fn fixed_output_bindings_exclude_only_variadic_declaration() {
+        let mut abi = FunctionAbi {
+            fixed_inputs: vec![],
+            varargin: None,
+            fixed_outputs: vec![BindingId(0), BindingId(1)],
+            varargout: None,
+            implicit_nargin: None,
+            implicit_nargout: None,
+        };
+        assert_eq!(
+            abi.fixed_output_bindings().copied().collect::<Vec<_>>(),
+            abi.fixed_outputs
+        );
+        abi.varargout = Some(BindingId(1));
+        assert_eq!(
+            abi.fixed_output_bindings().copied().collect::<Vec<_>>(),
+            vec![BindingId(0)]
+        );
+        abi.fixed_outputs.remove(0);
+        assert_eq!(abi.fixed_output_bindings().count(), 0);
+        assert_eq!(abi.fixed_outputs, vec![BindingId(1)]);
     }
 
     #[test]

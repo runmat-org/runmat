@@ -440,9 +440,7 @@ pub(super) fn lower_abi(
         varargin: body.abi.varargin.map(find).transpose()?,
         fixed_outputs: body
             .abi
-            .fixed_outputs
-            .iter()
-            .filter(|binding| Some(**binding) != body.abi.varargout)
+            .fixed_output_bindings()
             .copied()
             .map(find)
             .collect::<NativeCodegenResult<_>>()?,

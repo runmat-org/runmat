@@ -250,8 +250,7 @@ async fn resume_interpreter(
     })?;
     let fixed_outputs = body
         .abi
-        .fixed_outputs
-        .iter()
+        .fixed_output_bindings()
         .map(|local| {
             layout
                 .binding_slots
