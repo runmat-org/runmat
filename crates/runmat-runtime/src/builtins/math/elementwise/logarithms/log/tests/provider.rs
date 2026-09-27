@@ -72,11 +72,28 @@ fn provider_contract_rejects_alias_shape_and_storage_mismatch() {
             &runmat_value::ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![2, 1]).unwrap(),
         )
         .expect("genuine complex allocation");
+        let alias_view = input
+            .with_view(input.view().clone())
+            .expect("equal-shape view");
+        assert_ne!(alias_view.view_identity(), input.view_identity());
+        assert!(alias_view.shares_allocation_with(&input));
+        assert!(!super::super::super::provider::contract::valid(
+            &alias_view,
+            &input,
+            provider,
+        ));
         assert!(!super::super::super::provider::contract::valid(
             &wrong_storage,
             &input,
             provider
         ));
+        let input_lease = input.allocation_lease().downgrade();
+        let output_lease = output.allocation_lease().downgrade();
+        let complex_lease = wrong_storage.allocation_lease().downgrade();
+        drop((alias_view, wrong_shape, wrong_storage, input, output));
+        assert!(input_lease.acquire().is_none());
+        assert!(output_lease.acquire().is_none());
+        assert!(complex_lease.acquire().is_none());
     });
 }
 
