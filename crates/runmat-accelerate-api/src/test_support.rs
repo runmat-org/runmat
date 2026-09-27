@@ -1,4 +1,4 @@
-//! Opt-in fixture owners publish actual owned zeroed byte allocations, never
+//! Opt-in fixture owners publish actual owned typed allocations, never
 //! fabricated operational handles. Shipping defaults do not enable this module.
 use crate::allocation::*;
 use crate::*;
@@ -8,6 +8,9 @@ use std::sync::{
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
+mod payload;
+#[cfg(test)]
+mod tests;
 
 /// Device identity is minted privately. Fixture providers delegate their
 /// device_id to this factory; callers cannot impersonate a shipping provider.
@@ -27,6 +30,38 @@ impl TestAllocationOwner {
     }
     pub fn device_id(&self) -> u32 {
         self.device
+    }
+    /// Move aligned native storage into the same owner that retires its lease.
+    /// This is fixture data, not a simulated device pointer or shipping upload.
+    pub fn allocate_numeric(&self, host: HostNumericTensorOwned) -> anyhow::Result<TestAllocation> {
+        host.validate()?;
+        let (handle, owner) = owned_data(self.device, host, false)?;
+        Ok(TestAllocation {
+            handle,
+            probe: RetirementProbe { owner },
+        })
+    }
+
+    pub fn allocate_logical(
+        &self,
+        data: Vec<u8>,
+        shape: Vec<usize>,
+    ) -> anyhow::Result<TestAllocation> {
+        HostLogicalTensorView {
+            data: &data,
+            shape: &shape,
+        }
+        .validate()?;
+        let host = HostNumericTensorOwned {
+            data: HostNumericDataOwned::U8(data),
+            shape,
+            storage: GpuTensorStorage::Real,
+        };
+        let (handle, owner) = owned_data(self.device, host, true)?;
+        Ok(TestAllocation {
+            handle,
+            probe: RetirementProbe { owner },
+        })
     }
     pub fn allocate_zeroed(
         &self,
@@ -71,12 +106,55 @@ impl RetirementProbe {
     pub fn retirements(&self) -> usize {
         self.owner.retired.load(Ordering::SeqCst)
     }
+
+    /// Borrow the actual owner payload without copying it. The callback runs
+    /// under the allocation record lock and must not reenter this owner.
+    pub fn with_data<T>(
+        &self,
+        handle: &GpuTensorHandle,
+        callback: impl FnOnce(HostNumericDataView<'_>) -> T,
+    ) -> anyhow::Result<T> {
+        self.check_handle(handle)?;
+        let record = self.owner.record.lock().unwrap();
+        let data = record
+            .0
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("fixture allocation was retired"))?;
+        Ok(callback(data.as_view()))
+    }
+
+    /// Borrow the stable, correctly aligned address of the actual typed payload.
+    /// Native pointer use must retain `handle` (normally via the shared owning
+    /// native export wrapper) and obey exclusive-write/context synchronization
+    /// requirements. The callback must not reenter the allocation owner.
+    pub fn with_native_address<T>(
+        &self,
+        handle: &GpuTensorHandle,
+        callback: impl FnOnce(u64, usize) -> T,
+    ) -> anyhow::Result<T> {
+        self.check_handle(handle)?;
+        let mut record = self.owner.record.lock().unwrap();
+        let data = record
+            .0
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("fixture allocation was retired"))?;
+        let bytes = usize::try_from(self.owner.physical.payload_bytes())?;
+        Ok(callback(payload::address(data), bytes))
+    }
+
+    fn check_handle(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+        if handle.allocation_identity() != self.owner.identity {
+            anyhow::bail!("fixture probe does not own this allocation");
+        }
+        handle.allocation_lease().validate_live()?;
+        Ok(())
+    }
 }
 pub(crate) struct FixtureOwner {
     identity: AllocationIdentity,
     physical: GpuPhysicalDescriptor,
     logical: bool,
-    record: Mutex<(Option<Vec<u8>>, Option<WeakAllocationLease>)>,
+    record: Mutex<(Option<HostNumericDataOwned>, Option<WeakAllocationLease>)>,
     pub retired: AtomicUsize,
 }
 impl AllocationOwner for FixtureOwner {
@@ -141,33 +219,47 @@ pub(crate) fn owned(
     storage: GpuTensorStorage,
     logical: bool,
 ) -> (GpuTensorHandle, Arc<FixtureOwner>) {
-    let count = if shape.contains(&0) {
+    let bytes = crate::native_buffer_byte_length(&shape, element, storage).unwrap();
+    let host = HostNumericTensorOwned {
+        data: payload::zeroed(element, bytes / element.element_size()),
+        shape,
+        storage,
+    };
+    owned_data(device, host, logical).unwrap()
+}
+
+fn owned_data(
+    device: u32,
+    host: HostNumericTensorOwned,
+    logical: bool,
+) -> anyhow::Result<(GpuTensorHandle, Arc<FixtureOwner>)> {
+    host.validate()?;
+    let element = host.data.element_type();
+    let bytes = crate::native_buffer_byte_length(&host.shape, element, host.storage)?;
+    let count = if host.shape.contains(&0) {
         0
     } else {
-        shape.iter().product::<usize>()
+        host.shape.iter().product::<usize>()
     };
-    let bytes = crate::native_buffer_byte_length(&shape, element, storage).unwrap();
     let owner = Arc::new(FixtureOwner {
         identity: AllocationIdentity::new(device, NEXT.fetch_add(1, Ordering::SeqCst), 1),
         physical: GpuPhysicalDescriptor::new(
             element,
-            storage,
+            host.storage,
             count as u64,
             bytes as u64,
             bytes as u64,
-        )
-        .unwrap(),
+        )?,
         logical,
-        record: Mutex::new((Some(vec![0; bytes]), None)),
+        record: Mutex::new((Some(host.data), None)),
         retired: AtomicUsize::new(0),
     });
-    let lease = AllocationLease::register(owner.identity, owner.clone()).unwrap();
+    let lease = AllocationLease::register(owner.identity, owner.clone())?;
     let handle = GpuTensorHandle::from_allocation(
         lease,
-        GpuTensorView::contiguous(shape).with_logical(logical),
-    )
-    .unwrap();
-    (handle, owner)
+        GpuTensorView::contiguous(host.shape).with_logical(logical),
+    )?;
+    Ok((handle, owner))
 }
 #[cfg(test)]
 pub(crate) fn handle(
