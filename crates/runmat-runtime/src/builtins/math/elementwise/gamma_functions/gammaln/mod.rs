@@ -169,21 +169,25 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Ok(GpuLowerBoundResult::AtOrAbove) => match provider.unary_gammaln(&handle).await {
                 Ok(mut output) => {
                     if !resident_real_unary::output_matches(&output, &handle, provider) {
-                        resident_real_unary::reject_output(&output, &handle, provider);
-                        return Err(terminal_error(
-                            &GAMMALN_ERROR_INTERNAL,
-                            "provider unary_gammaln returned malformed output",
+                        return Err(resident_real_unary::reject_output(
+                            output,
+                            terminal_error(
+                                &GAMMALN_ERROR_INTERNAL,
+                                "provider unary_gammaln returned malformed output",
+                            ),
                         ));
                     }
-                    resident_real_unary::preserve_residency_intent(&mut output, &handle);
+                    resident_real_unary::preserve_residency_intent(&mut output, &handle)?;
                     return gpu_helpers::resident_gpu_value(output);
                 }
                 Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
                 Err(error) => {
-                    return Err(terminal_error(
+                    let mut failure = terminal_error(
                         &GAMMALN_ERROR_INTERNAL,
                         format!("provider unary_gammaln failed: {error}"),
-                    ))
+                    );
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    return Err(failure);
                 }
             },
             Ok(GpuLowerBoundResult::Unknown) => {}

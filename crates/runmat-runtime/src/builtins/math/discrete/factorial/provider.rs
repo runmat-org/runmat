@@ -47,19 +47,25 @@ async fn evaluate_floating(input: GpuTensorHandle) -> BuiltinResult<Value> {
     match provider.unary_factorial(&input).await {
         Ok(mut output) => {
             if !resident_real_unary::output_matches(&output, &input, provider) {
-                resident_real_unary::reject_output(&output, &input, provider);
-                return Err(factorial_error(
-                    FactorialError::Internal,
-                    "provider unary_factorial returned malformed output",
+                return Err(resident_real_unary::reject_output(
+                    output,
+                    factorial_error(
+                        FactorialError::Internal,
+                        "provider unary_factorial returned malformed output",
+                    ),
                 ));
             }
-            resident_real_unary::preserve_residency_intent(&mut output, &input);
+            resident_real_unary::preserve_residency_intent(&mut output, &input)?;
             gpu_helpers::resident_gpu_value(output)
         }
         Err(error) if resident_real_unary::hook_is_unsupported(&error) => {
             evaluate_and_restore(&input, OutputRepresentation::Floating).await
         }
-        Err(error) => Err(factorial_error(FactorialError::Internal, error)),
+        Err(source) => {
+            let mut error = factorial_error(FactorialError::Internal, source.to_string());
+            error.source = Some(source.into_boxed_dyn_error());
+            Err(error)
+        }
     }
 }
 
@@ -81,16 +87,22 @@ async fn evaluate_and_restore(
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let output = factorial_tensor(gathered)?;
-    let mut restored = gpu_helpers::upload_tensor(provider, &output)
-        .map_err(|error| factorial_error(FactorialError::Internal, error))?;
+    let mut restored =
+        gpu_helpers::upload_tensor_protecting(provider, &output, &[input]).map_err(|source| {
+            let mut error = factorial_error(FactorialError::Internal, source.to_string());
+            error.source = Some(Box::new(source));
+            error
+        })?;
     if !output_matches(&restored, input, provider, representation) {
-        gpu_helpers::free_rejected_provider_output(&restored, &[input], provider);
-        return Err(factorial_error(
-            FactorialError::Internal,
-            "provider upload returned malformed factorial output",
+        return Err(resident_real_unary::reject_output(
+            restored,
+            factorial_error(
+                FactorialError::Internal,
+                "provider upload returned malformed factorial output",
+            ),
         ));
     }
-    resident_real_unary::preserve_residency_intent(&mut restored, input);
+    resident_real_unary::preserve_residency_intent(&mut restored, input)?;
     gpu_helpers::resident_gpu_value(restored)
 }
 
@@ -114,7 +126,7 @@ fn output_matches(
             precision,
             integer,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }

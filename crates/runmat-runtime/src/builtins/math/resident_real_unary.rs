@@ -61,37 +61,40 @@ pub(super) fn output_matches(
             precision,
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }
 
 pub(super) fn reject_output(
-    output: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &'static dyn AccelProvider,
-) {
-    gpu_helpers::free_rejected_provider_output(output, &[input], provider);
+    output: GpuTensorHandle,
+    error: crate::RuntimeError,
+) -> crate::RuntimeError {
+    gpu_helpers::reject_gpu_output(output, error)
 }
 
-pub(super) fn preserve_residency_intent(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
-    let provenance = runmat_accelerate_api::handle_provenance(input)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
+pub(super) fn preserve_residency_intent(
+    output: &mut GpuTensorHandle,
+    input: &GpuTensorHandle,
+) -> crate::BuiltinResult<()> {
+    gpu_helpers::propagate_output_provenance(output, [input])
 }
 
 pub(super) fn restore_fallback(
     result: &Tensor,
     input: &GpuTensorHandle,
     provider: &'static dyn AccelProvider,
-) -> Result<GpuTensorHandle, String> {
-    let mut output = gpu_helpers::upload_tensor(provider, result)?;
+) -> crate::BuiltinResult<GpuTensorHandle> {
+    let mut output = gpu_helpers::upload_tensor_protecting(provider, result, &[input])?;
     if output_matches(&output, input, provider) {
-        preserve_residency_intent(&mut output, input);
+        preserve_residency_intent(&mut output, input)?;
         Ok(output)
     } else {
-        reject_output(&output, input, provider);
-        Err("provider upload returned malformed fallback output".into())
+        Err(reject_output(
+            output,
+            crate::build_runtime_error("provider upload returned malformed fallback output")
+                .build(),
+        ))
     }
 }
 
@@ -102,6 +105,28 @@ pub(super) fn hook_is_unsupported(error: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_view_does_not_retire_independently_retained_input() {
+        use runmat_accelerate_api::{test_support::TestAllocationOwner, NumericElementType};
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let rejected = allocation
+            .handle
+            .with_view(allocation.handle.view().clone().with_shape(vec![1, 2]))
+            .unwrap();
+        let error = reject_output(
+            rejected,
+            crate::build_runtime_error("invalid output").build(),
+        );
+        drop(error);
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.validate_live().unwrap();
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
 
     #[test]
     fn resident_input_reason_is_stable() {

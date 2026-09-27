@@ -113,24 +113,32 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     match provider.unary_gamma(&handle).await {
         Ok(mut output) => {
             if !resident_real_unary::output_matches(&output, &handle, provider) {
-                resident_real_unary::reject_output(&output, &handle, provider);
-                return Err(gamma_terminal_error(
-                    &GAMMA_ERROR_INTERNAL,
-                    "provider unary_gamma returned malformed output",
+                return Err(resident_real_unary::reject_output(
+                    output,
+                    gamma_terminal_error(
+                        &GAMMA_ERROR_INTERNAL,
+                        "provider unary_gamma returned malformed output",
+                    ),
                 ));
             }
-            resident_real_unary::preserve_residency_intent(&mut output, &handle);
+            resident_real_unary::preserve_residency_intent(&mut output, &handle)?;
             return gpu_helpers::resident_gpu_value(output);
         }
         Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
         Err(error) => {
-            return Err(gamma_terminal_error(&GAMMA_ERROR_INTERNAL, error));
+            let mut failure = gamma_terminal_error(&GAMMA_ERROR_INTERNAL, error.to_string());
+            failure.source = Some(error.into_boxed_dyn_error());
+            return Err(failure);
         }
     }
     let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
     let output = gamma_tensor(gathered)?;
-    let output = resident_real_unary::restore_fallback(&output, &handle, provider)
-        .map_err(|detail| gamma_terminal_error(&GAMMA_ERROR_INTERNAL, detail))?;
+    let output =
+        resident_real_unary::restore_fallback(&output, &handle, provider).map_err(|source| {
+            let mut failure = gamma_terminal_error(&GAMMA_ERROR_INTERNAL, source.to_string());
+            failure.source = Some(Box::new(source));
+            failure
+        })?;
     gpu_helpers::resident_gpu_value(output)
 }
 
