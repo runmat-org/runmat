@@ -1954,9 +1954,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!("ones not supported by provider"))
     }
 
-    /// Allocate a zero-initialised tensor matching the prototype tensor.
-    fn zeros_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.zeros(prototype.shape())
+    /// Allocate zeros with the requested shape and the prototype's exact class/storage.
+    /// The prototype must be a live allocation owned by this provider.
+    fn zeros_like(
+        &self,
+        _prototype: &GpuTensorHandle,
+        _shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(unsupported_provider_operation("zeros_like"))
+    }
+
+    /// Allocate a constant logical tensor through the provider's logical producer authority.
+    fn logical_fill(&self, _shape: &[usize], _value: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(unsupported_provider_operation("logical_fill"))
     }
 
     /// Allocate an exact native-integer zero buffer using the element class of
@@ -2001,9 +2011,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         value: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
         if value == 0.0 {
-            return self.zeros_like(prototype);
+            return self.zeros_like(prototype, prototype.shape());
         }
-        if let Ok(base) = self.zeros_like(prototype) {
+        if let Ok(base) = self.zeros_like(prototype, prototype.shape()) {
             match self.scalar_add(&base, value) {
                 Ok(out) => {
                     drop(base);
@@ -4715,6 +4725,23 @@ mod tests {
     }
 
     struct DefaultNumericAdapterProvider;
+
+    #[test]
+    fn typed_constant_constructors_default_to_explicit_unsupported() {
+        let provider = DefaultNumericAdapterProvider;
+        let prototype = crate::test_support::handle(
+            404,
+            vec![1, 2],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+        );
+        assert!(is_unsupported_provider_operation(
+            &provider.zeros_like(&prototype, &[2, 3]).unwrap_err()
+        ));
+        assert!(is_unsupported_provider_operation(
+            &provider.logical_fill(&[2, 3], true).unwrap_err()
+        ));
+    }
 
     impl AccelProvider for DefaultNumericAdapterProvider {
         fn device_id(&self) -> u32 {

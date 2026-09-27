@@ -3,6 +3,95 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn typed_zero_constructors_preserve_class_storage_shape_and_owner() {
+    let provider = InProcessProvider::new();
+    let foreign = InProcessProvider::new();
+    let fixtures = [
+        (
+            HostNumericDataOwned::F32(vec![7.0, 8.0]),
+            GpuTensorStorage::Real,
+        ),
+        (
+            HostNumericDataOwned::F64(vec![7.0, 8.0]),
+            GpuTensorStorage::Real,
+        ),
+        (
+            HostNumericDataOwned::F32(vec![7.0, 8.0, 9.0, 10.0]),
+            GpuTensorStorage::ComplexInterleaved,
+        ),
+        (HostNumericDataOwned::U8(vec![7, 8]), GpuTensorStorage::Real),
+        (
+            HostNumericDataOwned::U64(vec![7, u64::MAX]),
+            GpuTensorStorage::Real,
+        ),
+    ];
+    for (data, storage) in fixtures {
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: data.as_view(),
+                shape: &[1, 2],
+                storage,
+            })
+            .unwrap();
+        assert!(foreign.zeros_like(&input, &[2, 2]).is_err());
+        for shape in [vec![2, 1, 3], vec![usize::MAX, usize::MAX, 0]] {
+            let output = provider.zeros_like(&input, &shape).unwrap();
+            assert_eq!(output.shape(), shape);
+            assert_eq!(
+                output.physical().element_type(),
+                input.physical().element_type()
+            );
+            assert_eq!(output.physical().storage(), storage);
+            assert!(!output.shares_allocation_with(&input));
+            let actual = block_on(provider.download_numeric(&output)).unwrap();
+            assert_eq!(actual.data.element_type(), data.element_type());
+            match &actual.data {
+                HostNumericDataOwned::F32(values) => {
+                    assert!(values.iter().all(|value| value.to_bits() == 0))
+                }
+                HostNumericDataOwned::F64(values) => {
+                    assert!(values.iter().all(|value| value.to_bits() == 0))
+                }
+                HostNumericDataOwned::U8(values) => assert!(values.iter().all(|value| *value == 0)),
+                HostNumericDataOwned::U64(values) => {
+                    assert!(values.iter().all(|value| *value == 0))
+                }
+                _ => panic!("unexpected fixture output type"),
+            }
+            assert_eq!(
+                actual.data.len(),
+                if shape.contains(&0) {
+                    0
+                } else if storage == GpuTensorStorage::Real {
+                    6
+                } else {
+                    12
+                }
+            );
+        }
+    }
+    for value in [false, true] {
+        let logical = provider.logical_fill(&[1, 3], value).unwrap();
+        assert!(logical.view().is_logical());
+        assert_eq!(
+            block_on(provider.download(&logical)).unwrap().data,
+            vec![if value { 1.0 } else { 0.0 }; 3]
+        );
+        let zeros = provider.zeros_like(&logical, &[2, 2]).unwrap();
+        assert!(zeros.view().is_logical());
+        assert_eq!(
+            block_on(provider.download(&zeros)).unwrap().data,
+            vec![0.0; 4]
+        );
+        assert!(provider
+            .logical_fill(&[usize::MAX, usize::MAX, 0], value)
+            .unwrap()
+            .view()
+            .is_logical());
+    }
+}
+
+#[test]
 fn same_type_cast_shares_allocation_but_publishes_a_distinct_owned_view() {
     let provider = InProcessProvider::new();
     for shape in [vec![2, 1, 2], vec![usize::MAX, usize::MAX, 0]] {

@@ -1,5 +1,17 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "constructors/typed_tests.rs"]
+mod typed_tests;
+
+fn constructor_elements(shape: &[usize]) -> Option<usize> {
+    if shape.contains(&0) {
+        Some(0)
+    } else {
+        product_checked(shape)
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct NdgridParams {
@@ -114,12 +126,33 @@ impl WgpuProvider {
         self.register_existing_buffer(out_buffer, normalized, total_len)
     }
     pub(crate) fn fill_exec(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
-        let total_len = product_checked(shape)
+        self.fill_produced_exec(shape, value, false)
+    }
+
+    pub(crate) fn logical_fill_exec(
+        &self,
+        shape: &[usize],
+        value: bool,
+    ) -> Result<GpuTensorHandle> {
+        self.fill_produced_exec(shape, if value { 1.0 } else { 0.0 }, true)
+    }
+
+    fn fill_produced_exec(
+        &self,
+        shape: &[usize],
+        value: f64,
+        logical: bool,
+    ) -> Result<GpuTensorHandle> {
+        let total_len = constructor_elements(shape)
             .ok_or_else(|| anyhow!("fill: tensor size exceeds GPU limits"))?;
         let shape_vec = shape.to_vec();
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-fill-out")?;
         if total_len == 0 {
-            return self.register_existing_buffer(out_buffer, shape_vec, 0);
+            return if logical {
+                self.register_logical_buffer(out_buffer, shape_vec, 0, BufferUsageClass::Generic)
+            } else {
+                self.register_existing_buffer(out_buffer, shape_vec, 0)
+            };
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -129,7 +162,7 @@ impl WgpuProvider {
         // chunked dispatch below will build per-chunk params buffers
 
         // Dispatch in chunks to satisfy per-dimension group limits (<= 65535)
-        let wg_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+        let wg_size = self.workgroup_config.scalar;
         let max_groups: u32 = 65535;
         let max_elems_per_dispatch = (max_groups as usize) * (wg_size as usize);
         let mut processed: usize = 0;
@@ -196,7 +229,63 @@ impl WgpuProvider {
             processed += chunk_len;
         }
 
-        self.register_existing_buffer(out_buffer, shape_vec, total_len)
+        if logical {
+            self.register_logical_buffer(
+                out_buffer,
+                shape_vec,
+                total_len,
+                BufferUsageClass::Generic,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, shape_vec, total_len)
+        }
+    }
+
+    pub(crate) fn zeros_like_exec(
+        &self,
+        prototype: &GpuTensorHandle,
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry_raw(prototype)?;
+        let logical =
+            self.allocations.requires_logical_encoding(prototype)? && prototype.view().is_logical();
+        let elements =
+            constructor_elements(shape).ok_or_else(|| anyhow!("zeros_like: shape overflow"))?;
+        let lanes = elements
+            .checked_mul(if entry.storage == GpuTensorStorage::ComplexInterleaved {
+                2
+            } else {
+                1
+            })
+            .ok_or_else(|| anyhow!("zeros_like: lane count overflow"))?;
+        let words_per_lane = entry.element_type.integer_type().map_or(
+            entry.element_type.element_size() / 4,
+            crate::backend::wgpu_storage::integer_words_per_element,
+        );
+        let words = lanes
+            .checked_mul(words_per_lane)
+            .ok_or_else(|| anyhow!("zeros_like: word count overflow"))?;
+        let buffer = self.create_integer_word_buffer(words, "runmat-zeros-like")?;
+        let mut encoder =
+            self.device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-zeros-like-clear"),
+                });
+        encoder.clear_buffer(&buffer, 0, None);
+        self.submit(encoder);
+        let allocated_bytes = buffer.size();
+        self.register_numeric_buffer_produced(
+            buffer,
+            NumericBufferRegistration {
+                shape: shape.to_vec(),
+                len: lanes,
+                physical_element_type: entry.element_type,
+                storage: entry.storage,
+                allocated_bytes,
+                usage: BufferUsageClass::Generic,
+            },
+            logical,
+        )
     }
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

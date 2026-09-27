@@ -187,8 +187,12 @@ impl AccelProvider for WgpuProvider {
         self.zeros_with_storage_exec(shape, storage)
     }
 
-    fn zeros_like(&self, prototype: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        self.zeros_exec(prototype.shape())
+    fn zeros_like(&self, prototype: &GpuTensorHandle, shape: &[usize]) -> Result<GpuTensorHandle> {
+        self.zeros_like_exec(prototype, shape)
+    }
+
+    fn logical_fill(&self, shape: &[usize], value: bool) -> Result<GpuTensorHandle> {
+        self.logical_fill_exec(shape, value)
     }
 
     fn zeros_integer_like(

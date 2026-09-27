@@ -63,7 +63,7 @@ fn exact_canonical_queries_match_actual_in_process_logical_hooks() {
         ));
         let output = match operation {
             Operation::Cast => {
-                let zeros = provider.zeros_like(&left).unwrap();
+                let zeros = provider.zeros_like(&left, left.shape()).unwrap();
                 let result = block_on(provider.elem_ne(&left, &zeros)).unwrap();
                 provider.free(&zeros).unwrap();
                 result
