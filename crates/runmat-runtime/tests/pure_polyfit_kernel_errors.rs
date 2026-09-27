@@ -101,6 +101,72 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn impossible_degree_rejects_before_workspace_or_provider_work() {
+    let error = polyfit_host_real_for_provider(&[0., 1.], &[1., 3.], usize::MAX, None)
+        .err()
+        .unwrap();
+    assert!(matches!(error, PolyfitKernelError::InvalidArgument(_)));
+    let fit = polyfit_host_real_for_provider(&[-1., 1.], &[2., 4.], 3, None).unwrap();
+    assert_eq!(fit.coefficients.len(), 4);
+    assert_eq!(fit.r_matrix.len(), 16);
+    assert_eq!(fit.df, 0.);
+    for (x, y) in [(-1., 2.), (1., 4.)] {
+        let evaluated = fit
+            .coefficients
+            .iter()
+            .fold(0., |value, coefficient| value * x + coefficient);
+        assert!((evaluated - y).abs() < 1e-12);
+    }
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let x = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[0., 1.],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let y = provider
+        .inner
+        .upload(&runmat_accelerate_api::HostTensorView {
+            data: &[1., 3.],
+            shape: &[2, 1],
+        })
+        .unwrap();
+    for resident in [false, true] {
+        let args = if resident {
+            vec![
+                Value::GpuTensor(x.clone()),
+                Value::GpuTensor(y.clone()),
+                Value::Int(runmat_value::IntValue::U64(usize::MAX as u64)),
+            ]
+        } else {
+            vec![
+                Value::Tensor(Tensor::new(vec![0., 1.], vec![2, 1]).unwrap()),
+                Value::Tensor(Tensor::new(vec![1., 3.], vec![2, 1]).unwrap()),
+                Value::Int(runmat_value::IntValue::U64(usize::MAX as u64)),
+            ]
+        };
+        let error =
+            futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
+                .unwrap_err();
+        assert_eq!(error.identifier(), Some("RunMat:polyfit:InvalidArgument"));
+        let mut source: &(dyn Error + 'static) = &error;
+        while !source.is::<PolyfitKernelError>() {
+            source = source.source().expect("typed geometry failure");
+        }
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+    }
+    x.allocation_lease().validate_live().unwrap();
+    y.allocation_lease().validate_live().unwrap();
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn public_weight_errors_match_host_and_retain_provider_cause_and_inputs() {
     let provider = Box::leak(Box::new(SolverProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider::new(),

@@ -319,6 +319,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 #[path = "polyfit/kernel_error.rs"]
 pub mod kernel_error;
 use kernel_error::{PolyfitKernelError, PolyfitKernelResult};
+#[path = "polyfit/geometry.rs"]
+mod geometry;
+use geometry::SolverGeometry;
 
 fn polyfit_error_with(
     message: impl Into<String>,
@@ -450,7 +453,7 @@ pub async fn evaluate(
             "polyfit: X and Y must contain at least one sample",
         ));
     }
-    if deg + 1 > x_data.len() && x_data.len() > 1 {
+    if deg >= x_data.len() && x_data.len() > 1 {
         warn!(
             "polyfit: polynomial degree {} is ill-conditioned for {} data points; results may be inaccurate",
             deg,
@@ -514,6 +517,7 @@ async fn try_gpu_polyfit(
         }
         count = Some(len);
     }
+    SolverGeometry::new(count.expect("x and y lengths were validated"), degree)?;
     let provider = gpu_helpers::exact_provider_for_handle(x_handle)
         .ok_or_else(|| polyfit_internal_error("polyfit: no exact owner for resident input"))?;
     for input in &inputs {
@@ -841,10 +845,7 @@ fn solve_polyfit(
         ));
     }
     let scale = compute_scale(x_data, mean)?;
-    let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
-
-    let mut rhs = y_data.to_vec();
-    for (idx, value) in rhs.iter().enumerate() {
+    for (idx, value) in y_data.iter().enumerate() {
         if !value.re.is_finite() || !value.im.is_finite() {
             return Err(PolyfitKernelError::input(format!(
                 "polyfit: Y must contain finite values (encountered NaN/Inf at position {})",
@@ -852,13 +853,16 @@ fn solve_polyfit(
             )));
         }
     }
+    let geometry = SolverGeometry::new(x_data.len(), degree)?;
+    let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
+    let mut rhs = y_data.to_vec();
     if let Some(w) = weights {
         apply_weights_rhs(&mut rhs, w)?;
     }
 
-    let rows = scaled.len();
-    let cols = degree + 1;
-    let mut vandermonde = build_vandermonde(&scaled, cols);
+    let rows = geometry.rows;
+    let cols = geometry.cols;
+    let mut vandermonde = build_vandermonde(&scaled, &geometry);
     if let Some(w) = weights {
         apply_weights_matrix(&mut vandermonde, rows, cols, w)?;
     }
@@ -874,7 +878,7 @@ fn solve_polyfit(
     } else {
         0.0
     };
-    let r_matrix = extract_upper(&vandermonde, rows, cols);
+    let r_matrix = extract_upper(&vandermonde, &geometry);
     let is_complex = coeff_original.iter().any(|c| c.im.abs() > EPS_NAN);
 
     Ok(PolyfitSolution {
@@ -914,9 +918,10 @@ fn compute_scale(data: &[f64], mean: f64) -> PolyfitKernelResult<f64> {
     Ok(scale)
 }
 
-fn build_vandermonde(u: &[f64], cols: usize) -> Vec<f64> {
-    let rows = u.len();
-    let mut matrix = vec![0.0; rows * cols];
+fn build_vandermonde(u: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
+    let rows = geometry.rows;
+    let cols = geometry.cols;
+    let mut matrix = vec![0.0; geometry.rectangular_len];
     if cols == 0 {
         return matrix;
     }
@@ -1090,8 +1095,10 @@ fn residual_norm(rhs: &[Complex64], rows: usize, cols: usize) -> f64 {
     acc.sqrt()
 }
 
-fn extract_upper(matrix: &[f64], rows: usize, cols: usize) -> Vec<f64> {
-    let mut output = vec![0.0; cols * cols];
+fn extract_upper(matrix: &[f64], geometry: &SolverGeometry) -> Vec<f64> {
+    let rows = geometry.rows;
+    let cols = geometry.cols;
+    let mut output = vec![0.0; geometry.square_len];
     for col in 0..cols {
         for row in 0..=col {
             if row < rows {
@@ -1180,6 +1187,11 @@ pub fn polyfit_host_real_for_provider(
             ));
         }
         validate_weights(w)?;
+    }
+    // Check the complex RHS conversion as well as the downstream matrix
+    // allocations before allocating any provider-fallback workspace.
+    if !x.is_empty() {
+        SolverGeometry::new(x.len(), degree)?;
     }
     let complex_y: Vec<Complex64> = y.iter().copied().map(|v| Complex64::new(v, 0.0)).collect();
     let solution = solve_polyfit(x, &complex_y, degree, weights)?;
