@@ -820,7 +820,6 @@ async fn evaluate_diag_host(value: Value, parsed: &ParsedDiagArgs) -> BuiltinRes
 }
 
 async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResult<Value> {
-    let input_device = handle.device_id();
     let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
         diag_error(
             MESSAGE_ID_INVALID_INPUT,
@@ -837,7 +836,8 @@ async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> Buil
             return Ok(output);
         }
     }
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle)).await?;
+    let gathered =
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
     let host = evaluate_diag_host(gathered, parsed).await?;
     if matches!(parsed.template, OutputTemplate::Double)
         && provider.precision() != ProviderPrecision::F64
@@ -847,171 +847,82 @@ async fn diag_resident(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> Buil
             "diag: the owning provider cannot restore a true double-precision result",
         ));
     }
-    upload_diag_result(provider, input_device, input_precision, host)
+    upload_diag_result(provider, &handle, input_precision, host)
 }
 
 fn upload_diag_result(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    input_device: u32,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    input: &GpuTensorHandle,
     input_precision: ProviderPrecision,
     value: Value,
 ) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
+    let mut output = match value {
+        Value::GpuTensor(handle) => {
+            if handle.shares_allocation_with(input) {
+                return Err(gpu_helpers::reject_gpu_output(
+                    handle,
+                    diag_error(
+                        MESSAGE_ID_INVALID_INPUT,
+                        "diag: restored result aliases borrowed input",
+                    ),
+                ));
+            }
+            return Ok(Value::GpuTensor(handle));
+        }
         Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let integer_type = tensor.integer_storage().map(integer_storage_element_type);
-            let precision = match tensor.numeric_dtype() {
-                NumericDType::F32 => ProviderPrecision::F32,
-                _ => provider.precision(),
-            };
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::Real,
-                integer_type,
-                false,
-                precision,
-            )?;
-            gpu_helpers::resident_gpu_value(handle)
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])?
         }
         Value::LogicalArray(array) => {
-            let shape = array.shape.clone();
-            let storage = match input_precision {
-                ProviderPrecision::F32 => NumericStorage::F32(
-                    array
-                        .data
-                        .iter()
-                        .map(|value| f32::from(*value != 0))
-                        .collect(),
-                ),
-                ProviderPrecision::F64 => NumericStorage::F64(
-                    array
-                        .data
-                        .iter()
-                        .map(|value| f64::from(*value != 0))
-                        .collect(),
-                ),
-            };
-            let tensor = Tensor::from_numeric_storage(storage, shape.clone())
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::Real,
-                None,
-                true,
-                input_precision,
-            )?;
-            gpu_helpers::logical_gpu_value(handle)
+            upload_diag_logical(provider, &array.data, &array.shape, input)?
+        }
+        Value::Bool(value) => upload_diag_logical(provider, &[u8::from(value)], &[1, 1], input)?,
+        Value::Int(value) => {
+            let host = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])?;
+            gpu_helpers::upload_tensor_protecting(provider, &host, &[input])?
+        }
+        Value::Num(value) => {
+            let host = Tensor::new(vec![value], vec![1, 1])?;
+            gpu_helpers::upload_tensor_protecting(provider, &host, &[input])?
         }
         Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let precision = input_precision;
-            let expected_dtype = provider_precision_to_dtype(precision);
-            let tensor = if tensor.numeric_dtype() == expected_dtype {
-                tensor
-            } else {
-                ComplexTensor::from_f64_values_with_dtype(
-                    tensor.materialize_f64(),
-                    shape.clone(),
-                    expected_dtype,
-                )
-                .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?
-            };
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &shape,
-                GpuTensorStorage::ComplexInterleaved,
-                None,
-                false,
-                precision,
-            )?;
-            gpu_helpers::complex_gpu_value(handle)
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])?
         }
         Value::Complex(re, im) => {
-            let tensor = ComplexTensor::from_f64_values_with_dtype(
+            let host = ComplexTensor::from_f64_values_with_dtype(
                 vec![(re, im)],
                 vec![1, 1],
                 provider_precision_to_dtype(input_precision),
-            )
-            .map_err(|error| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {error}")))?;
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            validate_uploaded_diag_result(
-                &handle,
-                provider,
-                input_device,
-                &[1, 1],
-                GpuTensorStorage::ComplexInterleaved,
-                None,
-                false,
-                input_precision,
             )?;
-            gpu_helpers::complex_gpu_value(handle)
+            gpu_helpers::upload_complex_tensor_protecting(provider, &host, &[input])?
         }
-        other => Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            format!("diag: cannot restore resident result {other:?}"),
-        )),
-    }
+        other => {
+            return Err(diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                format!("diag: cannot restore resident result {other:?}"),
+            ))
+        }
+    };
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
-fn integer_storage_element_type(
-    storage: &IntegerStorage,
-) -> runmat_accelerate_api::IntegerElementType {
-    use runmat_accelerate_api::IntegerElementType;
-    match storage {
-        IntegerStorage::I8(_) => IntegerElementType::I8,
-        IntegerStorage::I16(_) => IntegerElementType::I16,
-        IntegerStorage::I32(_) => IntegerElementType::I32,
-        IntegerStorage::I64(_) => IntegerElementType::I64,
-        IntegerStorage::U8(_) => IntegerElementType::U8,
-        IntegerStorage::U16(_) => IntegerElementType::U16,
-        IntegerStorage::U32(_) => IntegerElementType::U32,
-        IntegerStorage::U64(_) => IntegerElementType::U64,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn validate_uploaded_diag_result(
-    handle: &GpuTensorHandle,
+fn upload_diag_logical(
     provider: &dyn runmat_accelerate_api::AccelProvider,
-    input_device: u32,
-    expected_shape: &[usize],
-    expected_storage: GpuTensorStorage,
-    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
-    expected_logical: bool,
-    expected_precision: ProviderPrecision,
-) -> BuiltinResult<()> {
-    let valid = handle.device_id() == input_device
-        && handle.shape() == expected_shape
-        && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(handle) == expected_storage
-        && runmat_accelerate_api::handle_integer_type(handle) == expected_integer
-        && runmat_accelerate_api::handle_is_logical(handle) == expected_logical
-        && (expected_integer.is_some()
-            || runmat_accelerate_api::handle_precision(handle) == Some(expected_precision));
-    if valid {
-        return Ok(());
-    }
-    free_rejected_diag_output(handle, provider);
-    Err(diag_error(
-        MESSAGE_ID_INVALID_INPUT,
-        "diag: acceleration provider returned incompatible fallback storage",
-    ))
+    data: &[u8],
+    shape: &[usize],
+    input: &GpuTensorHandle,
+) -> BuiltinResult<GpuTensorHandle> {
+    runmat_accelerate_api::upload_logical_protecting(
+        provider,
+        &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+        &[input],
+    )
+    .map_err(|cause| {
+        crate::build_runtime_error(format!("diag: logical upload failed: {cause}"))
+            .with_builtin("diag")
+            .with_source(cause)
+            .build()
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -1025,9 +936,7 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         return Ok(None);
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-    else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return Ok(None);
     };
 
@@ -1040,6 +949,11 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
         return Ok(None);
     };
 
+    if template.logical != input_logical
+        || (!input_logical && template.precision != input_precision)
+    {
+        return Ok(None);
+    }
     let (rows, cols) = matrix_dims(handle.shape())?;
     let is_vector = rows == 1 || cols == 1;
     validate_vector_mode(is_vector, parsed)?;
@@ -1072,21 +986,32 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
     };
 
     match result {
-        Ok(out)
-            if native_diag_output_matches(&handle, &out, provider, &expected_shape, template) =>
+        Ok(mut output)
+            if native_diag_output_matches(
+                &handle,
+                &output,
+                provider,
+                &expected_shape,
+                template,
+            ) && (parsed.vector_mode || !output.shares_allocation_with(&handle)) =>
         {
-            runmat_accelerate_api::set_handle_logical(&out, template.logical);
-            Ok(Some(Value::GpuTensor(out)))
+            gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+            Ok(Some(Value::GpuTensor(output)))
         }
-        Ok(out) => {
-            free_rejected_diag_output(&out, provider);
-            Ok(None)
-        }
-        Err(err) if is_unsupported_diag_provider(&err) => Ok(None),
-        Err(err) => Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            format!("diag: provider diagonal operation failed: {err}"),
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                "diag: invalid provider diagonal output",
+            ),
         )),
+        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => Ok(None),
+        Err(cause) => Err(crate::build_runtime_error(format!(
+            "diag: provider diagonal operation failed: {cause}"
+        ))
+        .with_builtin("diag")
+        .with_source(cause)
+        .build()),
     }
 }
 
@@ -1112,18 +1037,10 @@ fn native_diag_output_matches(
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && runmat_accelerate_api::handle_precision(output) == Some(template.precision)
-}
-
-fn free_rejected_diag_output(
-    output: &GpuTensorHandle,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
-    if let Err(error) = owner.free(output) {
-        log::trace!("diag: failed to free rejected provider result: {error}");
-    }
+        && output.view().is_logical() == template.logical
+        && (template.logical
+            || (runmat_accelerate_api::handle_integer_type(output).is_none()
+                && runmat_accelerate_api::handle_precision(output) == Some(template.precision)))
 }
 
 fn gpu_diag_template(
@@ -1162,13 +1079,6 @@ fn gpu_diag_template(
         OutputTemplate::Like(_) => None,
         OutputTemplate::Integer(_) => None,
     }
-}
-
-fn is_unsupported_diag_provider(err: &anyhow::Error) -> bool {
-    let text = err.to_string();
-    text.contains("diag_from_vector not supported")
-        || text.contains("diag_from_vector_sized not supported")
-        || text.contains("diag_extract not supported")
 }
 
 enum DiagInput {
@@ -1700,72 +1610,7 @@ async fn apply_gpu_like_template(
         floating_value_from_value(value, provider_precision_to_dtype(precision))?
     };
 
-    if integer_target.is_none() && provider.precision() != precision {
-        return Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            "diag: the prototype owner cannot upload the prototype's recorded precision",
-        ));
-    }
-
-    let (uploaded, expected_shape, expected_storage, expected_integer) = match converted {
-        Value::LogicalArray(array) => {
-            let shape = array.shape.clone();
-            let tensor = tensor::logical_to_tensor(&array)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            (handle, shape, GpuTensorStorage::Real, None)
-        }
-        Value::Tensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let expected_integer = tensor.integer_storage().map(integer_storage_element_type);
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| diag_error(MESSAGE_ID_INVALID_INPUT, format!("diag: {err}")))?;
-            (handle, shape, GpuTensorStorage::Real, expected_integer)
-        }
-        Value::ComplexTensor(tensor) => {
-            let shape = tensor.shape.clone();
-            let expected_integer = tensor
-                .integer_storage()
-                .map(|storage| integer_storage_element_type(&storage.real));
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-            (
-                handle,
-                shape,
-                GpuTensorStorage::ComplexInterleaved,
-                expected_integer,
-            )
-        }
-        other => {
-            return Err(diag_error(
-                MESSAGE_ID_INVALID_INPUT,
-                format!("diag: cannot upload gpuArray 'like' result {other:?}"),
-            ));
-        }
-    };
-
-    runmat_accelerate_api::set_handle_logical(&uploaded, logical_target);
-    let valid = uploaded.device_id() == prototype.device_id()
-        && uploaded.shape() == expected_shape
-        && runmat_accelerate_api::provider_for_handle(&uploaded)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&uploaded) == expected_storage
-        && runmat_accelerate_api::handle_integer_type(&uploaded) == expected_integer
-        && runmat_accelerate_api::handle_is_logical(&uploaded) == logical_target
-        && (expected_integer.is_some()
-            || runmat_accelerate_api::handle_precision(&uploaded) == Some(precision));
-    if !valid {
-        free_rejected_diag_output(&uploaded, provider);
-        return Err(diag_error(
-            MESSAGE_ID_INVALID_INPUT,
-            "diag: prototype owner returned incompatible gpuArray 'like' storage",
-        ));
-    }
-    Ok(match expected_storage {
-        GpuTensorStorage::ComplexInterleaved => gpu_helpers::complex_gpu_value(uploaded),
-        GpuTensorStorage::Real if logical_target => gpu_helpers::logical_gpu_value(uploaded),
-        GpuTensorStorage::Real => gpu_helpers::resident_gpu_value(uploaded),
-    })
+    upload_diag_result(provider, prototype, precision, converted)
 }
 
 fn provider_precision_to_dtype(precision: ProviderPrecision) -> NumericDType {
@@ -2630,8 +2475,57 @@ mod tests {
             ));
             let gathered = test_support::gather(Value::GpuTensor(output.clone())).unwrap();
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 0.0, 2.0]);
-            provider.free(&proto).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(proto);
+
+            drop(output);
+        });
+    }
+
+    #[test]
+    fn diag_resident_fallback_preserves_paired_uint64_without_like() {
+        test_support::with_test_provider(|provider| {
+            let wide = (1u64 << 53) + 1;
+            let host = ComplexTensor::new_integer(
+                runmat_value::IntegerComplexStorage::new(
+                    IntegerStorage::U64(vec![wide, u64::MAX]),
+                    IntegerStorage::U64(vec![u64::MAX, wide]),
+                )
+                .unwrap(),
+                vec![2, 1],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
+            let value = run_diag(Value::GpuTensor(input.clone()), Vec::new()).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident paired diagonal")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::U64
+            );
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("paired host output")
+            };
+            assert_eq!(result.shape, vec![2, 2]);
+            let storage = result.integer_storage().unwrap();
+            assert_eq!(
+                storage.real,
+                IntegerStorage::U64(vec![wide, 0, 0, u64::MAX])
+            );
+            assert_eq!(
+                storage.imag,
+                IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
+            );
+            let Value::ComplexTensor(original) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
+            else {
+                panic!("paired original")
+            };
+            assert_eq!(original.integer_storage(), host.integer_storage());
         });
     }
 
@@ -2692,8 +2586,10 @@ mod tests {
                 storage.imag,
                 IntegerStorage::U64(vec![u64::MAX, 0, 0, wide])
             );
-            provider.free(&prototype).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(prototype);
+
+            drop(output);
         });
     }
 
@@ -2701,13 +2597,12 @@ mod tests {
     fn diag_resident_logical_like_preserves_logical_metadata() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
-            let proto_tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
-            let view = HostTensorView {
-                data: &proto_tensor.materialize_f64(),
-                shape: &proto_tensor.shape,
-            };
-            let proto = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&proto, true);
+            let proto = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0],
+                    shape: &[1, 1],
+                })
+                .expect("logical upload");
 
             let value = Value::Tensor(Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap());
             let output = run_diag(
@@ -2724,8 +2619,10 @@ mod tests {
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
-            provider.free(&proto).expect("free prototype");
-            provider.free(&output).expect("free output");
+
+            drop(proto);
+
+            drop(output);
         });
     }
 
@@ -2790,8 +2687,10 @@ mod tests {
             assert!(!runmat_accelerate_api::handle_is_logical(&output));
             let gathered = test_support::gather(Value::GpuTensor(output.clone())).unwrap();
             assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
-            provider.free(&input_handle).unwrap();
-            provider.free(&output).unwrap();
+
+            drop(input_handle);
+
+            drop(output);
         });
     }
 
@@ -2820,9 +2719,12 @@ mod tests {
             assert_eq!(gathered.shape, vec![2, 1]);
             assert_eq!(gathered.materialize_f64(), vec![4.0, 8.0]);
 
-            let logical = Tensor::from_f32(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let logical_handle = gpu_helpers::upload_tensor(provider, &logical).unwrap();
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
             let logical_out = run_diag(
                 Value::GpuTensor(logical_handle),
                 vec![Value::from("logical")],
@@ -3001,8 +2903,10 @@ mod tests {
                     ])
                     .unwrap();
                 assert_eq!(gathered.integer_storage(), Some(&expected));
-                provider.free(&input_for_cleanup).unwrap();
-                provider.free(&output_handle).unwrap();
+
+                drop(input_for_cleanup);
+
+                drop(output_handle);
             }
         });
     }
@@ -3029,8 +2933,10 @@ mod tests {
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
-            provider.free(&input_for_cleanup).unwrap();
-            provider.free(&output).unwrap();
+
+            drop(input_for_cleanup);
+
+            drop(output);
         });
     }
 
