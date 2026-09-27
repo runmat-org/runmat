@@ -4,7 +4,7 @@ use futures::{executor::block_on, task::noop_waker};
 #[path = "../../test_owner.rs"]
 mod test_owner;
 use runmat_accelerate_api::{
-    test_support::RetirementProbe, GpuHandleProvenance, WeakGpuTensorHandle,
+    allocation::WeakGpuTensorHandle, test_support::RetirementProbe, GpuHandleProvenance,
 };
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProviderFuture, HostTensorView, ThreadProviderGuard,
