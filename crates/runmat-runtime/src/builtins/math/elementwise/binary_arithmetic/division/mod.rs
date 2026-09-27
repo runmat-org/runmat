@@ -4,7 +4,7 @@ mod host;
 mod provider;
 
 use runmat_builtins::{BuiltinCatalogIdentity, BuiltinErrorDescriptor};
-use runmat_value::{NumericDType, Value};
+use runmat_value::Value;
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -91,32 +91,11 @@ pub(super) async fn execute(
     }
 }
 
-fn integer_class(value: &Value) -> Option<runmat_types::IntegerClass> {
+fn operand_is_scalar(value: &Value) -> bool {
     match value {
-        Value::Int(value) => Some(value.integer_class()),
-        Value::Tensor(tensor) => tensor
-            .integer_storage()
-            .map(runmat_value::IntegerStorage::integer_class),
-        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_class(handle),
-        _ => None,
-    }
-}
-
-fn is_scalar_double(value: &Value) -> bool {
-    match value {
-        Value::Num(_) => true,
-        Value::Tensor(value) => {
-            tensor::is_scalar_tensor(value) && value.numeric_dtype() == NumericDType::F64
-        }
-        Value::GpuTensor(value) => {
-            value.shape().iter().copied().product::<usize>() <= 1
-                && runmat_accelerate_api::handle_integer_type(value).is_none()
-                && !runmat_accelerate_api::handle_is_logical(value)
-                && runmat_accelerate_api::handle_storage(value)
-                    == runmat_accelerate_api::GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_precision(value)
-                    == Some(runmat_accelerate_api::ProviderPrecision::F64)
-        }
+        Value::Tensor(value) => tensor::is_scalar_tensor(value),
+        Value::GpuTensor(value) => value.shape().iter().all(|&extent| extent == 1),
+        Value::Num(_) | Value::Int(_) | Value::Complex(_, _) | Value::Bool(_) => true,
         _ => false,
     }
 }
@@ -126,17 +105,42 @@ fn validate_integer_admission(
     numerator: &Value,
     denominator: &Value,
 ) -> BuiltinResult<()> {
-    match (integer_class(numerator), integer_class(denominator)) {
-        (None, None) => Ok(()),
-        (Some(numerator), Some(denominator)) if numerator == denominator => Ok(()),
-        (Some(_), Some(_)) => {
-            Err(context.internal_error("integer operands must have the same integer class"))
-        }
-        (Some(_), None) if is_scalar_double(denominator) => Ok(()),
-        (None, Some(_)) if is_scalar_double(numerator) => Ok(()),
-        _ => {
-            Err(context
-                .internal_error("integer arrays can only be combined with scalar double values"))
+    crate::builtins::math::elementwise::integer_arithmetic::validate_integer_binary_inputs(
+        numerator,
+        denominator,
+        operand_is_scalar(numerator),
+        operand_is_scalar(denominator),
+        context.identity.name,
+    )
+    .map_err(|detail| {
+        build_runtime_error(detail)
+            .with_builtin(context.identity.name)
+            .build()
+    })
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn division_scalar_admission_requires_one_element_for_host_and_resident() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        for (shape, scalar) in [(vec![1, 1], true), (vec![0, 1], false), (vec![2, 1], false)] {
+            let host = runmat_value::Tensor::new(vec![0.0; shape.iter().product()], shape.clone())
+                .unwrap();
+            let resident = owner
+                .allocate_zeroed(
+                    shape,
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            assert_eq!(operand_is_scalar(&Value::Tensor(host)), scalar);
+            assert_eq!(
+                operand_is_scalar(&Value::GpuTensor(resident.handle)),
+                scalar
+            );
         }
     }
 }
