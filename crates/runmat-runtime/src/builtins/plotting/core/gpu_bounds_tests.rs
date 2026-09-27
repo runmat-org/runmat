@@ -16,6 +16,7 @@ enum Mode {
     Alias(GpuTensorHandle),
     PendingDownload,
     ErrorDownload,
+    MutateInput,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -53,6 +54,12 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             match mode {
                 Mode::Alias(handle) => Ok(handle),
+                Mode::MutateInput => {
+                    let output = self.inner.reduce_min(input).await?;
+                    runmat_accelerate_api::set_handle_logical(input, true);
+                    runmat_accelerate_api::record_handle_transpose(input, 99, 88);
+                    Ok(output)
+                }
                 _ => self.inner.reduce_min(input).await,
             }
         })
@@ -64,8 +71,16 @@ impl AccelProvider for Provider {
         let mode = self.mode.lock().unwrap().clone();
         Box::pin(async move {
             match mode {
-                Mode::PendingMax => futures::future::pending().await,
+                Mode::PendingMax => {
+                    runmat_accelerate_api::set_handle_logical(input, true);
+                    futures::future::pending().await
+                }
                 Mode::ErrorMax => anyhow::bail!("injected max failure"),
+                Mode::MutateInput => {
+                    assert!(!runmat_accelerate_api::handle_is_logical(input));
+                    assert!(runmat_accelerate_api::handle_transpose_info(input).is_none());
+                    self.inner.reduce_max(input).await
+                }
                 _ => self.inner.reduce_max(input).await,
             }
         })
@@ -96,6 +111,22 @@ fn upload(provider: &Provider) -> GpuTensorHandle {
 }
 
 #[test]
+fn bounds_restore_input_metadata_before_next_hook_and_keep_admitted_output_type() {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider = provider(Mode::MutateInput);
+    let _current = ThreadProviderGuard::set(Some(provider));
+    let input = upload(provider);
+    assert_eq!(
+        block_on(axis_bounds_protecting(&input, &[&input], "stem")).unwrap(),
+        (1.0, 2.0)
+    );
+    assert!(!runmat_accelerate_api::handle_is_logical(&input));
+    assert_eq!(provider.freed.lock().unwrap().len(), 2);
+    assert!(block_on(provider.inner.download(&input)).is_ok());
+    provider.free(&input).unwrap();
+}
+
+#[test]
 fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     let provider = provider(Mode::Ready);
@@ -119,6 +150,7 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
         let freed = provider.freed.lock().unwrap().clone();
         assert_eq!(freed.len(), usize::from(!matches!(mode, Mode::Alias(_))));
         assert!(!freed.contains(&x.buffer_id) && !freed.contains(&y.buffer_id));
+        assert!(!runmat_accelerate_api::handle_is_logical(&x));
         assert!(block_on(provider.inner.download(&x)).is_ok());
         assert!(block_on(provider.inner.download(&y)).is_ok());
     }
@@ -127,7 +159,7 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
 }
 
 #[test]
-fn dispatched_stem_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
+fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle};
     let _lock = crate::builtins::common::test_support::accel_test_lock();
@@ -146,7 +178,7 @@ fn dispatched_stem_preparation_can_suspend_fail_and_drop_before_plot_mutation() 
         Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         Value::GpuTensor(input.clone()),
     ];
-    let mut future = Box::pin(crate::dispatcher::call_builtin_async("stem", &args));
+    let mut future = Box::pin(crate::builtins::plotting::stem::stem_builtin(args.to_vec()));
     assert!(matches!(
         future.poll_unpin(&mut Context::from_waker(&noop_waker())),
         Poll::Pending
@@ -156,10 +188,10 @@ fn dispatched_stem_preparation_can_suspend_fail_and_drop_before_plot_mutation() 
     assert_eq!(count(), initial);
     assert!(provider.freed.lock().unwrap().is_empty());
     *provider.mode.lock().unwrap() = Mode::ErrorDownload;
-    assert!(block_on(crate::dispatcher::call_builtin_async("stem", &args)).is_err());
+    assert!(block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).is_err());
     assert_eq!(count(), initial);
     *provider.mode.lock().unwrap() = Mode::Ready;
-    block_on(crate::dispatcher::call_builtin_async("stem", &args)).unwrap();
+    block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).unwrap();
     assert_eq!(count(), initial + 1);
     assert!(block_on(provider.inner.download(&input)).is_ok());
     assert!(provider.freed.lock().unwrap().is_empty());

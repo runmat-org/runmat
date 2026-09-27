@@ -1,5 +1,11 @@
 //! Provider reductions used by plotting, before registry mutation.
 use super::{plotting_error, value_to_scalar_async};
+
+struct ExpectedOutput {
+    element: runmat_accelerate_api::NumericElementType,
+    precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    integer: Option<runmat_accelerate_api::IntegerElementType>,
+}
 use crate::builtins::common::gpu_helpers as gpu;
 use crate::BuiltinResult;
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage};
@@ -27,7 +33,7 @@ impl Temporaries<'_> {
     fn admit(
         &mut self,
         output: GpuTensorHandle,
-        input: &GpuTensorHandle,
+        expected: &ExpectedOutput,
         context: &'static str,
     ) -> BuiltinResult<GpuTensorHandle> {
         let protected_alias = self
@@ -48,13 +54,11 @@ impl Temporaries<'_> {
             && output.device_id == self.provider.device_id()
             && gpu::exact_provider_for_handle(&output)
                 .is_some_and(|owner| std::ptr::eq(owner, self.provider))
-            && gpu::expected_handle_numeric_element_type(input).is_ok_and(|element| {
-                gpu::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
-            })
+            && gpu::numeric_descriptor_matches(&output, expected.element, GpuTensorStorage::Real)
             && gpu::gpu_class_metadata_matches(
                 &output,
-                runmat_accelerate_api::handle_precision(input),
-                runmat_accelerate_api::handle_integer_type(input),
+                expected.precision,
+                expected.integer,
                 false,
             );
         // Own every fresh result immediately, including malformed metadata.
@@ -81,7 +85,13 @@ pub(super) async fn axis_bounds_protecting(
     let provider = gpu::exact_provider_for_handle(input).ok_or_else(|| {
         plotting_error(context, format!("{context}: no provider owns bounds input"))
     })?;
-    let _metadata = protected
+    let expected = ExpectedOutput {
+        element: gpu::expected_handle_numeric_element_type(input)
+            .map_err(|error| plotting_error(context, error))?,
+        precision: runmat_accelerate_api::handle_precision(input),
+        integer: runmat_accelerate_api::handle_integer_type(input),
+    };
+    let metadata = protected
         .iter()
         .map(|handle| gpu::HandleMetadataRestoreGuard::new(handle))
         .collect::<Vec<_>>();
@@ -90,14 +100,22 @@ pub(super) async fn axis_bounds_protecting(
         protected,
         handles: Vec::with_capacity(2),
     };
-    let minimum = provider.reduce_min(input).await.map_err(|error| {
+    let minimum = provider.reduce_min(input).await;
+    for guard in &metadata {
+        guard.restore();
+    }
+    let minimum = minimum.map_err(|error| {
         plotting_error(context, format!("{context}: reduce_min failed: {error}"))
     })?;
-    let minimum = owned.admit(minimum, input, context)?;
-    let maximum = provider.reduce_max(input).await.map_err(|error| {
+    let minimum = owned.admit(minimum, &expected, context)?;
+    let maximum = provider.reduce_max(input).await;
+    for guard in &metadata {
+        guard.restore();
+    }
+    let maximum = maximum.map_err(|error| {
         plotting_error(context, format!("{context}: reduce_max failed: {error}"))
     })?;
-    let maximum = owned.admit(maximum, input, context)?;
+    let maximum = owned.admit(maximum, &expected, context)?;
     let minimum = value_to_scalar_async(Value::GpuTensor(minimum), context).await?;
     let maximum = value_to_scalar_async(Value::GpuTensor(maximum), context).await?;
     Ok((minimum as f32, maximum as f32))

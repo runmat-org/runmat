@@ -139,11 +139,15 @@ impl<'a> HandleMetadataRestoreGuard<'a> {
             snapshot: snapshot_handle_metadata(handle),
         }
     }
+
+    pub(crate) fn restore(&self) {
+        restore_handle_metadata(self.handle, &self.snapshot);
+    }
 }
 
 impl Drop for HandleMetadataRestoreGuard<'_> {
     fn drop(&mut self) {
-        restore_handle_metadata(self.handle, &self.snapshot);
+        self.restore();
     }
 }
 

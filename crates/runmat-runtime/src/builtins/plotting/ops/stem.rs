@@ -484,13 +484,9 @@ pub async fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     // Complete provider work before entering the synchronous figure registry.
     // Pending/error/drop therefore cannot publish a partially prepared plot.
     let gpu_plot = if let (Some(x), Some(y)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
-        match build_stem_gpu_plot(BUILTIN_NAME, x, y, &parsed, &label).await {
-            Ok(plot) => Some(plot),
-            Err(err) => {
-                log::warn!("stem GPU path unavailable: {err}");
-                None
-            }
-        }
+        build_stem_gpu_plot(BUILTIN_NAME, x, y, &parsed, &label)
+            .await
+            .map_err(map_stem_internal)?
     } else {
         None
     };
@@ -587,12 +583,18 @@ async fn build_stem_gpu_plot(
     y: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedStemStyle,
     label: &str,
-) -> crate::BuiltinResult<StemPlot> {
-    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
+) -> crate::BuiltinResult<Option<StemPlot>> {
+    // Only unavailable zero-copy rendering support permits host preparation.
+    // Once admitted, invalid metadata, reduction and vertex failures propagate.
+    let Ok(context) = super::gpu_helpers::ensure_shared_wgpu_context(name) else {
+        return Ok(None);
+    };
+    let Some(x_ref) = runmat_accelerate_api::export_wgpu_buffer(x) else {
+        return Ok(None);
+    };
+    let Some(y_ref) = runmat_accelerate_api::export_wgpu_buffer(y) else {
+        return Ok(None);
+    };
     if x_ref.len != y_ref.len {
         return Err(plotting_error(
             name,
@@ -733,7 +735,7 @@ async fn build_stem_gpu_plot(
     if let Some(visible) = parsed.appearance.visible {
         plot.set_visible(visible);
     }
-    Ok(plot)
+    Ok(Some(plot))
 }
 
 struct ParsedStemStyle {
