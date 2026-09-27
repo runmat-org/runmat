@@ -2,6 +2,7 @@
 
 mod host;
 mod provider;
+mod preparation;
 mod specification;
 
 #[cfg(target_arch = "wasm32")]
@@ -39,8 +40,8 @@ async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         "complex",
     )?;
     match rest.as_slice() {
-        [] => provider::unary(real).await,
-        [imaginary] => provider::binary(real, imaginary.clone()).await,
+        [] => preparation::unary(real).await,
+        [imaginary] => preparation::binary(real, imaginary.clone()).await,
         _ => Err(error(
             &COMPLEX_ERROR_INVALID_ARGUMENT,
             format!("expected 1 or 2 input arguments, got {}", rest.len() + 1),

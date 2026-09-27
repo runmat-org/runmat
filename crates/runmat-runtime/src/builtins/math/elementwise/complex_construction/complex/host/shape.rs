@@ -6,7 +6,10 @@ use crate::BuiltinResult;
 
 use super::super::error;
 
-pub(super) fn compatible(real: &Tensor, imaginary: &Tensor) -> BuiltinResult<Vec<usize>> {
+pub(in crate::builtins::math::elementwise::complex_construction::complex) fn compatible(
+    real: &Tensor,
+    imaginary: &Tensor,
+) -> BuiltinResult<Vec<usize>> {
     if real.shape == imaginary.shape || is_scalar(imaginary) {
         Ok(real.shape.clone())
     } else if is_scalar(real) {

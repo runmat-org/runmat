@@ -46,10 +46,17 @@ async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    match value {
-        Value::GpuTensor(handle) => provider::execute(handle).await,
-        host_value => host::execute(host_value),
-    }
+    super::preparation::execute(
+        runmat_builtins::CONJ_CATALOG_ENTRY.identity,
+        value,
+        |value| async move {
+            match value {
+                Value::GpuTensor(handle) => provider::execute(handle).await,
+                host_value => host::execute(host_value),
+            }
+        },
+    )
+    .await
 }
 
 pub(crate) use host::conjugate_integer_imaginary_storage;
