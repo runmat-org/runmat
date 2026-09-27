@@ -1562,14 +1562,12 @@ pub(crate) mod tests {
     #[test]
     fn colon_resident_logical_and_complex_metadata_are_gated_before_dispatch() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
             let logical = provider
-                .upload(&HostTensorView {
-                    data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
                 })
                 .expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = colon_builtin(
                 Value::GpuTensor(logical.clone()),

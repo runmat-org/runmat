@@ -1157,12 +1157,11 @@ pub(crate) mod tests {
     fn linspace_rejects_resident_logical_count_before_gathering() {
         test_support::with_test_provider(|provider| {
             let count = provider
-                .upload(&HostTensorView {
-                    data: &[3.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
                     shape: &[1, 1],
                 })
                 .expect("count upload");
-            runmat_accelerate_api::set_handle_logical(&count, true);
             let error = linspace_builtin(
                 Value::Num(3.0),
                 Value::Num(7.0),

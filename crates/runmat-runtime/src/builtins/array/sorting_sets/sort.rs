@@ -2224,12 +2224,11 @@ pub(crate) mod tests {
             );
 
             let logical = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 0.0, 1.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1],
                     shape: &[3, 1],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
             let (sorted, _) = evaluate(Value::GpuTensor(logical), &[])
                 .expect("logical GPU sort")
                 .into_values();

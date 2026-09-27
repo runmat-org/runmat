@@ -584,45 +584,47 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::{random, test_support};
     use futures::executor::block_on;
+    use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
     use runmat_accelerate_api::AccelProvider;
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     struct InvalidExplicitRandnProvider {
-        inner: runmat_accelerate::simple_provider::InProcessProvider,
-        frees: AtomicUsize,
+        owner: TestAllocationOwner,
+        result: Mutex<Option<RetirementProbe>>,
     }
 
     impl AccelProvider for InvalidExplicitRandnProvider {
         fn upload(
             &self,
-            host: &runmat_accelerate_api::HostTensorView,
+            _host: &runmat_accelerate_api::HostTensorView,
         ) -> anyhow::Result<GpuTensorHandle> {
-            self.inner.upload(host)
+            unreachable!("no upload for invalid constructor result")
         }
 
         fn download<'a>(
             &'a self,
-            handle: &'a GpuTensorHandle,
+            _handle: &'a GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            self.inner.download(handle)
-        }
-
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            self.frees.fetch_add(1, Ordering::SeqCst);
-            self.inner.free(handle)
+            unreachable!("no download for invalid constructor result")
         }
 
         fn device_info(&self) -> String {
-            self.inner.device_info()
+            "invalid owned randn result".into()
         }
 
         fn device_id(&self) -> u32 {
-            self.inner.device_id()
+            self.owner.device_id()
         }
 
         fn random_normal(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-            self.inner.random_normal(&[1, 1])
+            let allocation = self.owner.allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )?;
+            *self.result.lock().unwrap() = Some(allocation.probe);
+            Ok(allocation.handle)
         }
     }
 
@@ -911,14 +913,23 @@ pub(crate) mod tests {
     fn randn_gpu_rejects_and_frees_invalid_provider_output() {
         let _guard = test_support::accel_test_lock();
         let provider = Box::leak(Box::new(InvalidExplicitRandnProvider {
-            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
-            frees: AtomicUsize::new(0),
+            owner: TestAllocationOwner::new(),
+            result: Mutex::new(None),
         }));
         let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
 
         let error = randn_gpu(&[2, 2]).expect_err("invalid provider output must be terminal");
         assert!(error.message().contains("invalid constructor result"));
-        assert_eq!(provider.frees.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            provider
+                .result
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .retirements(),
+            1
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
