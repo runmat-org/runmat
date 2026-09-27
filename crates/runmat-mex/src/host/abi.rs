@@ -198,7 +198,7 @@ impl MexCallState {
         self.inner.lock().map_err(|_| ())
     }
 
-    #[cfg(not(target_family = "wasm"))]
+    #[cfg(any(test, not(target_family = "wasm")))]
     pub(crate) fn has_pending_async_requests(&self) -> Result<bool, ()> {
         let requests = self
             .lock()?
@@ -1944,10 +1944,13 @@ mod tests {
         assert!(lifetime.upgrade().is_none());
     }
 
-    #[test]
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
     fn allocator_and_data_api_callbacks_extend_complete_previous_prefixes() {
         let pointer_size = std::mem::size_of::<usize>();
-        let gpu_field_count = 11;
+        // Native ABI v9 appends GPU callbacks. Browser hosts expose the same
+        // preceding callback layout without the native context/address tail.
+        let gpu_field_count = if cfg!(target_family = "wasm") { 0 } else { 11 };
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, allocate_memory),
             std::mem::size_of::<MexHostApiV1>() - (27 + gpu_field_count) * pointer_size
@@ -1984,10 +1987,12 @@ mod tests {
             std::mem::offset_of!(MexHostApiV1, async_release),
             std::mem::size_of::<MexHostApiV1>() - (1 + gpu_field_count) * pointer_size
         );
+        #[cfg(not(target_family = "wasm"))]
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, gpu_context_enter),
             std::mem::size_of::<MexHostApiV1>() - gpu_field_count * pointer_size
         );
+        #[cfg(not(target_family = "wasm"))]
         assert_eq!(
             std::mem::offset_of!(MexHostApiV1, gpu_create_complex),
             std::mem::size_of::<MexHostApiV1>() - pointer_size
@@ -2011,6 +2016,7 @@ mod tests {
             .contains("mxClassID"));
     }
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn host_call_state_is_safe_for_data_api_worker_access() {
         fn require_send_sync<T: Send + Sync>() {}

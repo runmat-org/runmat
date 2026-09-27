@@ -551,7 +551,8 @@ mod tests {
         register(state, Arc::new(CompletedRequest(completion))).expect("register completed request")
     }
 
-    #[test]
+    #[cfg_attr(not(target_family = "wasm"), test)]
+    #[cfg_attr(target_family = "wasm", wasm_bindgen_test::wasm_bindgen_test)]
     fn pending_requests_retain_module_lifecycle_until_completion_or_release() {
         let state = MexCallState::new(MxApiMode::InterleavedComplex);
         let request = register(&state, Arc::new(PendingRequest)).expect("register pending request");

@@ -957,6 +957,7 @@ fn validate_shape(len: usize, shape: &[usize]) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[cfg(not(target_family = "wasm"))]
     #[test]
     fn boundary_arrays_are_native_lane_transferable_without_runtime_handles() {
         fn assert_send<T: Send>() {}
