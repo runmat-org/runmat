@@ -9,6 +9,9 @@ use crate::{gather_if_needed_async, value_contains_gpu, BuiltinResult};
 
 use super::plotting_error;
 
+#[path = "gpu_bounds.rs"]
+mod bounds;
+
 #[cfg(feature = "plot-core")]
 use glam::Vec3;
 #[cfg(feature = "plot-core")]
@@ -29,57 +32,14 @@ pub fn ensure_shared_wgpu_context(name: &'static str) -> BuiltinResult<SharedWgp
         .ok_or_else(|| plotting_error(name, format!("{name}: plotting GPU context unavailable")))
 }
 
-/// Compute the min/max bounds for a GPU tensor by delegating to the runtime
-/// `min`/`max` builtins. Results are returned as `f32` so they can flow directly
-/// into plotting bounding boxes.
+/// Compute global bounds through the exact owner's reduction hooks. Temporary
+/// results are guarded across errors and suspension; coordinates stay borrowed.
+/// Results are returned as `f32` for plotting bounding boxes.
 pub async fn axis_bounds_async(
     handle: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<(f32, f32)> {
-    // IMPORTANT: `min(A)`/`max(A)` have MATLAB semantics (reduce along a dimension), which for
-    // matrices returns a vector (e.g. 1xN) and would trigger a small-but-unwanted download.
-    // For plotting bounds we always want the global extrema, so call the provider global
-    // reduction hooks directly when available.
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        let min_handle = provider.reduce_min(handle).await.map_err(|err| {
-            plotting_error(context, format!("{context}: reduce_min failed: {err}"))
-        })?;
-        let max_handle = provider.reduce_max(handle).await.map_err(|err| {
-            plotting_error(context, format!("{context}: reduce_max failed: {err}"))
-        })?;
-
-        let min_scalar =
-            value_to_scalar_async(Value::GpuTensor(min_handle.clone()), context).await?;
-        let max_scalar =
-            value_to_scalar_async(Value::GpuTensor(max_handle.clone()), context).await?;
-
-        // These temporary scalar handles are purely intermediate; free them eagerly.
-        let _ = provider.free(&min_handle);
-        let _ = provider.free(&max_handle);
-
-        return Ok((min_scalar as f32, max_scalar as f32));
-    }
-
-    // Fallback: gather and compute on the host (should be rare; provider should exist for GPU tensors).
-    let tensor = gather_tensor_from_gpu_async(handle.clone(), context).await?;
-    let mut min_val = f64::INFINITY;
-    let mut max_val = f64::NEG_INFINITY;
-    for index in 0..tensor.len() {
-        let v = numeric_scalar_to_f64(
-            tensor
-                .numeric_value_at(index)
-                .expect("tensor storage length matches shape"),
-        );
-        if v.is_finite() {
-            min_val = min_val.min(v);
-            max_val = max_val.max(v);
-        }
-    }
-    if !min_val.is_finite() || !max_val.is_finite() {
-        min_val = 0.0;
-        max_val = 0.0;
-    }
-    Ok((min_val as f32, max_val as f32))
+    bounds::axis_bounds_protecting(handle, &[handle], context).await
 }
 
 pub fn axis_bounds(handle: &GpuTensorHandle, context: &'static str) -> BuiltinResult<(f32, f32)> {
@@ -138,8 +98,9 @@ pub async fn gpu_xy_bounds_async(
     y: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds_async(x, context).await?;
-    let (min_y, max_y) = axis_bounds_async(y, context).await?;
+    let protected = [x, y];
+    let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context).await?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, 0.0),
         Vec3::new(max_x, max_y, 0.0),
@@ -180,9 +141,10 @@ pub async fn gpu_xyz_bounds_async(
     z: &GpuTensorHandle,
     context: &'static str,
 ) -> BuiltinResult<BoundingBox> {
-    let (min_x, max_x) = axis_bounds_async(x, context).await?;
-    let (min_y, max_y) = axis_bounds_async(y, context).await?;
-    let (min_z, max_z) = axis_bounds_async(z, context).await?;
+    let protected = [x, y, z];
+    let (min_x, max_x) = bounds::axis_bounds_protecting(x, &protected, context).await?;
+    let (min_y, max_y) = bounds::axis_bounds_protecting(y, &protected, context).await?;
+    let (min_z, max_z) = bounds::axis_bounds_protecting(z, &protected, context).await?;
     Ok(BoundingBox::new(
         Vec3::new(min_x, min_y, min_z),
         Vec3::new(max_x, max_y, max_z),

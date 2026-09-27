@@ -486,10 +486,13 @@ mod tests {
     #[test]
     fn set_updates_stem_properties() {
         let _guard = setup();
-        let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
-            runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
-        )])
-        .unwrap();
+        let handle =
+            futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(vec![
+                Value::Tensor(
+                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+                ),
+            ]))
+            .unwrap();
         set_builtin(vec![
             Value::Num(handle),
             Value::String("BaseValue".into()),

@@ -520,15 +520,18 @@ mod tests {
     #[test]
     fn stem_handle_exposes_runtime_properties() {
         let _guard = setup();
-        let handle = crate::builtins::plotting::stem::stem_builtin(vec![
-            Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values")),
-            Value::String("DisplayName".into()),
-            Value::String("Impulse".into()),
-            Value::String("BaseValue".into()),
-            Value::Num(-1.0),
-            Value::String("filled".into()),
-        ])
-        .unwrap();
+        let handle =
+            futures::executor::block_on(crate::builtins::plotting::stem::stem_builtin(vec![
+                Value::Tensor(
+                    runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).expect("stem values"),
+                ),
+                Value::String("DisplayName".into()),
+                Value::String("Impulse".into()),
+                Value::String("BaseValue".into()),
+                Value::Num(-1.0),
+                Value::String("filled".into()),
+            ]))
+            .unwrap();
         let props = get_builtin(vec![Value::Num(handle)]).unwrap();
         let Value::Struct(st) = props else {
             panic!("expected struct");
