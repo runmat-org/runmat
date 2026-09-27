@@ -103,6 +103,15 @@ pub struct RetirementProbe {
     owner: Arc<FixtureOwner>,
 }
 impl RetirementProbe {
+    /// Inject a retained-payload retirement failure. Keep this probe alive to
+    /// retain the failure record and payload until the fixture is torn down.
+    pub fn fail_retirement(&self, detail: impl Into<String>) {
+        let mut failure = self.owner.retirement_failure.lock().unwrap();
+        assert_eq!(self.retirements(), 0, "retirement already attempted");
+        *failure = Some(detail.into());
+    }
+
+    /// Number of retirement attempts, including injected failures.
     pub fn retirements(&self) -> usize {
         self.owner.retired.load(Ordering::SeqCst)
     }
@@ -156,6 +165,7 @@ pub(crate) struct FixtureOwner {
     logical: bool,
     record: Mutex<(Option<HostNumericDataOwned>, Option<WeakAllocationLease>)>,
     pub retired: AtomicUsize,
+    retirement_failure: Mutex<Option<String>>,
 }
 impl AllocationOwner for FixtureOwner {
     fn register_lease(
@@ -183,7 +193,7 @@ impl AllocationOwner for FixtureOwner {
         if identity != self.identity {
             return Err(AllocationAcquisitionError::WrongOwner);
         }
-        if self.record.lock().unwrap().0.is_none() {
+        if self.retired.load(Ordering::SeqCst) != 0 || self.record.lock().unwrap().0.is_none() {
             return Err(AllocationAcquisitionError::NotLive);
         }
         Ok(())
@@ -203,10 +213,16 @@ impl AllocationOwner for FixtureOwner {
     }
     fn retire(&self, identity: AllocationIdentity) -> AllocationRetirementOutcome {
         assert_eq!(identity, self.identity);
+        let failure = self.retirement_failure.lock().unwrap();
+        assert_eq!(self.retired.fetch_add(1, Ordering::SeqCst), 0);
+        if let Some(detail) = failure.as_ref() {
+            return AllocationRetirementOutcome::RetainedFailure {
+                detail: detail.clone(),
+            };
+        }
         let payload = self.record.lock().unwrap().0.take();
         assert!(payload.is_some());
         drop(payload);
-        self.retired.fetch_add(1, Ordering::SeqCst);
         AllocationRetirementOutcome::Retired
     }
     fn record_retirement_panic(&self, _: AllocationIdentity) {}
@@ -253,6 +269,7 @@ fn owned_data(
         logical,
         record: Mutex::new((Some(host.data), None)),
         retired: AtomicUsize::new(0),
+        retirement_failure: Mutex::new(None),
     });
     let lease = AllocationLease::register(owner.identity, owner.clone())?;
     let handle = GpuTensorHandle::from_allocation(

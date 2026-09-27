@@ -4,6 +4,10 @@ use runmat_accelerate_api::observation::{
     current_provider_observation, ProviderExecutionDisposition, ProviderObservationClock,
     ProviderObservationSupport, ProviderOperationReceipt,
 };
+use runmat_accelerate_api::{
+    test_support::{RetirementProbe, TestAllocationOwner},
+    GpuTensorStorage, NumericElementType,
+};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
@@ -19,8 +23,6 @@ impl ProviderObservationClock for Clock {
 struct ObservingProvider {
     clock: Arc<Clock>,
     queries: Mutex<Vec<runmat_accelerate_api::ProviderFeasibilityQuery>>,
-    failing_frees: bool,
-    freed: Mutex<Vec<u64>>,
 }
 impl AccelProvider for ObservingProvider {
     fn upload(&self, _: &HostTensorView<'_>) -> Result<runmat_accelerate_api::GpuTensorHandle> {
@@ -31,14 +33,6 @@ impl AccelProvider for ObservingProvider {
         _: &'a runmat_accelerate_api::GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async { unreachable!("no product kernel claimed") })
-    }
-    fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
-        assert!(
-            self.failing_frees,
-            "no allocation in other lifecycle fixtures"
-        );
-        self.freed.lock().unwrap().push(handle.buffer_id);
-        Err(anyhow!("retirement result uncertain"))
     }
     fn device_info(&self) -> String {
         "receipt-fixture".into()
@@ -57,8 +51,6 @@ fn provider() -> ObservingProvider {
     ObservingProvider {
         clock: Arc::new(Clock(AtomicU64::new(100))),
         queries: Mutex::default(),
-        failing_frees: false,
-        freed: Mutex::default(),
     }
 }
 fn query() -> runmat_accelerate_api::ProviderFeasibilityQuery {
@@ -126,10 +118,11 @@ fn direct_unproven_or_fallback_execution_never_becomes_positive() {
                 recorder.confirm_provider_execution(provider.device_id(), &query().operation);
             }
             // Host fallback may restore a resident result. That cannot repair
-            // the failed route evidence. No provider allocation is fabricated.
-            Ok(Value::GpuTensor(
-                runmat_accelerate_api::GpuTensorHandle::new(vec![1, 1], 9181, 9182),
-            ))
+            // the failed route evidence. Use a real fixture-owned allocation.
+            let allocation = TestAllocationOwner::new()
+                .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            Ok(Value::GpuTensor(allocation.handle))
         }))
         .unwrap();
         let feedback = probe.feedback.borrow();
@@ -201,50 +194,62 @@ fn direct_receipt_abandonment_and_body_error_never_publish_success() {
 
 fn failing_cleanup_call(
     probe: &Rc<Probe>,
-) -> (PreparedBuiltinCall, &'static ObservingProvider, Value) {
-    let provider = Box::leak(Box::new(ObservingProvider {
-        failing_frees: true,
-        ..provider()
-    }));
-    let retained = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 1],
-        9271,
-        2,
-    ));
-    let discarded = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 1],
-        9271,
-        1,
-    ));
+) -> (
+    PreparedBuiltinCall,
+    ObservingProvider,
+    Value,
+    [RetirementProbe; 2],
+) {
+    let provider = provider();
+    let owner = TestAllocationOwner::new();
+    let retained = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let discarded = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    discarded
+        .probe
+        .fail_retirement("discarded operand retirement failed");
+    retained
+        .probe
+        .fail_retirement("retained operand retirement failed");
+    let probes = [discarded.probe, retained.probe];
+    let retained = Value::GpuTensor(retained.handle);
+    let discarded = Value::GpuTensor(discarded.handle);
     let mut uploads = super::super::ownership::OwnedUploads::new(&[]).unwrap();
-    uploads.track(&discarded);
-    uploads.track(&retained);
+    for value in [&discarded, &retained] {
+        let Value::GpuTensor(handle) = value else {
+            unreachable!()
+        };
+        uploads.track(handle);
+    }
     let mut prepared = observed(probe, true, vec![]);
     prepared
         .observation
         .as_mut()
         .unwrap()
-        .prepare_provider(provider, Some(&query()));
+        .prepare_provider(&provider, Some(&query()));
     prepared.uploads = Some(uploads);
-    (prepared, provider, retained)
+    (prepared, provider, retained, probes)
 }
 
 #[test]
-fn failed_cleanup_invalidates_success_without_orphaning_adopted_result_or_retrying_free() {
+fn failed_cleanup_returns_error_and_retires_each_owned_reference_once() {
     let probe = Rc::new(Probe::default());
-    let (prepared, provider, retained) = failing_cleanup_call(&probe);
-    let result = futures::executor::block_on(prepared.execute(|_| async {
+    let (prepared, provider, retained, allocations) = failing_cleanup_call(&probe);
+    let error = futures::executor::block_on(prepared.execute(|_| async {
         current_provider_observation()
             .unwrap()
             .confirm_provider_execution(provider.device_id(), &query().operation);
         Ok(retained)
     }))
-    .unwrap();
-    assert!(matches!(result, Value::GpuTensor(ref handle) if handle.buffer_id == 2));
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:AccelerationCleanupFailed"));
+    assert!(std::error::Error::source(&error).is_some());
     assert_eq!(
-        *provider.freed.lock().unwrap(),
-        [1],
-        "adopted output survives, failed retirement is not retried by Drop"
+        allocations.map(|allocation| allocation.retirements()),
+        [1, 1]
     );
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
@@ -253,7 +258,8 @@ fn failed_cleanup_invalidates_success_without_orphaning_adopted_result_or_retryi
 #[test]
 fn failed_cleanup_preserves_original_body_error_and_attempts_each_retirement_once() {
     let probe = Rc::new(Probe::default());
-    let (prepared, provider, _) = failing_cleanup_call(&probe);
+    let (prepared, _provider, retained, allocations) = failing_cleanup_call(&probe);
+    drop(retained);
     let error = futures::executor::block_on(prepared.execute(|_| async {
         Err(runmat_runtime::build_runtime_error("original body failure")
             .with_identifier("RunMat:FixtureBodyError")
@@ -261,7 +267,11 @@ fn failed_cleanup_preserves_original_body_error_and_attempts_each_retirement_onc
     }))
     .unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:FixtureBodyError"));
-    assert_eq!(*provider.freed.lock().unwrap(), [1, 2]);
+    assert!(std::error::Error::source(&error).is_some());
+    assert_eq!(
+        allocations.map(|allocation| allocation.retirements()),
+        [1, 1]
+    );
     assert_eq!(probe.feedback.borrow().len(), 1);
     assert!(!probe.feedback.borrow()[0].succeeded);
 }
@@ -270,7 +280,8 @@ fn failed_cleanup_preserves_original_body_error_and_attempts_each_retirement_onc
 fn cancelled_cleanup_is_best_effort_and_cannot_train_success_or_retry() {
     for poll in [false, true] {
         let probe = Rc::new(Probe::default());
-        let (prepared, provider, _) = failing_cleanup_call(&probe);
+        let (prepared, _provider, retained, allocations) = failing_cleanup_call(&probe);
+        drop(retained);
         let mut future = Box::pin(prepared.execute(|_| std::future::pending()));
         if poll {
             use std::future::Future;
@@ -282,7 +293,10 @@ fn cancelled_cleanup_is_best_effort_and_cannot_train_success_or_retry() {
                 .is_pending());
         }
         drop(future);
-        assert_eq!(*provider.freed.lock().unwrap(), [1, 2]);
+        assert_eq!(
+            allocations.map(|allocation| allocation.retirements()),
+            [1, 1]
+        );
         assert_eq!(probe.feedback.borrow().len(), 1);
         assert!(!probe.feedback.borrow()[0].succeeded);
     }

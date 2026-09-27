@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn injected_retirement_failure_retains_payload_without_reacquisition_or_retry() {
+    let allocation = TestAllocationOwner::new()
+        .allocate_zeroed(vec![2], NumericElementType::U64, GpuTensorStorage::Real)
+        .unwrap();
+    allocation.probe.fail_retirement("fixture retained payload");
+    let weak = allocation.handle.downgrade();
+    let error = allocation.handle.release().unwrap_err();
+    assert_eq!(allocation.probe.retirements(), 1);
+    assert!(matches!(
+        weak.acquire(),
+        Err(AllocationAcquisitionError::NotLive)
+    ));
+    assert!(allocation.probe.owner.record.lock().unwrap().0.is_some());
+    assert!(matches!(
+        allocation
+            .probe
+            .owner
+            .validate_live(allocation.probe.owner.identity),
+        Err(AllocationAcquisitionError::NotLive)
+    ));
+    drop(error);
+    assert_eq!(allocation.probe.retirements(), 1);
+    assert!(allocation.probe.owner.record.lock().unwrap().0.is_some());
+}
+
+#[test]
 fn typed_backing_is_moved_without_copy_and_native_address_uses_that_same_allocation() {
     let owner = TestAllocationOwner::new();
     let values = vec![1.5_f64, -2.0];

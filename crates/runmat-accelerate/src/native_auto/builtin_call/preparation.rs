@@ -216,7 +216,9 @@ impl NativeAutoOffload {
                         observation.trace.as_ref(),
                         &uploads.protected(),
                     )?;
-                    uploads.track(value);
+                    if let Value::GpuTensor(handle) = value {
+                        uploads.track(handle);
+                    }
                 }
                 if !processed
                     .iter()

@@ -58,20 +58,18 @@ impl OwnedUploads {
         self.borrowed_handles.iter().chain(&self.owned).collect()
     }
 
-    pub(super) fn track(&mut self, value: &Value) {
-        runmat_runtime::dispatcher::visit_gpu_handles(value, &mut |handle| {
-            if !self
-                .borrowed_handles
+    pub(super) fn track(&mut self, handle: &GpuTensorHandle) {
+        if !self
+            .borrowed_handles
+            .iter()
+            .any(|borrowed| borrowed.shares_allocation_with(handle))
+            && !self
+                .owned
                 .iter()
-                .any(|borrowed| borrowed.shares_allocation_with(handle))
-                && !self
-                    .owned
-                    .iter()
-                    .any(|owned| owned.shares_allocation_with(handle))
-            {
-                self.owned.push(handle.clone());
-            }
-        });
+                .any(|owned| owned.shares_allocation_with(handle))
+        {
+            self.owned.push(handle.clone());
+        }
     }
 
     pub(super) fn transfer_all(mut self) {
@@ -122,8 +120,11 @@ mod tests {
             let value = Value::GpuTensor(allocation.handle);
             let output = retain_output.then(|| value.clone());
             let mut uploads = OwnedUploads::new(&[]).unwrap();
-            uploads.track(&value);
-            uploads.track(&value);
+            let Value::GpuTensor(handle) = &value else {
+                unreachable!()
+            };
+            uploads.track(handle);
+            uploads.track(handle);
             drop(value);
             uploads.release().unwrap();
             assert_eq!(allocation.probe.retirements(), usize::from(!retain_output));
@@ -145,7 +146,8 @@ mod tests {
             .unwrap();
         let mut uploads =
             OwnedUploads::new(&[Value::GpuTensor(allocation.handle.clone())]).unwrap();
-        uploads.track(&Value::GpuTensor(other_view));
+        uploads.track(&other_view);
+        drop(other_view);
         assert!(uploads.owned.is_empty());
         uploads.release().unwrap();
         drop(uploads);
