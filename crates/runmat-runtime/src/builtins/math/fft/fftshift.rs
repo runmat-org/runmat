@@ -3,8 +3,7 @@
 //! `fftshift` recenters zero-frequency components for outputs produced by FFTs.
 
 use super::common::{
-    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims,
-    gather_gpu_complex_tensor, restore_complex_gpu_result, ShiftKind,
+    apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims, ShiftKind,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -13,7 +12,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::fftshift_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -440,40 +439,31 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
 }
 
 async fn fftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        let host = gather_gpu_complex_tensor(&handle, BUILTIN_NAME)
-            .await
-            .map_err(|source| {
-                fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
-            })?;
-        let shifted = fftshift_complex_tensor(host, dims)?;
-        return restore_complex_gpu_result(&handle, &shifted, BUILTIN_NAME);
-    }
-    let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
-    let host_tensor = gpu_helpers::gather_tensor_async(&handle)
+    let host = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
         .await
         .map_err(|source| {
             fftshift_error_with_source(&FFTSHIFT_ERROR_INTERNAL, "gpu gather failed", source)
         })?;
-    let shifted = fftshift_tensor(host_tensor, dims)?;
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        return gpu_helpers::upload_tensor(provider, &shifted)
-            .map(|output| {
-                if was_logical {
-                    gpu_helpers::logical_gpu_value(output)
-                } else {
-                    gpu_helpers::resident_gpu_value(output)
-                }
-            })
-            .map_err(|source| {
-                fftshift_error_with_detail(
-                    &FFTSHIFT_ERROR_INTERNAL,
-                    format!("gpu upload failed: {source}"),
-                )
-            });
-    }
-    Ok(tensor::tensor_into_value(shifted))
+    let shifted = match host {
+        Value::Tensor(tensor) => Value::Tensor(fftshift_tensor(tensor, dims)?),
+        Value::ComplexTensor(tensor) => {
+            Value::ComplexTensor(fftshift_complex_tensor(tensor, dims)?)
+        }
+        Value::LogicalArray(array) => Value::LogicalArray(fftshift_logical(array, dims)?),
+        other => {
+            return Err(fftshift_error_with_detail(
+                &FFTSHIFT_ERROR_INTERNAL,
+                format!("unexpected downloaded value {other:?}"),
+            )
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never));
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, shifted, BUILTIN_NAME)
 }
+
+#[cfg(test)]
+#[path = "fftshift_owned_tests.rs"]
+mod owned_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
