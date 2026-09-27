@@ -63,6 +63,22 @@ impl AccelProvider for Recorder {
             dispatches: Some(1),
         })
     }
+    fn reshape(&self, input: &GpuTensorHandle, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
+        clear_handle_transpose(input);
+        match self.mode.load(Ordering::SeqCst) {
+            8 => {
+                return Err(unsupported_provider_operation(
+                    "layout materialization unavailable",
+                ))
+            }
+            9 => anyhow::bail!("layout materialization failed"),
+            10 => return Ok(input.clone()),
+            _ => {}
+        }
+        let mut output = self.fresh(input.descriptor.element_type.unwrap());
+        output.shape = shape.to_vec();
+        Ok(output)
+    }
     fn fused_elementwise_multi(
         &self,
         _: &str,
@@ -311,5 +327,55 @@ fn malformed_fresh_annotations_are_rejected_and_borrowed_aliases_are_never_freed
         let mut freed = OWNER.freed.lock().unwrap().clone();
         freed.sort_unstable();
         assert_eq!(freed, if mode == 7 { vec![10] } else { vec![10, 11] });
+    }
+}
+
+#[test]
+fn materialized_input_is_owned_through_later_suspension_and_layout_failures_preserve_source() {
+    use runmat_accelerate::fusion_exec::{execute_elementwise_placed, FusionExecutionOutcome};
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    for mode in [0, 8, 9, 10] {
+        OWNER.mode.store(mode, Ordering::SeqCst);
+        OWNER.casts.store(0, Ordering::SeqCst);
+        OWNER.next.store(10, Ordering::SeqCst);
+        OWNER.freed.lock().unwrap().clear();
+        let input = OWNER.make(1, NumericElementType::F64);
+        record_handle_transpose(&input, 2, 1);
+        let before = snapshot_handle_metadata(&input);
+        let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
+        plan.materialized_stores.push(FusionStoreMaterialization {
+            value_id: 2,
+            binding: VarBinding {
+                kind: VarKind::Global,
+                index: 0,
+            },
+        });
+        let mut future = Box::pin(execute_elementwise_placed(request(&plan, input.clone())));
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        match future.as_mut().poll(&mut context) {
+            Poll::Pending => assert_eq!(mode, 0),
+            Poll::Ready(Ok(FusionExecutionOutcome::SharedRuntime(_))) => assert_eq!(mode, 8),
+            Poll::Ready(Err(error)) => {
+                assert!(mode == 9 || mode == 10);
+                if mode == 9 {
+                    assert!(error.to_string().contains("layout materialization failed"));
+                }
+            }
+            _ => panic!("unexpected completed provider result"),
+        }
+        drop(future);
+        assert_eq!(snapshot_handle_metadata(&input), before);
+        let mut freed = OWNER.freed.lock().unwrap().clone();
+        freed.sort_unstable();
+        assert_eq!(
+            freed,
+            if mode == 0 {
+                vec![10, 11, 12, 13]
+            } else {
+                vec![]
+            }
+        );
+        clear_handle_metadata(&input);
     }
 }

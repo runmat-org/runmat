@@ -3228,6 +3228,9 @@ pub trait AccelProvider: Send + Sync {
         handle: &GpuTensorHandle,
         new_shape: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
+        if handle_is_transposed(handle) {
+            return Err(unsupported_provider_operation("reshape of a lazy transpose requires provider materialization"));
+        }
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
         Ok(updated)

@@ -88,3 +88,46 @@ fn broadcast_inputs_are_charged_at_source_size_but_incompatible_geometry_rejects
         Some(ProviderFeasibility::Rejected { .. })
     ));
 }
+
+#[test]
+fn strided_single_materialization_and_widening_have_distinct_scratch_allocations() {
+    let provider = InProcessProvider::new();
+    let mut input = value(ProviderElementType::F32, ProviderResidency::Device);
+    input.layout = ProviderLayout::Strided;
+    let query = ProviderFeasibilityQuery {
+        operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![input],
+        outputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        workload: Default::default(),
+    };
+    let work = physical_work(&provider, &query).unwrap();
+    // Borrowed32 + materialized32 + widened64 + raw64 + final32.
+    assert_eq!(work.estimate.transient_bytes, Some(224));
+    assert_eq!(work.scratch_bytes, 160);
+    assert_eq!(work.estimate.dispatches, Some(4));
+    assert_eq!(work.queue_submissions, 6);
+    let mut contiguous = query;
+    contiguous.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
+    let work = physical_work(&provider, &contiguous).unwrap();
+    assert_eq!(work.scratch_bytes, 128);
+}
+
+#[test]
+fn shared_resident_fact_preserves_lazy_transpose_layout() {
+    let handle = runmat_accelerate_api::GpuTensorHandle::new(vec![3, 2], u32::MAX - 286, 1)
+        .with_numeric_descriptor(
+            runmat_accelerate_api::NumericElementType::F32,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        );
+    runmat_accelerate_api::record_handle_transpose(&handle, 2, 3);
+    let fact = super::super::tensor_representation(
+        &runmat_value::Value::GpuTensor(handle.clone()),
+        ProviderPrecision::F64,
+    )
+    .unwrap();
+    assert_eq!(fact.element_type, ProviderElementType::F32);
+    assert_eq!(fact.shape, vec![3, 2]);
+    assert_eq!(fact.layout, ProviderLayout::Strided);
+    runmat_accelerate_api::clear_handle_metadata(&handle);
+}

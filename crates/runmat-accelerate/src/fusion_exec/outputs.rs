@@ -23,6 +23,13 @@ pub(super) struct FusionAllocations {
 }
 
 impl FusionAllocations {
+    pub fn protect_metadata(&self) -> Vec<runmat_accelerate_api::HandleMetadataRestoreGuard<'_>> {
+        self.borrowed
+            .iter()
+            .chain(self.allocations.iter().map(|allocation| &allocation.handle))
+            .map(runmat_accelerate_api::HandleMetadataRestoreGuard::new)
+            .collect()
+    }
     pub fn new(inputs: &[Value]) -> Self {
         Self {
             borrowed: inputs

@@ -200,13 +200,41 @@ async fn execute_elementwise_outputs(
                     ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                     ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                 };
-                let prepared_handle = if handle.descriptor.element_type == Some(expected) {
-                    handle.clone()
+                let contiguous = if runmat_accelerate_api::handle_is_transposed(handle) {
+                    let metadata = allocations.protect_metadata();
+                    let started = Instant::now();
+                    let materialized = provider.reshape(handle, &handle.shape);
+                    drop(metadata);
+                    observer.queue(started);
+                    let materialized = match materialized {
+                        Ok(handle) => handle,
+                        Err(error)
+                            if runmat_accelerate_api::is_unsupported_provider_operation(&error) =>
+                        {
+                            return Ok(FusionExecutionOutcome::SharedRuntime(
+                                FusionCpuObservation::new(None),
+                            ));
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    observer.kernel_unmeasured();
+                    allocations.admit(
+                        materialized,
+                        provider,
+                        &handle.shape,
+                        runmat_accelerate_api::handle_precision(handle)
+                            .ok_or_else(|| anyhow!("missing source precision"))?,
+                    )?
                 } else {
-                    let metadata = HandleMetadataRestoreGuard::new(handle);
+                    handle.clone()
+                };
+                let prepared_handle = if contiguous.descriptor.element_type == Some(expected) {
+                    contiguous
+                } else {
+                    let metadata = HandleMetadataRestoreGuard::new(&contiguous);
                     let converted = match provider.precision() {
-                        ProviderPrecision::F64 => provider.unary_double(handle).await,
-                        ProviderPrecision::F32 => provider.unary_single(handle).await,
+                        ProviderPrecision::F64 => provider.unary_double(&contiguous).await,
+                        ProviderPrecision::F32 => provider.unary_single(&contiguous).await,
                     };
                     drop(metadata);
                     allocations.admit(converted?, provider, &handle.shape, provider.precision())?

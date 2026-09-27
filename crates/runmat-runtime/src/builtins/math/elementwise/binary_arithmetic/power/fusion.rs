@@ -45,10 +45,10 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
         let domain = if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (left, right) {
             // Classification is about the exact values that the kernel will
             // receive, not a future lossy conversion of different operands.
-            if [left, right]
-                .iter()
-                .any(|handle| runmat_accelerate_api::handle_precision(handle) != Some(precision))
-            {
+            if [left, right].iter().any(|handle| {
+                runmat_accelerate_api::handle_precision(handle) != Some(precision)
+                    || runmat_accelerate_api::handle_is_transposed(handle)
+            }) {
                 return Ok(None);
             }
             let provider = gpu_helpers::exact_provider_for_binary_inputs(left, right)

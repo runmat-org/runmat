@@ -10,11 +10,14 @@ use super::*;
 pub(crate) fn physical_work(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
-) -> Option<ProviderResourceEstimate> {
-    match validate(provider, true, query)? {
-        ProviderFeasibility::Supported { estimate } => Some(estimate),
-        ProviderFeasibility::Rejected { .. } => None,
-    }
+) -> Option<PhysicalWork> {
+    analyze(provider, true, query)?.ok()
+}
+
+pub(crate) struct PhysicalWork {
+    pub estimate: ProviderResourceEstimate,
+    pub scratch_bytes: u64,
+    pub queue_submissions: u32,
 }
 
 pub(super) fn validate(
@@ -22,10 +25,21 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
+    analyze(provider, wgpu, query).map(|work| match work {
+        Ok(work) => ProviderFeasibility::supported(work.estimate),
+        Err(rejected) => rejected,
+    })
+}
+
+fn analyze(
+    provider: &(impl AccelProvider + ?Sized),
+    wgpu: bool,
+    query: &ProviderFeasibilityQuery,
+) -> Option<Result<PhysicalWork, ProviderFeasibility>> {
     if query.operation.0 != "fusion.elementwise" {
         return None;
     }
-    let reject = |code, reason| Some(ProviderFeasibility::rejected(code, reason));
+    let reject = |code, reason| Some(Err(ProviderFeasibility::rejected(code, reason)));
     if !wgpu {
         // InProcessProvider's actual fused_elementwise hook is unsupported.
         // Its ordinary numeric kernels do not imply a WGSL interpreter.
@@ -102,8 +116,18 @@ pub(super) fn validate(
     physical.outputs.clear();
     let mut adapter_dispatches = 0u64;
     let mut final_output_bytes = 0u64;
+    let mut scratch_bytes = 0u64;
+    let mut materialization_setup_submissions = 0u32;
     let mut shape = None;
     for input in &query.inputs {
+        let materialize =
+            input.residency == ProviderResidency::Device && input.layout == ProviderLayout::Strided;
+        if input.layout != ProviderLayout::ColumnMajorContiguous && !materialize {
+            return reject(
+                ProviderRejectionCode::UnsupportedLayout,
+                "fusion.elementwise.layout",
+            );
+        }
         if input.storage != ProviderStorage::DenseReal
             || !matches!(
                 input.element_type,
@@ -115,7 +139,55 @@ pub(super) fn validate(
                 "fusion.elementwise.real_float_input",
             );
         }
-        if input.residency == ProviderResidency::Device && input.element_type != native {
+        let cast = input.residency == ProviderResidency::Device && input.element_type != native;
+        let mut physical_input = input.clone();
+        physical_input.layout = ProviderLayout::ColumnMajorContiguous;
+        if materialize {
+            // The underlying original allocation stays live; the logical
+            // strided view is materialized into a separate physical buffer.
+            physical.inputs.push(physical_input.clone());
+            let Some(bytes) =
+                crate::backend::wgpu_storage::checked_allocation_bytes(&physical_input)
+            else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.materialize_bytes",
+                );
+            };
+            let Some(total) = scratch_bytes.checked_add(bytes) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.scratch_overflow",
+                );
+            };
+            scratch_bytes = total;
+            let Some(count) = input.checked_element_count().and_then(dispatches) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.materialize_dispatches",
+                );
+            };
+            let Some(total) = adapter_dispatches.checked_add(count) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.dispatch_overflow",
+                );
+            };
+            adapter_dispatches = total;
+            if count != 0 {
+                // Existing permute submits a no-op pass and a flush before
+                // its chunked copy dispatches. These are queue work, not
+                // additional numerical kernel invocations.
+                let Some(total) = materialization_setup_submissions.checked_add(2) else {
+                    return reject(
+                        ProviderRejectionCode::ResourceLimit,
+                        "fusion.elementwise.queue_overflow",
+                    );
+                };
+                materialization_setup_submissions = total;
+            }
+        }
+        if cast {
             if provider.precision() != ProviderPrecision::F64
                 || input.element_type != ProviderElementType::F32
             {
@@ -126,7 +198,7 @@ pub(super) fn validate(
             }
             // The original allocation remains borrowed and live while its
             // widened staging allocation is used by the native-precision ABI.
-            physical.inputs.push(input.clone());
+            physical.inputs.push(physical_input.clone());
             let Some(count) = input.checked_element_count() else {
                 return reject(
                     ProviderRejectionCode::InvalidShape,
@@ -149,9 +221,25 @@ pub(super) fn validate(
                 }
             };
         }
-        let mut staged = input.clone();
+        let mut staged = physical_input;
         staged.element_type = native;
         staged.residency = ProviderResidency::Device;
+        if input.residency == ProviderResidency::Host || cast {
+            let Some(bytes) = crate::backend::wgpu_storage::checked_allocation_bytes(&staged)
+            else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.staging_bytes",
+                );
+            };
+            let Some(total) = scratch_bytes.checked_add(bytes) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.scratch_overflow",
+                );
+            };
+            scratch_bytes = total;
+        }
         physical.inputs.push(staged);
     }
     for output in &query.outputs {
@@ -195,6 +283,21 @@ pub(super) fn validate(
         raw.element_type = native;
         physical.outputs.push(raw);
         if output.element_type != native {
+            let Some(bytes) = crate::backend::wgpu_storage::checked_allocation_bytes(
+                physical.outputs.last().expect("raw output added"),
+            ) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.raw_output_bytes",
+                );
+            };
+            let Some(total) = scratch_bytes.checked_add(bytes) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.scratch_overflow",
+                );
+            };
+            scratch_bytes = total;
             // Transactional publication keeps every raw output alive until
             // every final adapter has completed; peak includes both sets.
             physical.outputs.push(output.clone());
@@ -253,7 +356,25 @@ pub(super) fn validate(
         estimate.output_bytes = Some(final_output_bytes);
         estimate.dispatches = Some(dispatches);
     }
-    Some(result)
+    Some(match result {
+        ProviderFeasibility::Supported { estimate } => {
+            let Some(queue_submissions) = estimate
+                .dispatches
+                .and_then(|dispatches| dispatches.checked_add(materialization_setup_submissions))
+            else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.queue_overflow",
+                );
+            };
+            Ok(PhysicalWork {
+                estimate,
+                scratch_bytes,
+                queue_submissions,
+            })
+        }
+        rejected => Err(rejected),
+    })
 }
 
 fn dispatches(elements: u64) -> Option<u64> {

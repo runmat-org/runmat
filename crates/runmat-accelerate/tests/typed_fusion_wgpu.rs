@@ -171,3 +171,94 @@ fn actual_f64_adapter_preserves_single_interior_rounding_and_mixed_final_buffers
         provider.free(handle).unwrap();
     }
 }
+
+fn transposed_fusion(
+    provider: &'static runmat_accelerate::backend::wgpu::provider::WgpuProvider,
+    source: runmat_accelerate_api::GpuTensorHandle,
+) {
+    let transposed = provider.transpose(&source).unwrap();
+    assert_eq!(transposed.shape, vec![3, 2]);
+    assert_eq!(
+        transposed.descriptor.element_type,
+        source.descriptor.element_type
+    );
+    assert!(runmat_accelerate_api::handle_is_transposed(&transposed));
+    provider.free(&source).unwrap(); // Alias owns its buffer independently.
+    let before = runmat_accelerate_api::snapshot_handle_metadata(&transposed);
+    let mut plan = plan(vec![cast("single", 0, 2)], 2);
+    plan.group.shape = ShapeInfo::Tensor(vec![Some(3), Some(2)]);
+    let result = block_on(execute_elementwise(FusionExecutionRequest {
+        plan: &plan,
+        inputs: vec![Value::GpuTensor(transposed.clone())],
+        placement: None,
+        runtime: None,
+    }))
+    .unwrap();
+    assert_eq!(
+        runmat_accelerate_api::snapshot_handle_metadata(&transposed),
+        before
+    );
+    let Value::GpuTensor(output) = result.final_value else {
+        panic!("resident materialized result")
+    };
+    assert_eq!(output.shape, vec![3, 2]);
+    assert_eq!(
+        output.descriptor.element_type,
+        Some(NumericElementType::F32)
+    );
+    assert!(!runmat_accelerate_api::handle_is_transposed(&output));
+    let HostNumericDataOwned::F32(actual) =
+        block_on(provider.download_numeric(&output)).unwrap().data
+    else {
+        panic!("physical Single output")
+    };
+    same_f32(&actual, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+    provider.free(&output).unwrap();
+    let materialized = provider.reshape(&transposed, &[3, 2]).unwrap();
+    assert_eq!(
+        materialized.descriptor.element_type,
+        transposed.descriptor.element_type
+    );
+    assert!(!runmat_accelerate_api::handle_is_transposed(&materialized));
+    provider.free(&transposed).unwrap();
+    let actual = block_on(provider.download_numeric(&materialized)).unwrap();
+    match actual.data {
+        HostNumericDataOwned::F32(values) => same_f32(&values, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]),
+        HostNumericDataOwned::F64(values) => assert_eq!(values, vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]),
+        _ => panic!("preserved floating storage"),
+    }
+    provider.free(&materialized).unwrap();
+}
+
+#[test]
+fn actual_adapter_materializes_asymmetric_native_transpose_on_device() {
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required");
+    let source = provider
+        .upload(&HostTensorView {
+            data: &[1., 2., 3., 4., 5., 6.],
+            shape: &[2, 3],
+        })
+        .unwrap();
+    transposed_fusion(provider, source);
+}
+
+#[test]
+#[ignore = "requires an actual F64 WGPU adapter; run explicitly during F64 qualification"]
+fn actual_f64_adapter_materializes_single_transpose_without_reinterpreting_bytes() {
+    use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual F64 WGPU adapter required");
+    assert_eq!(provider.precision(), ProviderPrecision::F64);
+    let source = runmat_accelerate_api::upload_numeric_protecting(
+        provider,
+        &HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1., 2., 3., 4., 5., 6.]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        },
+        &[],
+    )
+    .unwrap();
+    transposed_fusion(provider, source);
+}

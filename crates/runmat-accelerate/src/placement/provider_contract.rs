@@ -107,7 +107,12 @@ pub(crate) fn tensor_representation(
     Some(ProviderRepresentation {
         element_type,
         storage,
-        layout: ProviderLayout::ColumnMajorContiguous,
+        layout: if matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_transposed(handle))
+        {
+            ProviderLayout::Strided
+        } else {
+            ProviderLayout::ColumnMajorContiguous
+        },
         shape: shape
             .into_iter()
             .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))

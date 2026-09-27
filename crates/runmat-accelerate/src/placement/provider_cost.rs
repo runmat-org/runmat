@@ -55,7 +55,7 @@ pub(crate) fn wgpu_cost_estimate(
         });
     dispatches = fusion_work
         .as_ref()
-        .and_then(|work| work.dispatches)
+        .and_then(|work| work.estimate.dispatches)
         .unwrap_or(dispatches);
     let coordinate_work = {
         #[cfg(feature = "wgpu")]
@@ -71,7 +71,9 @@ pub(crate) fn wgpu_cost_estimate(
         }
     };
     let mut readbacks = u32::from(readback_bytes > 0);
-    let mut queue_submissions = dispatches;
+    let mut queue_submissions = fusion_work
+        .as_ref()
+        .map_or(dispatches, |work| work.queue_submissions);
     if let Some(work) = &unary_work {
         probe_elements = work.probe_elements;
         probe_bytes = work.temporary_bytes;
@@ -153,7 +155,9 @@ pub(crate) fn wgpu_cost_estimate(
                     0
                 },
             },
-            scratch_bytes: probe_bytes,
+            scratch_bytes: fusion_work
+                .as_ref()
+                .map_or(probe_bytes, |work| work.scratch_bytes),
             confidence: if observed_execution_ns.is_some() {
                 EstimateConfidence::Medium
             } else {
@@ -347,6 +351,7 @@ mod tests {
         assert_eq!(adapted.components.queue_ns, 20_000);
         assert_eq!(adapted.components.allocation_ns, 10_000);
         assert_eq!(adapted.components.upload_ns, transfer_prior_ns(64));
+        assert_eq!(adapted.scratch_bytes, 128);
         assert_eq!(adapted.source, EstimateSource::StaticPrior);
         query.operation.outputs[0].element_type = ProviderElementType::F64;
         let native = wgpu_cost_estimate(&provider, &query).cost;

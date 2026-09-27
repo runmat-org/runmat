@@ -158,7 +158,7 @@ impl WgpuProvider {
                 .ok_or_else(|| anyhow!("reshape: dimension product exceeds GPU limits"))?
         };
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(handle) {
-            let entry = self.get_entry_for_storage_move(handle, "reshape")?;
+            let entry = self.get_entry_for_bitwise_move(handle, "reshape")?;
             ensure!(
                 entry.shape.len() == 2
                     && entry.shape[0] == info.base_cols
@@ -195,12 +195,8 @@ impl WgpuProvider {
                 handle.buffer_id
             );
 
-            let canonical = self.register_existing_buffer_with_storage(
-                entry.buffer.clone(),
-                vec![info.base_rows, info.base_cols],
-                entry.len,
-                storage,
-            );
+            let canonical =
+                self.register_storage_move_alias(&entry, vec![info.base_rows, info.base_cols]);
             let materialized = match self.permute_exec(&canonical, &[1, 0]) {
                 Ok(handle) => handle,
                 Err(err) => {
@@ -860,13 +856,12 @@ impl WgpuProvider {
     }
 
     pub(crate) fn transpose_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry_for_storage_move(a, "transpose")?;
+        let entry = self.get_entry_for_bitwise_move(a, "transpose")?;
         if entry.shape.len() != 2 {
             return Err(anyhow!("transpose: only 2D tensors supported"));
         }
         let rows = entry.shape[0];
         let cols = entry.shape[1];
-        let len = entry.len;
         let storage =
             if runmat_accelerate_api::handle_storage(a) == GpuTensorStorage::ComplexInterleaved {
                 GpuTensorStorage::ComplexInterleaved
@@ -882,19 +877,13 @@ impl WgpuProvider {
             let base_rows = info.base_rows;
             let base_cols = info.base_cols;
             let shape = vec![base_rows, base_cols];
-            let handle = self.register_existing_buffer_with_storage(
-                entry.buffer.clone(),
-                shape,
-                len,
-                storage,
-            );
+            let handle = self.register_storage_move_alias(&entry, shape);
             runmat_accelerate_api::clear_handle_transpose(&handle);
             return Ok(handle);
         }
 
         let shape = vec![cols, rows];
-        let handle =
-            self.register_existing_buffer_with_storage(entry.buffer.clone(), shape, len, storage);
+        let handle = self.register_storage_move_alias(&entry, shape);
         runmat_accelerate_api::record_handle_transpose(&handle, rows, cols);
         Ok(handle)
     }
@@ -906,13 +895,18 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         ensure!(!order.is_empty(), "permute: order must not be empty");
         let logical_rank = order.len();
-        let entry = self.get_entry_for_storage_move(handle, "permute")?;
+        let entry = self.get_entry_for_bitwise_move(handle, "permute")?;
         let integer_type = entry.integer_type();
-        let word_factor = integer_type.map_or(1usize, |element_type| match element_type {
-            runmat_accelerate_api::IntegerElementType::I64
-            | runmat_accelerate_api::IntegerElementType::U64 => 2,
+        let word_copy = integer_type.is_some() || entry.precision != self.precision;
+        let word_factor = match (word_copy, entry.element_type) {
+            (
+                true,
+                runmat_accelerate_api::NumericElementType::F64
+                | runmat_accelerate_api::NumericElementType::I64
+                | runmat_accelerate_api::NumericElementType::U64,
+            ) => 2usize,
             _ => 1,
-        });
+        };
         let storage = if runmat_accelerate_api::handle_storage(handle)
             == GpuTensorStorage::ComplexInterleaved
         {
@@ -920,14 +914,11 @@ impl WgpuProvider {
         } else {
             entry.storage
         };
-        let lane_factor = if integer_type.is_some() {
-            word_factor
-        } else {
-            match storage {
-                GpuTensorStorage::Real => 1usize,
-                GpuTensorStorage::ComplexInterleaved => 2usize,
-            }
+        let component_factor = match storage {
+            GpuTensorStorage::Real => 1usize,
+            GpuTensorStorage::ComplexInterleaved => 2usize,
         };
+        let lane_factor = word_factor * component_factor;
         let kernel_rank = logical_rank + usize::from(lane_factor > 1);
         if kernel_rank > crate::backend::wgpu::params::PERMUTE_MAX_RANK {
             return Err(anyhow!(
@@ -959,7 +950,9 @@ impl WgpuProvider {
         let registered_storage_len = if integer_type.is_some() {
             logical_total
         } else {
-            storage_total
+            logical_total
+                .checked_mul(component_factor)
+                .ok_or_else(|| anyhow!("permute: component count overflows"))?
         };
         ensure!(
             registered_storage_len == entry.len || (registered_storage_len == 0 && entry.len == 0),
@@ -1048,18 +1041,25 @@ impl WgpuProvider {
             strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(src_strides[i] as u32);
         }
 
-        let out_buffer = if integer_type.is_some() {
-            self.create_integer_word_buffer(storage_total, "runmat-integer-permute-out")?
+        let out_buffer = if word_copy {
+            self.create_integer_word_buffer(storage_total, "runmat-bitwise-permute-out")?
         } else {
             self.create_storage_buffer(storage_total, "runmat-permute-out")
         };
+        let pipeline = if word_copy {
+            &self.pipelines.integer_permute
+        } else {
+            &self.pipelines.permute
+        };
         let out_shape = dst_shape;
         if storage_total == 0 {
-            return if let Some(element_type) = integer_type {
-                Ok(self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0))
-            } else {
-                Ok(self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage))
-            };
+            return Ok(self.register_storage_move_buffer(
+                out_buffer.clone(),
+                &entry,
+                out_shape,
+                0,
+                out_buffer.size(),
+            ));
         }
 
         {
@@ -1072,11 +1072,7 @@ impl WgpuProvider {
                 label: Some("runmat-permute-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_permute.pipeline
-            } else {
-                &self.pipelines.permute.pipeline
-            });
+            pass.set_pipeline(&pipeline.pipeline);
             drop(pass);
             self.submit(enc);
         }
@@ -1111,11 +1107,7 @@ impl WgpuProvider {
                 .device_ref()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-permute-bind"),
-                    layout: if integer_type.is_some() {
-                        &self.pipelines.integer_permute.layout
-                    } else {
-                        &self.pipelines.permute.layout
-                    },
+                    layout: &pipeline.layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -1138,29 +1130,20 @@ impl WgpuProvider {
             crate::backend::wgpu::dispatch::permute::run(
                 self.device_ref(),
                 self.queue_ref(),
-                if integer_type.is_some() {
-                    &self.pipelines.integer_permute.pipeline
-                } else {
-                    &self.pipelines.permute.pipeline
-                },
+                &pipeline.pipeline,
                 &bind_group,
                 workgroups,
             );
             offset += chunk_len;
         }
 
-        if let Some(element_type) = integer_type {
-            Ok(self.register_integer_buffer(
-                out_buffer,
-                out_shape,
-                logical_total,
-                element_type,
-                (storage_total as u64) * std::mem::size_of::<u32>() as u64,
-            ))
-        } else {
-            Ok(self
-                .register_existing_buffer_with_storage(out_buffer, out_shape, entry.len, storage))
-        }
+        Ok(self.register_storage_move_buffer(
+            out_buffer.clone(),
+            &entry,
+            out_shape,
+            entry.len,
+            out_buffer.size(),
+        ))
     }
     pub(crate) fn circshift_exec(
         &self,
