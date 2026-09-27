@@ -1,9 +1,17 @@
 use super::common::submit;
+use super::observation::PendingSubmissions;
+use runmat_accelerate_api::WgpuEmission;
 
-pub fn warmup_noop(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::ComputePipeline) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-noop-elementwise"),
-    });
+pub(crate) fn warmup_noop(
+    emission: &WgpuEmission<'_>,
+    pending: &mut PendingSubmissions,
+    pipeline: &wgpu::ComputePipeline,
+) -> anyhow::Result<()> {
+    let mut enc = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-noop-elementwise"),
+        });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-noop-pass-elementwise"),
@@ -11,19 +19,22 @@ pub fn warmup_noop(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::
         });
         pass.set_pipeline(pipeline);
     }
-    submit(device, queue, enc);
+    submit(emission, pending, enc)?;
+    Ok(())
 }
 
-pub fn run(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+pub(crate) fn run(
+    emission: &WgpuEmission<'_>,
+    pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
     workgroups_x: u32,
-) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-elementwise-encoder"),
-    });
+) -> anyhow::Result<()> {
+    let mut enc = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-elementwise-encoder"),
+        });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-elementwise-pass"),
@@ -35,5 +46,6 @@ pub fn run(
             pass.dispatch_workgroups(workgroups_x, 1, 1);
         }
     }
-    submit(device, queue, enc);
+    submit(emission, pending, enc)?;
+    Ok(())
 }

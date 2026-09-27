@@ -12,6 +12,12 @@ struct Readback {
 
 impl Readback {
     fn cleanup(&mut self) -> Result<()> {
+        if !self.map_registered {
+            // Unpolled futures own an ordinary buffer, not an active mapping.
+            // Raw Buffer Drop cannot feed the pinned backends' error scopes.
+            drop(self.buffer.take());
+            return Ok(());
+        }
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.access.with_cleanup(|cleanup| {
                 if let Some(buffer) = self.buffer.take() {

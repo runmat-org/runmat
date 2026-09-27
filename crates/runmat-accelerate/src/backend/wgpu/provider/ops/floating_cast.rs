@@ -73,96 +73,99 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("floating cast byte count overflow"))?;
         // The existing checked raw-word allocator is independent of provider
         // float precision; typed registration below owns the interpretation.
-        let output = self.create_integer_word_buffer(words, "runmat-floating-cast")?;
-        if entry.precision == target {
-            if len != 0 {
-                let mut encoder =
-                    self.device
-                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: Some("runmat-logical-to-numeric-copy"),
-                        });
-                encoder.copy_buffer_to_buffer(&entry.buffer, 0, &output, 0, allocated_bytes);
-                self.queue.submit(Some(encoder.finish()));
+        let output = self.with_emission(|emission, pending| -> Result<Arc<wgpu::Buffer>> {
+            let output =
+                self.create_integer_word_buffer(emission, words, "runmat-floating-cast")?;
+            if entry.precision == target {
+                if len != 0 {
+                    let mut encoder =
+                        emission
+                            .device()
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-logical-to-numeric-copy"),
+                            });
+                    encoder.copy_buffer_to_buffer(&entry.buffer, 0, &output, 0, allocated_bytes);
+                    self.submit(emission, pending, encoder)?;
+                }
+                return Ok(output);
             }
-            let output = self.register_numeric_buffer(
-                output,
-                NumericBufferRegistration {
-                    shape: entry.shape,
-                    len,
-                    physical_element_type: target_type,
-                    storage: GpuTensorStorage::Real,
-                    allocated_bytes,
-                    usage: BufferUsageClass::Generic,
-                },
-            )?;
-            return self.finish_floating_cast_view(output, transpose);
-        }
-        if len != 0 {
-            let workgroup_size = self.workgroup_config.scalar;
-            let recipe = super::pipeline_recipe::PipelineRecipe::floating_cast(
-                entry.precision,
-                target,
-                workgroup_size,
-            );
-            let bindings = self.cached_bind_group_layout(&recipe.layout, |device| {
-                device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-floating-cast-bgl"),
-                    entries: &[
-                        crate::backend::wgpu::bindings::storage_read_entry(0),
-                        crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                        crate::backend::wgpu::bindings::uniform_entry(2),
-                    ],
-                })
-            });
-            let pipeline = self.recipe_pipeline(&recipe, &bindings, "runmat-floating-cast");
-            let capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
-                .ok_or_else(|| anyhow!("floating cast has invalid workgroup geometry"))?
-                as usize;
-            let mut offset = 0;
-            while offset < len {
-                let count = (len - offset).min(capacity);
-                let params = self.uniform_buffer(
-                    &Params {
-                        len: count as u32,
-                        offset: offset as u32,
-                        padding: [0; 2],
-                    },
-                    "runmat-floating-cast-params",
-                );
-                let bind_group = self
-                    .device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-floating-cast-bg"),
-                        layout: &bindings,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: output.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params.as_entire_binding(),
-                            },
-                        ],
-                    });
-                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    count as u32,
+            if len != 0 {
+                let workgroup_size = self.workgroup_config.scalar;
+                let recipe = super::pipeline_recipe::PipelineRecipe::floating_cast(
+                    entry.precision,
+                    target,
                     workgroup_size,
                 );
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &pipeline,
-                    &bind_group,
-                    groups,
-                );
-                offset += count;
+                let bindings =
+                    self.cached_bind_group_layout(emission, &recipe.layout, |emission| {
+                        emission.device().create_bind_group_layout(
+                            &wgpu::BindGroupLayoutDescriptor {
+                                label: Some("runmat-floating-cast-bgl"),
+                                entries: &[
+                                    crate::backend::wgpu::bindings::storage_read_entry(0),
+                                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                                    crate::backend::wgpu::bindings::uniform_entry(2),
+                                ],
+                            },
+                        )
+                    })?;
+                let pipeline =
+                    self.recipe_pipeline(emission, &recipe, &bindings, "runmat-floating-cast")?;
+                let capacity =
+                    crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
+                        .ok_or_else(|| anyhow!("floating cast has invalid workgroup geometry"))?
+                        as usize;
+                let mut offset = 0;
+                while offset < len {
+                    let count = (len - offset).min(capacity);
+                    let params = self.uniform_buffer(
+                        emission,
+                        &Params {
+                            len: count as u32,
+                            offset: offset as u32,
+                            padding: [0; 2],
+                        },
+                        "runmat-floating-cast-params",
+                    )?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-floating-cast-bg"),
+                                layout: &bindings,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: entry.buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: output.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: params.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        count as u32,
+                        workgroup_size,
+                    );
+                    crate::backend::wgpu::dispatch::elementwise::run(
+                        emission,
+                        pending,
+                        &pipeline,
+                        &bind_group,
+                        groups,
+                    )?;
+                    offset += count;
+                }
             }
-        }
+            Ok(output)
+        })??;
+        // Publication is outside device emission: registration/view failure
+        // cleanup may invoke residency owners and must not reenter the gate.
         let output = self.register_numeric_buffer(
             output,
             NumericBufferRegistration {

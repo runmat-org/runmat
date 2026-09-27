@@ -85,7 +85,7 @@ impl BufferResidency {
 
     pub fn acquire(
         &self,
-        device: &wgpu::Device,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         usage: BufferUsageClass,
         len: usize,
         element_size: usize,
@@ -93,7 +93,7 @@ impl BufferResidency {
     ) -> (Arc<wgpu::Buffer>, bool) {
         if len == 0 {
             return (
-                Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+                Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
                     label: Some(label),
                     size: element_size.max(1) as u64,
                     usage: wgpu::BufferUsages::STORAGE
@@ -122,7 +122,7 @@ impl BufferResidency {
             return (buffer, true);
         }
 
-        let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: size_bytes,
             usage: wgpu::BufferUsages::STORAGE

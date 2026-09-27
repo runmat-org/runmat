@@ -1,7 +1,12 @@
 use runmat_time::Instant;
 use wgpu::util::DeviceExt;
 
-pub fn try_compile_kernel(device: &wgpu::Device, label: &str, wgsl_src: &str) {
+pub fn try_compile_kernel(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    label: &str,
+    wgsl_src: &str,
+) {
+    let device = emission.device();
     let t0 = Instant::now();
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&format!("{}-module", label)),
@@ -27,13 +32,14 @@ pub fn try_compile_kernel(device: &wgpu::Device, label: &str, wgsl_src: &str) {
     );
 }
 
-pub fn probe_kernel_with_buffers(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+pub(crate) fn probe_kernel_with_buffers(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    pending: &mut super::dispatch::observation::PendingSubmissions,
     label: &str,
     wgsl_src: &str,
     wg: u32,
-) {
+) -> anyhow::Result<()> {
+    let device = emission.device();
     let t0 = Instant::now();
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(&format!("{}-module", label)),
@@ -117,11 +123,11 @@ pub fn probe_kernel_with_buffers(
         let groups_x = wg.max(1);
         pass.dispatch_workgroups(groups_x, 1, 1);
     }
-    super::dispatch::observation::submit(device, queue, enc);
-    device.poll(wgpu::Maintain::Wait);
+    super::dispatch::common::submit(emission, pending, enc)?;
     log::info!(
         "probe_kernel_with_buffers: '{}' compiled+submitted in {:.3} ms",
         label,
         t0.elapsed().as_secs_f64() * 1000.0
     );
+    Ok(())
 }

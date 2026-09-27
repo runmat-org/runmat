@@ -129,6 +129,7 @@ struct PendingObservation {
 pub(crate) struct PendingSubmissions {
     access: WgpuDeviceAccess,
     observations: Vec<PendingObservation>,
+    legacy_poll: Option<wgpu::SubmissionIndex>,
 }
 
 impl PendingSubmissions {
@@ -136,6 +137,7 @@ impl PendingSubmissions {
         Self {
             access,
             observations: Vec::new(),
+            legacy_poll: None,
         }
     }
 
@@ -190,6 +192,15 @@ impl PendingSubmissions {
 
     pub(crate) fn commit(mut self) {
         self.drain(false);
+        if let Some(submission) = self.legacy_poll.take() {
+            super::common::poll_submitted(&self.access, submission);
+        }
+    }
+
+    /// Only combine same-queue chunks with no intervening CPU/readback data
+    /// dependency. A host-dependent barrier must end its emission first.
+    pub(crate) fn request_legacy_poll(&mut self, submission: wgpu::SubmissionIndex) {
+        self.legacy_poll = Some(submission);
     }
 
     fn drain(&mut self, abandoned: bool) {

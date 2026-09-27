@@ -25,7 +25,9 @@ pub(crate) fn submit(
     pending: &mut PendingSubmissions,
     enc: wgpu::CommandEncoder,
 ) -> anyhow::Result<wgpu::SubmissionIndex> {
-    pending.submit(emission, enc)
+    let submission = pending.submit(emission, enc)?;
+    pending.request_legacy_poll(submission.clone());
+    Ok(submission)
 }
 
 pub(crate) fn poll_submitted(access: &WgpuDeviceAccess, submission: wgpu::SubmissionIndex) {

@@ -114,13 +114,13 @@ impl AllocationState {
 
     pub(super) fn acquire(
         &self,
-        device: &wgpu::Device,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         usage: BufferUsageClass,
         len: usize,
         element_size: usize,
         label: &str,
     ) -> (Arc<wgpu::Buffer>, bool) {
-        self.pool.acquire(device, usage, len, element_size, label)
+        self.pool.acquire(emission, usage, len, element_size, label)
     }
 
     pub(super) fn pooled_bytes(&self, element_size: usize) -> u64 {

@@ -282,7 +282,7 @@ impl WgpuProvider {
         emission.ensure_device(&self.access)?;
         Ok(self
             .allocations
-            .acquire(emission.device(), usage, len, self.element_size, label))
+            .acquire(emission, usage, len, self.element_size, label))
     }
 
     pub(super) fn create_storage_buffer(
@@ -354,7 +354,7 @@ impl WgpuProvider {
                 label: Some("runmat-matmul-warmup-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.matmul.pipeline);
+            pass.set_pipeline(&self.pipelines.matmul.get(emission)?.pipeline);
         }
         self.submit(emission, pending, enc)?;
 
@@ -383,7 +383,7 @@ impl WgpuProvider {
                 label: Some("runmat-matmul-vec4-warmup-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.matmul_vec4.pipeline);
+            pass.set_pipeline(&self.pipelines.matmul_vec4.get(emission)?.pipeline);
         }
         self.submit(emission, pending, enc)?;
 
