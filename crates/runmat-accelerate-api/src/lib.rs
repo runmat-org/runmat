@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+pub mod allocation;
 mod native_device;
 pub mod observation;
 mod handle_metadata;
