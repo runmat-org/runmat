@@ -164,7 +164,7 @@ fn index_scalar_from_host_value(value: &Value) -> Option<IndexScalar> {
 
 pub async fn index_scalar_from_value(value: &Value) -> VmResult<Option<IndexScalar>> {
     if let Value::GpuTensor(handle) = value {
-        let total = total_len_from_shape(&handle.shape);
+        let total = total_len_from_shape(handle.shape());
         if total != 1 {
             return Ok(None);
         }

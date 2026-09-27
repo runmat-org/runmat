@@ -6,6 +6,7 @@ pub mod object;
 pub mod plan;
 pub mod read_linear;
 pub mod read_slice;
+mod resident;
 pub mod selectors;
 pub mod shape;
 pub mod structure;

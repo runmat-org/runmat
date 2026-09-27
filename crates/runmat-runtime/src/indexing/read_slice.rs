@@ -14,10 +14,6 @@ fn map_slice_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     )
 }
 
-fn map_slice_acceleration_error(err: impl std::fmt::Display) -> RuntimeError {
-    crate::runtime_error::semantic_error("AccelerationOperationFailed", format!("slice: {err}"))
-}
-
 fn numeric_selection_value(
     tensor: &Tensor,
     indices: &[usize],
@@ -1009,7 +1005,7 @@ pub async fn read_gpu_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let base_shape = handle.shape.clone();
+    let base_shape = handle.shape().to_vec();
     let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
     let plan = build_index_plan(&selectors, dims, &base_shape)?;
     read_gpu_slice_from_plan(handle, &plan)
@@ -1019,52 +1015,15 @@ pub fn read_gpu_slice_from_plan(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     plan: &IndexPlan,
 ) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        crate::runtime_error::semantic_error(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
+    let provider = super::resident::owner(handle)?;
+    let _residency = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
     if plan.indices.is_empty() {
-        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-            return upload_empty_integer_gpu_slice(provider, integer_type, &plan.output_shape);
-        }
-        let zeros = provider
-            .zeros(&plan.output_shape)
-            .map_err(map_slice_acceleration_error)?;
-        Ok(Value::GpuTensor(zeros))
-    } else {
-        let result = provider
-            .gather_linear(handle, &plan.indices, &plan.output_shape)
-            .map_err(map_slice_acceleration_error)?;
-        Ok(Value::GpuTensor(result))
+        return super::resident::empty_read(handle, &plan.output_shape);
     }
-}
-
-fn upload_empty_integer_gpu_slice(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    integer_type: runmat_accelerate_api::IntegerElementType,
-    output_shape: &[usize],
-) -> Result<Value, RuntimeError> {
-    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, IntegerElementType};
-
-    let data = match integer_type {
-        IntegerElementType::I8 => HostIntegerDataView::I8(&[]),
-        IntegerElementType::I16 => HostIntegerDataView::I16(&[]),
-        IntegerElementType::I32 => HostIntegerDataView::I32(&[]),
-        IntegerElementType::I64 => HostIntegerDataView::I64(&[]),
-        IntegerElementType::U8 => HostIntegerDataView::U8(&[]),
-        IntegerElementType::U16 => HostIntegerDataView::U16(&[]),
-        IntegerElementType::U32 => HostIntegerDataView::U32(&[]),
-        IntegerElementType::U64 => HostIntegerDataView::U64(&[]),
-    };
-    provider
-        .upload_integer(&HostIntegerTensorView {
-            data,
-            shape: output_shape,
-        })
-        .map(Value::GpuTensor)
-        .map_err(map_slice_acceleration_error)
+    let result = provider
+        .gather_linear(handle, &plan.indices, &plan.output_shape)
+        .map_err(|cause| super::resident::failure("indexed gather", cause.into()))?;
+    super::resident::admit_read(result, handle, &plan.output_shape)
 }
 
 pub async fn read_string_slice(
@@ -1113,9 +1072,9 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
 #[cfg(test)]
 mod tests {
     use super::{
-        gather_string_slice, map_slice_acceleration_error, read_complex_slice_from_plan,
-        read_gpu_slice_from_plan, read_sparse_slice_from_plan, read_string_slice,
-        read_tensor_slice_from_plan, try_tensor_slice_2d_fast_path,
+        gather_string_slice, read_complex_slice_from_plan, read_gpu_slice_from_plan,
+        read_sparse_slice_from_plan, read_string_slice, read_tensor_slice_from_plan,
+        try_tensor_slice_2d_fast_path,
     };
     use crate::indexing::plan::IndexPlan;
     use crate::indexing::selectors::SliceSelector;
@@ -1532,7 +1491,8 @@ mod tests {
 
     #[test]
     fn slice_acceleration_error_mapping_reports_identifier() {
-        let err = map_slice_acceleration_error("provider failed");
+        let err =
+            crate::indexing::resident::failure("slice", anyhow::anyhow!("provider failed").into());
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }

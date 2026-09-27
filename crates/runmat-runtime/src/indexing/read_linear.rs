@@ -36,7 +36,7 @@ pub async fn generic_index(base: &Value, indices: &[usize]) -> Result<Value, Run
             Value::GpuTensor(handle)
                 if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
             {
-                let plan = build_index_plan(&selectors, indices.len(), &handle.shape)?;
+                let plan = build_index_plan(&selectors, indices.len(), handle.shape())?;
                 return read_gpu_slice_from_plan(handle, &plan);
             }
             _ => {}
