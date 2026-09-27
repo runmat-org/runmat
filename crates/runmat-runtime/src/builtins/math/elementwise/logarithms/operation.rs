@@ -49,8 +49,21 @@ impl LogarithmOperation {
     pub(super) const fn accepts_tabular(self) -> bool {
         !matches!(self, Self::OnePlus)
     }
-    pub(super) const fn normalizes_near_zero_real(self) -> bool {
-        !matches!(self, Self::OnePlus)
+    pub(super) fn real_f64(self, value: f64) -> f64 {
+        match self {
+            Self::Natural => value.ln(),
+            Self::OnePlus => value.ln_1p(),
+            Self::Binary => value.log2(),
+            Self::Common => value.log10(),
+        }
+    }
+    pub(super) fn real_f32(self, value: f32) -> f32 {
+        match self {
+            Self::Natural => value.ln(),
+            Self::OnePlus => value.ln_1p(),
+            Self::Binary => value.log2(),
+            Self::Common => value.log10(),
+        }
     }
     pub(super) const fn restores_automatic_fallback(self) -> bool {
         !matches!(self, Self::Binary)

@@ -41,6 +41,41 @@ fn discarded_outputs_still_validate_argument_and_domain() {
 }
 
 #[test]
+fn logarithms_retain_small_real_and_complex_components() {
+    for (name, expected) in [
+        ("log", (1.0_f64 + 1e-14).ln()),
+        ("log2", (1.0_f64 + 1e-14).log2()),
+        ("log10", (1.0_f64 + 1e-14).log10()),
+    ] {
+        let Value::Num(value) = call(name, Value::Num(1.0 + 1e-14)) else {
+            panic!("real result");
+        };
+        assert_eq!(value, expected);
+        assert!(value > 0.0);
+    }
+    let Value::Num(value) = call("log1p", Value::Num(1e-300)) else {
+        panic!("real result");
+    };
+    assert_eq!(value, 1e-300_f64.ln_1p());
+    for name in ["log", "log2", "log10", "log1p"] {
+        let scalar = call(name, Value::Complex(1.0, 1e-20));
+        let tensor = call(
+            name,
+            Value::ComplexTensor(ComplexTensor::new(vec![(1.0, 1e-20)], vec![1, 1]).unwrap()),
+        );
+        assert_eq!(scalar, tensor, "{name}");
+        let Value::Complex(_, imaginary) = tensor else {
+            panic!("complex result");
+        };
+        assert!(imaginary > 0.0, "{name}");
+        let Value::Num(value) = call(name, Value::Num(f64::NAN)) else {
+            panic!("real NaN");
+        };
+        assert!(value.is_nan());
+    }
+}
+
+#[test]
 fn square_root_preserves_small_results_and_nan_real_domain() {
     let Value::Num(value) = call("sqrt", Value::Num(1e-300)) else {
         panic!("real double");
