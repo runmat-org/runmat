@@ -550,10 +550,7 @@ async fn build_stairs_gpu_plot(
         ));
     }
     if x_ref.precision != y_ref.precision {
-        return Err(plotting_error(
-            name,
-            format!("{name}: X and Y gpuArrays must share the same precision"),
-        ));
+        return Ok(None);
     }
 
     let len_u32 = u32::try_from(x_ref.len).map_err(|_| {

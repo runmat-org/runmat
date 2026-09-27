@@ -606,13 +606,18 @@ async fn build_quiver_gpu_plot(
     };
     for coordinate in [x, y] {
         if let QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) = coordinate {
-            if runmat_accelerate_api::export_wgpu_buffer(handle).is_none() {
+            if !runmat_accelerate_api::export_wgpu_buffer(handle)
+                .is_some_and(|exported| exported.precision == u_ref.precision)
+            {
                 return Ok(None);
             }
         }
     }
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    if u_ref.len != v_ref.len || u_ref.precision != v_ref.precision {
+    if u_ref.precision != v_ref.precision {
+        return Ok(None);
+    }
+    if u_ref.len != v_ref.len {
         return Err(plotting_error(
             BUILTIN_NAME,
             "quiver: U and V GPU inputs must match",

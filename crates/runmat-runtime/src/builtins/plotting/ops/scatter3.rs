@@ -979,7 +979,9 @@ async fn build_scatter3_gpu_plot(
         .iter()
         .chain(style.gpu_colors.iter().map(|color| &color.handle))
     {
-        if runmat_accelerate_api::export_wgpu_buffer(handle).is_none() {
+        if !runmat_accelerate_api::export_wgpu_buffer(handle)
+            .is_some_and(|exported| exported.precision == ProviderPrecision::F32)
+        {
             return Ok(None);
         }
     }
@@ -994,9 +996,7 @@ async fn build_scatter3_gpu_plot(
         ));
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
-        return Err(scatter3_err(
-            "scatter3: gpuArray inputs must have matching precision",
-        ));
+        return Ok(None);
     }
     let point_count = x_ref.len;
     let len_u32 = u32::try_from(point_count)

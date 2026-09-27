@@ -60,15 +60,10 @@ impl AccelProvider for FailingBounds {
 }
 
 #[test]
+#[ignore = "requires a compatible WGPU device; run explicitly for hardware qualification"]
 fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots() {
-    let inner = match WgpuProvider::new(WgpuProviderOptions::default()) {
-        Ok(provider) => provider,
-        Err(error) if error.to_string().contains("no compatible adapter found") => {
-            eprintln!("WGPU plotting witness unavailable: {error}");
-            return;
-        }
-        Err(error) => panic!("WGPU initialization failed: {error}"),
-    };
+    let inner = WgpuProvider::new(WgpuProviderOptions::default())
+        .expect("required WGPU plotting qualification device is unavailable");
     let provider = Box::leak(Box::new(FailingBounds {
         inner,
         mode: AtomicUsize::new(0),

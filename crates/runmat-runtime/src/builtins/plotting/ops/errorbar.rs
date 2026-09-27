@@ -843,10 +843,7 @@ async fn build_errorbar_gpu_plot(
             .unwrap_or(x_ref.precision)
             != x_ref.precision
     {
-        return Err(plotting_error(
-            name,
-            format!("{name}: gpuArray precision must match across all errorbar inputs"),
-        ));
+        return Ok(None);
     }
     let scalar =
         ScalarType::from_is_f64(x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64);
