@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::ProviderPrecision;
 
+#[cfg(test)]
+#[path = "workload_tests.rs"]
+mod workload_tests;
+
 use super::{
     ProviderElementType, ProviderLayout, ProviderOperationFamily, ProviderRepresentation,
     ProviderResidency, ProviderStorage,
@@ -22,6 +26,10 @@ impl ProviderOperationIdentity {
 pub struct ProviderWorkload {
     pub elements: Option<u64>,
     pub flops: Option<u64>,
+    /// Total operation-owned scalar work prior, not a FLOP count or a timing.
+    /// Missing means no resolved estimate; it must not be interpreted as zero.
+    #[serde(default)]
+    pub scalar_work_units: Option<u64>,
     pub batch: Option<u64>,
     /// Language-requested outputs; None is the operation's implicit default,
     /// not zero. This distinguishes resource work and placement feedback keys.

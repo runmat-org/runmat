@@ -73,6 +73,7 @@ mod tests {
                 workload: ProviderWorkload {
                     elements: Some(4),
                     flops: Some(8),
+                    scalar_work_units: None,
                     batch: Some(1),
                     numerical_domain: Default::default(),
                     requested_outputs: None,
@@ -100,6 +101,12 @@ mod tests {
         let original = digest(&query);
         assert_eq!(original, digest(&query.clone()));
         let mut changed = query.clone();
+        changed.operation.workload.scalar_work_units = Some(32);
+        assert_ne!(original, digest(&changed));
+        let first_work = digest(&changed);
+        changed.operation.workload.scalar_work_units = Some(64);
+        assert_ne!(first_work, digest(&changed));
+        changed = query.clone();
         changed.operation.workload.requested_outputs = Some(0);
         assert_ne!(original, digest(&changed));
         let discarded = digest(&changed);

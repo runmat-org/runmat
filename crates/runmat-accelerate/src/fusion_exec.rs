@@ -226,6 +226,7 @@ fn select_fusion_provider(
             .map(|shape| dense_output_representation(provider.precision(), shape))
             .collect(),
         None,
+        None,
     )
 }
 
@@ -234,6 +235,7 @@ fn select_fusion_provider_with_contract(
     provider: &dyn AccelProvider,
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     semantic_identity: Option<runmat_execution::Digest>,
+    scalar_work_units: Option<u64>,
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
     let observer = FusionPlacementObserver::new(request.placement);
     let typed_elementwise = semantic_identity.is_some() && request.plan.group.kind.is_elementwise();
@@ -276,6 +278,7 @@ fn select_fusion_provider_with_contract(
             &outputs,
             elements,
             None,
+            scalar_work_units,
         )?;
         observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
         return Ok(FusionExecutionOutcome::Executed(FusionPlacementSelection {
@@ -287,9 +290,10 @@ fn select_fusion_provider_with_contract(
 
     let operation = fusion_operation_token(&request.plan.group.kind);
     let element_count = u64::try_from(elements.unwrap_or(1)).unwrap_or(u64::MAX);
+    let execution_units = scalar_work_units.unwrap_or(element_count);
     let cpu_cost = ExecutionCostEstimate {
         components: ExecutionCostComponents {
-            execution_ns: element_count.saturating_mul(100).max(100),
+            execution_ns: execution_units.saturating_mul(100).max(100),
             ..ExecutionCostComponents::default()
         },
         scratch_bytes: 0,
@@ -312,7 +316,7 @@ fn select_fusion_provider_with_contract(
             compile_or_prepare_ns: 20_000,
             allocation_ns: 5_000,
             queue_ns: 10_000,
-            execution_ns: element_count.saturating_mul(10).max(100),
+            execution_ns: execution_units.saturating_mul(10).max(100),
             ..ExecutionCostComponents::default()
         },
         scratch_bytes: 0,
@@ -331,6 +335,7 @@ fn select_fusion_provider_with_contract(
             workload: ProviderWorkload {
                 elements: Some(element_count),
                 flops: None,
+                scalar_work_units,
                 batch: None,
                 numerical_domain: Default::default(),
                 requested_outputs: None,

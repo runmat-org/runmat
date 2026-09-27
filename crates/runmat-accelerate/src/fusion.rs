@@ -22,6 +22,7 @@ mod expression;
 mod admission;
 pub(crate) mod semantics;
 mod typed_shader;
+mod work;
 
 /// Fusion plans can contain `Value` constants, including GC handles. Keep them
 /// thread-confined so the type system does not imply cross-thread GC safety.

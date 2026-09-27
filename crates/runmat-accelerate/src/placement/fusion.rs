@@ -43,6 +43,7 @@ impl FusionPlacementObserver {
         outputs: &[ProviderRepresentation],
         elements: Option<usize>,
         batch: Option<usize>,
+        scalar_work_units: Option<u64>,
     ) -> Result<ProviderFeasibilityQuery> {
         let started = Instant::now();
         let inputs = inputs
@@ -57,6 +58,7 @@ impl FusionPlacementObserver {
             workload: ProviderWorkload {
                 elements: elements.and_then(|value| u64::try_from(value).ok()),
                 flops: None,
+                scalar_work_units,
                 batch: batch.and_then(|value| u64::try_from(value).ok()),
                 numerical_domain: Default::default(),
                 requested_outputs: None,
@@ -68,6 +70,7 @@ impl FusionPlacementObserver {
             ProviderFeasibility::Supported { estimate } => {
                 let attributes = [
                     ("elements", query.workload.elements),
+                    ("scalar_work_units", query.workload.scalar_work_units),
                     ("batch", query.workload.batch),
                     ("transient_bytes", estimate.transient_bytes),
                     ("output_bytes", estimate.output_bytes),

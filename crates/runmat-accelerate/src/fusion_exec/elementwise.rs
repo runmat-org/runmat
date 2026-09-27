@@ -156,15 +156,28 @@ async fn execute_elementwise_outputs(
             dense_output_representation(precision, &output_shape)
         })
         .collect();
+    let scalar_work_units = match u64::try_from(len)
+        .ok()
+        .and_then(|elements| program.scalar_work_units(request.plan, elements).ok())
+    {
+        Some(units) => units,
+        None => {
+            return Ok(FusionExecutionOutcome::SharedRuntime(
+                FusionCpuObservation::new(None),
+            ))
+        }
+    };
     let semantic_identity = runmat_execution::Digest::sha256(serde_json::to_vec(&(
         program.cache_identity()?,
         &shader,
+        scalar_work_units,
     ))?);
     let selection = select_fusion_provider_with_contract(
         request,
         provider,
         representations,
         Some(semantic_identity),
+        Some(scalar_work_units),
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
