@@ -62,12 +62,10 @@ fn all_integer_classes_are_exact_and_mode_gated() {
 #[test]
 fn validates_the_whole_call_before_resident_gather() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_101,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = call(vec![resident, Value::Bool(true)]).expect_err("invalid excludes");
     assert_eq!(
         error.identifier(),
@@ -79,12 +77,10 @@ fn validates_the_whole_call_before_resident_gather() {
 #[test]
 fn matlab_mode_rejects_resident_numeric_before_provider_lookup() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_102,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = call(vec![resident]).expect_err("numeric extension");
     assert_eq!(
         error.identifier(),

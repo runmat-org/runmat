@@ -41,11 +41,10 @@ fn scalar_and_string_array_queries_follow_environment_state() {
 fn invalid_names_reject_before_environment_access() {
     for value in [
         Value::Num(1.0),
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-            vec![1, 1],
-            99,
-            2,
-        )),
+        Value::GpuTensor(
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+                .handle,
+        ),
     ] {
         assert_eq!(
             run(vec![value]).unwrap_err().identifier(),

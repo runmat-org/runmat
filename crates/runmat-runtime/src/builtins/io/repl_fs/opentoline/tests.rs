@@ -48,12 +48,10 @@ fn navigation_delivers_exact_typed_position_and_requires_host_support() {
 #[test]
 fn option_and_host_position_admission_precede_any_resident_download() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let args = vec![
         Value::from("missing.m"),
         resident.clone(),
@@ -181,13 +179,10 @@ fn opentoline_typed_positions_are_independently_gated_before_file_lookup() {
 fn opentoline_resident_position_is_gated_without_provider_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let resident = Value::GpuTensor(
-        runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        }
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit resident position"),
     );
     let error = call(vec![Value::String("definitely-missing.m".into()), resident])
         .expect_err("resident line must be gated");
@@ -207,7 +202,9 @@ fn opentoline_automatically_resident_double_position_gathers_in_strict_mode() {
         let line = Tensor::new(vec![1.0], vec![1, 1]).expect("line");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &line)
             .expect("resident line");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("automatic resident position");
         let result = {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             call(vec![
@@ -217,7 +214,7 @@ fn opentoline_automatically_resident_double_position_gathers_in_strict_mode() {
             .expect("automatic position gathers transparently")
         };
         assert_eq!(result, empty_array());
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.allocation_lease().validate_live().unwrap();
     });
 }
 

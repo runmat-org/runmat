@@ -88,12 +88,10 @@ fn wildcard_requires_existing_directory_and_valid_pattern() {
 
 #[test]
 fn resident_paths_reject_without_provider_access_and_character_pages_do_not_flatten() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let pages = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
     for source in [resident, pages] {
         assert_eq!(

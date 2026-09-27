@@ -1662,13 +1662,11 @@ mod tests {
         assert_eq!(bit_pattern, Value::Int(runmat_value::IntValue::I32(-1)));
     }
 
-    fn unowned_resident_value() -> Value {
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        })
+    fn unregistered_resident_value() -> Value {
+        Value::GpuTensor(
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+                .handle,
+        )
     }
 
     #[test]
@@ -1687,7 +1685,7 @@ mod tests {
     fn userpath_rejects_integer_and_resident_values_before_provider_access() {
         for invalid in [
             Value::Int(runmat_value::IntValue::I64(i64::MIN)),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ] {
             let error = run(userpath_builtin(vec![invalid])).expect_err("invalid path text");
             assert!(error.message().contains("must be host text"));
@@ -1709,7 +1707,7 @@ mod tests {
         ] {
             assert!(run(ispref_builtin(vec![Value::Int(integer)])).is_err());
         }
-        assert!(run(ispref_builtin(vec![unowned_resident_value()])).is_err());
+        assert!(run(ispref_builtin(vec![unregistered_resident_value()])).is_err());
     }
 
     #[test]
@@ -1934,7 +1932,7 @@ mod tests {
 
     #[test]
     fn getpref_rejects_resident_controls_and_defaults_before_provider_access() {
-        let resident = || unowned_resident_value();
+        let resident = || unregistered_resident_value();
         let error = run(getpref_builtin(vec![
             resident(),
             Value::String("name".into()),
@@ -2238,7 +2236,7 @@ mod tests {
         .expect_err("numeric attribute must reject");
         assert!(numeric_flag.message().contains("attribute must be"));
 
-        let resident_path = run(fileattrib_builtin(vec![unowned_resident_value()]))
+        let resident_path = run(fileattrib_builtin(vec![unregistered_resident_value()]))
             .expect_err("resident path must reject");
         assert!(resident_path.message().contains("path must be"));
         assert!(!resident_path
@@ -2248,7 +2246,7 @@ mod tests {
 
         let resident_flag = run(fileattrib_builtin(vec![
             Value::String("missing-fileattrib-path".to_string()),
-            unowned_resident_value(),
+            unregistered_resident_value(),
         ]))
         .expect_err("resident attribute must reject");
         assert!(resident_flag.message().contains("attribute must be"));

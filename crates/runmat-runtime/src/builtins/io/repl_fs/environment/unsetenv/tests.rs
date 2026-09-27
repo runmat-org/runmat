@@ -57,11 +57,10 @@ fn validates_the_whole_batch_before_removing_any_name() {
 fn rejects_numeric_and_resident_names_without_provider_access() {
     for value in [
         Value::Num(1.0),
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-            vec![1, 1],
-            99,
-            3,
-        )),
+        Value::GpuTensor(
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+                .handle,
+        ),
     ] {
         assert_eq!(
             run(vec![value]).unwrap_err().identifier(),

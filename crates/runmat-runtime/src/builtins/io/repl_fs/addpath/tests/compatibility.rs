@@ -52,12 +52,10 @@ fn all_integer_classes_are_exact_and_mode_gated() {
 fn resident_numeric_rejects_before_provider_lookup_in_matlab_mode() {
     let _guard = PathGuard::new();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let value = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_001,
-        descriptor: Default::default(),
-    });
+    let value = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = super::run(vec![value]).expect_err("compatibility rejection");
     assert_eq!(
         error.identifier(),
@@ -69,12 +67,10 @@ fn resident_numeric_rejects_before_provider_lookup_in_matlab_mode() {
 fn validates_all_arguments_before_gathering_resident_character_codes() {
     let _guard = PathGuard::new();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_002,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = super::run(vec![resident, Value::Bool(true)]).expect_err("invalid argument");
     assert_eq!(
         error.identifier(),

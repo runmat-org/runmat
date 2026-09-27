@@ -291,12 +291,10 @@ fn exist_rejects_all_integer_classes_and_logical_inputs() {
 #[test]
 fn exist_rejects_resident_numeric_name_without_provider_access() {
     let (_guard, _lock) = test_guard();
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let err = exist_builtin(resident, Vec::new()).expect_err("resident name must reject");
     assert_eq!(err.message(), EXIST_ERROR_NAME_ARG.message);
     assert!(!err.message().contains("provider"));

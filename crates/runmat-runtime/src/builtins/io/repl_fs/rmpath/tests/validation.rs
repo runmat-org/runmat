@@ -9,12 +9,10 @@ fn rejects_every_numeric_form_before_provider_access() {
     let inputs = [
         Value::Int(IntValue::U8(1)),
         Value::Tensor(Tensor::new(vec![65.0], vec![1, 1]).expect("tensor")),
-        Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_446_001,
-            descriptor: Default::default(),
-        }),
+        Value::GpuTensor(
+            crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+                .handle,
+        ),
     ];
     for input in inputs {
         let error = super::run(vec![input]).expect_err("numeric rejection");

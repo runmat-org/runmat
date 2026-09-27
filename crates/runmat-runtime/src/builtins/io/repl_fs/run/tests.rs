@@ -106,12 +106,10 @@ fn invalid_script_argument_reports_stable_identifier() {
 
 #[test]
 fn rejects_numeric_residency_and_character_pages_before_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_120,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let pages = Value::CharArray(CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap());
     for value in [resident, pages] {
         let error = block_on(resolve_run_source(&value)).unwrap_err();

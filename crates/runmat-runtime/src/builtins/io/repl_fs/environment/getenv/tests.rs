@@ -87,11 +87,10 @@ fn all_variables_are_a_typed_dictionary() {
 
 #[test]
 fn invalid_resident_name_rejects_without_provider_access() {
-    let value = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 1],
-        99,
-        1,
-    ));
+    let value = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = run(vec![value]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:getenv:InvalidName"));
     assert!(!error.message().contains("provider"));

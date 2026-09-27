@@ -73,11 +73,10 @@ fn trailing_singleton_character_components_are_rows() {
 #[test]
 fn invalid_output_count_precedes_provider_access() {
     let _outputs = crate::output_count::push_output_count(Some(2));
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 2],
-        99,
-        1,
-    ));
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 2])
+            .handle,
+    );
     let error = run(vec![resident]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:fullfile:TooManyOutputs"));
 }

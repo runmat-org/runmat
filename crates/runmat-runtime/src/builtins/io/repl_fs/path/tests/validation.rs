@@ -68,12 +68,10 @@ fn rejects_multiple_outputs_before_mutation() {
 fn validates_later_arguments_before_resident_access() {
     let (_lock, guard) = locked();
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_343_110,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 1])
+            .handle,
+    );
     let error = call(vec![resident, Value::Bool(false)]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:path:InvalidInput"));
     assert_eq!(
