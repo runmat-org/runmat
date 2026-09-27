@@ -6,6 +6,8 @@ mod boundary;
 mod gpu_abi;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) use gpu_abi::native_device_address;
+#[cfg(all(test, not(target_family = "wasm")))]
+pub(crate) use gpu_abi::NativeInvocationContext;
 mod service_slot;
 mod services;
 

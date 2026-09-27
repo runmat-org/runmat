@@ -5,14 +5,14 @@ use std::rc::Rc;
 
 use super::exports::ExportScope;
 
-pub(super) struct NativeInvocationContext {
+pub(crate) struct NativeInvocationContext {
     provider: &'static dyn AccelProvider,
     guard: Option<NativeDeviceContextGuard>,
     exports: Rc<ExportScope>,
 }
 
 impl NativeInvocationContext {
-    pub(super) fn enter(provider: &'static dyn AccelProvider) -> Result<Self, String> {
+    pub(crate) fn enter(provider: &'static dyn AccelProvider) -> Result<Self, String> {
         let guard = catch_allocation_cleanup_unwind(|| {
             provider
                 .enter_native_device_context()
@@ -26,7 +26,7 @@ impl NativeInvocationContext {
         })
     }
 
-    pub(super) fn leave(mut self) -> Result<(), String> {
+    pub(crate) fn leave(mut self) -> Result<(), String> {
         self.cleanup()
     }
 

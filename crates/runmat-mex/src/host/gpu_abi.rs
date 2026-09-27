@@ -5,7 +5,7 @@ use runmat_accelerate_api::{NativeDeviceApi, NativeDeviceComponent};
 mod context;
 mod exports;
 pub(crate) use exports::native_device_address;
-use context::NativeInvocationContext;
+pub(crate) use context::NativeInvocationContext;
 #[cfg(test)]
 mod tests;
 
