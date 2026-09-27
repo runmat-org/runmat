@@ -8,6 +8,7 @@ mod filesystem;
 mod text_shape;
 use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
 use crate::builtins::common::test_support;
+use runmat_builtins::BuiltinIntegerAuditKind;
 use runmat_value::{
     ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray,
     StructArray, StructValue, Tensor,
@@ -1325,6 +1326,7 @@ fn undocumented_explicit_resident_validators_are_mode_gated() {
 
 #[test]
 fn validate_function_signatures_json_checks_json_syntax() {
+    let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     assert_eq!(
         VALIDATE_FUNCTION_SIGNATURES_JSON_INTEGER_AUDIT.kind,
         BuiltinIntegerAuditKind::NotApplicable

@@ -1,6 +1,7 @@
 use super::super::test_support::setup;
 use super::*;
 use crate::builtins::plotting::get::get_builtin;
+use crate::builtins::plotting::state::color_limits_snapshot;
 use runmat_value::IntegerStorage;
 
 #[test]

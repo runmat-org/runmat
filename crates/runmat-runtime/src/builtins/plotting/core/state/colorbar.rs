@@ -80,12 +80,6 @@ pub fn ensure_colorbar_for_axes(
     colorbar_handle_for_axes(handle, axes_index).ok_or(FigureError::InvalidPlotObjectHandle)
 }
 
-pub fn set_colorbar_enabled(enabled: bool) {
-    let state = current_axes_state();
-    set_colorbar_enabled_for_axes(state.handle, state.active_index, enabled)
-        .expect("current axes exists");
-}
-
 pub fn set_colorbar_enabled_for_axes(
     handle: FigureHandle,
     axes_index: usize,
@@ -136,14 +130,4 @@ pub fn set_colorbar_visible(handle: f64, visible: bool) -> Result<(), FigureErro
     };
     notify_with_figure(figure_handle, &figure, FigureEventKind::Updated);
     Ok(())
-}
-
-pub fn toggle_colorbar() -> bool {
-    let state = current_axes_state();
-    let enabled = !axes_metadata_snapshot(state.handle, state.active_index)
-        .expect("current axes exists")
-        .colorbar_enabled;
-    set_colorbar_enabled_for_axes(state.handle, state.active_index, enabled)
-        .expect("current axes exists");
-    enabled
 }

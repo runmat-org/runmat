@@ -153,6 +153,7 @@ pub fn clear_axes_target(
     Ok(())
 }
 
+#[cfg(test)]
 pub fn clear_current_axes() {
     let state = current_axes_state();
     clear_axes_target(state.handle, state.active_index, false).expect("current axes exists");

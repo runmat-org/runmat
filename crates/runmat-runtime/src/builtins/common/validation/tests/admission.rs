@@ -112,8 +112,7 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
 fn canonical_dispatch_preserves_zero_output_statements() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     for (name, _, args) in validators() {
-        let _outputs = crate::output_count::push_output_count(Some(0));
-        futures::executor::block_on(crate::call_builtin_async(name, &args))
+        futures::executor::block_on(crate::call_builtin_async_with_outputs(name, &args, 0))
             .unwrap_or_else(|error| panic!("{name}: {error}"));
     }
 }

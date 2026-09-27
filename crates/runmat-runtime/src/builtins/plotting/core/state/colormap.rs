@@ -1,6 +1,7 @@
 //! Palette mutation preserves selection and updates direct-image color limits before publication.
 use super::*;
 
+#[cfg(test)]
 pub fn set_colormap_with_length(colormap: ColorMap, length: usize) {
     let (handle, figure) = {
         let mut reg = registry();

@@ -29,8 +29,12 @@ fn every_numeric_guard_checks_outputs_before_data_or_provider_access() {
         "mustBeInRange",
         "mustBeMember",
     ] {
-        let _outputs = crate::output_count::push_output_count(Some(1));
-        let error = block_on(crate::call_builtin_async(name, &[resident.clone()])).unwrap_err();
+        let error = block_on(crate::call_builtin_async_with_outputs(
+            name,
+            &[resident.clone()],
+            1,
+        ))
+        .unwrap_err();
         assert_eq!(
             error.identifier(),
             Some(format!("RunMat:{name}:TooManyOutputs").as_str()),
