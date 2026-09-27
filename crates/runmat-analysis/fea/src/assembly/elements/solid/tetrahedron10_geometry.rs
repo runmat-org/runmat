@@ -14,13 +14,6 @@ const BARYCENTRIC_DERIVATIVES: [[f64; 3]; 4] = [
     [0.0, 0.0, 1.0],
 ];
 
-pub(super) fn physical_shape_gradients(
-    nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
-    barycentric: [f64; 4],
-) -> Result<[[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT], Tetrahedron10ElementError> {
-    Ok(physical_shape_gradients_and_measure(nodes_m, barycentric)?.0)
-}
-
 pub(super) fn physical_shape_gradients_and_measure(
     nodes_m: [[f64; 3]; TETRAHEDRON10_ELEMENT_NODE_COUNT],
     barycentric: [f64; 4],

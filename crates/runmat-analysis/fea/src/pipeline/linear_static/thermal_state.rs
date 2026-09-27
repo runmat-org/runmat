@@ -18,6 +18,8 @@ pub struct ThermoelasticStaticResult {
     pub run: FeaRunResult,
     pub thermal_transition: CanonicalStateTransition,
     pub solver_result_identity: SolverResultIdentity,
+    /// Physical initial-stress operator from this exact solve and thermal transition.
+    pub linearization: crate::pipeline::structural_linearization::StructuralLinearizationArtifact,
 }
 
 /// Consume the exact retained nodal temperature field, not a prescribed profile or solver guess.
@@ -52,14 +54,24 @@ pub fn run_linear_static_from_thermal_state(
         CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64),
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let structural_result_content = Digest::sha256(content);
     let solver_result_identity = SolverResultIdentity::from_step_result(
         thermal_transition.consumer,
-        Digest::sha256(content),
+        structural_result_content,
+    )
+    .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let linearization = crate::pipeline::structural_linearization::StructuralLinearizationArtifact::from_thermal_solution(
+        &result.summary,
+        result.run.identity.clone(),
+        &result.solution,
+        thermal_transition.clone(),
+        structural_result_content,
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     Ok(ThermoelasticStaticResult {
         run: result.run,
         thermal_transition,
         solver_result_identity,
+        linearization,
     })
 }

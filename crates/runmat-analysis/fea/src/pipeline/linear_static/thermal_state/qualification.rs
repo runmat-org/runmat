@@ -3,6 +3,9 @@
 //! These are continuum patch solutions, not beam benchmarks or mesh-convergence evidence.
 //! Temperatures come from a thermal solve; no structural answer is injected into the state.
 
+mod downstream;
+mod modal;
+
 use super::*;
 use crate::{
     fixtures::{fixture_model, FixtureId},
@@ -17,6 +20,8 @@ use runmat_meshing_core::{
 const REFERENCE: f64 = 293.15;
 const DELTA: f64 = 10.0;
 const ALPHA: f64 = 1.0e-5;
+
+mod prestress;
 
 fn model_and_mesh(order: ElementOrder, restrained: bool) -> (AnalysisModel, SolverMeshArtifact) {
     let mesh = canonical_tetrahedron_solver_mesh(order);
@@ -232,6 +237,12 @@ fn solved_linear_temperature_drives_compatible_quadratic_tet10_deformation() {
             .all(|value| value.abs() < stress_scale * 1.0e-7)
     );
     assert!(field(&result.run, crate::FEA_FIELD_STRUCTURAL_TOTAL_STRAIN_ENERGY)[0].abs() < 1.0e-12);
+    assert!(result
+        .linearization
+        .geometric_stiffness()
+        .values()
+        .iter()
+        .all(|value| value.abs() < stress_scale * 1.0e-7));
 }
 
 fn options(mesh: &SolverMeshArtifact) -> LinearStaticSolveOptions {
@@ -290,6 +301,12 @@ fn solved_uniform_temperature_produces_free_tet4_and_tet10_dilation() {
             .youngs_modulus_pa
             * ALPHA
             * DELTA;
+        assert!(result
+            .linearization
+            .geometric_stiffness()
+            .values()
+            .iter()
+            .all(|value| value.abs() < stress_scale * 1.0e-7));
         for id in [
             crate::FEA_FIELD_STRUCTURAL_STRESS,
             crate::FEA_FIELD_STRUCTURAL_REACTION_FORCE,
@@ -328,6 +345,25 @@ fn solved_uniform_temperature_produces_restrained_hydrostatic_compression() {
         let strain = ALPHA * DELTA;
         let pressure =
             mechanical.youngs_modulus_pa * strain / (1.0 - 2.0 * mechanical.poisson_ratio);
+        // Independent geometric virtual work for v=(x,0,0): integral sigma_xx dV=-p/6.
+        let geometric = result.linearization.geometric_stiffness();
+        let moment: f64 = mesh
+            .topology
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, a)| {
+                mesh.topology
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(j, b)| {
+                        a.coordinates_m[0] * geometric.get(3 * i, 3 * j) * b.coordinates_m[0]
+                    })
+                    .sum::<f64>()
+            })
+            .sum();
+        assert!((moment / (-pressure / 6.0) - 1.0).abs() < 1.0e-9);
         let stress = field(&result.run, crate::FEA_FIELD_STRUCTURAL_STRESS);
         assert_eq!(stress.len(), 6);
         for value in &stress[..3] {

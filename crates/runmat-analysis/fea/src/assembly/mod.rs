@@ -26,10 +26,7 @@ pub(crate) mod thermoelastic_load;
 
 use std::{collections::BTreeMap, fmt};
 
-pub(crate) use entry_points::{
-    assemble_linear_system, assemble_structural_system, assemble_structural_system_borrowed,
-    assemble_structural_system_with_constraint_plan, assemble_structural_system_with_execution,
-};
+pub(crate) use entry_points::*;
 pub(crate) use mixed_structural::mixed_dof_layout;
 
 #[cfg(test)]

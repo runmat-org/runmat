@@ -2054,7 +2054,7 @@ fn physical_preload_publishes_signed_load_linear_geometric_stiffness() {
     assert_eq!(base.linearization.initial_stress().len(), 1);
     assert_eq!(
         base.linearization.evidence().stress_quadrature_point_count,
-        1
+        15
     );
     assert!(base
         .linearization

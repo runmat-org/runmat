@@ -6,8 +6,8 @@ use crate::excitation::{
 };
 
 use super::{
-    assemble_structural_system, AssemblySummary, LinearAssemblyError,
-    StructuralFormulationRequirement,
+    assemble_structural_perturbation_system, assemble_structural_system, AssemblySummary,
+    LinearAssemblyError, StructuralFormulationRequirement,
 };
 
 /// One structural operator with losslessly projected real and imaginary load vectors.
@@ -36,13 +36,57 @@ fn assemble_realized_complex_structural_system(
     solver_mesh: Option<SolverMeshArtifact>,
     formulation: StructuralFormulationRequirement,
 ) -> Result<ComplexStructuralAssemblySummary, LinearAssemblyError> {
-    let real = assemble_structural_system(
+    assemble_realized_with(
+        model,
+        excitations,
+        solver_mesh,
+        formulation,
+        assemble_structural_system,
+    )
+}
+
+/// Complex perturbation about a retained preload: assemble the elastic reference and
+/// frequency-domain loads without applying the authored global thermal profile again.
+pub(crate) fn assemble_complex_structural_perturbation_system(
+    model: &AnalysisModel,
+    step: &ProcedureStep,
+    frequency_hz: f64,
+    solver_mesh: Option<SolverMeshArtifact>,
+    formulation: StructuralFormulationRequirement,
+) -> Result<ComplexStructuralAssemblySummary, LinearAssemblyError> {
+    let excitations =
+        realize_step_excitations(model, step, ExcitationSamplePoint::frequency(frequency_hz))
+            .map_err(|error| LinearAssemblyError::CouplingRealization(error.to_string()))?;
+    assemble_realized_with(
+        model,
+        &excitations,
+        solver_mesh,
+        formulation,
+        assemble_structural_perturbation_system,
+    )
+}
+
+type RealStructuralAssembler = fn(
+    &AnalysisModel,
+    &RealizedExcitations,
+    Option<SolverMeshArtifact>,
+    StructuralFormulationRequirement,
+) -> Result<AssemblySummary, LinearAssemblyError>;
+
+fn assemble_realized_with(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<SolverMeshArtifact>,
+    formulation: StructuralFormulationRequirement,
+    assemble: RealStructuralAssembler,
+) -> Result<ComplexStructuralAssemblySummary, LinearAssemblyError> {
+    let real = assemble(
         model,
         &excitations.component(ComplexComponent::Real),
         solver_mesh.clone(),
         formulation,
     )?;
-    let imaginary = assemble_structural_system(
+    let imaginary = assemble(
         model,
         &excitations.component(ComplexComponent::Imaginary),
         solver_mesh,

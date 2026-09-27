@@ -4,7 +4,10 @@ use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use super::CompletedModalCore;
 use crate::{
-    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    assembly::{
+        assemble_structural_perturbation_system, assemble_structural_system,
+        StructuralFormulationRequirement,
+    },
     contracts::{
         fea_modal_mode_shape_field_id, FeaModalRunResult, FeaRunError, ModalRecoveredMode,
         FEA_FIELD_STRUCTURAL_DISPLACEMENT, FEA_FIELD_STRUCTURAL_STRAIN,
@@ -131,7 +134,12 @@ fn recover_completed_structural_modal_run_with_state(
         ExcitationSamplePoint::Static,
     )
     .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let summary = assemble_structural_system(
+    let assemble = if linearization.is_some() {
+        assemble_structural_perturbation_system
+    } else {
+        assemble_structural_system
+    };
+    let summary = assemble(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),

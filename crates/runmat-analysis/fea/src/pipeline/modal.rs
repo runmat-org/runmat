@@ -3,7 +3,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    assembly::{
+        assemble_structural_perturbation_system, assemble_structural_system,
+        StructuralFormulationRequirement,
+    },
     contracts::{
         ComputeBackend, FeaModalRunResult, FeaRunError, FeaRunResult, ModalSolveOptions,
         FEA_FIELD_MODAL_CUMULATIVE_EFFECTIVE_MASS, FEA_FIELD_MODAL_CUMULATIVE_MASS_RATIO,
@@ -208,7 +211,12 @@ fn execute_modal_core(
         Some(1),
         Some(5),
     );
-    let summary = assemble_structural_system(
+    let assemble = if linearization.is_some() {
+        assemble_structural_perturbation_system
+    } else {
+        assemble_structural_system
+    };
+    let summary = assemble(
         model,
         &excitations,
         options.solver_mesh.clone(),

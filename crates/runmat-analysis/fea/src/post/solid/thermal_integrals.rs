@@ -1,8 +1,9 @@
 //! Volume integrals use retained nodal temperatures, never a fit to four recovery samples.
 
-use super::{stress::recover_element_stress, StructuralFieldRecoveryError};
+use super::{stress::response_error, StructuralFieldRecoveryError};
 use crate::{
     assembly::{
+        elements::solid::response::response_at_volume_point,
         elements::solid::{tetrahedron10_is_affine, Tetrahedron10ElementGeometry},
         SolidRecoveryElementSummary, SolidRecoveryGeometry, SolvedThermalRecoveryQuadrature,
     },
@@ -104,46 +105,18 @@ fn integrate_rule(
         if error.is_some() {
             return;
         }
-        let mut gradient = [[0.0; 3]; 3];
-        for (u, shape_gradient) in nodal.iter().zip(point.physical_shape_gradients()) {
-            for i in 0..3 {
-                for (j, derivative) in shape_gradient.iter().enumerate() {
-                    gradient[i][j] += u[i] * derivative;
-                }
-            }
-        }
-        let strain = [
-            gradient[0][0],
-            gradient[1][1],
-            gradient[2][2],
-            gradient[1][2] + gradient[2][1],
-            gradient[0][2] + gradient[2][0],
-            gradient[0][1] + gradient[1][0],
-        ];
-        let temperature = thermal
-            .nodal_temperature_k
-            .iter()
-            .zip(point.shape_values())
-            .map(|(value, shape)| value * shape)
-            .sum::<f64>();
-        if !temperature.is_finite() || temperature <= 0.0 {
-            error = Some(invalid());
-            return;
-        }
-        let eigenstrain =
-            thermal.expansion_coefficient_per_k * (temperature - thermal.reference_temperature_k);
-        match recover_element_stress(element, strain, eigenstrain) {
-            Err(failure) => error = Some(failure),
-            Ok(stress) => {
+        match response_at_volume_point(element, &nodal, &point) {
+            Err(failure) => error = Some(response_error(element, failure)),
+            Ok(response) => {
                 let weight = point.volume_weight_m3;
                 volume += weight;
                 for component in 0..6 {
-                    integrals.0[component] += weight * strain[component];
-                    integrals.1[component] += weight * stress[component];
+                    integrals.0[component] += weight * response.total_strain[component];
+                    integrals.1[component] += weight * response.stress[component];
                     integrals.2 += 0.5
                         * weight
-                        * (strain[component] - if component < 3 { eigenstrain } else { 0.0 })
-                        * stress[component];
+                        * response.elastic_strain[component]
+                        * response.stress[component];
                 }
             }
         }

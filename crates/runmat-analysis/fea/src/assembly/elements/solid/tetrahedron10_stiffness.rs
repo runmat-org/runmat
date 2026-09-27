@@ -155,7 +155,7 @@ mod tests {
 
     use super::*;
     use crate::assembly::elements::solid::tetrahedron10::{
-        jacobian_determinant, physical_shape_gradients, strain_displacement_matrix,
+        jacobian_determinant, strain_displacement_matrix,
     };
 
     #[test]
@@ -176,7 +176,9 @@ mod tests {
                 let mut actual =
                     [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
                 add_point(&mut actual, geometry, &elasticity, barycentric, 1.0).unwrap();
-                let gradients = physical_shape_gradients(nodes_m, barycentric).unwrap();
+                let gradients = physical_shape_gradients_and_measure(nodes_m, barycentric)
+                    .unwrap()
+                    .0;
                 let b = strain_displacement_matrix(gradients);
                 let determinant = jacobian_determinant(nodes_m, barycentric).unwrap();
                 for (row, actual_row) in actual.iter().enumerate() {

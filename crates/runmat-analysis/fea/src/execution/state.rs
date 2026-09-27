@@ -185,6 +185,15 @@ impl CanonicalSemanticState {
                 linearization
                     .validate()
                     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+                if let Some(source) = linearization.thermal_source() {
+                    if source.transition().consumer != self.producer
+                        || source.structural_result() != self.source_result
+                    {
+                        return Err(AnalysisExecutionError::Identity(
+                            "thermal preload publication names another structural producer or result",
+                        ));
+                    }
+                }
             }
             CanonicalSemanticStatePayload::StructuralResponseEnvelope { envelope } => {
                 if self.kind != StateKind::StructuralResponseEnvelope

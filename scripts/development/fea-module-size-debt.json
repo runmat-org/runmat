@@ -1,6 +1,6 @@
 {
   "crates/runmat-runtime/src/analysis/mod.rs": 7668,
-  "crates/runmat-analysis/fea/src/assembly/mod.rs": 4527,
+  "crates/runmat-analysis/fea/src/assembly/mod.rs": 4524,
   "crates/runmat-runtime/src/analysis/figures.rs": 3848,
   "crates/runmat-analysis/fea/src/pipeline/electromagnetic.rs": 3722,
   "crates/runmat-runtime/src/analysis/contracts.rs": 3267,
@@ -28,8 +28,7 @@
   "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 766,
   "crates/runmat-analysis/fea/src/constraints/result.rs": 763,
   "crates/runmat-analysis/fea/src/execution/study_workloads.rs": 761,
-  "crates/runmat-analysis/fea/src/pipeline/structural_frequency.rs": 739,
+  "crates/runmat-analysis/fea/src/pipeline/structural_frequency.rs": 698,
   "crates/runmat-analysis/fea/src/constraints/algebra.rs": 738,
-  "crates/runmat-analysis/fea/src/execution/frequency_receipt.rs": 736,
-  "crates/runmat-analysis/fea/src/assembly/elements/solid/tetrahedron10.rs": 619
+  "crates/runmat-analysis/fea/src/execution/frequency_receipt.rs": 736
 }

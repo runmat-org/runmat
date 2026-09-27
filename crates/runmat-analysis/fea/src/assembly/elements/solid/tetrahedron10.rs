@@ -6,16 +6,14 @@ use crate::topology::quadrature::{
     TETRAHEDRON_ELEVEN_POINT_RULE as VOLUME_QUADRATURE, TETRAHEDRON_FOUR_POINT_RULE as QUADRATURE,
 };
 
+use super::material::SolidMaterialError;
 #[cfg(test)]
 use super::tetrahedron10_geometry::reference_shape_gradients;
 pub(super) use super::tetrahedron10_geometry::{
-    jacobian_determinant, physical_shape_gradients, physical_shape_gradients_and_measure,
-    validate_nodes,
+    jacobian_determinant, physical_shape_gradients_and_measure, validate_nodes,
 };
-use super::{
-    material::{elasticity_matrix, SolidMaterialError},
-    SolidMaterial,
-};
+#[cfg(test)]
+use super::SolidMaterial;
 
 pub const TETRAHEDRON10_ELEMENT_NODE_COUNT: usize = 10;
 pub const TETRAHEDRON10_NODE_DOF_COUNT: usize = 3;
@@ -24,7 +22,6 @@ pub const TETRAHEDRON10_ELEMENT_DOF_COUNT: usize =
 
 pub type Tetrahedron10Matrix30 =
     [[f64; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
-pub type SymmetricStressTensor = [[f64; 3]; 3];
 
 const QUADRATURE_WEIGHT: f64 = 1.0 / 24.0;
 
@@ -183,92 +180,6 @@ pub enum Tetrahedron10ElementError {
     InvalidMaterial(#[from] SolidMaterialError),
 }
 
-/// Initial-stress stiffness uses four supplied stress samples, unlike curved material stiffness.
-/// Curved prestressed Tet10 integration is unqualified; stress is tension-positive.
-pub fn geometric_stiffness_matrix(
-    geometry: Tetrahedron10ElementGeometry,
-    stresses: [SymmetricStressTensor; 4],
-) -> Result<Tetrahedron10Matrix30, Tetrahedron10ElementError> {
-    validate_nodes(geometry.nodes_m)?;
-    let mut matrix = [[0.0; TETRAHEDRON10_ELEMENT_DOF_COUNT]; TETRAHEDRON10_ELEMENT_DOF_COUNT];
-    for (quadrature_index, barycentric) in QUADRATURE.into_iter().enumerate() {
-        let (gradients, determinant) =
-            physical_shape_gradients_and_measure(geometry.nodes_m, barycentric)?;
-        let scale = QUADRATURE_WEIGHT * determinant;
-        for left_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
-            for right_node in 0..TETRAHEDRON10_ELEMENT_NODE_COUNT {
-                let scalar = scale
-                    * quadratic_form(
-                        gradients[left_node],
-                        stresses[quadrature_index],
-                        gradients[right_node],
-                    );
-                for axis in 0..TETRAHEDRON10_NODE_DOF_COUNT {
-                    matrix[left_node * 3 + axis][right_node * 3 + axis] += scalar;
-                }
-            }
-        }
-    }
-    if matrix.iter().flatten().all(|value| value.is_finite()) {
-        Ok(matrix)
-    } else {
-        Err(Tetrahedron10ElementError::DegenerateOrInverted)
-    }
-}
-
-/// Full signed stress at the stiffness quadrature points for a nodal displacement state.
-pub fn quadrature_stress(
-    material: SolidMaterial,
-    geometry: Tetrahedron10ElementGeometry,
-    displacement: [f64; TETRAHEDRON10_ELEMENT_DOF_COUNT],
-) -> Result<[SymmetricStressTensor; 4], Tetrahedron10ElementError> {
-    validate_nodes(geometry.nodes_m)?;
-    if displacement.iter().any(|value| !value.is_finite()) {
-        return Err(Tetrahedron10ElementError::NonFiniteDisplacement);
-    }
-    let elasticity = elasticity_matrix(material)?;
-    let mut stresses = [[[0.0; 3]; 3]; 4];
-    for (index, barycentric) in QUADRATURE.into_iter().enumerate() {
-        let gradients = physical_shape_gradients(geometry.nodes_m, barycentric)?;
-        let b = strain_displacement_matrix(gradients);
-        let strain = std::array::from_fn::<_, 6, _>(|row| {
-            b[row]
-                .iter()
-                .zip(displacement)
-                .map(|(left, right)| left * right)
-                .sum::<f64>()
-        });
-        let stress = std::array::from_fn::<_, 6, _>(|row| {
-            elasticity[row]
-                .iter()
-                .zip(strain)
-                .map(|(left, right)| left * right)
-                .sum::<f64>()
-        });
-        stresses[index] = voigt_stress_tensor(stress);
-    }
-    Ok(stresses)
-}
-
-fn voigt_stress_tensor(stress: [f64; 6]) -> SymmetricStressTensor {
-    [
-        [stress[0], stress[5], stress[4]],
-        [stress[5], stress[1], stress[3]],
-        [stress[4], stress[3], stress[2]],
-    ]
-}
-
-fn quadratic_form(left: [f64; 3], matrix: [[f64; 3]; 3], right: [f64; 3]) -> f64 {
-    (0..3)
-        .map(|row| {
-            left[row]
-                * (0..3)
-                    .map(|column| matrix[row][column] * right[column])
-                    .sum::<f64>()
-        })
-        .sum()
-}
-
 pub(super) fn shape_values(barycentric: [f64; 4]) -> [f64; TETRAHEDRON10_ELEMENT_NODE_COUNT] {
     let mut values = [0.0; TETRAHEDRON10_ELEMENT_NODE_COUNT];
     for node in 0..4 {
@@ -377,7 +288,9 @@ mod tests {
             ],
         };
         for barycentric in QUADRATURE {
-            let gradients = physical_shape_gradients(geometry.nodes_m, barycentric).unwrap();
+            let gradients = physical_shape_gradients_and_measure(geometry.nodes_m, barycentric)
+                .unwrap()
+                .0;
             for coordinate in 0..3 {
                 for derivative in 0..3 {
                     let value = geometry
@@ -413,22 +326,6 @@ mod tests {
                 .sum::<f64>()
         });
         assert!(residual.iter().all(|value| value.abs() < 2.0e-3));
-    }
-
-    #[test]
-    fn tetrahedron10_geometric_stiffness_is_symmetric_and_load_linear() {
-        let geometry = straight_unit_tetrahedron();
-        let unit = [[3.0, 0.2, 0.1], [0.2, 2.0, 0.3], [0.1, 0.3, 1.0]];
-        let base = geometric_stiffness_matrix(geometry, [unit; 4]).unwrap();
-        let doubled =
-            geometric_stiffness_matrix(geometry, [unit.map(|row| row.map(|value| 2.0 * value)); 4])
-                .unwrap();
-        for row in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-            for column in 0..TETRAHEDRON10_ELEMENT_DOF_COUNT {
-                assert!((base[row][column] - base[column][row]).abs() < 1.0e-13);
-                assert!((doubled[row][column] - 2.0 * base[row][column]).abs() < 1.0e-13);
-            }
-        }
     }
 
     #[test]

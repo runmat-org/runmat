@@ -3,7 +3,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
-    assembly::{assemble_structural_system, StructuralFormulationRequirement},
+    assembly::{assemble_structural_perturbation_system, StructuralFormulationRequirement},
     contracts::{
         fea_buckling_mode_shape_field_id, fea_buckling_rotation_shape_field_id, ExecutionBackend,
         FeaBucklingRunResult, FeaRunError, FeaRunResult, ModalRecoveredMode, SolverMethod,
@@ -69,7 +69,7 @@ pub fn execute_structural_buckling_workload(
     let excitations =
         realize_step_excitations(workload.model(), step, ExcitationSamplePoint::Static)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let summary = assemble_structural_system(
+    let summary = assemble_structural_perturbation_system(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),
@@ -176,7 +176,7 @@ pub fn recover_completed_structural_buckling_run(
     let excitations =
         realize_step_excitations(workload.model(), step, ExcitationSamplePoint::Static)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let summary = assemble_structural_system(
+    let summary = assemble_structural_perturbation_system(
         workload.model(),
         &excitations,
         Some(solver_mesh.clone()),

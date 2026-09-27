@@ -1,14 +1,13 @@
+mod assembly;
+
+use assembly::assemble_entry;
 use std::f64::consts::TAU;
 
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 
 use crate::{
     assembly::{
-        complex_structural::{
-            assemble_complex_structural_system, ComplexStructuralAssemblySummary,
-        },
-        identity::structural_operator_digest,
-        StructuralFormulationRequirement,
+        complex_structural::ComplexStructuralAssemblySummary, identity::structural_operator_digest,
     },
     contracts::{validate_solver_formulation_compatibility, SolverMethod, SolverPreconditioner},
     execution::{
@@ -696,44 +695,4 @@ fn recover_structural_frequency_entry_fields_with_state(
         fields,
     )
     .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))
-}
-
-fn assemble_entry(
-    workload: &StructuralFrequencyWorkload,
-    solver_mesh: &SolverMeshArtifact,
-    frequency_hz: f64,
-    prestress_state: Option<&CanonicalSemanticState>,
-) -> AnalysisExecutionResult<ComplexStructuralAssemblySummary> {
-    let mut assembly = assemble_complex_structural_system(
-        workload.model(),
-        workload.procedure_step()?,
-        frequency_hz,
-        Some(solver_mesh.clone()),
-        StructuralFormulationRequirement::PhysicalDiscretization,
-    )
-    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
-    let topology_digest =
-        runmat_execution::Digest::from_bytes(*solver_mesh.canonical_digest.bytes());
-    let linearization = match (workload.prestress_transition(), prestress_state) {
-        (None, None) => None,
-        (Some(transition), Some(state)) => Some(
-            super::prestress::structural_linearization_from_state(
-                transition,
-                state,
-                topology_digest,
-            )
-            .map_err(AnalysisExecutionError::Invalid)?,
-        ),
-        _ => {
-            return Err(AnalysisExecutionError::Invalid(
-                "structural frequency workload and prestress-state presence differ".into(),
-            ));
-        }
-    };
-    if let Some(linearization) = linearization {
-        assembly.real =
-            super::prestress::prestressed_structural_summary(&assembly.real, linearization)
-                .map_err(AnalysisExecutionError::Invalid)?;
-    }
-    Ok(assembly)
 }

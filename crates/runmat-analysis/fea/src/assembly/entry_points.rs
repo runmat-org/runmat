@@ -2,6 +2,33 @@
 
 use super::*;
 
+enum StructuralCouplingInput<'a> {
+    Authored {
+        solved_nodal_temperature_k: Option<&'a [f64]>,
+    },
+    ElasticPerturbation,
+}
+
+/// Assemble the elastic operator about an already retained preload state.
+/// The physical preload stress enters through its retained geometric operator;
+/// its thermal profile is not reapplied as a new perturbation load.
+pub(crate) fn assemble_structural_perturbation_system(
+    model: &AnalysisModel,
+    excitations: &RealizedExcitations,
+    solver_mesh: Option<SolverMeshArtifact>,
+    requirement: StructuralFormulationRequirement,
+) -> Result<AssemblySummary, LinearAssemblyError> {
+    assemble_with_mesh(
+        model,
+        excitations,
+        solver_mesh.as_ref(),
+        Some(requirement),
+        None,
+        crate::planning::resource::LocalExecutionPlan::serial(),
+        StructuralCouplingInput::ElasticPerturbation,
+    )
+}
+
 /// Internal reduced operator used by non-structural experimental pipelines.
 /// Structural callers use `assemble_structural_system` for explicit synthetic admission.
 pub(crate) fn assemble_linear_system(
@@ -16,7 +43,9 @@ pub(crate) fn assemble_linear_system(
         None,
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
-        None,
+        StructuralCouplingInput::Authored {
+            solved_nodal_temperature_k: None,
+        },
     )
 }
 
@@ -43,7 +72,9 @@ pub(crate) fn assemble_structural_system_borrowed(
         Some(requirement),
         None,
         crate::planning::resource::LocalExecutionPlan::serial(),
-        None,
+        StructuralCouplingInput::Authored {
+            solved_nodal_temperature_k: None,
+        },
     )
 }
 
@@ -81,7 +112,9 @@ pub(crate) fn assemble_structural_system_with_execution(
         Some(requirement),
         constraint_plan,
         local_execution,
-        solved_nodal_temperature_k,
+        StructuralCouplingInput::Authored {
+            solved_nodal_temperature_k,
+        },
     )
 }
 
@@ -92,11 +125,38 @@ fn assemble_with_mesh(
     requirement: Option<StructuralFormulationRequirement>,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     local_execution: crate::planning::resource::LocalExecutionPlan,
-    solved_nodal_temperature_k: Option<&[f64]>,
+    coupling: StructuralCouplingInput<'_>,
 ) -> Result<AssemblySummary, LinearAssemblyError> {
-    let (thermo_mechanical_context, electro_thermal_context) =
-        crate::excitation::realize_coupling_contexts(model, excitations)
-            .map_err(LinearAssemblyError::CouplingRealization)?;
+    let (thermo_mechanical_context, electro_thermal_context, solved_nodal_temperature_k) =
+        match coupling {
+            StructuralCouplingInput::Authored {
+                solved_nodal_temperature_k,
+            } => {
+                let (thermal, electrical) =
+                    crate::excitation::realize_coupling_contexts(model, excitations)
+                        .map_err(LinearAssemblyError::CouplingRealization)?;
+                (thermal, electrical, solved_nodal_temperature_k)
+            }
+            StructuralCouplingInput::ElasticPerturbation => {
+                use crate::excitation::RealizedExcitationKind;
+                if excitations.iter().any(|excitation| {
+                    matches!(
+                        excitation.kind,
+                        RealizedExcitationKind::TemperatureField(_)
+                            | RealizedExcitationKind::TerminalVoltage(_)
+                            | RealizedExcitationKind::ElectricCurrent(_)
+                            | RealizedExcitationKind::ElectricCharge(_)
+                            | RealizedExcitationKind::CurrentDensity(_)
+                            | RealizedExcitationKind::MagneticVectorPotential(_)
+                    )
+                }) {
+                    return Err(LinearAssemblyError::CouplingRealization(
+                        "elastic perturbation cannot reapply active temperature or electrical coupling excitations".into(),
+                    ));
+                }
+                (None, None, None)
+            }
+        };
     if solved_nodal_temperature_k.is_some()
         && excitations.iter().any(|excitation| {
             matches!(

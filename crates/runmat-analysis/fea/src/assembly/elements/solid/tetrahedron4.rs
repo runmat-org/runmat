@@ -14,7 +14,6 @@ pub const TETRAHEDRON4_ELEMENT_DOF_COUNT: usize =
 pub type Tetrahedron4Matrix12 =
     [[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT];
 pub type Tetrahedron4BMatrix = [[f64; TETRAHEDRON4_ELEMENT_DOF_COUNT]; 6];
-pub type SymmetricStressTensor = [[f64; 3]; 3];
 pub type ElasticityMatrix = super::material::ElasticityMatrix;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -142,44 +141,6 @@ pub fn consistent_mass_matrix(
     }))
 }
 
-/// Initial-stress (geometric) stiffness for a total-Lagrangian linearized stability solve.
-///
-/// The supplied Cauchy stress is tension-positive. Consequently, tensile states contribute a
-/// positive geometric tangent and compressive states contribute a negative one.
-pub fn geometric_stiffness_matrix(
-    geometry: Tetrahedron4ElementGeometry,
-    stress: SymmetricStressTensor,
-) -> Result<Tetrahedron4Matrix12, Tetrahedron4ElementError> {
-    let volume = geometry.volume_m3()?;
-    let gradients = geometry.shape_function_gradients()?;
-    let mut matrix = [[0.0; TETRAHEDRON4_ELEMENT_DOF_COUNT]; TETRAHEDRON4_ELEMENT_DOF_COUNT];
-    for left_node in 0..TETRAHEDRON4_ELEMENT_NODE_COUNT {
-        for right_node in 0..TETRAHEDRON4_ELEMENT_NODE_COUNT {
-            let scalar =
-                volume * quadratic_form(gradients[left_node], stress, gradients[right_node]);
-            for axis in 0..TETRAHEDRON4_NODE_DOF_COUNT {
-                matrix[left_node * 3 + axis][right_node * 3 + axis] = scalar;
-            }
-        }
-    }
-    if matrix.iter().flatten().all(|value| value.is_finite()) {
-        Ok(matrix)
-    } else {
-        Err(Tetrahedron4ElementError::DegenerateOrInverted)
-    }
-}
-
-fn quadratic_form(left: [f64; 3], matrix: [[f64; 3]; 3], right: [f64; 3]) -> f64 {
-    (0..3)
-        .map(|row| {
-            left[row]
-                * (0..3)
-                    .map(|column| matrix[row][column] * right[column])
-                    .sum::<f64>()
-        })
-        .sum()
-}
-
 fn validate_nodes(nodes_m: [[f64; 3]; 4]) -> Result<(), Tetrahedron4ElementError> {
     if nodes_m.iter().flatten().all(|value| value.is_finite()) {
         Ok(())
@@ -284,40 +245,6 @@ mod tests {
         for axis in 0..3 {
             let sum = gradients.iter().map(|gradient| gradient[axis]).sum::<f64>();
             assert!(sum.abs() < 1.0e-14);
-        }
-    }
-
-    #[test]
-    fn tetrahedron4_geometric_stiffness_has_physical_sign_and_rigid_translation_nullspace() {
-        let tension = geometric_stiffness_matrix(
-            unit_tetrahedron(),
-            [[12.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-        )
-        .unwrap();
-        let compression = geometric_stiffness_matrix(
-            unit_tetrahedron(),
-            [[-12.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-        )
-        .unwrap();
-        assert!(tension[0][0] > 0.0);
-        for row in 0..TETRAHEDRON4_ELEMENT_DOF_COUNT {
-            for column in 0..TETRAHEDRON4_ELEMENT_DOF_COUNT {
-                assert_eq!(compression[row][column], -tension[row][column]);
-            }
-        }
-        for axis in 0..3 {
-            let mut translation = [0.0; TETRAHEDRON4_ELEMENT_DOF_COUNT];
-            for node in 0..4 {
-                translation[node * 3 + axis] = 1.0;
-            }
-            for row in tension {
-                let residual = row
-                    .iter()
-                    .zip(translation)
-                    .map(|(left, right)| left * right)
-                    .sum::<f64>();
-                assert!(residual.abs() < 1.0e-14);
-            }
         }
     }
 

@@ -9,20 +9,15 @@ use crate::{
         ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties, OperatorRole,
         RealSparseAssembler, RealSparseMatrix,
     },
-    assembly::{
-        dofs::StructuralDofKind,
-        elements::solid::{
-            elasticity_matrix, strain_displacement_matrix,
-            tetrahedron10_geometric_stiffness_matrix, tetrahedron10_quadrature_stress,
-            tetrahedron4_geometric_stiffness_matrix, Tetrahedron10ElementGeometry,
-            Tetrahedron4ElementGeometry,
-        },
-        AssemblySummary, SolidRecoveryGeometry,
-    },
+    assembly::{dofs::StructuralDofKind, AssemblySummary, SolidRecoveryGeometry},
     AnalysisRunIdentity,
 };
 
-const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v1\0";
+mod integration;
+mod thermal_source;
+pub use thermal_source::ThermalLinearizationSource;
+
+const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v2\0";
 const LINEARIZATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32);
 
@@ -61,6 +56,7 @@ pub struct StructuralLinearizationArtifact {
     schema_version: u16,
     identity: StructuralLinearizationIdentity,
     source_run: AnalysisRunIdentity,
+    thermal_source: Option<ThermalLinearizationSource>,
     topology_digest: Digest,
     elastic_stiffness_digest: Digest,
     base_displacement: Vec<f64>,
@@ -76,6 +72,7 @@ struct StructuralLinearizationArtifactData {
     schema_version: u16,
     identity: StructuralLinearizationIdentity,
     source_run: AnalysisRunIdentity,
+    thermal_source: Option<ThermalLinearizationSource>,
     topology_digest: Digest,
     elastic_stiffness_digest: Digest,
     base_displacement: Vec<f64>,
@@ -109,6 +106,7 @@ impl TryFrom<StructuralLinearizationArtifactData> for StructuralLinearizationArt
             schema_version: data.schema_version,
             identity: data.identity,
             source_run: data.source_run,
+            thermal_source: data.thermal_source,
             topology_digest: data.topology_digest,
             elastic_stiffness_digest: data.elastic_stiffness_digest,
             base_displacement: data.base_displacement,
@@ -129,6 +127,39 @@ impl StructuralLinearizationArtifact {
         topology_digest: Digest,
         solution: &[f64],
     ) -> Result<Self, StructuralLinearizationError> {
+        Self::from_bound_solution(summary, source_run, topology_digest, solution, None)
+    }
+
+    pub(crate) fn from_thermal_solution(
+        summary: &AssemblySummary,
+        source_run: AnalysisRunIdentity,
+        solution: &[f64],
+        transition: crate::execution::CanonicalStateTransition,
+        structural_result_content: Digest,
+    ) -> Result<Self, StructuralLinearizationError> {
+        let topology = transition.target_topology_digest;
+        let source = ThermalLinearizationSource::new(transition, structural_result_content)?;
+        Self::from_bound_solution(summary, source_run, topology, solution, Some(source))
+    }
+
+    fn from_bound_solution(
+        summary: &AssemblySummary,
+        source_run: AnalysisRunIdentity,
+        topology_digest: Digest,
+        solution: &[f64],
+        thermal_source: Option<ThermalLinearizationSource>,
+    ) -> Result<Self, StructuralLinearizationError> {
+        thermal_source::validate_context(&source_run, topology_digest, thermal_source.as_ref())?;
+        if summary
+            .structural_solid_recovery
+            .iter()
+            .any(|element| element.solved_thermal_quadrature.is_some())
+            != thermal_source.is_some()
+        {
+            return Err(StructuralLinearizationError::InvalidArtifact(
+                "solved thermal assembly requires its exact source context",
+            ));
+        }
         if solution.len() != summary.dof_count || solution.iter().any(|value| !value.is_finite()) {
             return Err(StructuralLinearizationError::InvalidSolution);
         }
@@ -154,74 +185,12 @@ impl StructuralLinearizationArtifact {
         let mut initial_stress = Vec::with_capacity(summary.structural_solid_recovery.len());
         let mut quadrature_count = 0usize;
         for element in &summary.structural_solid_recovery {
-            let stresses = match &element.geometry {
-                SolidRecoveryGeometry::Tetrahedron4 {
-                    node_indices,
-                    coordinates_m,
-                } => {
-                    let geometry = Tetrahedron4ElementGeometry {
-                        nodes_m: *coordinates_m,
-                    };
-                    let displacement = gather_element_displacement::<4, 12>(
-                        &summary.structural_dof_layout,
-                        node_indices,
-                        solution,
-                    )?;
-                    let b = strain_displacement_matrix(geometry)
-                        .map_err(|error| element_error(&element.element_id, error))?;
-                    let elasticity = elasticity_matrix(element.material)
-                        .map_err(|error| element_error(&element.element_id, error))?;
-                    let strain = std::array::from_fn::<_, 6, _>(|row| {
-                        b[row]
-                            .iter()
-                            .zip(displacement)
-                            .map(|(left, right)| left * right)
-                            .sum::<f64>()
-                    });
-                    let stress = std::array::from_fn::<_, 6, _>(|row| {
-                        elasticity[row]
-                            .iter()
-                            .zip(strain)
-                            .map(|(left, right)| left * right)
-                            .sum::<f64>()
-                    });
-                    let tensor = voigt_stress_tensor(stress);
-                    let matrix = tetrahedron4_geometric_stiffness_matrix(geometry, tensor)
-                        .map_err(|error| element_error(&element.element_id, error))?;
-                    assemble_element_matrix(
-                        &mut assembler,
-                        &summary.structural_dof_layout,
-                        node_indices,
-                        &matrix,
-                    )?;
-                    vec![tensor]
-                }
-                SolidRecoveryGeometry::Tetrahedron10 {
-                    node_indices,
-                    coordinates_m,
-                } => {
-                    let geometry = Tetrahedron10ElementGeometry {
-                        nodes_m: *coordinates_m,
-                    };
-                    let displacement = gather_element_displacement::<10, 30>(
-                        &summary.structural_dof_layout,
-                        node_indices,
-                        solution,
-                    )?;
-                    let stresses =
-                        tetrahedron10_quadrature_stress(element.material, geometry, displacement)
-                            .map_err(|error| element_error(&element.element_id, error))?;
-                    let matrix = tetrahedron10_geometric_stiffness_matrix(geometry, stresses)
-                        .map_err(|error| element_error(&element.element_id, error))?;
-                    assemble_element_matrix(
-                        &mut assembler,
-                        &summary.structural_dof_layout,
-                        node_indices,
-                        &matrix,
-                    )?;
-                    stresses.to_vec()
-                }
-            };
+            let stresses = integration::assemble(
+                element,
+                &summary.structural_dof_layout,
+                solution,
+                &mut assembler,
+            )?;
             quadrature_count += stresses.len();
             initial_stress.push(StructuralInitialStressState {
                 element_id: element.element_id.clone(),
@@ -246,9 +215,10 @@ impl StructuralLinearizationArtifact {
             .numerical_identity()
             .map_err(|error| StructuralLinearizationError::Identity(error.to_string()))?;
         let mut artifact = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: StructuralLinearizationIdentity(Digest::sha256([])),
             source_run,
+            thermal_source,
             topology_digest,
             elastic_stiffness_digest,
             base_displacement: solution.to_vec(),
@@ -267,6 +237,9 @@ impl StructuralLinearizationArtifact {
     }
     pub const fn source_run(&self) -> &AnalysisRunIdentity {
         &self.source_run
+    }
+    pub fn thermal_source(&self) -> Option<&ThermalLinearizationSource> {
+        self.thermal_source.as_ref()
     }
     pub const fn topology_digest(&self) -> Digest {
         self.topology_digest
@@ -291,8 +264,13 @@ impl StructuralLinearizationArtifact {
     }
 
     pub fn validate(&self) -> Result<(), StructuralLinearizationError> {
+        thermal_source::validate_context(
+            &self.source_run,
+            self.topology_digest,
+            self.thermal_source.as_ref(),
+        )?;
         let dimension = self.base_displacement.len();
-        if self.schema_version != 1
+        if self.schema_version != 2
             || dimension == 0
             || self.reference_load.len() != dimension
             || self
@@ -315,7 +293,7 @@ impl StructuralLinearizationArtifact {
                 state.element_id.is_empty()
                     || state.region_id.is_empty()
                     || !element_ids.insert(state.element_id.as_str())
-                    || !matches!(state.quadrature_stress_pa.len(), 1 | 4)
+                    || !matches!(state.quadrature_stress_pa.len(), 15 | 1728 | 4096)
                     || state
                         .quadrature_stress_pa
                         .iter()
@@ -362,6 +340,7 @@ impl StructuralLinearizationArtifact {
             "analysis.fea.structural-linearization",
             &(
                 &self.source_run,
+                &self.thermal_source,
                 self.topology_digest,
                 self.elastic_stiffness_digest,
                 &self.base_displacement,
@@ -376,31 +355,6 @@ impl StructuralLinearizationArtifact {
         .map(StructuralLinearizationIdentity)
         .map_err(|error| StructuralLinearizationError::Identity(error.to_string()))
     }
-}
-
-fn gather_element_displacement<const N: usize, const D: usize>(
-    layout: &crate::assembly::dofs::StructuralDofLayout,
-    node_indices: &[usize; N],
-    solution: &[f64],
-) -> Result<[f64; D], StructuralLinearizationError> {
-    debug_assert_eq!(D, N * 3);
-    let kinds = [
-        StructuralDofKind::Ux,
-        StructuralDofKind::Uy,
-        StructuralDofKind::Uz,
-    ];
-    let mut gathered = [0.0; D];
-    for (local_node, node_index) in node_indices.iter().copied().enumerate() {
-        for (axis, kind) in kinds.into_iter().enumerate() {
-            let row = layout
-                .index(node_index, kind)
-                .ok_or(StructuralLinearizationError::InvalidSolution)?;
-            gathered[local_node * 3 + axis] = *solution
-                .get(row)
-                .ok_or(StructuralLinearizationError::InvalidSolution)?;
-        }
-    }
-    Ok(gathered)
 }
 
 fn assemble_element_matrix<const D: usize>(
@@ -428,14 +382,6 @@ fn assemble_element_matrix<const D: usize>(
         }
     }
     Ok(())
-}
-
-fn voigt_stress_tensor(stress: [f64; 6]) -> [[f64; 3]; 3] {
-    [
-        [stress[0], stress[5], stress[4]],
-        [stress[5], stress[1], stress[3]],
-        [stress[4], stress[3], stress[2]],
-    ]
 }
 
 fn symmetry_residual(matrix: &RealSparseMatrix) -> f64 {

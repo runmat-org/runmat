@@ -14,6 +14,8 @@ use runmat_analysis_core::{AnalysisModel, ProcedureStep};
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
+mod linearization;
+
 use super::{
     assembly_sizing::{
         ASSEMBLY_SCRATCH_BYTES_PER_ELEMENT, FIXED_ASSEMBLY_SCRATCH_BYTES_PER_WORKER,
@@ -196,10 +198,7 @@ pub(crate) fn build_static_resource_plan(
             0
         },
     )?;
-    let publishes_linearization = step
-        .state_outputs
-        .iter()
-        .any(|output| output.kind == runmat_analysis_core::StateKind::GeometricStiffness);
+    let publishes_linearization = linearization::requires_envelope(step);
     let recovery_values = facts
         .recovery_node_count
         .checked_mul(STRUCTURAL_RECOVERY_VALUES_PER_NODE)
@@ -221,16 +220,8 @@ pub(crate) fn build_static_resource_plan(
         "solved thermal recovery values",
     )?;
     if publishes_linearization {
-        // Two full vectors, worst-case four full stress tensors per element, and a complete
-        // sparse geometric-stiffness CSR. Index storage is charged at the same eight-byte width.
-        let linearization_values = dofs
-            .checked_mul(2)
-            .and_then(|value| value.checked_add(facts.topology.elements.0.checked_mul(36)?))
-            .and_then(|value| value.checked_add(stiffness_nonzeros.checked_mul(2)?))
-            .and_then(|value| value.checked_add(dofs.checked_add(1)?))
-            .ok_or(ResourcePlanningError::Overflow(
-                "structural linearization value count",
-            ))?;
+        let linearization_values =
+            linearization::value_envelope(dofs, facts.topology.elements.0, stiffness_nonzeros)?;
         recovery_values = recovery_values.checked_add(linearization_values).ok_or(
             ResourcePlanningError::Overflow("structural result value count"),
         )?;

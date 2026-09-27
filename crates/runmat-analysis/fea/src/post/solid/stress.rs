@@ -1,4 +1,7 @@
-use crate::assembly::SolidRecoveryElementSummary;
+use crate::assembly::{
+    elements::solid::response::{response_from_strain, SolidResponseError},
+    SolidRecoveryElementSummary,
+};
 
 use super::{StructuralFieldRecoveryError, COMPONENT_COUNT};
 
@@ -7,36 +10,22 @@ pub(super) fn recover_element_stress(
     strain: [f64; COMPONENT_COUNT],
     eigenstrain: f64,
 ) -> Result<[f64; COMPONENT_COUNT], StructuralFieldRecoveryError> {
-    let lambda = element.material.lame_lambda_pa().map_err(|_| {
-        StructuralFieldRecoveryError::InvalidMaterial {
+    response_from_strain(element.material, strain, eigenstrain)
+        .map(|response| response.stress)
+        .map_err(|error| response_error(element, error))
+}
+
+pub(super) fn response_error(
+    element: &SolidRecoveryElementSummary,
+    error: SolidResponseError,
+) -> StructuralFieldRecoveryError {
+    match error {
+        SolidResponseError::InvalidMaterial => StructuralFieldRecoveryError::InvalidMaterial {
             element_id: element.element_id.clone(),
-        }
-    })?;
-    let mu = element.material.shear_modulus_pa().map_err(|_| {
-        StructuralFieldRecoveryError::InvalidMaterial {
+        },
+        SolidResponseError::InvalidInput => StructuralFieldRecoveryError::NonFiniteResult {
             element_id: element.element_id.clone(),
-        }
-    })?;
-    let mechanical_normal_strain = [
-        strain[0] - eigenstrain,
-        strain[1] - eigenstrain,
-        strain[2] - eigenstrain,
-    ];
-    let trace = mechanical_normal_strain.iter().sum::<f64>();
-    let stress = [
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[0],
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[1],
-        lambda * trace + 2.0 * mu * mechanical_normal_strain[2],
-        mu * strain[3],
-        mu * strain[4],
-        mu * strain[5],
-    ];
-    if stress.iter().all(|value| value.is_finite()) {
-        Ok(stress)
-    } else {
-        Err(StructuralFieldRecoveryError::NonFiniteResult {
-            element_id: element.element_id.clone(),
-        })
+        },
     }
 }
 
