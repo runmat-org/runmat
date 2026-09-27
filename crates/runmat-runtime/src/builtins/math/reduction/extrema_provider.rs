@@ -50,12 +50,10 @@ impl ExtremaKind {
         match result {
             Ok(output) => Ok(Some(output)),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-            Err(error) => {
-                let mut failure =
-                    self.contract_error(format!("provider {operation} failed: {error}"));
-                failure.source = Some(error.into_boxed_dyn_error());
-                Err(failure)
-            }
+            Err(error) => Err(crate::runtime_error::with_provider_execution_source(
+                self.contract_error(format!("provider {operation} failed: {error}")),
+                error.into(),
+            )),
         }
     }
 

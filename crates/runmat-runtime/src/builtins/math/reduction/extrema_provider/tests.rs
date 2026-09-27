@@ -107,12 +107,22 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
                     let error = result.unwrap_err();
                     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
                     let mut source = std::error::Error::source(&error);
-                    let mut retained = false;
+                    let mut retained = None;
                     while let Some(error) = source {
-                        retained |= error.downcast_ref::<std::io::Error>().is_some();
+                        if let Some(error) = error.downcast_ref::<std::io::Error>() {
+                            retained = Some(error.kind());
+                        }
                         source = error.source();
                     }
-                    assert!(retained, "original {name} provider failure must survive");
+                    assert_eq!(
+                        retained,
+                        Some(if matches!(fault, Fault::Execution) {
+                            std::io::ErrorKind::BrokenPipe
+                        } else {
+                            std::io::ErrorKind::ConnectionReset
+                        }),
+                        "original {name} provider failure must survive"
+                    );
                 }
             }
             assert_eq!(
