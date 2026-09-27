@@ -1,21 +1,21 @@
 use anyhow::anyhow;
-use once_cell::sync::{Lazy, OnceCell};
+#[cfg(test)]
+use once_cell::sync::Lazy;
+use once_cell::sync::OnceCell;
 use runmat_types::{standard, ClassIdentity};
 use serde::{Deserialize, Serialize};
-#[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
 #[cfg(feature = "wgpu")]
 use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::sync::Mutex;
-use std::sync::RwLock;
 
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+mod platform;
+mod provider_registry;
+pub use platform::AcceleratorThreadBound;
 pub mod allocation;
 pub use allocation::{
     GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
@@ -1444,7 +1444,7 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 }
 
 /// Device/provider interface that backends implement and register into the runtime layer
-pub trait AccelProvider: Send + Sync {
+pub trait AccelProvider: AcceleratorThreadBound {
     /// Upload a canonical host logical value through shared admission.
     fn upload_logical(&self, host: &HostLogicalTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
         upload_logical_protecting(self, host, &[])
@@ -3715,56 +3715,18 @@ pub trait AccelProvider: Send + Sync {
     }
 }
 
-static GLOBAL_PROVIDER: Lazy<RwLock<Option<&'static dyn AccelProvider>>> =
-    Lazy::new(|| RwLock::new(None));
-static PROVIDER_REGISTRY: Lazy<RwLock<HashMap<u32, &'static dyn AccelProvider>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
 static DEVICE_ID_COUNTER: AtomicU32 = AtomicU32::new(1);
 
-#[cfg(not(target_arch = "wasm32"))]
 thread_local! {
     static THREAD_PROVIDER: Cell<Option<&'static dyn AccelProvider>> = Cell::new(None);
 }
-
-#[cfg(target_arch = "wasm32")]
-static WASM_THREAD_PROVIDER: Lazy<Mutex<Option<&'static dyn AccelProvider>>> =
-    Lazy::new(|| Mutex::new(None));
-
-#[cfg(not(target_arch = "wasm32"))]
 fn replace_thread_provider(
     provider: Option<&'static dyn AccelProvider>,
 ) -> Option<&'static dyn AccelProvider> {
-    THREAD_PROVIDER.with(|cell| {
-        let prev = cell.get();
-        cell.set(provider);
-        prev
-    })
+    THREAD_PROVIDER.with(|cell| cell.replace(provider))
 }
-
-#[cfg(target_arch = "wasm32")]
-fn replace_thread_provider(
-    provider: Option<&'static dyn AccelProvider>,
-) -> Option<&'static dyn AccelProvider> {
-    let mut slot = WASM_THREAD_PROVIDER
-        .lock()
-        .expect("wasm provider mutex poisoned");
-    let prev = *slot;
-    *slot = provider;
-    prev
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
-    THREAD_PROVIDER.with(|cell| cell.get())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
-    WASM_THREAD_PROVIDER
-        .lock()
-        .expect("wasm provider mutex poisoned")
-        .as_ref()
-        .copied()
+    THREAD_PROVIDER.with(Cell::get)
 }
 
 /// Register a global acceleration provider.
@@ -3778,16 +3740,12 @@ fn current_thread_provider() -> Option<&'static dyn AccelProvider> {
 ///   `device_id`; the handle registry uses that identifier as its ownership key.
 pub unsafe fn register_provider(p: &'static dyn AccelProvider) {
     replace_thread_provider(Some(p));
-    if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
-        *guard = Some(p);
-    }
+    provider_registry::set_default(Some(p));
     register_provider_for_device(p.device_id(), p);
 }
 
 unsafe fn register_provider_for_device(device_id: u32, provider: &'static dyn AccelProvider) {
-    if let Ok(mut guard) = PROVIDER_REGISTRY.write() {
-        guard.insert(device_id, provider);
-    }
+    provider_registry::register(device_id, provider);
 }
 
 /// Register a provider as an addressable device owner without selecting it as
@@ -3808,33 +3766,23 @@ pub unsafe fn register_device_provider(provider: &'static dyn AccelProvider) {
 }
 
 pub fn provider() -> Option<&'static dyn AccelProvider> {
-    if let Some(p) = current_thread_provider().filter(|provider| provider_is_authorized(*provider))
-    {
-        return Some(p);
-    }
-    if let Some(provider) = GLOBAL_PROVIDER
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().copied())
-        .filter(|provider| provider_is_authorized(*provider))
+    if let Some(provider) =
+        current_thread_provider().filter(|provider| provider_is_authorized(*provider))
     {
         return Some(provider);
     }
-    PROVIDER_REGISTRY.read().ok().and_then(|providers| {
-        providers
-            .iter()
-            // Registry-only providers (for example a native CUDA extension
-            // provider beside ambient WGPU) become the default only when a
-            // scheduled assignment names them. Direct sessions retain the
-            // established ambient-provider policy.
-            .filter(|(_, provider)| {
-                matches!(
-                    provider_authorization(**provider),
-                    ExecutionProviderAuthorization::Allowed
-                )
-            })
-            .min_by_key(|(device_id, _)| **device_id)
-            .map(|(_, provider)| *provider)
+    if let Some(provider) =
+        provider_registry::default().filter(|provider| provider_is_authorized(*provider))
+    {
+        return Some(provider);
+    }
+    // Copy references before callbacks; no registry lock or RefCell borrow
+    // crosses provider code.
+    registered_providers().into_iter().find(|provider| {
+        matches!(
+            provider_authorization(*provider),
+            ExecutionProviderAuthorization::Allowed
+        )
     })
 }
 
@@ -3846,31 +3794,21 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 /// function and register another provider; device ids keep the handle namespaces distinct.
 pub fn clear_provider() {
     replace_thread_provider(None);
-    if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
-        *guard = None;
-    }
+    provider_registry::set_default(None);
 }
 
 pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider> {
-    if let Some(registered) = PROVIDER_REGISTRY
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&device_id).copied())
-    {
+    if let Some(registered) = provider_registry::get(device_id) {
         return provider_is_authorized(registered).then_some(registered);
     }
-    if let Some(thread_provider) = current_thread_provider() {
-        if thread_provider.device_id() == device_id {
-            return provider_is_authorized(thread_provider).then_some(thread_provider);
+    if let Some(provider) = current_thread_provider() {
+        if provider.device_id() == device_id {
+            return provider_is_authorized(provider).then_some(provider);
         }
     }
-    // Preserve legacy behavior: when no explicit per-device registration exists,
-    // fall back to the globally active provider regardless of handle device id.
-    let fallback = GLOBAL_PROVIDER
-        .read()
-        .ok()
-        .and_then(|guard| guard.as_ref().copied());
-    fallback.filter(|provider| {
+    // Retained execution-selection compatibility only. Physical retirement
+    // never consults this registry or its ambient fallback.
+    provider_registry::default().filter(|provider| {
         matches!(
             provider_authorization(*provider),
             ExecutionProviderAuthorization::Unrestricted
@@ -3882,10 +3820,7 @@ pub fn provider_for_device(device_id: u32) -> Option<&'static dyn AccelProvider>
 /// Provider registration guarantees that these references remain valid for
 /// the process lifetime.
 pub fn registered_providers() -> Vec<&'static dyn AccelProvider> {
-    PROVIDER_REGISTRY
-        .read()
-        .map(|providers| providers.values().copied().collect())
-        .unwrap_or_default()
+    provider_registry::all()
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
@@ -3903,14 +3838,8 @@ pub fn provider_for_native_device(api: NativeDeviceApi) -> Option<&'static dyn A
     }) {
         return Some(selected);
     }
-    PROVIDER_REGISTRY.read().ok().and_then(|providers| {
-        providers
-            .iter()
-            .filter(|(_, provider)| {
-                provider.native_device_api() == Some(api) && provider_is_authorized(**provider)
-            })
-            .min_by_key(|(device_id, _)| **device_id)
-            .map(|(_, provider)| *provider)
+    registered_providers().into_iter().find(|provider| {
+        provider.native_device_api() == Some(api) && provider_is_authorized(*provider)
     })
 }
 

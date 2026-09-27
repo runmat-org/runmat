@@ -17,10 +17,7 @@ pub use descriptor::{
     GpuTensorWireDescriptor, GpuViewError,
 };
 pub use lease::{AllocationLease, WeakAllocationLease};
-pub use owner::{
-    AllocationOwner, AllocationOwnerThreadBound, AllocationRegistrationError,
-    AllocationRetirementOutcome,
-};
+pub use owner::{AllocationOwner, AllocationRegistrationError, AllocationRetirementOutcome};
 pub use release::{AllocationReleaseError, AllocationReleaseOutcome, GpuHandleReleaseError};
 pub use tensor::{GpuTensorHandle, TensorViewIdentity, WeakGpuTensorHandle};
 

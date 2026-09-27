@@ -1,17 +1,5 @@
 use super::{AllocationIdentity, GpuPhysicalDescriptor, WeakAllocationLease};
 
-/// Native leases may cross threads. Browser-only owners need not assert
-/// thread safety for JS-backed resources; their leases remain non-Send.
-#[cfg(not(target_arch = "wasm32"))]
-pub trait AllocationOwnerThreadBound: Send + Sync {}
-#[cfg(not(target_arch = "wasm32"))]
-impl<T: Send + Sync + ?Sized> AllocationOwnerThreadBound for T {}
-
-#[cfg(target_arch = "wasm32")]
-pub trait AllocationOwnerThreadBound {}
-#[cfg(target_arch = "wasm32")]
-impl<T: ?Sized> AllocationOwnerThreadBound for T {}
-
 /// Registration fails without granting a second lifetime authority.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AllocationRegistrationError {
@@ -47,7 +35,7 @@ pub enum AllocationRetirementOutcome {
 /// providers are process-retained; custom fallible owners must provide an
 /// equally real drain/teardown lifetime, not an otherwise unreachable record.
 /// Owner destructors and panic-recording implementations must not unwind.
-pub trait AllocationOwner: AllocationOwnerThreadBound + 'static {
+pub trait AllocationOwner: crate::AcceleratorThreadBound + 'static {
     /// Under the existing map's lock, validate identity/generation/live payload
     /// and install exactly one weak lease. Reject a duplicate even if its old
     /// weak lease is no longer acquirable. No retired entry may be resurrected.
