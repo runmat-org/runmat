@@ -39,6 +39,7 @@ pub enum BuiltinPreparationOperation {
     RealUnary(runmat_types::RealUnaryPredicate),
     /// Digit count and decimal/significant mode remain typed request controls.
     RoundDigits,
+    FloatingRemainder(runmat_types::FloatingRemainderKind),
     ElementwiseBinary,
     /// An admitted broadcast operation consuming every declared data operand.
     ElementwiseNary {
@@ -86,7 +87,10 @@ impl BuiltinPreparationOperation {
             | Self::RoundDigits
             | Self::Transpose
             | Self::Reduction(_) => Some(1),
-            Self::ElementwiseBinary | Self::RealPower | Self::MatrixMultiply => Some(2),
+            Self::ElementwiseBinary
+            | Self::RealPower
+            | Self::FloatingRemainder(_)
+            | Self::MatrixMultiply => Some(2),
             Self::ElementwiseNary { data_arity } => Some(data_arity),
             Self::Sink(_) => None,
         }

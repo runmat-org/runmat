@@ -54,6 +54,10 @@ impl AdmittedBuiltinPreparation {
                 runmat_builtins::BuiltinPreparationOperation::RoundDigits,
                 NumericalDomainEvidence::RoundDigits { digits, mode },
             ) => mode == runmat_accelerate_api::RoundDigitsMode::Decimals || digits > 0,
+            (
+                runmat_builtins::BuiltinPreparationOperation::FloatingRemainder(expected),
+                NumericalDomainEvidence::FloatingRemainder(actual),
+            ) => expected == actual,
             _ => false,
         };
         if !belongs {

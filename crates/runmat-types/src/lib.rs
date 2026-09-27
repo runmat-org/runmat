@@ -24,6 +24,8 @@ pub use fact::*;
 pub use identity::*;
 pub use integer_literal::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
 pub use real_unary::{RealUnaryClassification, RealUnaryPredicate};
+mod floating_remainder;
+pub use floating_remainder::FloatingRemainderKind;
 pub use rules::*;
 pub use source::{merge_span, Span};
 pub use symbolic::{

@@ -10,6 +10,7 @@ pub(super) enum ArgumentOperation {
     Unary(UnaryOp),
     RealUnary(runmat_accelerate_api::NumericalDomainEvidence),
     RoundDigits(runmat_accelerate_api::NumericalDomainEvidence),
+    FloatingRemainder(runmat_accelerate_api::NumericalDomainEvidence),
     RealPower(runmat_accelerate_api::NumericalDomainEvidence),
 }
 
@@ -37,7 +38,7 @@ impl ArgumentOperation {
 
     fn count(&self) -> usize {
         match self {
-            Self::Binary(_) | Self::RealPower(_) => 2,
+            Self::Binary(_) | Self::RealPower(_) | Self::FloatingRemainder(_) => 2,
             Self::ElementwiseNary { data_arity, .. } => *data_arity,
             _ => 1,
         }
@@ -87,8 +88,10 @@ impl ArgumentOperation {
                     ProviderOperationFamily::Elementwise,
                 )
             }
-            Self::Binary(BinaryOp::Elementwise) | Self::RealPower(_) => {
-                if let Self::RealPower(evidence) = self {
+            Self::Binary(BinaryOp::Elementwise)
+            | Self::RealPower(_)
+            | Self::FloatingRemainder(_) => {
+                if let Self::RealPower(evidence) | Self::FloatingRemainder(evidence) = self {
                     workload.numerical_domain = *evidence;
                 }
                 let elements = element_count_pair(&args[0], &args[1]).unwrap_or(0);

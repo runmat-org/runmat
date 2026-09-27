@@ -25,11 +25,28 @@ pub enum NumericalDomainEvidence {
         digits: i32,
         mode: RoundDigitsMode,
     },
+    FloatingRemainder(runmat_types::FloatingRemainderKind),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn floating_remainder_strategies_round_trip() {
+        for kind in [
+            runmat_types::FloatingRemainderKind::Modulus,
+            runmat_types::FloatingRemainderKind::Remainder,
+        ] {
+            let evidence = NumericalDomainEvidence::FloatingRemainder(kind);
+            assert_eq!(
+                serde_json::from_str::<NumericalDomainEvidence>(
+                    &serde_json::to_string(&evidence).unwrap()
+                )
+                .unwrap(),
+                evidence
+            );
+        }
+    }
     #[test]
     fn parsed_rounding_strategies_round_trip_without_becoming_tensor_arguments() {
         for mode in [RoundDigitsMode::Decimals, RoundDigitsMode::Significant] {
