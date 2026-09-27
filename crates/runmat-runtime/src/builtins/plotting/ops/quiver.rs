@@ -770,14 +770,6 @@ impl QuiverCoordinateInput {
             Self::ImplicitY { rows, cols } => implicit_quiver_grid_tensor(rows, cols, false),
         }
     }
-    #[cfg(test)]
-    fn into_tensor(self, builtin: &'static str) -> crate::BuiltinResult<Tensor> {
-        match self {
-            Self::Explicit(input) => input.into_tensor(builtin),
-            Self::ImplicitX { rows, cols } => implicit_quiver_grid_tensor(rows, cols, true),
-            Self::ImplicitY { rows, cols } => implicit_quiver_grid_tensor(rows, cols, false),
-        }
-    }
 }
 
 impl QuiverAxisSource {
@@ -1327,8 +1319,8 @@ mod tests {
             _ => panic!("expected compact f64 y axis"),
         }
 
-        let x_full = x_axis.into_tensor(BUILTIN_NAME).unwrap();
-        let y_full = y_axis.into_tensor(BUILTIN_NAME).unwrap();
+        let x_full = futures::executor::block_on(x_axis.into_tensor_async(BUILTIN_NAME)).unwrap();
+        let y_full = futures::executor::block_on(y_axis.into_tensor_async(BUILTIN_NAME)).unwrap();
         assert_eq!(x_full.materialize_f64(), vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0]);
         assert_eq!(y_full.materialize_f64(), vec![1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
     }
