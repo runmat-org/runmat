@@ -440,3 +440,48 @@ fn outstanding_callback_does_not_keep_progress_sender_alive() {
     );
     callback.complete();
 }
+
+#[test]
+fn abandoned_future_cleanup_uses_its_owner_not_ambient_parent() {
+    struct Cleanup;
+    impl Future for Cleanup {
+        type Output = ();
+        fn poll(self: std::pin::Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+            Poll::Pending
+        }
+    }
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            current_provider_observation()
+                .unwrap()
+                .submission()
+                .unwrap()
+                .complete();
+        }
+    }
+    for polled in [false, true] {
+        let mut outer = ProviderOperationReceipt::new();
+        let mut inner = ProviderOperationReceipt::new();
+        let mut future = Box::pin(observe_provider_future(Some(inner.recorder()), Cleanup));
+        with_provider_observation(Some(outer.recorder()), || {
+            if polled {
+                let waker = Waker::from(Arc::new(Noop));
+                assert!(future
+                    .as_mut()
+                    .poll(&mut Context::from_waker(&waker))
+                    .is_pending());
+            }
+            drop(future);
+        });
+        inner.publish().unwrap();
+        outer.publish().unwrap();
+        assert!(matches!(
+            inner.take_completed().unwrap().status,
+            ProviderObservationStatus::Completed { submissions: 1, .. }
+        ));
+        assert!(matches!(
+            outer.take_completed().unwrap().status,
+            ProviderObservationStatus::Completed { submissions: 0, .. }
+        ));
+    }
+}

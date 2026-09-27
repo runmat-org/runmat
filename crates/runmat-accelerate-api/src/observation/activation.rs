@@ -33,7 +33,7 @@ pub fn with_provider_observation<T>(
 }
 
 struct ObservedFuture<F> {
-    inner: Pin<Box<F>>,
+    inner: Option<Pin<Box<F>>>,
     recorder: Option<ProviderOperationRecorder>,
 }
 
@@ -41,7 +41,20 @@ impl<F: Future> Future for ObservedFuture<F> {
     type Output = F::Output;
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        with_provider_observation(this.recorder.clone(), || this.inner.as_mut().poll(cx))
+        with_provider_observation(this.recorder.clone(), || {
+            this.inner
+                .as_mut()
+                .expect("observation future has an inner owner")
+                .as_mut()
+                .poll(cx)
+        })
+    }
+}
+
+impl<F> Drop for ObservedFuture<F> {
+    fn drop(&mut self) {
+        let inner = self.inner.take();
+        with_provider_observation(self.recorder.clone(), || drop(inner));
     }
 }
 
@@ -53,7 +66,7 @@ pub fn observe_provider_future<F: Future>(
     future: F,
 ) -> impl Future<Output = F::Output> {
     ObservedFuture {
-        inner: Box::pin(future),
+        inner: Some(Box::pin(future)),
         recorder,
     }
 }
