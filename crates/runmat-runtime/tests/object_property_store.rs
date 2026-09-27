@@ -395,7 +395,51 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
                 .unwrap_err();
                 assert_eq!(error.identifier(), Some("RunMat:PropertyPrivateAccess"));
                 assert_eq!(property(&handle, name), Value::Num(0.0));
+                store_member(
+                    Value::HandleObject(handle.clone()),
+                    name.into(),
+                    Value::Num(6.0),
+                    false,
+                    Some("Restricted.set.Dependent"),
+                    |_, _| {},
+                )
+                .await
+                .unwrap();
+                assert_eq!(
+                    property(&handle, name),
+                    Value::Num(6.0),
+                    "defining-class caller is authorized"
+                );
             }
+            let mut child = class("RestrictedChild");
+            child.parent = Some("Restricted".into());
+            setter(&mut child, "RestrictedChild.set.Dependent");
+            register_class(child);
+            store_member(
+                Value::HandleObject(handle.clone()),
+                "ProtectedDynamic".into(),
+                Value::Num(10.0),
+                false,
+                Some("RestrictedChild.set.Dependent"),
+                |_, _| {},
+            )
+            .await
+            .unwrap();
+            assert_eq!(property(&handle, "ProtectedDynamic"), Value::Num(10.0));
+            assert_eq!(
+                store_member(
+                    Value::HandleObject(handle.clone()),
+                    "PrivateDynamic".into(),
+                    Value::Num(10.0),
+                    false,
+                    Some("RestrictedChild.set.Dependent"),
+                    |_, _| {}
+                )
+                .await
+                .unwrap_err()
+                .identifier(),
+                Some("RunMat:PropertyPrivateAccess")
+            );
             let error = store_member(
                 Value::HandleObject(handle.clone()),
                 "Dependent".into(),
@@ -417,6 +461,41 @@ fn dynamic_stores_and_private_setter_admission_use_registered_metadata() {
             )
             .await
             .is_err());
+        }));
+    });
+}
+
+#[test]
+fn dependent_property_without_setter_never_creates_backing_storage() {
+    runmat_gc::gc_test_context(|| {
+        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        block_on(runtime.scope(async {
+            register_class(class("ReadOnlyDependent"));
+            let handle = new_handle("ReadOnlyDependent");
+            for value in [
+                Value::Object(ObjectInstance::new("ReadOnlyDependent")),
+                Value::HandleObject(handle.clone()),
+            ] {
+                let error = store_member(
+                    value,
+                    "Dependent".into(),
+                    Value::Num(9.0),
+                    false,
+                    None,
+                    |_, _| panic!("no write before no-setter rejection"),
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(error.identifier(), Some("RunMat:PropertyReadOnly"));
+            }
+            runmat_gc::gc_with_value(&handle.target, |value| {
+                let Value::Object(object) = value else {
+                    panic!("target")
+                };
+                assert!(!object.properties.contains_key("Dependent"));
+                assert_eq!(object.properties["Value"], Value::Num(1.0));
+            })
+            .unwrap();
         }));
     });
 }

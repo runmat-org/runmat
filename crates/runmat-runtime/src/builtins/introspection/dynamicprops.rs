@@ -470,29 +470,37 @@ pub fn dynamic_property_assign(
     name: &str,
     value: Value,
 ) -> BuiltinResult<bool> {
-    if !validate_dynamic_property_assignment(obj, name)? {
-        return Ok(false);
-    }
-    obj.properties.insert(name.to_string(), value);
-    Ok(true)
-}
-
-/// Shared admission for stores whose owner must publish with its own GC barrier.
-pub(crate) fn validate_dynamic_property_assignment(
-    obj: &ObjectInstance,
-    name: &str,
-) -> BuiltinResult<bool> {
-    let Some(def) = obj.dynamic_property(name) else {
+    let Some(permitted) = dynamic_property_assignment_access(obj, name, None) else {
         return Ok(false);
     };
-    if def.set_access == MemberAccess::Private {
+    if !permitted {
         return Err(dynamic_error(
             "setfield",
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
             format!("Property '{name}' is private"),
         ));
     }
+    obj.properties.insert(name.to_string(), value);
     Ok(true)
+}
+
+/// Dynamic-property access policy, shared by public field assignment and the
+/// canonical object store. Absence is distinct from a denied existing property.
+/// The caller is the class resolved from canonical method metadata, not a
+/// receiver-supplied class name.
+pub(crate) fn dynamic_property_assignment_access(
+    obj: &ObjectInstance,
+    name: &str,
+    caller: Option<&runmat_types::ClassIdentity>,
+) -> Option<bool> {
+    let def = obj.dynamic_property(name)?;
+    Some(match def.set_access {
+        MemberAccess::Public => true,
+        MemberAccess::Private => caller == Some(&def.defining_class),
+        MemberAccess::Protected => caller.is_some_and(|caller| {
+            crate::class_registry::is_class_or_subclass(caller, &def.defining_class)
+        }),
+    })
 }
 
 pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<Option<Value>> {

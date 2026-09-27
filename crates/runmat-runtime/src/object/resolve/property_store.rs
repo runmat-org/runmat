@@ -34,26 +34,33 @@ fn admit(obj: &ObjectInstance, field: &str, caller: Option<&str>) -> Result<Stor
                 &format!("Property '{field}' is private"),
             ));
         }
-        if property.is_dependent
-            && crate::class_registry::lookup_method(
+        if property.is_dependent {
+            if crate::class_registry::lookup_method(
                 &obj.class_name,
                 &crate::object_property_setter_name(field).as_str().into(),
             )
             .is_some()
-        {
-            return Ok(Store::Dependent);
+            {
+                return Ok(Store::Dependent);
+            }
+            return Err(mex(
+                IDENT_PROPERTY_READ_ONLY,
+                &format!("Dependent property '{field}' has no set method"),
+            ));
         }
         return Ok(Store::Stored);
     }
-    if let Some(property) = obj.dynamic_property(field) {
-        if !access_permitted(&property.defining_class, &property.set_access, caller) {
+    if let Some(permitted) = dynamicprops::dynamic_property_assignment_access(
+        obj,
+        field,
+        caller_class_for_function(caller).as_ref(),
+    ) {
+        if !permitted {
             return Err(mex(
                 IDENT_PROPERTY_PRIVATE_ACCESS,
                 &format!("Property '{field}' is private"),
             ));
         }
-    }
-    if dynamicprops::validate_dynamic_property_assignment(obj, field)? {
         return Ok(Store::Stored);
     }
     if crate::class_registry::get_class(&obj.class_name).is_some() {
