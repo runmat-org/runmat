@@ -99,7 +99,7 @@ async fn convert_to_gpu(
                 && gpu_helpers::exact_provider_for_handle(&handle)
                     .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
         {
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::GpuTensor(handle) => {
             let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
@@ -110,7 +110,7 @@ async fn convert_to_gpu(
         Value::Tensor(tensor) => {
             let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &borrowed)
                 .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
@@ -157,7 +157,7 @@ async fn convert_to_gpu_complex(
                 && gpu_helpers::exact_provider_for_handle(&handle)
                     .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
         {
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::GpuTensor(handle) => {
             let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
@@ -185,7 +185,7 @@ async fn convert_to_gpu_complex(
                                 },
                             ) =>
                     {
-                        return Ok(gpu_helpers::complex_gpu_value(output));
+                        return gpu_helpers::complex_gpu_value(output);
                     }
                     Ok(output) => {
                         let mut all_borrowed = borrowed.clone();
@@ -220,13 +220,13 @@ async fn convert_to_gpu_complex(
             let handle =
                 gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &borrowed)
                     .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let handle =
                 gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &borrowed)
                     .map_err(|e| tan_error_with_detail(&TAN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), prototype, protected).await,
         Value::Tensor(tensor) => {

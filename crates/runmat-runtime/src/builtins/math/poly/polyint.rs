@@ -320,7 +320,7 @@ fn maybe_return_gpu(
         Value::ComplexTensor(tensor) => {
             if let Some(provider) = provider {
                 match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-                    Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
+                    Ok(handle) => return gpu_helpers::complex_gpu_value(handle),
                     Err(err) => {
                         warn!(
                             "polyint: provider complex upload failed, keeping result on host: {err}"

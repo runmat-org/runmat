@@ -575,12 +575,12 @@ fn upload_sort_value(
                 .map_err(|error| sort_internal(format!("sort: {error}")))?;
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
                 .map_err(|error| sort_internal(format!("sort: {}", error.message())))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         other => Err(sort_internal(format!(
             "sort: cannot upload unexpected output {other:?}"

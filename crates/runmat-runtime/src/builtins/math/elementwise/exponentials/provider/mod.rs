@@ -64,7 +64,7 @@ pub(super) async fn evaluate(
     match provider_result {
         Ok(mut output) if valid_real(&output, &handle, provider, contract::precision(&handle)) => {
             runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-            return Ok(gpu_helpers::resident_gpu_value(output));
+            return gpu_helpers::resident_gpu_value(output);
         }
         Ok(output) => {
             gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);

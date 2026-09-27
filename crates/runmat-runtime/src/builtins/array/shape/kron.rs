@@ -213,20 +213,20 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&a, &b) {
         if let Some(mut result) = try_kron_gpu_pair(left, right)? {
             set_kron_output_provenance(&mut result, left, Some(right));
-            return Ok(gpu_helpers::resident_gpu_value(result));
+            return gpu_helpers::resident_gpu_value(result);
         }
     }
     match (&a, &b) {
         (Value::GpuTensor(source), host) => {
             if let Some(mut result) = try_kron_gpu_host(source, host, true)? {
                 set_kron_output_provenance(&mut result, source, None);
-                return Ok(gpu_helpers::resident_gpu_value(result));
+                return gpu_helpers::resident_gpu_value(result);
             }
         }
         (host, Value::GpuTensor(source)) => {
             if let Some(mut result) = try_kron_gpu_host(source, host, false)? {
                 set_kron_output_provenance(&mut result, source, None);
-                return Ok(gpu_helpers::resident_gpu_value(result));
+                return gpu_helpers::resident_gpu_value(result);
             }
         }
         _ => {}

@@ -53,7 +53,7 @@ pub(crate) fn validate_real_unary_provider_output_protecting(
         runmat_accelerate_api::handle_provenance(input)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
     );
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 pub(crate) async fn gather_compute_restore<F>(

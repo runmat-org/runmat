@@ -199,7 +199,7 @@ fn ceil_char_array(ca: CharArray) -> BuiltinResult<Value> {
 async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &CEIL_ERROR_INTERNAL)?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        return gpu_helpers::resident_gpu_value(handle);
     }
     if !runmat_accelerate_api::handle_is_logical(&handle)
         && runmat_accelerate_api::handle_storage(&handle)

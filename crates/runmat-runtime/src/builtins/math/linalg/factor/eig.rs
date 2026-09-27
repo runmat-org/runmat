@@ -853,7 +853,7 @@ fn upload_eig_value(
         }
         other => return Ok(other),
     };
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {

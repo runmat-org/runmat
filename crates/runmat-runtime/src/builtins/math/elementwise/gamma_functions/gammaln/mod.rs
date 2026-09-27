@@ -176,7 +176,7 @@ async fn gammaln_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                         ));
                     }
                     resident_real_unary::preserve_residency_intent(&mut output, &handle);
-                    return Ok(gpu_helpers::resident_gpu_value(output));
+                    return gpu_helpers::resident_gpu_value(output);
                 }
                 Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
                 Err(error) => {

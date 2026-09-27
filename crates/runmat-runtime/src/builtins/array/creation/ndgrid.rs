@@ -923,7 +923,7 @@ fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<
             shape: &tensor.shape,
         };
         match provider.upload(&view) {
-            Ok(handle) => return Ok(gpu_helpers::logical_gpu_value(handle)),
+            Ok(handle) => return gpu_helpers::logical_gpu_value(handle),
             Err(err) => {
                 return Err(ndgrid_error_with_detail(
                     &NDGRID_ERROR_INTERNAL,
@@ -941,7 +941,7 @@ fn to_logical_gpu_value(logical: LogicalArray, device_id: u32) -> BuiltinResult<
 fn to_complex_gpu_tensor_value(tensor: ComplexTensor, device_id: u32) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_device(device_id) {
         match gpu_helpers::upload_complex_tensor(provider, &tensor) {
-            Ok(handle) => return Ok(gpu_helpers::complex_gpu_value(handle)),
+            Ok(handle) => return gpu_helpers::complex_gpu_value(handle),
             Err(err) => {
                 return Err(ndgrid_error_with_detail(
                     &NDGRID_ERROR_INTERNAL,

@@ -25,7 +25,7 @@ pub(super) async fn unary(value: Value) -> BuiltinResult<Value> {
     })?;
     validate_real_or_complex_handle(&handle)?;
     if handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        return gpu_helpers::resident_gpu_value(handle);
     }
     if handle_integer_type(&handle).is_none()
         && !handle_is_logical(&handle)

@@ -15,7 +15,7 @@ pub(in super::super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<
         match provider.unary_pow2(&input).await {
             Ok(mut output) if direct_output_matches(&output, &input, provider) => {
                 super::preserve_unary_provenance(&mut output, &input);
-                return Ok(gpu_helpers::resident_gpu_value(output));
+                return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
                 gpu_helpers::free_rejected_provider_output(&output, &[&input], provider);
@@ -78,5 +78,5 @@ async fn fallback_and_restore(
         ));
     }
     super::preserve_unary_provenance(&mut restored, input);
-    Ok(gpu_helpers::resident_gpu_value(restored))
+    gpu_helpers::resident_gpu_value(restored)
 }

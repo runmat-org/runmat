@@ -54,7 +54,7 @@ async fn evaluate_floating(input: GpuTensorHandle) -> BuiltinResult<Value> {
                 ));
             }
             resident_real_unary::preserve_residency_intent(&mut output, &input);
-            Ok(gpu_helpers::resident_gpu_value(output))
+            gpu_helpers::resident_gpu_value(output)
         }
         Err(error) if resident_real_unary::hook_is_unsupported(&error) => {
             evaluate_and_restore(&input, OutputRepresentation::Floating).await
@@ -91,7 +91,7 @@ async fn evaluate_and_restore(
         ));
     }
     resident_real_unary::preserve_residency_intent(&mut restored, input);
-    Ok(gpu_helpers::resident_gpu_value(restored))
+    gpu_helpers::resident_gpu_value(restored)
 }
 
 fn output_matches(

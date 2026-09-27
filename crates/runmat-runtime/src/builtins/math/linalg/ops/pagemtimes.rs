@@ -576,7 +576,7 @@ impl PageOutput {
                                     "pagemtimes: gpu upload failed ({err})"
                                 ))
                             })?;
-                        return Ok(gpu_helpers::resident_gpu_value(handle));
+                        return gpu_helpers::resident_gpu_value(handle);
                     }
                 }
                 Ok(tensor::tensor_into_value(tensor))
@@ -585,7 +585,7 @@ impl PageOutput {
                 if wants_gpu {
                     if let Some(provider) = provider {
                         let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-                        return Ok(gpu_helpers::complex_gpu_value(handle));
+                        return gpu_helpers::complex_gpu_value(handle);
                     }
                 }
                 Ok(complex_tensor_into_value(tensor))

@@ -2016,7 +2016,7 @@ pub mod binocdf {
                 })?;
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|err| super::normal_error("binocdf", format!("binocdf: {err}")))?;
-            return Ok(gpu_helpers::resident_gpu_value(handle));
+            return gpu_helpers::resident_gpu_value(handle);
         }
         match precision {
             OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),
@@ -2309,7 +2309,7 @@ pub mod chi2cdf {
                 })?;
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|error| super::normal_error("chi2cdf", format!("chi2cdf: {error}")))?;
-            return Ok(gpu_helpers::resident_gpu_value(handle));
+            return gpu_helpers::resident_gpu_value(handle);
         }
         match precision {
             OutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),

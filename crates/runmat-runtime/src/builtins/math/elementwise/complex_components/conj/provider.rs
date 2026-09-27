@@ -22,10 +22,10 @@ pub(super) async fn execute(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     })?;
     if storage == GpuTensorStorage::Real {
         if handle_integer_type(&handle).is_some() {
-            return Ok(gpu_helpers::resident_gpu_value(handle));
+            return gpu_helpers::resident_gpu_value(handle);
         }
         if handle_is_logical(&handle) {
-            return Ok(gpu_helpers::logical_gpu_value(handle));
+            return gpu_helpers::logical_gpu_value(handle);
         }
     }
 

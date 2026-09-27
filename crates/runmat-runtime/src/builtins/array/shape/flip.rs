@@ -776,7 +776,7 @@ pub(crate) async fn flip_gpu_with(
             if let Ok(out) = provider.flip(&handle, &zero_based) {
                 if flip_native_output_matches(&handle, &out, provider) {
                     runmat_accelerate_api::set_handle_logical(&out, logical);
-                    return Ok(gpu_helpers::resident_gpu_value(out));
+                    return gpu_helpers::resident_gpu_value(out);
                 }
                 if !gpu_handles_alias(&handle, &out) {
                     let owner =

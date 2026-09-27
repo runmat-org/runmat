@@ -376,7 +376,7 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
                     runmat_accelerate_api::handle_provenance(&handle)
                         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
                 );
-                return Ok(gpu_helpers::resident_gpu_value(result));
+                return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {
                 gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);

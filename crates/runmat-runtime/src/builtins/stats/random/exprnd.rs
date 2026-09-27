@@ -192,7 +192,7 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
         if let Some(provenance) = runmat_accelerate_api::handle_provenance(&source) {
             runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
         }
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        return gpu_helpers::resident_gpu_value(handle);
     }
     Ok(exprnd_host_output(output, parsed.output_precision))
 }

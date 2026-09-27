@@ -205,7 +205,7 @@ async fn tan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                         },
                     ) =>
                 {
-                    return Ok(gpu_helpers::resident_gpu_value(output));
+                    return gpu_helpers::resident_gpu_value(output);
                 }
                 Ok(output) => {
                     gpu_helpers::free_rejected_provider_output(&output, &borrowed, provider);

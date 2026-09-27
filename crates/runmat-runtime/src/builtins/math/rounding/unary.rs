@@ -84,7 +84,7 @@ pub(super) fn validate_provider_output_with_storage(
         runmat_accelerate_api::handle_provenance(input)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
     );
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 pub(super) fn input_provider(

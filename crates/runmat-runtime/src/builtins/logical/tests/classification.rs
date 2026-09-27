@@ -75,7 +75,7 @@ impl ClassificationBoundary {
         gpu_helpers::restore_handle_metadata(&handle, &metadata);
         match provider_result {
             Ok(mask) if self.valid_provider_mask(&handle, &mask, provider) => {
-                Ok(gpu_helpers::logical_gpu_value(mask))
+                gpu_helpers::logical_gpu_value(mask)
             }
             Ok(mask) => {
                 gpu_helpers::free_unprotected_exact_owner(&mask, &[&handle]);

@@ -31,7 +31,7 @@ pub(super) fn validate_real_unary_output(
         ));
     }
     preserve_provenance(&mut output, input);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 pub(super) async fn gather_compute_restore<F>(
@@ -114,7 +114,7 @@ fn restore_output(
         ));
     }
     preserve_provenance(&mut handle, input);
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 fn preserve_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {

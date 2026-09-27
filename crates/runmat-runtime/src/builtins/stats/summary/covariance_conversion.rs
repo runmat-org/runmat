@@ -655,7 +655,7 @@ impl CovarianceGpuEval {
             }
             None => {
                 let _ = self.provider.free(&second);
-                Ok(gpu_helpers::resident_gpu_value(first))
+                gpu_helpers::resident_gpu_value(first)
             }
         }
     }

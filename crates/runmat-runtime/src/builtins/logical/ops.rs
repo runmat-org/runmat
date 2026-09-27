@@ -266,7 +266,7 @@ async fn logical_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         if let Some(mut result) = try_gpu_cast(p, &handle).await {
             copy_logical_provenance(&mut result, &handle);
-            return Ok(gpu_helpers::logical_gpu_value(result));
+            return gpu_helpers::logical_gpu_value(result);
         } else {
             trace!(
                 "logical: provider elem_ne/zeros_like unavailable for buffer {} – gathering",
@@ -387,7 +387,7 @@ fn logical_buffer_to_gpu(
                 } else {
                     runmat_accelerate_api::mark_handle_automatic(&mut handle);
                 }
-                Ok(gpu_helpers::logical_gpu_value(handle))
+                gpu_helpers::logical_gpu_value(handle)
             }
             Err(err) => {
                 trace!("logical: upload failed during fallback path ({err})");

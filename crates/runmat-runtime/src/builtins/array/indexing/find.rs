@@ -1202,7 +1202,7 @@ impl FindResult {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
                     if let Ok(handle) = gpu_helpers::upload_tensor(provider, &tensor) {
-                        return Ok(gpu_helpers::logical_gpu_value(handle));
+                        return gpu_helpers::logical_gpu_value(handle);
                     }
                 }
                 Ok(Value::LogicalArray(logical))

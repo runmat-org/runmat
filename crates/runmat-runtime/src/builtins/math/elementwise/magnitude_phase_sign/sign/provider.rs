@@ -32,9 +32,9 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             Ok(mut output) if valid_sign_gpu_output(&output, &handle, provider) => {
                 runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
                 if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
-                    return Ok(gpu_helpers::complex_gpu_value(output));
+                    return gpu_helpers::complex_gpu_value(output);
                 }
-                return Ok(gpu_helpers::resident_gpu_value(output));
+                return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
                 gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);

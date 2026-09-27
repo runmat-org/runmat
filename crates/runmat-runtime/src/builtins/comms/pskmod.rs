@@ -276,7 +276,7 @@ async fn pskmod_gpu(
             };
             if let Ok(out) = provider.modulate_constellation(request).await {
                 if valid_gpu_output(provider, &handle, &out, options.output_dtype, &handle.shape) {
-                    return Ok(gpu_helpers::complex_gpu_value(out));
+                    return gpu_helpers::complex_gpu_value(out);
                 }
                 gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             }
@@ -300,7 +300,7 @@ async fn pskmod_gpu(
                         options.output_dtype,
                         &output_shape,
                     ) {
-                        return Ok(gpu_helpers::complex_gpu_value(out));
+                        return gpu_helpers::complex_gpu_value(out);
                     }
                     gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
                 }
@@ -315,7 +315,7 @@ async fn pskmod_gpu(
     };
     let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
         .map_err(|err| pskmod_error(format!("pskmod: {err}")))?;
-    Ok(gpu_helpers::complex_gpu_value(out))
+    gpu_helpers::complex_gpu_value(out)
 }
 
 fn valid_gpu_output(

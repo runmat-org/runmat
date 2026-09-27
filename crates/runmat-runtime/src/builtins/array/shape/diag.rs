@@ -877,7 +877,7 @@ fn upload_diag_result(
                 false,
                 precision,
             )?;
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::LogicalArray(array) => {
             let shape = array.shape.clone();
@@ -912,7 +912,7 @@ fn upload_diag_result(
                 true,
                 input_precision,
             )?;
-            Ok(gpu_helpers::logical_gpu_value(handle))
+            gpu_helpers::logical_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let shape = tensor.shape.clone();
@@ -939,7 +939,7 @@ fn upload_diag_result(
                 false,
                 precision,
             )?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::from_f64_values_with_dtype(
@@ -959,7 +959,7 @@ fn upload_diag_result(
                 false,
                 input_precision,
             )?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         other => Err(diag_error(
             MESSAGE_ID_INVALID_INPUT,

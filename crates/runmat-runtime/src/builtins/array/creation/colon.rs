@@ -450,7 +450,7 @@ async fn resident_integer_colon(
     let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
         colon_error_with_message(format!("colon: {error}"), &COLON_ERROR_INTERNAL)
     })?;
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 async fn gather_colon_operand(value: Value) -> crate::BuiltinResult<Value> {

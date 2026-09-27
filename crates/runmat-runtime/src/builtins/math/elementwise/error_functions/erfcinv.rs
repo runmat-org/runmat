@@ -141,7 +141,7 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     match provider.unary_erfcinv(&handle).await {
         Ok(mut out) if real_unary::output_matches(&out, &handle, provider) => {
             real_unary::preserve_residency_intent(&mut out, &handle);
-            return Ok(gpu_helpers::resident_gpu_value(out));
+            return gpu_helpers::resident_gpu_value(out);
         }
         Ok(out) => {
             real_unary::reject_output(&out, &handle, provider);
@@ -167,7 +167,7 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "failed to restore fallback result to input provider: {err}"
         ))
     })?;
-    Ok(gpu_helpers::resident_gpu_value(out))
+    gpu_helpers::resident_gpu_value(out)
 }
 
 fn erfcinv_real(value: Value) -> BuiltinResult<Value> {

@@ -100,14 +100,14 @@ fn upload_set_output(
                 gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
                     internal_error(format!("{builtin}: GPU upload failed: {}", error.message()))
                 })?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         Value::ComplexTensor(tensor) => {
             let handle =
                 gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
                     internal_error(format!("{builtin}: GPU upload failed: {}", error.message()))
                 })?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
+            gpu_helpers::complex_gpu_value(handle)
         }
         other => Err(internal_error(format!(
             "{builtin}: cannot restore resident output {other:?}"

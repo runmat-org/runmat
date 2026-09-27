@@ -38,7 +38,7 @@ pub(crate) async fn try_gpu_equality_comparison(
                 })
                 .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
             runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
-            Some(Ok(gpu_helpers::logical_gpu_value(handle)))
+            Some(gpu_helpers::logical_gpu_value(handle))
         }
         Ok(handle) => {
             free_rejected_gpu_handle(&handle, &[lhs, rhs]);

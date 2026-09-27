@@ -250,7 +250,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             {
                 gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
                 runmat_accelerate_api::set_handle_provenance(&mut result, provenance);
-                return Ok(gpu_helpers::resident_gpu_value(result));
+                return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {
                 gpu_helpers::restore_handle_metadata(&handle, &input_metadata);

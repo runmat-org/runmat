@@ -1341,7 +1341,7 @@ fn upload_gpu_result(
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
             runmat_accelerate_api::set_handle_logical(&handle, false);
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::Num(value) => {
             let data = [value];
@@ -1354,7 +1354,7 @@ fn upload_gpu_result(
                 .upload(&view)
                 .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
             runmat_accelerate_api::set_handle_logical(&handle, false);
-            Ok(gpu_helpers::resident_gpu_value(handle))
+            gpu_helpers::resident_gpu_value(handle)
         }
         Value::LogicalArray(array) => {
             let data: Vec<f64> = array.data.iter().map(|&value| f64::from(value)).collect();

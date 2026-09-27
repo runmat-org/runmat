@@ -728,7 +728,7 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
     let uploaded = gpu_helpers::upload_tensor(provider, &upload_tensor)
         .map_err(|error| median_internal_error(format!("median: GPU upload failed: {error}")))?;
     if is_logical {
-        Ok(gpu_helpers::logical_gpu_value(uploaded))
+        gpu_helpers::logical_gpu_value(uploaded)
     } else {
         Ok(Value::GpuTensor(uploaded))
     }

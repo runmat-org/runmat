@@ -299,7 +299,7 @@ pub fn restore_complex_gpu_result(
             format!("{builtin}: provider returned an invalid restored complex result"),
         ));
     }
-    Ok(gpu_helpers::complex_gpu_value(output))
+    gpu_helpers::complex_gpu_value(output)
 }
 
 pub fn restore_real_gpu_result(

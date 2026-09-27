@@ -431,7 +431,7 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
         // the native path when no synthetic trailing dimensions are required.
         if plan.ext_shape == handle.shape {
             if let Ok(out) = provider.circshift(&handle, &plan.provider) {
-                return Ok(gpu_helpers::resident_gpu_value(out));
+                return gpu_helpers::resident_gpu_value(out);
             }
         }
     }

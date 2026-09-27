@@ -105,5 +105,5 @@ fn validate(
     let provenance = runmat_accelerate_api::handle_provenance(prototype)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }

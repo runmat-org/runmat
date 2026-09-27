@@ -600,7 +600,7 @@ async fn diff_gpu(
             && runmat_accelerate_api::provider_for_handle(&device_result)
                 .is_some_and(|owner| std::ptr::eq(owner, provider));
         if valid {
-            return Ok(gpu_helpers::resident_gpu_value(device_result));
+            return gpu_helpers::resident_gpu_value(device_result);
         }
         let owner = runmat_accelerate_api::provider_for_handle(&device_result).unwrap_or(provider);
         let _ = owner.free(&device_result);

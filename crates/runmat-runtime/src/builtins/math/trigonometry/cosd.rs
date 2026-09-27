@@ -261,7 +261,7 @@ fn upload_real_gpu_output(
 ) -> BuiltinResult<Value> {
     let handle = gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|e| cosd_error_with_detail(&COSD_ERROR_INTERNAL, e))?;
-    Ok(gpu_helpers::resident_gpu_value(handle))
+    gpu_helpers::resident_gpu_value(handle)
 }
 
 fn upload_complex_gpu_output(
@@ -269,7 +269,7 @@ fn upload_complex_gpu_output(
     tensor: ComplexTensor,
 ) -> BuiltinResult<Value> {
     let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)?;
-    Ok(gpu_helpers::complex_gpu_value(handle))
+    gpu_helpers::complex_gpu_value(handle)
 }
 
 #[cfg(test)]

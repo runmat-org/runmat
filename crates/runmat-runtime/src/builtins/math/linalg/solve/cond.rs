@@ -329,7 +329,7 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
         let cond_value = cond_real_tensor_builtin(&tensor, norm)?;
         if let Some(provider) = maybe_provider {
             let uploaded = upload_scalar(provider, cond_value)?;
-            return Ok(gpu_helpers::resident_gpu_value(uploaded));
+            return gpu_helpers::resident_gpu_value(uploaded);
         }
         return Ok(Value::Num(cond_value));
     }
@@ -369,7 +369,7 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
 
     if let Some(provider) = maybe_provider {
         let uploaded = upload_scalar(provider, cond_value)?;
-        return Ok(gpu_helpers::resident_gpu_value(uploaded));
+        return gpu_helpers::resident_gpu_value(uploaded);
     }
 
     Ok(Value::Num(cond_value))

@@ -446,15 +446,15 @@ fn reshape_gpu_tensor(
             || runmat_accelerate_api::handle_storage(&reshaped)
                 == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
-            Ok(gpu_helpers::complex_gpu_value(reshaped))
+            gpu_helpers::complex_gpu_value(reshaped)
         } else {
-            Ok(gpu_helpers::resident_gpu_value(reshaped))
+            gpu_helpers::resident_gpu_value(reshaped)
         }
     } else {
         let mut updated = handle;
         updated.shape = dims.to_vec();
         if complex_storage {
-            Ok(gpu_helpers::complex_gpu_value(updated))
+            gpu_helpers::complex_gpu_value(updated)
         } else {
             Ok(Value::GpuTensor(updated))
         }

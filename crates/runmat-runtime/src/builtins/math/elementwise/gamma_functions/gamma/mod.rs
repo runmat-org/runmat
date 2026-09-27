@@ -120,7 +120,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 ));
             }
             resident_real_unary::preserve_residency_intent(&mut output, &handle);
-            return Ok(gpu_helpers::resident_gpu_value(output));
+            return gpu_helpers::resident_gpu_value(output);
         }
         Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
         Err(error) => {
@@ -131,7 +131,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let output = gamma_tensor(gathered)?;
     let output = resident_real_unary::restore_fallback(&output, &handle, provider)
         .map_err(|detail| gamma_terminal_error(&GAMMA_ERROR_INTERNAL, detail))?;
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn gamma_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {

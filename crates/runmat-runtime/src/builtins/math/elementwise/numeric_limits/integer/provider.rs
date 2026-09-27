@@ -118,5 +118,5 @@ fn validate(
     }
     let mut output = output;
     runmat_accelerate_api::set_handle_provenance(&mut output, expected.provenance);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }

@@ -69,7 +69,7 @@ pub(super) fn real(
         ));
     }
     preserve_provenance(&mut output, input);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn complex(
@@ -100,7 +100,7 @@ fn complex(
         ));
     }
     runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-    Ok(gpu_helpers::complex_gpu_value(output))
+    gpu_helpers::complex_gpu_value(output)
 }
 
 fn preserve_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {

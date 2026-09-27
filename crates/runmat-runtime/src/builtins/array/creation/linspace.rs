@@ -722,7 +722,7 @@ fn validated_sequence_output(
         runmat_accelerate_api::handle_provenance(source)
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
     );
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn validated_unowned_sequence_output(
@@ -751,7 +751,7 @@ fn validated_unowned_sequence_output(
             "{builtin}: provider returned malformed sequence output"
         )));
     }
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn generate_real_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {

@@ -244,7 +244,7 @@ fn build_output(
             })?;
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| trnd_error(&ERROR_INTERNAL, format!("trnd: {err}")))?;
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        return gpu_helpers::resident_gpu_value(handle);
     }
 
     match output_precision {

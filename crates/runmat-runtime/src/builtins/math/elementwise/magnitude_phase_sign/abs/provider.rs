@@ -23,7 +23,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match result {
             Ok(mut output) if valid_output(&output, &handle, provider) => {
                 runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
-                return Ok(gpu_helpers::resident_gpu_value(output));
+                return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
                 gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
@@ -70,7 +70,7 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         ));
     }
     runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn valid_output(

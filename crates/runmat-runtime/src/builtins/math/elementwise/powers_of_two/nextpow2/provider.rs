@@ -25,7 +25,7 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
             if output_matches(&output, &input, provider, output_representation(&input)) =>
         {
             preserve_residency(&mut output, &input);
-            Ok(gpu_helpers::resident_gpu_value(output))
+            gpu_helpers::resident_gpu_value(output)
         }
         Ok(output) => {
             gpu_helpers::free_rejected_provider_output(&output, &[&input], provider);
@@ -76,7 +76,7 @@ async fn evaluate_and_restore(
         ));
     }
     preserve_residency(&mut output, input);
-    Ok(gpu_helpers::resident_gpu_value(output))
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn output_matches(

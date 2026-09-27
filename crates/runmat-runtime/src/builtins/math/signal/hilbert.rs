@@ -367,7 +367,7 @@ async fn hilbert_gpu_tensor(
                         .unwrap_or_else(|| provider.precision()),
                 ) =>
             {
-                return Ok(gpu_helpers::complex_gpu_value(out));
+                return gpu_helpers::complex_gpu_value(out);
             }
             Ok(out) => {
                 if hilbert_gpu_handles_alias(&out, &handle) {
@@ -597,7 +597,7 @@ fn restore_hilbert_gpu_output(
             "provider upload returned malformed fallback output",
         ));
     }
-    Ok(gpu_helpers::complex_gpu_value(output))
+    gpu_helpers::complex_gpu_value(output)
 }
 
 fn valid_hilbert_gpu_output(

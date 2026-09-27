@@ -284,7 +284,7 @@ async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return sinc_gpu_host_fallback(provider, &handle).await;
         }
         match provider.unary_sinc(&handle).await {
-            Ok(out) => return Ok(gpu_helpers::resident_gpu_value(out)),
+            Ok(out) => return gpu_helpers::resident_gpu_value(out),
             Err(err) if provider_error_is_unsupported(&err) => {
                 return sinc_gpu_host_fallback(provider, &handle).await;
             }

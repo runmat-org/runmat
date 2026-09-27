@@ -1028,7 +1028,7 @@ fn finish_cdf(
             })?;
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|err| invalid_for(CDF_NAME, format!("cdf: {err}")))?;
-        return Ok(gpu_helpers::resident_gpu_value(handle));
+        return gpu_helpers::resident_gpu_value(handle);
     }
     match precision {
         CdfOutputPrecision::Double => Ok(tensor::tensor_into_value(tensor)),

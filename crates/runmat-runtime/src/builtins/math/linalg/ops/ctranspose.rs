@@ -539,9 +539,9 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                         || runmat_accelerate_api::handle_storage(&conjugated)
                             == GpuTensorStorage::ComplexInterleaved
                     {
-                        return Ok(gpu_helpers::complex_gpu_value(conjugated));
+                        return gpu_helpers::complex_gpu_value(conjugated);
                     }
-                    return Ok(gpu_helpers::resident_gpu_value(conjugated));
+                    return gpu_helpers::resident_gpu_value(conjugated);
                 }
                 Ok(rejected) => {
                     cleanup_rejected_conjugate(&handle, &transposed_handle, &rejected, provider);
@@ -583,7 +583,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match &transposed_value {
             Value::Tensor(transposed) => {
                 match gpu_helpers::upload_tensor(provider, transposed) {
-                    Ok(uploaded) => return Ok(gpu_helpers::resident_gpu_value(uploaded)),
+                    Ok(uploaded) => return gpu_helpers::resident_gpu_value(uploaded),
                     Err(err) => warn!(
                         "ctranspose: re-upload after host fallback failed; returning host tensor ({err})"
                     ),
@@ -591,7 +591,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
             Value::ComplexTensor(transposed) => {
                 match gpu_helpers::upload_complex_tensor(provider, transposed) {
-                    Ok(uploaded) => return Ok(gpu_helpers::complex_gpu_value(uploaded)),
+                    Ok(uploaded) => return gpu_helpers::complex_gpu_value(uploaded),
                     Err(err) => warn!(
                         "ctranspose: complex re-upload after host fallback failed; returning host tensor ({err})"
                     ),
@@ -608,7 +608,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     shape: &transposed.shape,
                 };
                 match provider.upload(&view) {
-                    Ok(uploaded) => return Ok(gpu_helpers::logical_gpu_value(uploaded)),
+                    Ok(uploaded) => return gpu_helpers::logical_gpu_value(uploaded),
                     Err(err) => warn!(
                         "ctranspose: logical re-upload after host fallback failed; returning host logical array ({err})"
                     ),

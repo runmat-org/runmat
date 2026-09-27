@@ -106,7 +106,7 @@ fn upload_double_like_complex(
     let handle = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, protected)
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?;
     if valid_double_like_output(&handle, prototype, provider, &tensor.shape, true) {
-        Ok(gpu_helpers::complex_gpu_value(handle))
+        gpu_helpers::complex_gpu_value(handle)
     } else {
         gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
         Err(double_error_with_detail(
