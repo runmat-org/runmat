@@ -125,6 +125,7 @@ struct TestProvider {
     frees: Mutex<HashMap<u64, usize>>,
     inspect_roots_on_free: AtomicBool,
     fail_free_buffer: AtomicU64,
+    single_inputs: Mutex<Vec<u64>>,
     reject_fusion: AtomicBool,
     fused_dispatches: AtomicU64,
 }
@@ -137,6 +138,7 @@ impl TestProvider {
             frees: Mutex::new(HashMap::new()),
             inspect_roots_on_free: AtomicBool::new(false),
             fail_free_buffer: AtomicU64::new(0),
+            single_inputs: Mutex::new(Vec::new()),
             reject_fusion: AtomicBool::new(false),
             fused_dispatches: AtomicU64::new(0),
         }
@@ -812,12 +814,31 @@ impl AccelProvider for TestProvider {
         Box::pin(async move { Err(anyhow!("corrcoef (test provider): not implemented")) })
     }
 
+    fn unary_sin<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if runmat_accelerate_api::handle_precision(input) != Some(ProviderPrecision::F64)
+                || runmat_accelerate_api::handle_storage(input)
+                    != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test sine hook admits only real Double operands",
+                ));
+            }
+            let (data, shape) = self.pull(input)?;
+            Ok(self.push(data.into_iter().map(f64::sin).collect(), shape))
+        })
+    }
+
     fn unary_single<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             suspension::pending_single_if_armed().await;
+            self.single_inputs.lock().unwrap().push(input.buffer_id);
             let (data, shape) = self.pull(input)?;
             let single = data
                 .into_iter()

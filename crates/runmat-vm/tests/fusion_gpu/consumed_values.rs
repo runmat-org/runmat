@@ -68,7 +68,7 @@ fn failed_retirement_preserves_residency_marker_and_live_allocation() {
     });
 }
 
-fn resident_outputs(values: &[Value]) -> Vec<GpuTensorHandle> {
+pub(super) fn resident_outputs(values: &[Value]) -> Vec<GpuTensorHandle> {
     let mut seen = HashSet::new();
     let mut handles = Vec::new();
     for value in values {
@@ -152,7 +152,11 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
         provider.reject_fusion.store(true, Ordering::Relaxed);
         let _reject = RejectFusion(provider);
         let dispatches = provider.fused_dispatches.load(Ordering::Relaxed);
-        let source = "x = [0.25 0.5]; y = single(sin(x)); alias = y;";
+        let single_calls = provider.single_inputs.lock().unwrap().len();
+        // MIR locals are part of the returned full-frame ABI. A second real
+        // iteration overwrites the first intermediate, making its retirement
+        // obligatory instead of mistaking a returned anonymous slot for a leak.
+        let source = "x = [0.25 0.5]; for k = 1:2; y = single(sin(x)); end; alias = y;";
         let bytecode = compile_semantic(source);
         let input = provider.push(vec![0.25, 0.5], vec![1, 2]);
         let first_temporary = provider.next_id.load(Ordering::Relaxed);
@@ -219,6 +223,21 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
         assert!(
             !retired.is_empty(),
             "witness must allocate and consume an intermediate"
+        );
+        let single_inputs = provider.single_inputs.lock().unwrap()[single_calls..].to_vec();
+        assert_eq!(
+            single_inputs.len(),
+            2,
+            "both real call iterations must execute the resident cast hook"
+        );
+        assert_ne!(single_inputs[0], single_inputs[1]);
+        assert!(
+            retired.contains(&single_inputs[0]),
+            "the first sine result consumed by single must be retired"
+        );
+        assert!(
+            expected.contains(&single_inputs[1]),
+            "the last represented MIR input slot remains adopted by completion"
         );
         for id in retired {
             assert_eq!(

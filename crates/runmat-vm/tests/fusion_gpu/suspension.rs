@@ -450,7 +450,29 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             .iter()
             .filter(|series| series.candidate.contains("fusion.elementwise"))
             .all(|series| series.samples == 0 && series.failures == 0));
-        provider.free(handle).unwrap();
+        // Completion returns a dense full frame, also used by region-resume
+        // consumers, not just exported y. Assert exact ownership before freeing
+        // its deduplicated resident slots; an unreturned temporary still fails.
+        let adopted = consumed_values::resident_outputs(&completed.values);
+        let mut expected_ids = baseline
+            .keys()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        expected_ids.extend(adopted.iter().map(|value| value.buffer_id));
+        assert_eq!(
+            provider
+                .buffers
+                .lock()
+                .unwrap()
+                .keys()
+                .copied()
+                .collect::<std::collections::HashSet<_>>(),
+            expected_ids,
+            "all remaining allocations must be reachable from the returned full frame"
+        );
+        for output in adopted {
+            provider.free(&output).unwrap();
+        }
         assert_buffers_equal(provider, &baseline);
     });
 }
