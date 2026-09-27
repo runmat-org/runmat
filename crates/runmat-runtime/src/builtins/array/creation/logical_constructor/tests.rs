@@ -279,7 +279,7 @@ fn logical_wgpu_like_integer_prototype_preserves_owner_and_logical_storage() {
     assert_eq!(handle.shape(), vec![2, 2]);
     assert!(runmat_accelerate_api::handle_is_logical(&handle));
     assert!(runmat_accelerate_api::provider_for_handle(&handle)
-        .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather false");
     assert_eq!(gathered.shape, vec![2, 2]);
     assert_eq!(gathered.materialize_f64(), vec![0.0; 4]);
@@ -296,7 +296,7 @@ fn logical_wgpu_like_integer_prototype_preserves_owner_and_logical_storage() {
     assert_eq!(handle.shape(), vec![2, 2]);
     assert!(runmat_accelerate_api::handle_is_logical(&handle));
     assert!(runmat_accelerate_api::provider_for_handle(&handle)
-        .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider)));
     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather true");
     assert_eq!(gathered.shape, vec![2, 2]);
     assert_eq!(gathered.materialize_f64(), vec![1.0; 4]);

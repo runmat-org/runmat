@@ -2315,8 +2315,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
                 output.clone(),
             )))

@@ -47,7 +47,7 @@ pub(super) fn binary_hook(
         .ok_or_else(|| errors::execution(builtin, "no provider owns the left operand"))?;
     let rhs_owner = gpu_helpers::exact_provider_for_handle(rhs)
         .ok_or_else(|| errors::execution(builtin, "no provider owns the right operand"))?;
-    if !std::ptr::eq(owner, rhs_owner)
+    if !runmat_accelerate_api::same_provider_instance(owner, rhs_owner)
         || runmat_accelerate_api::handle_precision(lhs)
             != runmat_accelerate_api::handle_precision(rhs)
     {

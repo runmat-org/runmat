@@ -796,7 +796,7 @@ fn upload_created_output(
     if handle.shape() != shape
         || handle.shares_allocation_with(owner)
         || !gpu_helpers::exact_provider_for_handle(&handle)
-            .is_some_and(|actual| std::ptr::eq(actual, provider))
+            .is_some_and(|actual| runmat_accelerate_api::same_provider_instance(actual, provider))
     {
         return Err(gpu_helpers::reject_gpu_output(
             handle,
@@ -1484,8 +1484,11 @@ pub(crate) mod tests {
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
             assert_eq!(handle.shape(), vec![2, 2]);
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint64 fill")
                 .data;
@@ -1540,8 +1543,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&output)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&output).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let gathered = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
                 output.clone(),
             )))
@@ -1781,8 +1787,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U8)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint8 output")
                 .data;
@@ -1812,8 +1821,11 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(runmat_accelerate_api::IntegerElementType::U8)
             );
-            assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let downloaded = block_on(provider.download_integer(&handle))
                 .expect("download uint8 output")
                 .data;

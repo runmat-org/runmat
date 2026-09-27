@@ -307,8 +307,11 @@ pub(crate) mod tests {
                 .expect("owner upload");
             let output = run_full(Value::GpuTensor(input.clone())).expect("full identity");
             assert_eq!(output, Value::GpuTensor(input.clone()));
-            assert!(runmat_accelerate_api::provider_for_handle(&input)
-                .is_some_and(|provider| std::ptr::eq(provider, owner_dyn)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&input).is_some_and(|provider| {
+                    runmat_accelerate_api::same_provider_instance(provider, owner_dyn)
+                })
+            );
             drop(input);
         }
     }

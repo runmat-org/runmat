@@ -286,10 +286,14 @@ fn merge_source_owners(
     rhs: Option<SourceResidency>,
 ) -> crate::BuiltinResult<Option<SourceResidency>> {
     match (lhs, rhs) {
-        (Some(lhs), Some(rhs)) if !std::ptr::eq(lhs.owner, rhs.owner) => Err(terminal_gpu_error(
-            "logspace: GPU scalar inputs must have the same owning provider",
-            &LOGSPACE_ERRORS[4],
-        )),
+        (Some(lhs), Some(rhs))
+            if !runmat_accelerate_api::same_provider_instance(lhs.owner, rhs.owner) =>
+        {
+            Err(terminal_gpu_error(
+                "logspace: GPU scalar inputs must have the same owning provider",
+                &LOGSPACE_ERRORS[4],
+            ))
+        }
         (Some(lhs), Some(rhs)) => Ok(Some(SourceResidency {
             owner: lhs.owner,
             explicit: lhs.explicit || rhs.explicit,
@@ -650,8 +654,9 @@ fn valid_uploaded_sequence_handle(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output) == Some(owner.precision())
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|candidate| {
+            runmat_accelerate_api::same_provider_instance(candidate, owner)
+        })
 }
 
 fn finalize_sequence_handle(
@@ -692,8 +697,9 @@ fn valid_sequence_handle(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|candidate| std::ptr::eq(candidate, owner))
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|candidate| {
+            runmat_accelerate_api::same_provider_instance(candidate, owner)
+        })
 }
 
 fn generate_real_log_sequence(start: f64, stop: f64, count: usize) -> Vec<f64> {

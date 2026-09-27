@@ -77,7 +77,7 @@ fn gt_gpu_wide_integer_scalar_fallback_is_exact_owner_resident_logical() {
             panic!("expected resident logical result");
         };
         assert!(runmat_accelerate_api::handle_is_logical(result_handle));
-        assert!(std::ptr::eq(
+        assert!(runmat_accelerate_api::same_provider_instance(
             runmat_accelerate_api::provider_for_handle(result_handle).expect("result owner"),
             provider
         ));
@@ -98,7 +98,7 @@ fn gt_resident_single_does_not_round_a_double_scalar_for_comparison() {
             panic!("expected resident logical result");
         };
         assert!(runmat_accelerate_api::handle_is_logical(result_handle));
-        assert!(std::ptr::eq(
+        assert!(runmat_accelerate_api::same_provider_instance(
             runmat_accelerate_api::provider_for_handle(result_handle).expect("result owner"),
             provider
         ));

@@ -282,7 +282,9 @@ fn try_kron_gpu_pair(
     let Some(right_owner) = gpu_helpers::exact_provider_for_handle(right) else {
         return Ok(None);
     };
-    if !std::ptr::eq(owner, right_owner) || left.device_id() != right.device_id() {
+    if !runmat_accelerate_api::same_provider_instance(owner, right_owner)
+        || left.device_id() != right.device_id()
+    {
         return Ok(None);
     }
     let expected_shape = aligned_shapes(left.shape(), right.shape())?.2;
@@ -298,8 +300,9 @@ fn try_kron_gpu_pair(
     };
     let valid = output.shape() == expected_shape
         && output.device_id() == left.device_id()
-        && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|output_owner| {
+            runmat_accelerate_api::same_provider_instance(output_owner, owner)
+        })
         && !output.shares_allocation_with(left)
         && !output.shares_allocation_with(right)
         && runmat_accelerate_api::handle_storage(&output)
@@ -358,8 +361,9 @@ fn try_kron_gpu_host(
         Err(_) => return Ok(None),
     };
     let uploaded_valid = uploaded.device_id() == source.device_id()
-        && gpu_helpers::exact_provider_for_handle(&uploaded)
-            .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(&uploaded).is_some_and(|uploaded_owner| {
+            runmat_accelerate_api::same_provider_instance(uploaded_owner, owner)
+        })
         && runmat_accelerate_api::handle_storage(&uploaded)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
@@ -390,8 +394,9 @@ fn try_kron_gpu_host(
     };
     let valid = output.shape() == expected_shape
         && output.device_id() == source.device_id()
-        && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(&output).is_some_and(|output_owner| {
+            runmat_accelerate_api::same_provider_instance(output_owner, owner)
+        })
         && !output.shares_allocation_with(source)
         && !output.shares_allocation_with(&uploaded)
         && runmat_accelerate_api::handle_storage(&output)

@@ -297,7 +297,7 @@ pub(super) fn valid_provider_truth_handle(
         && output.shape() == expected_shape
         && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
         && matches!(
             output.physical().element_type(),

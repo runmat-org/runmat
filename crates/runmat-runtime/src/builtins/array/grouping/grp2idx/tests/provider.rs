@@ -28,11 +28,11 @@ fn resident_integer_outputs_keep_owner_and_do_not_alias() {
             assert!(!g.shares_allocation_with(&prototype));
             assert!(!levels.shares_allocation_with(&prototype));
             assert!(!g.shares_allocation_with(levels));
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(g).unwrap(),
                 provider
             ));
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(levels).unwrap(),
                 provider
             ));

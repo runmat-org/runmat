@@ -401,8 +401,9 @@ fn try_gpu_ind2sub(
                 let valid = handles.iter().enumerate().all(|(index, output)| {
                     output.shape() == output_shape
                         && output.device_id() == provider.device_id()
-                        && gpu_helpers::exact_provider_for_handle(output)
-                            .is_some_and(|owner| std::ptr::eq(owner, provider))
+                        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|owner| {
+                            runmat_accelerate_api::same_provider_instance(owner, provider)
+                        })
                         && runmat_accelerate_api::handle_storage(output)
                             == runmat_accelerate_api::GpuTensorStorage::Real
                         && runmat_accelerate_api::handle_precision(output)
@@ -967,8 +968,11 @@ pub(crate) mod tests {
                 let Value::GpuTensor(handle) = output else {
                     panic!("scalar fallback must restore resident output");
                 };
-                assert!(super::gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                assert!(
+                    super::gpu_helpers::exact_provider_for_handle(&handle).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
+                );
                 assert_eq!(
                     runmat_accelerate_api::handle_provenance(&handle),
                     Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)

@@ -21,7 +21,7 @@ pub(crate) async fn try_gpu_equality_comparison(
     }
     let provider = resolved_actual_owner(lhs)?;
     let rhs_owner = resolved_actual_owner(rhs)?;
-    if !std::ptr::eq(provider, rhs_owner)
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_owner)
         || runmat_accelerate_api::handle_precision(lhs)
             != runmat_accelerate_api::handle_precision(rhs)
     {
@@ -102,7 +102,7 @@ pub(crate) async fn try_gpu_ordering_comparison(
     }
     let provider = resolved_actual_owner(lhs)?;
     let rhs_owner = resolved_actual_owner(rhs)?;
-    if !std::ptr::eq(provider, rhs_owner) {
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_owner) {
         return None;
     }
     let temporary_lhs;
@@ -192,7 +192,8 @@ fn valid_real_projection(
             == runmat_accelerate_api::handle_precision(input)
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
-        && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn valid_ordering_output(
@@ -214,7 +215,8 @@ fn valid_ordering_output(
                 | runmat_accelerate_api::NumericElementType::F32
                 | runmat_accelerate_api::NumericElementType::F64
         )
-        && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn valid_equality_output(
@@ -236,7 +238,8 @@ fn valid_equality_output(
                 | runmat_accelerate_api::NumericElementType::F32
                 | runmat_accelerate_api::NumericElementType::F64
         )
-        && resolved_actual_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        && resolved_actual_owner(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn rejected(handle: GpuTensorHandle, operation: IntegerComparisonOp) -> crate::RuntimeError {
