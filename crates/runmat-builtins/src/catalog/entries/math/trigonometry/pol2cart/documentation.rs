@@ -90,8 +90,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     evidence: BuiltinDocumentationEvidence {
         implementation: &[],
         verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Coordinate shapes, classes, requested outputs and provider lifetimes", location: "crates/runmat-runtime/src/builtins/math/trigonometry/pol2cart/tests.rs" }],
-        notes: &["Legacy description, behaviors, FAQs, links, source and both examples preserved here. The contradictory legacy blanket integer-rejection statement is corrected to match the independently gated exact integer extensions.",
-            "Shared typed three-data-operand/multiple-output preparation and placement observation remain an L05 acceptance obligation; RuntimeOwned is not automatic placement evidence."],
+        notes: &[],
     },
     introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };
