@@ -289,3 +289,90 @@ fn submission_checks_owner_native_storage_layout_and_actual_allocation_extent() 
     drop(allocation.handle);
     assert_eq!(allocation.probe.retirements(), 1);
 }
+
+#[test]
+fn logical_f32_leaf_is_rejected_without_releasing_the_callers_allocation() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_logical_zeroed(vec![4, 2], ProviderPrecision::F32)
+        .unwrap();
+    let caller = input.handle.clone();
+    let wire = caller.wire_descriptor();
+    let r = recipe(descriptor());
+    let inputs = [input.handle];
+    // Native encoding, dimensions, device and byte extent all match. Only the
+    // authentic logical producer interpretation disqualifies this leaf.
+    assert_eq!(caller.physical().element_type(), NumericElementType::F32);
+    assert_eq!(caller.physical().payload_bytes(), 32);
+    assert!(caller.view().is_logical());
+    for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let error = match ReductionSubmission::new(
+            ReductionSelection::new(&r, strategy).unwrap(),
+            &inputs,
+            owner.device_id(),
+        ) {
+            Ok(_) => panic!("logical storage must not be interpreted as a numerical leaf"),
+            Err(error) => error,
+        };
+        assert!(!error.is_unsupported());
+        assert!(error.to_string().contains("prepared input view mismatch"));
+        assert_eq!(caller.wire_descriptor(), wire);
+        assert_eq!(input.probe.retirements(), 0);
+    }
+    drop(inputs);
+    assert_eq!(input.probe.retirements(), 0);
+    drop(caller);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
+#[test]
+fn unavailable_leaf_retains_typed_not_live_source_and_caller_ownership() {
+    use crate::allocation::AllocationAcquisitionError;
+    use std::error::Error;
+
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![4, 2], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let caller = input.handle.clone();
+    let wire = caller.wire_descriptor();
+    let r = recipe(descriptor());
+    let inputs = [input.handle];
+    // The exact same native leaf is admissible before owner availability is
+    // lost. No descriptor forgery or premature manual free constructs this case.
+    assert!(ReductionSubmission::new(
+        ReductionSelection::new(&r, ReductionStrategy::SinglePass).unwrap(),
+        &inputs,
+        owner.device_id(),
+    )
+    .is_ok());
+    input.probe.mark_unavailable();
+    for strategy in [ReductionStrategy::SinglePass, ReductionStrategy::TwoPass] {
+        let error = match ReductionSubmission::new(
+            ReductionSelection::new(&r, strategy).unwrap(),
+            &inputs,
+            owner.device_id(),
+        ) {
+            Ok(_) => panic!("unavailable allocation must not be submitted"),
+            Err(error) => error,
+        };
+        assert!(
+            !error.is_unsupported(),
+            "device failure is not permission to retry"
+        );
+        assert_eq!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<AllocationAcquisitionError>()),
+            Some(&AllocationAcquisitionError::NotLive),
+        );
+        assert_eq!(caller.wire_descriptor(), wire);
+        assert_eq!(input.probe.retirements(), 0);
+        drop(error);
+        assert_eq!(input.probe.retirements(), 0);
+    }
+    drop(inputs);
+    assert_eq!(input.probe.retirements(), 0);
+    drop(caller);
+    assert_eq!(input.probe.retirements(), 1);
+}
