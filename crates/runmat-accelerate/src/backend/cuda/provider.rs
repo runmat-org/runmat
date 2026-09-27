@@ -4,11 +4,12 @@ use anyhow::{anyhow, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     native_buffer_byte_length, AccelDownloadFuture, AccelIntegerDownloadFuture,
-    AccelNumericDownloadFuture, AccelProvider, GpuTensorDescriptor, GpuTensorHandle,
-    GpuTensorStorage, HostIntegerTensorOwned, HostIntegerTensorView, HostNumericDataOwned,
+    AccelNumericDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage,
+    HostIntegerTensorOwned, HostIntegerTensorView, HostLogicalTensorView, HostNumericDataOwned,
     HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned,
-    HostTensorView, NativeDeviceAccess, NativeDeviceApi, NativeDeviceBuffer, NativeDeviceComponent,
-    NativeDeviceContext, NativeDeviceContextGuard, NativeDeviceInitialization, NumericElementType,
+    HostTensorView, NativeDeviceAccess, NativeDeviceApi, NativeDeviceBuffer, NativeDeviceClass,
+    NativeDeviceComponent, NativeDeviceContext, NativeDeviceContextGuard,
+    NativeDeviceInitialization,
 };
 
 use super::allocation_state::{Allocation, AllocationState};
@@ -75,11 +76,11 @@ impl CudaProvider {
     fn allocate(
         &self,
         shape: &[usize],
-        element_type: NumericElementType,
+        class: NativeDeviceClass,
         storage: GpuTensorStorage,
         initialization: NativeDeviceInitialization,
     ) -> Result<GpuTensorHandle> {
-        self.allocate_initialized(shape, element_type, storage, |pointer, byte_length| {
+        self.allocate_initialized(shape, class, storage, |pointer, byte_length| {
             if initialization == NativeDeviceInitialization::Zeroed {
                 self.driver.zero(pointer, byte_length)
             } else {
@@ -93,15 +94,16 @@ impl CudaProvider {
     fn allocate_initialized(
         &self,
         shape: &[usize],
-        element_type: NumericElementType,
+        class: NativeDeviceClass,
         storage: GpuTensorStorage,
         initialize: impl FnOnce(DevicePointer, usize) -> Result<()>,
     ) -> Result<GpuTensorHandle> {
-        let byte_length = native_buffer_byte_length(shape, element_type, storage)?;
-        let descriptor = GpuTensorDescriptor::numeric(element_type, storage);
+        class.validate_storage(storage)?;
+        let byte_length = native_buffer_byte_length(shape, class.element_type(), storage)?;
         self.allocations.allocate(
             shape.to_vec(),
-            descriptor,
+            class,
+            storage,
             byte_length,
             || self.driver.allocate(byte_length),
             |pointer| initialize(pointer, byte_length),
@@ -113,7 +115,7 @@ impl CudaProvider {
         let bytes = numeric_view_bytes(host.data);
         let handle = self.allocate_initialized(
             host.shape,
-            host.element_type(),
+            NativeDeviceClass::Numeric(host.element_type()),
             host.storage,
             |pointer, _| self.driver.upload(pointer, bytes),
         )?;
@@ -124,15 +126,15 @@ impl CudaProvider {
     fn download_numeric_impl(&self, handle: &GpuTensorHandle) -> Result<HostNumericTensorOwned> {
         let allocation = self.allocation(handle)?;
         let element_type = handle
-            .descriptor
+            .descriptor()
             .element_type
             .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?;
         let storage = handle
-            .descriptor
+            .descriptor()
             .storage
             .ok_or_else(|| anyhow!("CUDA handle is missing its storage layout"))?;
-        let lanes = allocation
-            .byte_length
+        let byte_length = native_buffer_byte_length(handle.shape(), element_type, storage)?;
+        let lanes = byte_length
             .checked_div(element_type.element_size())
             .ok_or_else(|| anyhow!("invalid CUDA element size"))?;
         let mut data = zeroed_numeric(element_type, lanes);
@@ -140,13 +142,10 @@ impl CudaProvider {
             self.driver
                 .download(allocation.pointer, numeric_owned_bytes_mut(&mut data))
         })?;
-        runmat_value::record_host_copy(
-            runmat_value::HostCopyReason::ProviderReadback,
-            allocation.byte_length,
-        );
+        runmat_value::record_host_copy(runmat_value::HostCopyReason::ProviderReadback, byte_length);
         let result = HostNumericTensorOwned {
             data,
-            shape: handle.shape.clone(),
+            shape: handle.shape().to_vec(),
             storage,
         };
         result.validate()?;
@@ -159,13 +158,13 @@ impl CudaProvider {
         component: NativeDeviceComponent,
     ) -> Result<GpuTensorHandle> {
         let source_allocation = self.allocation(source)?;
-        if source.descriptor.storage != Some(GpuTensorStorage::ComplexInterleaved) {
+        if source.descriptor().storage != Some(GpuTensorStorage::ComplexInterleaved) {
             return Err(anyhow!(
                 "CUDA component extraction requires complex storage"
             ));
         }
         let element_type = source
-            .descriptor
+            .descriptor()
             .element_type
             .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?;
         let element_bytes = element_type.element_size();
@@ -173,10 +172,14 @@ impl CudaProvider {
             NativeDeviceComponent::Real => 0,
             NativeDeviceComponent::Imaginary => element_bytes,
         };
-        let elements = source_allocation.byte_length / (element_bytes * 2);
-        self.allocate_initialized(
-            &source.shape,
+        let elements = native_buffer_byte_length(
+            source.shape(),
             element_type,
+            GpuTensorStorage::ComplexInterleaved,
+        )? / (element_bytes * 2);
+        self.allocate_initialized(
+            source.shape(),
+            NativeDeviceClass::Numeric(element_type),
             GpuTensorStorage::Real,
             |pointer, _| {
                 self.driver.copy_strided(
@@ -196,10 +199,10 @@ impl CudaProvider {
         real: &GpuTensorHandle,
         imaginary: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        if real.shape != imaginary.shape
-            || real.descriptor.element_type != imaginary.descriptor.element_type
-            || real.descriptor.storage != Some(GpuTensorStorage::Real)
-            || imaginary.descriptor.storage != Some(GpuTensorStorage::Real)
+        if real.shape() != imaginary.shape()
+            || real.descriptor().element_type != imaginary.descriptor().element_type
+            || real.descriptor().storage != Some(GpuTensorStorage::Real)
+            || imaginary.descriptor().storage != Some(GpuTensorStorage::Real)
         {
             return Err(anyhow!(
                 "CUDA complex components must be matching real arrays"
@@ -208,13 +211,15 @@ impl CudaProvider {
         let real_allocation = self.allocation(real)?;
         let imaginary_allocation = self.allocation(imaginary)?;
         let element_type = real
-            .descriptor
+            .descriptor()
             .element_type
             .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?;
         let element_bytes = element_type.element_size();
-        let elements = real_allocation.byte_length / element_bytes;
+        let elements =
+            native_buffer_byte_length(real.shape(), element_type, GpuTensorStorage::Real)?
+                / element_bytes;
         self.allocate_initialized(
-            &real.shape,
+            real.shape(),
             element_type,
             GpuTensorStorage::ComplexInterleaved,
             |pointer, _| {
@@ -266,6 +271,21 @@ impl AccelProvider for CudaProvider {
         self.upload_numeric_impl(host)
     }
 
+    fn upload_logical_raw(&self, host: &HostLogicalTensorView<'_>) -> Result<GpuTensorHandle> {
+        host.validate()?;
+        let result = self.allocate_initialized(
+            host.shape,
+            NativeDeviceClass::Logical,
+            GpuTensorStorage::Real,
+            |pointer, _| self.driver.upload(pointer, host.data),
+        )?;
+        runmat_value::record_host_copy(
+            runmat_value::HostCopyReason::ProviderUpload,
+            host.data.len(),
+        );
+        Ok(result)
+    }
+
     fn download_numeric<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
@@ -291,8 +311,12 @@ impl AccelProvider for CudaProvider {
         })
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.allocations.free(handle)
+    fn acquire_live(
+        &self,
+        wire: &runmat_accelerate_api::allocation::GpuTensorWireDescriptor,
+    ) -> Result<GpuTensorHandle, runmat_accelerate_api::allocation::AllocationAcquisitionError>
+    {
+        self.allocations.acquire(wire)
     }
 
     fn device_info(&self) -> String {
@@ -347,16 +371,23 @@ impl AccelProvider for CudaProvider {
         self.allocations.enter_native()
     }
 
-    fn export_native_device_buffer(
+    fn export_native_device_buffer_raw(
         &self,
         handle: &GpuTensorHandle,
-        _access: NativeDeviceAccess,
+        access: NativeDeviceAccess,
     ) -> Result<NativeDeviceBuffer> {
         let allocation = self.allocation(handle)?;
+        if access == NativeDeviceAccess::ReadWrite {
+            self.allocations.validate_native_write(handle)?;
+        }
         Ok(NativeDeviceBuffer {
             context: self.native_device_context()?,
             device_address: allocation.pointer,
-            byte_length: allocation.byte_length,
+            byte_length: native_buffer_byte_length(
+                handle.shape(),
+                handle.physical().element_type(),
+                handle.physical().storage(),
+            )?,
             descriptor: allocation.descriptor,
         })
     }
@@ -364,31 +395,29 @@ impl AccelProvider for CudaProvider {
     fn allocate_native_device_buffer(
         &self,
         shape: &[usize],
-        element_type: NumericElementType,
+        class: NativeDeviceClass,
         storage: GpuTensorStorage,
         initialization: NativeDeviceInitialization,
     ) -> Result<GpuTensorHandle> {
-        self.allocate(shape, element_type, storage, initialization)
+        self.allocate(shape, class, storage, initialization)
     }
 
     fn copy_native_device_buffer(&self, source: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let source_allocation = self.allocation(source)?;
         self.allocate_initialized(
-            &source.shape,
+            source.shape(),
+            if source.view().is_logical() {
+                NativeDeviceClass::Logical
+            } else {
+                NativeDeviceClass::Numeric(source.physical().element_type())
+            },
             source
-                .descriptor
-                .element_type
-                .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?,
-            source
-                .descriptor
+                .descriptor()
                 .storage
                 .ok_or_else(|| anyhow!("CUDA handle is missing its storage layout"))?,
-            |pointer, _| {
-                self.driver.copy(
-                    pointer,
-                    source_allocation.pointer,
-                    source_allocation.byte_length,
-                )
+            |pointer, byte_length| {
+                self.driver
+                    .copy(pointer, source_allocation.pointer, byte_length)
             },
         )
     }

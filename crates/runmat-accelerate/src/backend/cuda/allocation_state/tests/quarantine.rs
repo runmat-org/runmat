@@ -33,7 +33,8 @@ fn caught_nested_quarantine_does_not_publish_initialized_allocation() {
     let (state, driver) = owner();
     let result = state.allocate(
         vec![1],
-        GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
+        NativeDeviceClass::Numeric(NumericElementType::F64),
+        GpuTensorStorage::Real,
         8,
         || Ok(1201),
         |_| {
@@ -68,7 +69,8 @@ fn other_lane_quarantine_before_completion_prevents_allocation_publication() {
         std::thread::spawn(move || {
             state.allocate(
                 vec![1],
-                GpuTensorDescriptor::numeric(NumericElementType::F64, GpuTensorStorage::Real),
+                NativeDeviceClass::Numeric(NumericElementType::F64),
+                GpuTensorStorage::Real,
                 8,
                 || Ok(1202),
                 |_| {

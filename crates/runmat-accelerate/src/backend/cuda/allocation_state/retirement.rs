@@ -2,13 +2,12 @@ use super::context::ContextScope;
 use super::*;
 
 impl AllocationState {
-    pub(in crate::backend::cuda) fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        self.validate_owner(handle)?;
+    fn retire_record(&self, id: u64) -> Result<()> {
         self.ensure_available()?;
         let allocation = {
             let mut records = self.records();
             let record = records
-                .get_mut(&handle.buffer_id)
+                .get_mut(&id)
                 .ok_or_else(|| anyhow!("CUDA handle is stale or already freed"))?;
             match &record.phase {
                 Phase::Live | Phase::EntryFailed(_) => {}
@@ -26,7 +25,7 @@ impl AllocationState {
             allocation
         };
         if let Err(error) = self.driver.push(self.context) {
-            self.set_phase(handle.buffer_id, Phase::EntryFailed(error.to_string()));
+            self.set_phase(id, Phase::EntryFailed(error.to_string()));
             return Err(error);
         }
         let scope = ContextScope {
@@ -35,26 +34,20 @@ impl AllocationState {
         };
         // Record uncertainty before calling the driver: even unwinding cannot
         // leave a record eligible for a second physical free.
-        self.set_phase(
-            handle.buffer_id,
-            Phase::Uncertain("driver free did not return".into()),
-        );
+        self.set_phase(id, Phase::Uncertain("driver free did not return".into()));
         let freed = self.driver.free(allocation.pointer);
         match &freed {
-            Ok(()) => self.set_phase(
-                handle.buffer_id,
-                Phase::FreedExitFailed("context exit pending".into()),
-            ),
-            Err(error) => self.set_phase(handle.buffer_id, Phase::Uncertain(error.to_string())),
+            Ok(()) => self.set_phase(id, Phase::FreedExitFailed("context exit pending".into())),
+            Err(error) => self.set_phase(id, Phase::Uncertain(error.to_string())),
         }
         let leave = scope.finish();
         match (freed, leave) {
             (Ok(()), Ok(())) => {
-                self.records().remove(&handle.buffer_id);
+                self.records().remove(&id);
                 Ok(())
             }
             (Ok(()), Err(error)) => {
-                self.set_phase(handle.buffer_id, Phase::FreedExitFailed(error.to_string()));
+                self.set_phase(id, Phase::FreedExitFailed(error.to_string()));
                 Err(error)
             }
             (Err(error), _) => Err(error),
@@ -91,8 +84,7 @@ impl AllocationState {
             })
             .collect::<Vec<_>>();
         for id in candidates {
-            let handle = GpuTensorHandle::new(vec![], self.device_id, id);
-            match catch_allocation_cleanup_unwind(|| self.free(&handle)) {
+            match catch_allocation_cleanup_unwind(|| self.retire_record(id)) {
                 Ok(Ok(())) => {}
                 Ok(Err(error)) => {
                     log::error!("CUDA final state teardown did not retire allocation {id}: {error}")

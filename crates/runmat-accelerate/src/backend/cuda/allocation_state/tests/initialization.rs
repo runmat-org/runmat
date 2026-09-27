@@ -10,7 +10,8 @@ fn initialize_failure(stages: usize, unwind: bool, free_fails: bool) {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         state.allocate(
             vec![1, 2],
-            GpuTensorDescriptor::numeric(NumericElementType::U64, GpuTensorStorage::Real),
+            NativeDeviceClass::Numeric(NumericElementType::U64),
+            GpuTensorStorage::Real,
             16,
             || Ok(1302),
             |_| {
@@ -47,9 +48,7 @@ fn initialize_failure(stages: usize, unwind: bool, free_fails: bool) {
     );
     if free_fails {
         assert!(matches!(state.records()[&2].phase, Phase::Uncertain(_)));
-        assert!(state
-            .free(&GpuTensorHandle::new(vec![], state.device_id, 2))
-            .is_err());
+        assert!(state.retire_record(2).is_err());
     } else {
         assert!(!state.records().contains_key(&2));
     }
@@ -63,7 +62,7 @@ fn initialize_failure(stages: usize, unwind: bool, free_fails: bool) {
             .count(),
         stages
     );
-    state.free(&borrowed).unwrap();
+    state.retire_record(borrowed.buffer_id()).unwrap();
     drop(state);
     assert_eq!(
         driver.frees(),
@@ -88,8 +87,9 @@ fn independent_copy_initializer_publishes_distinct_allocation_without_retiring_s
     let original = state.allocation(&source).unwrap();
     let output = state
         .allocate(
-            source.shape.clone(),
-            original.descriptor,
+            source.shape().to_vec(),
+            NativeDeviceClass::Numeric(original.descriptor.element_type.unwrap()),
+            original.descriptor.storage.unwrap(),
             original.byte_length,
             || Ok(1402),
             |destination| {
@@ -100,11 +100,11 @@ fn independent_copy_initializer_publishes_distinct_allocation_without_retiring_s
             },
         )
         .unwrap();
-    assert_ne!(source.buffer_id, output.buffer_id);
-    state.free(&output).unwrap();
+    assert_ne!(source.buffer_id(), output.buffer_id());
+    state.retire_record(output.buffer_id()).unwrap();
     assert_eq!(driver.frees(), [1402]);
     assert!(state.allocation(&source).is_ok());
-    state.free(&source).unwrap();
+    state.retire_record(source.buffer_id()).unwrap();
     assert_eq!(driver.frees(), [1402, 1401]);
 }
 
