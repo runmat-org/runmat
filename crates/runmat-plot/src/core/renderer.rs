@@ -9,7 +9,25 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 use crate::core::DepthMode;
-use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
+use crate::{
+    core::scene::{GpuIndirectDraw, GpuVertexBuffer},
+    gpu::shaders,
+};
+
+/// The draw command for a bound vertex buffer, without owning or copying GPU data.
+///
+/// Indexed commands use `Uint32` indices. Indirect commands are non-indexed and
+/// take their vertex and instance ranges from the existing GPU argument buffer.
+pub enum VertexDraw<'a> {
+    Direct {
+        vertex_count: u32,
+    },
+    Indexed {
+        index_buffer: &'a wgpu::Buffer,
+        index_count: u32,
+    },
+    Indirect(&'a GpuIndirectDraw),
+}
 
 /// Uniforms for the procedural 3D grid plane.
 #[repr(C)]
@@ -1728,9 +1746,7 @@ impl WgpuRenderer {
         render_pass: &mut wgpu::RenderPass<'a>,
         pipeline_type: PipelineType,
         vertex_buffer: &'a wgpu::Buffer,
-        vertex_count: u32,
-        index_buffer: Option<(&'a wgpu::Buffer, u32)>,
-        indirect: Option<(&'a wgpu::Buffer, u64)>,
+        draw: VertexDraw<'a>,
     ) {
         // Ensure the pipeline exists first
         self.ensure_pipeline(emission, pipeline_type);
@@ -1741,17 +1757,18 @@ impl WgpuRenderer {
         render_pass.set_bind_group(0, &self.uniform_bind_group, &[]);
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
 
-        if let Some((args, offset)) = indirect {
-            render_pass.draw_indirect(args, offset);
-            return;
-        }
-
-        match index_buffer {
-            Some((indices, index_count)) => {
-                render_pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
+        match draw {
+            VertexDraw::Indirect(indirect) => {
+                render_pass.draw_indirect(indirect.args.as_ref(), indirect.offset);
+            }
+            VertexDraw::Indexed {
+                index_buffer,
+                index_count,
+            } => {
+                render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 render_pass.draw_indexed(0..index_count, 0, 0..1);
             }
-            None => {
+            VertexDraw::Direct { vertex_count } => {
                 render_pass.draw(0..vertex_count, 0..1);
             }
         }
