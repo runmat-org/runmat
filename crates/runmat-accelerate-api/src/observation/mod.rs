@@ -17,7 +17,10 @@ pub use state::{ProviderOperationReceipt, ProviderOperationRecorder, ProviderSub
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Explicit absence of evidence is not synchronous completion.
+/// Explicit absence of evidence is not synchronous completion. A provider may
+/// return Observed only if it positively supports complete operation tracking,
+/// or positively identifies this route as synchronous/empty. An opaque provider
+/// must return Unsupported, never an empty receipt inferred from missing events.
 pub enum ProviderObservationSupport {
     Unsupported,
     Observed(ProviderOperationReceipt),

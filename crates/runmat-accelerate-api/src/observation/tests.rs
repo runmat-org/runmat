@@ -314,3 +314,54 @@ fn abandoning_receipt_releases_retained_waiter_cycle() {
     drop(receipt);
     assert!(weak.upgrade().is_none());
 }
+
+#[test]
+fn duplicate_publication_fails_before_delivery_but_cannot_revoke_delivery() {
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.publish().unwrap();
+    assert_eq!(
+        receipt.publish(),
+        Err(ProviderObservationFailure::PublicationFailed)
+    );
+    assert_eq!(
+        receipt.take_completed().unwrap().status,
+        ProviderObservationStatus::Failed(ProviderObservationFailure::PublicationFailed)
+    );
+
+    let mut receipt = ProviderOperationReceipt::new();
+    receipt.publish().unwrap();
+    let delivered = receipt.take_completed().unwrap();
+    assert!(matches!(
+        delivered.status,
+        ProviderObservationStatus::Completed { .. }
+    ));
+    assert_eq!(
+        receipt.publish(),
+        Err(ProviderObservationFailure::PublicationFailed)
+    );
+    assert_eq!(receipt.status(), delivered.status);
+    assert!(receipt.take_completed().is_none());
+}
+
+#[test]
+fn measurements_freeze_at_completion_not_delayed_delivery() {
+    use runmat_execution::CandidatePreparationState;
+    let mut receipt = ProviderOperationReceipt::new();
+    let recorder = receipt.recorder();
+    let submission = recorder.submission().unwrap();
+    receipt.publish().unwrap();
+    recorder.record_stage(ProviderObservationStage::Execution, Duration::from_nanos(7));
+    recorder.record_pipeline(CandidatePreparationState::Warm);
+    submission.complete();
+    recorder.record_stage(
+        ProviderObservationStage::Execution,
+        Duration::from_nanos(99),
+    );
+    recorder.record_pipeline(CandidatePreparationState::Cold);
+    let evidence = receipt.take_completed().unwrap();
+    let execution = evidence.stages[ProviderObservationStage::Execution as usize];
+    assert_eq!(execution.samples, 1);
+    assert_eq!(execution.elapsed, Duration::from_nanos(7));
+    assert_eq!(evidence.pipelines.warm, 1);
+    assert_eq!(evidence.pipelines.cold, 0);
+}

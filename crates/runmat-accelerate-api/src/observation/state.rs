@@ -120,7 +120,9 @@ impl ProviderOperationReceipt {
     }
 
     /// Seal submission registration after all selected-route work and successful
-    /// output publication. No-submission CPU/empty work completes at this point.
+    /// output publication. Positively identified synchronous/empty work with no
+    /// submissions completes here. Missing instrumentation is not such evidence;
+    /// an opaque provider must use ProviderObservationSupport::Unsupported.
     pub fn publish(&mut self) -> Result<(), ProviderObservationFailure> {
         let now = self.0.clock.now();
         self.0.with(|state| {
@@ -128,6 +130,7 @@ impl ProviderOperationReceipt {
                 return Err(reason);
             }
             if state.publication.is_some() || state.taken {
+                state.fail(ProviderObservationFailure::PublicationFailed);
                 return Err(ProviderObservationFailure::PublicationFailed);
             }
             state.publication = state.timestamp(now);
@@ -234,9 +237,12 @@ impl ProviderOperationRecorder {
 
     /// Explicit provider measurement only. Do not supply queue-submit latency as
     /// execution, or sum these overlapping stage aggregates into total elapsed.
+    /// Record a submission's stages before completing its token. Evidence freezes
+    /// once publication and all submissions complete (or failure occurs), not at
+    /// session delivery; late measurements are ignored.
     pub fn record_stage(&self, stage: ProviderObservationStage, elapsed: Duration) {
         self.0.with(|state| {
-            if state.taken || state.failure.is_some() {
+            if state.taken || state.status() != ProviderObservationStatus::Pending {
                 return;
             }
             let slot = &mut state.stages[stage as usize];
@@ -254,11 +260,12 @@ impl ProviderOperationRecorder {
 
     /// Record readiness at the actual pipeline owner/cache lookup. This does not
     /// establish pre-execution cost-query readiness or replace exact cache keys.
-    /// Record measured preparation duration separately via record_stage.
+    /// Record measured preparation duration separately via record_stage. As with
+    /// stage measurements, events after terminal completion are ignored.
     pub fn record_pipeline(&self, preparation: runmat_execution::CandidatePreparationState) {
         use runmat_execution::CandidatePreparationState;
         self.0.with(|state| {
-            if state.taken || state.failure.is_some() {
+            if state.taken || state.status() != ProviderObservationStatus::Pending {
                 return;
             }
             let count = match preparation {
