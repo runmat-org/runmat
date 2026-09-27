@@ -4,6 +4,8 @@ use runmat_builtins::{
     builtin_catalog_entry_by_name, builtin_implementation_provenance,
     BuiltinImplementationAuthority,
 };
+#[cfg(test)]
+mod tests;
 
 /// These declarations authorize a form, not arbitrary arguments: the execution
 /// planner must validate represented classes, exact arity and phase ordering.
