@@ -430,7 +430,6 @@ pub async fn uniform_spectral_estimate(
     provider.uniform_spectral_estimate(&request).await
 }
 
-#[path = "spectral_request.rs"]
 mod spectral_request;
 pub use spectral_request::validate_uniform_spectral_request;
 

@@ -79,7 +79,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                     request.into_operands(),
                 ));
             };
-            let prepared = prepare_with(auto, &context, request).map_err(|error| *error)?;
+            let prepared = prepare_with(&auto, &context, request).map_err(|error| *error)?;
             let (operands, guard) = prepared.into_execution();
             Ok(PreparedBuiltinOperands::new(
                 operands,
