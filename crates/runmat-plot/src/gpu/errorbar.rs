@@ -37,11 +37,12 @@ struct ErrorBarUniforms {
 }
 
 pub fn pack_vertical_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &ErrorBarGpuInputs,
     params: &ErrorBarGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -102,35 +103,67 @@ pub fn pack_vertical_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: inputs
                     .x_neg_buffer
                     .as_ref()
-                    .map(|b| b.as_entire_binding())
-                    .unwrap_or(inputs.x_buffer.as_entire_binding()),
+                    .map(|b| b.buffer(emission).map(|buffer| buffer.as_entire_binding()))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or(
+                        inputs
+                            .x_buffer
+                            .buffer(emission)
+                            .map_err(|error| error.to_string())?
+                            .as_entire_binding(),
+                    ),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
                 resource: inputs
                     .x_pos_buffer
                     .as_ref()
-                    .map(|b| b.as_entire_binding())
-                    .unwrap_or(inputs.x_buffer.as_entire_binding()),
+                    .map(|b| b.buffer(emission).map(|buffer| buffer.as_entire_binding()))
+                    .transpose()
+                    .map_err(|error| error.to_string())?
+                    .unwrap_or(
+                        inputs
+                            .x_buffer
+                            .buffer(emission)
+                            .map_err(|error| error.to_string())?
+                            .as_entire_binding(),
+                    ),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: inputs.y_neg_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_neg_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: inputs.y_pos_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_pos_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
@@ -159,7 +192,7 @@ pub fn pack_vertical_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {

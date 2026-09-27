@@ -10,8 +10,7 @@ use std::sync::{OnceLock, RwLock};
 #[derive(Clone)]
 pub struct SharedWgpuContext {
     pub instance: Arc<wgpu::Instance>,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+    pub access: runmat_accelerate_api::WgpuDeviceAccess,
     pub adapter: Arc<wgpu::Adapter>,
     pub adapter_info: wgpu::AdapterInfo,
     pub limits: wgpu::Limits,

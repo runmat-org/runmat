@@ -21,6 +21,14 @@ use tracing::{debug, warn};
 #[cfg(feature = "gui")]
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
 #[cfg(feature = "gui")]
+#[derive(Debug, thiserror::Error)]
+enum WindowRenderError {
+    #[error("GPU access failed: {0}")]
+    Access(#[from] runmat_accelerate_api::WgpuAccessError),
+    #[error("surface rendering failed: {0}")]
+    Surface(#[from] wgpu::SurfaceError),
+}
+#[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
     fn update_subplot_camera_aspects_for_rect(&mut self, plot_rect: egui::Rect) {
         let (rows, cols) = self.plot_renderer.figure_axes_grid();
@@ -79,8 +87,8 @@ impl<'window> PlotWindow<'window> {
             (instance, surface, None)
         };
 
-        let (adapter, device, queue) = if let Some(ctx) = shared_ctx {
-            (ctx.adapter, ctx.device, ctx.queue)
+        let (adapter, access) = if let Some(ctx) = shared_ctx {
+            (ctx.adapter, ctx.access)
         } else {
             let adapter = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
@@ -102,7 +110,10 @@ impl<'window> PlotWindow<'window> {
                 )
                 .await?;
 
-            (Arc::new(adapter), Arc::new(device), Arc::new(queue))
+            (
+                Arc::new(adapter),
+                runmat_accelerate_api::WgpuDeviceAccess::new(device, queue),
+            )
         };
 
         // Configure surface
@@ -128,29 +139,33 @@ impl<'window> PlotWindow<'window> {
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
         };
-        surface.configure(&device, &surface_config);
+        let (depth_texture, depth_view) = access.with_shared(|emission| {
+            let device = emission.device();
+            surface.configure(device, &surface_config);
 
-        // Create depth texture
-        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Depth Texture"),
-            size: wgpu::Extent3d {
-                width: config.width,
-                height: config.height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+            // Create depth texture
+            let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Depth Texture"),
+                size: wgpu::Extent3d {
+                    width: config.width,
+                    height: config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Depth32Float,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
 
-        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+            (depth_texture, depth_view)
+        })?;
 
         // Create unified plot renderer
-        let plot_renderer =
-            crate::core::PlotRenderer::new(device.clone(), queue.clone(), surface_config).await?;
+        let plot_renderer = crate::core::PlotRenderer::new(access.clone(), surface_config).await?;
         let plot_overlay = crate::gui::PlotOverlay::new();
 
         // Setup egui with modern dark theme
@@ -168,12 +183,14 @@ impl<'window> PlotWindow<'window> {
             None,
         );
 
-        let egui_renderer = crate::wgpu_compat::egui_renderer_new(
-            &device,
-            surface_format,
-            None, // egui doesn't need depth buffer
-            1,
-        );
+        let egui_renderer = access.with_shared(|emission| {
+            crate::wgpu_compat::egui_renderer_new(
+                emission.device(),
+                surface_format,
+                None, // egui doesn't need depth buffer
+                1,
+            )
+        })?;
 
         Ok(Self {
             window,
@@ -263,9 +280,13 @@ impl<'window> PlotWindow<'window> {
     }
 
     /// Set the figure to display in this window (clears existing content)
-    pub fn set_figure(&mut self, figure: crate::plots::Figure) {
+    pub fn set_figure(
+        &mut self,
+        figure: crate::plots::Figure,
+    ) -> Result<(), runmat_accelerate_api::WgpuAccessError> {
         // Use the unified plot renderer
-        self.plot_renderer.set_figure(figure);
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        access.with_shared(|emission| self.plot_renderer.set_figure(emission, figure))
     }
 
     /// Attach a signal that lets external callers request the window to close.
@@ -341,10 +362,12 @@ impl<'window> PlotWindow<'window> {
 
                     match self.render(dt) {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => {
+                        Err(WindowRenderError::Surface(wgpu::SurfaceError::Lost)) => {
                             self.resize(self.config.width, self.config.height)
                         }
-                        Err(wgpu::SurfaceError::OutOfMemory) => target.exit(),
+                        Err(WindowRenderError::Surface(wgpu::SurfaceError::OutOfMemory)) => {
+                            target.exit()
+                        }
                         Err(e) => eprintln!("Render error: {e:?}"),
                     }
                 }
@@ -500,6 +523,20 @@ impl<'window> PlotWindow<'window> {
 
     /// Handle window resize
     fn resize(&mut self, width: u32, height: u32) {
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        if let Err(error) =
+            access.with_shared(|emission| self.resize_with_emission(emission, width, height))
+        {
+            log::error!("plot window resize could not access its GPU device: {error}");
+        }
+    }
+
+    fn resize_with_emission(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        width: u32,
+        height: u32,
+    ) {
         if width == 0 || height == 0 {
             return; // Skip invalid sizes that could cause crashes
         }
@@ -525,29 +562,23 @@ impl<'window> PlotWindow<'window> {
 
         // Update renderer's surface config
         self.plot_renderer.wgpu_renderer.surface_config = surface_config.clone();
-        self.surface
-            .configure(&self.plot_renderer.wgpu_renderer.device, &surface_config);
+        self.surface.configure(emission.device(), &surface_config);
 
         // Recreate depth texture
-        self.depth_texture =
-            self.plot_renderer
-                .wgpu_renderer
-                .device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some("Depth Texture"),
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Depth32Float,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    view_formats: &[],
-                });
+        self.depth_texture = emission.device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("Depth Texture"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
 
         self.depth_view = self
             .depth_texture
@@ -566,7 +597,15 @@ impl<'window> PlotWindow<'window> {
     }
 
     /// Render a frame
-    fn render(&mut self, _dt: std::time::Duration) -> Result<(), wgpu::SurfaceError> {
+    fn render(&mut self, _dt: std::time::Duration) -> Result<(), WindowRenderError> {
+        let access = self.plot_renderer.wgpu_renderer.access.clone();
+        access.with_shared(|emission| self.render_with_emission(emission))?
+    }
+
+    fn render_with_emission(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<(), WindowRenderError> {
         // Get the next frame
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -576,13 +615,12 @@ impl<'window> PlotWindow<'window> {
         // Camera updates will be handled by simple interaction code
 
         // Create command encoder
-        let mut encoder = self
-            .plot_renderer
-            .wgpu_renderer
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+        let mut encoder =
+            emission
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         // Render egui
         let raw_input = self.egui_state.take_egui_input(&self.window);
@@ -672,13 +710,13 @@ impl<'window> PlotWindow<'window> {
                 for idx in 0..axes_count {
                     fig.set_axes_grid_enabled(idx, show);
                 }
-                self.plot_renderer.set_figure(fig);
+                self.plot_renderer.set_figure(emission, fig);
             }
         }
         if let Some(show) = toggle_legend_opt {
             if let Some(mut fig) = self.plot_renderer.last_figure.clone() {
                 fig.legend_enabled = show;
-                self.plot_renderer.set_figure(fig);
+                self.plot_renderer.set_figure(emission, fig);
             }
         }
         if reset_view {
@@ -754,16 +792,16 @@ impl<'window> PlotWindow<'window> {
             .tessellate(full_output.shapes, full_output.pixels_per_point);
         for (id, image_delta) in &full_output.textures_delta.set {
             self.egui_renderer.update_texture(
-                &self.plot_renderer.wgpu_renderer.device,
-                &self.plot_renderer.wgpu_renderer.queue,
+                emission.device(),
+                emission.queue(),
                 *id,
                 image_delta,
             );
         }
 
         self.egui_renderer.update_buffers(
-            &self.plot_renderer.wgpu_renderer.device,
-            &self.plot_renderer.wgpu_renderer.queue,
+            emission.device(),
+            emission.queue(),
             &mut encoder,
             &tris,
             &egui_wgpu::ScreenDescriptor {
@@ -802,7 +840,7 @@ impl<'window> PlotWindow<'window> {
                 })
                 .collect();
             self.plot_renderer
-                .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                .ensure_scene_viewport_dependent_geometry_for_axes(emission, &axes_plot_sizes_px);
             let primary_rect = axes_plot_rects.first().copied().unwrap_or(plot_rect);
             let vx = (primary_rect.min.x * ppp).round();
             let vy = (primary_rect.min.y * ppp).round();
@@ -923,6 +961,7 @@ impl<'window> PlotWindow<'window> {
                     ..Default::default()
                 };
                 let _ = self.plot_renderer.render_axes_to_viewports(
+                    emission,
                     &mut encoder,
                     &view,
                     &viewports,
@@ -959,6 +998,7 @@ impl<'window> PlotWindow<'window> {
                 };
                 let cam = self.plot_renderer.camera().clone();
                 let _ = self.plot_renderer.render_camera_to_viewport(
+                    emission,
                     &mut encoder,
                     &view,
                     scissor,
@@ -1001,10 +1041,7 @@ impl<'window> PlotWindow<'window> {
         }
 
         // Submit commands
-        self.plot_renderer
-            .wgpu_renderer
-            .queue
-            .submit(std::iter::once(encoder.finish()));
+        emission.queue().submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())

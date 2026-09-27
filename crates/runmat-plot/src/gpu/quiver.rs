@@ -39,15 +39,16 @@ struct QuiverUniforms {
 }
 
 pub fn pack_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &QuiverGpuInputs<'_>,
     params: &QuiverGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
-    let x_buffer = axis_storage_buffer(device, "quiver-x", &inputs.x_data, inputs.scalar)?;
-    let y_buffer = axis_storage_buffer(device, "quiver-y", &inputs.y_data, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "quiver-x", &inputs.x_data, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(emission, "quiver-y", &inputs.y_data, inputs.scalar)?;
     let vertex_count = inputs.count as u64 * 6;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("quiver-gpu-vertices"),
@@ -102,19 +103,33 @@ pub fn pack_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: y_buffer.as_entire_binding(),
+                resource: y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.u_buffer.as_entire_binding(),
+                resource: inputs
+                    .u_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
-                resource: inputs.v_buffer.as_entire_binding(),
+                resource: inputs
+                    .v_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 4,
@@ -143,7 +158,7 @@ pub fn pack_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -188,7 +203,7 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 mod tests {
     use super::*;
     use pollster::FutureExt;
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -213,96 +228,126 @@ mod tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
     fn gpu_packer_generates_quiver_vertices() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x = [1.0f32, 2.0f32];
         let y = [1.0f32, 2.0f32];
         let u = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quiver-test-u"),
-                contents: bytemuck::cast_slice(&[0.5f32, -0.25f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quiver-test-u"),
+                            contents: bytemuck::cast_slice(&[0.5f32, -0.25f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let v = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quiver-test-v"),
-                contents: bytemuck::cast_slice(&[1.0f32, 0.75f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quiver-test-v"),
+                            contents: bytemuck::cast_slice(&[1.0f32, 0.75f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let packed = pack_vertices(
-            &device,
-            &queue,
-            &QuiverGpuInputs {
-                x_data: AxisData::F32(&x),
-                y_data: AxisData::F32(&y),
-                u_buffer: u.into(),
-                v_buffer: v.into(),
-                count: 2,
-                rows: 2,
-                cols: 1,
-                xy_mode: 0,
-                scalar: ScalarType::F32,
-            },
-            &QuiverGpuParams {
-                color: Vec4::ONE,
-                scale: 1.0,
-                head_size: 0.2,
-            },
-        )
-        .expect("quiver pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_vertices(
+                    emission,
+                    &QuiverGpuInputs {
+                        x_data: AxisData::F32(&x),
+                        y_data: AxisData::F32(&y),
+                        u_buffer: u.into(),
+                        v_buffer: v.into(),
+                        count: 2,
+                        rows: 2,
+                        cols: 1,
+                        xy_mode: 0,
+                        scalar: ScalarType::F32,
+                    },
+                    &QuiverGpuParams {
+                        color: Vec4::ONE,
+                        scale: 1.0,
+                        head_size: 0.2,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("quiver pack should succeed");
         assert_eq!(packed.vertex_count, 12);
     }
 
     #[test]
     fn gpu_packer_accepts_meshgrid_vector_axes() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x = [1.0f32, 2.0f32];
         let y = [1.0f32, 2.0f32, 3.0f32];
         let u = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quiver-meshgrid-test-u"),
-                contents: bytemuck::cast_slice(&[0.5f32; 6]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quiver-meshgrid-test-u"),
+                            contents: bytemuck::cast_slice(&[0.5f32; 6]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let v = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("quiver-meshgrid-test-v"),
-                contents: bytemuck::cast_slice(&[0.25f32; 6]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("quiver-meshgrid-test-v"),
+                            contents: bytemuck::cast_slice(&[0.25f32; 6]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let packed = pack_vertices(
-            &device,
-            &queue,
-            &QuiverGpuInputs {
-                x_data: AxisData::F32(&x),
-                y_data: AxisData::F32(&y),
-                u_buffer: u.into(),
-                v_buffer: v.into(),
-                count: 6,
-                rows: 3,
-                cols: 2,
-                xy_mode: 1,
-                scalar: ScalarType::F32,
-            },
-            &QuiverGpuParams {
-                color: Vec4::ONE,
-                scale: 1.0,
-                head_size: 0.2,
-            },
-        )
-        .expect("quiver meshgrid-vector pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_vertices(
+                    emission,
+                    &QuiverGpuInputs {
+                        x_data: AxisData::F32(&x),
+                        y_data: AxisData::F32(&y),
+                        u_buffer: u.into(),
+                        v_buffer: v.into(),
+                        count: 6,
+                        rows: 3,
+                        cols: 2,
+                        xy_mode: 1,
+                        scalar: ScalarType::F32,
+                    },
+                    &QuiverGpuParams {
+                        color: Vec4::ONE,
+                        scale: 1.0,
+                        head_size: 0.2,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("quiver meshgrid-vector pack should succeed");
         assert_eq!(packed.vertex_count, 36);
     }
 }

@@ -79,11 +79,12 @@ struct BarUniforms {
 
 /// Builds a GPU-resident vertex buffer for bar charts directly from provider-owned value arrays.
 pub fn pack_vertices_from_values(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &BarGpuInputs,
     params: &BarGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.row_count == 0 {
         return Err("bar: input cannot be empty".to_string());
     }
@@ -179,7 +180,11 @@ pub fn pack_vertices_from_values(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.values_buffer.as_entire_binding(),
+                resource: inputs
+                    .values_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -211,7 +216,7 @@ pub fn pack_vertices_from_values(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {

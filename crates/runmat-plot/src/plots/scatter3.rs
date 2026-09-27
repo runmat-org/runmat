@@ -95,30 +95,15 @@ impl Scatter3Plot {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let z = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.z_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
+            let z =
+                readback_scalar_buffer_f64(&context.access, &inputs.z_buffer, len, inputs.scalar)
+                    .await?;
             let shape = vec![1, len];
             let wrap = |values: Vec<f64>| match inputs.scalar {
                 crate::gpu::ScalarType::F64 => {
@@ -186,9 +171,7 @@ impl Scatter3Plot {
                         .ok_or_else(|| {
                             "scatter3 GPU color source byte size overflowed".to_string()
                         })?;
-                    let bytes =
-                        copy_readback_bytes(&context.device, &context.queue, buffer, byte_len)
-                            .await?;
+                    let bytes = copy_readback_bytes(&context.access, buffer, byte_len).await?;
                     let values: &[f32] = bytemuck::try_cast_slice(&bytes)
                         .map_err(|err| format!("scatter3 GPU color readback failed: {err}"))?;
                     if values.len() != value_count {

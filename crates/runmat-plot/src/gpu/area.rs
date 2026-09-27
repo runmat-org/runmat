@@ -33,17 +33,18 @@ struct AreaUniforms {
 }
 
 pub fn pack_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &AreaGpuInputs<'_>,
     params: &AreaGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.rows < 2 {
         return Err("area: GPU path requires at least two points".into());
     }
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
-    let x_buffer = axis_storage_buffer(device, "area-x", &inputs.x_axis, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "area-x", &inputs.x_axis, inputs.scalar)?;
     let segment_count = (inputs.rows - 1) as u64;
     let vertex_count = segment_count * 6;
     let output_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
@@ -95,11 +96,18 @@ pub fn pack_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -128,7 +136,7 @@ pub fn pack_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -173,7 +181,7 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
 mod tests {
     use super::*;
     use pollster::FutureExt;
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -198,39 +206,50 @@ mod tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
     fn gpu_packer_generates_area_vertices() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x = [1.0f32, 2.0f32, 3.0f32];
         let y = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("area-test-y"),
-                contents: bytemuck::cast_slice(&[1.0f32, 2.0f32, 3.0f32, 0.5f32, 0.5f32, 0.5f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("area-test-y"),
+                            contents: bytemuck::cast_slice(&[
+                                1.0f32, 2.0f32, 3.0f32, 0.5f32, 0.5f32, 0.5f32,
+                            ]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
-        let packed = pack_vertices(
-            &device,
-            &queue,
-            &AreaGpuInputs {
-                x_axis: AxisData::F32(&x),
-                y_buffer: y.into(),
-                rows: 3,
-                cols: 2,
-                target_col: 1,
-                scalar: ScalarType::F32,
-            },
-            &AreaGpuParams {
-                color: Vec4::ONE,
-                baseline: 0.0,
-            },
-        )
-        .expect("area pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_vertices(
+                    emission,
+                    &AreaGpuInputs {
+                        x_axis: AxisData::F32(&x),
+                        y_buffer: y.into(),
+                        rows: 3,
+                        cols: 2,
+                        target_col: 1,
+                        scalar: ScalarType::F32,
+                    },
+                    &AreaGpuParams {
+                        color: Vec4::ONE,
+                        baseline: 0.0,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("area pack should succeed");
         assert_eq!(packed.vertex_count, 12);
     }
 }

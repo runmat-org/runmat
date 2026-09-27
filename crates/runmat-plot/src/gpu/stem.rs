@@ -39,11 +39,12 @@ struct StemUniforms {
 }
 
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &StemGpuInputs,
     params: &StemGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
     let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -99,11 +100,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -132,7 +141,7 @@ pub fn pack_vertices_from_xy(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {

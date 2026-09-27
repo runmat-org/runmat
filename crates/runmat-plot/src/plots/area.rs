@@ -56,11 +56,10 @@ impl AreaPlot {
             })?;
             let x = source
                 .x_axis
-                .export_f64(&context.device, &context.queue, source.rows, source.scalar)
+                .export_f64(&context.access, source.rows, source.scalar)
                 .await?;
             let all_y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.y_buffer,
                 source.rows * source.cols,
                 source.scalar,

@@ -38,11 +38,12 @@ struct ContourFillUniforms {
 const MAX_VERTICES_PER_INVOCATION: u32 = 36;
 
 pub fn pack_contour_fill_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &ContourFillGpuInputs<'_>,
     params: &ContourFillGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.x_len < 2 || inputs.y_len < 2 {
         return Err("contourf: axis vectors must contain at least two elements".to_string());
     }
@@ -75,8 +76,8 @@ pub fn pack_contour_fill_vertices(
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
-    let x_buffer = axis_storage_buffer(device, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
-    let y_buffer = axis_storage_buffer(device, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "contourf-x-axis", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(emission, "contourf-y-axis", &inputs.y_axis, inputs.scalar)?;
 
     let color_buffer = Arc::new(
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -245,15 +246,25 @@ pub fn pack_contour_fill_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_ref().as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: y_buffer.as_ref().as_entire_binding(),
+                resource: y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.z_buffer.as_ref().as_entire_binding(),
+                resource: inputs
+                    .z_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -301,7 +312,7 @@ pub fn pack_contour_fill_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {

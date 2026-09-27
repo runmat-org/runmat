@@ -355,15 +355,14 @@ impl SurfacePlot {
             })?;
             let x = source
                 .x_axis
-                .export_f64(&context.device, &context.queue, source.x_len, source.scalar)
+                .export_f64(&context.access, source.x_len, source.scalar)
                 .await?;
             let y = source
                 .y_axis
-                .export_f64(&context.device, &context.queue, source.y_len, source.scalar)
+                .export_f64(&context.access, source.y_len, source.scalar)
                 .await?;
             let z_flat = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.z_buffer,
                 source.x_len * source.y_len,
                 source.scalar,
@@ -403,8 +402,7 @@ impl SurfacePlot {
             "surface image has GPU color data but no shared WGPU context is installed".to_string()
         })?;
         let values = readback_scalar_buffer_f64(
-            &context.device,
-            &context.queue,
+            &context.access,
             &source.image_buffer,
             source.rows * source.cols * source.channels,
             source.scalar,

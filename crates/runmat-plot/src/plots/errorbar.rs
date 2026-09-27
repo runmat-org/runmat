@@ -289,59 +289,33 @@ impl ErrorBar {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             let y_neg = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_neg_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let y_pos = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &inputs.y_pos_buffer,
                 len,
                 inputs.scalar,
             )
             .await?;
             let x_neg = if let Some(buffer) = &inputs.x_neg_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
             let x_pos = if let Some(buffer) = &inputs.x_pos_buffer {
-                readback_scalar_buffer_f64(
-                    &context.device,
-                    &context.queue,
-                    buffer,
-                    len,
-                    inputs.scalar,
-                )
-                .await?
+                readback_scalar_buffer_f64(&context.access, buffer, len, inputs.scalar).await?
             } else {
                 vec![0.0; len]
             };
@@ -652,8 +626,7 @@ impl ErrorBar {
         }
         let orientation = self.orientation_code();
         let packed = crate::gpu::errorbar::pack_vertical_vertices(
-            gpu.device,
-            gpu.queue,
+            gpu.emission,
             inputs,
             &ErrorBarGpuParams {
                 color: self.color,

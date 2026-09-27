@@ -244,8 +244,7 @@ pub enum PipelineType {
 
 /// High-performance WGPU renderer for interactive plotting
 pub struct WgpuRenderer {
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+    pub access: runmat_accelerate_api::WgpuDeviceAccess,
     pub surface_config: wgpu::SurfaceConfiguration,
 
     // Global MSAA sample count for pipelines/attachments
@@ -314,75 +313,92 @@ pub struct WgpuRenderer {
 impl WgpuRenderer {
     fn create_uniform_bind_group_for_buffer(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         buffer: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: Some(label),
-        })
+        emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+                label: Some(label),
+            })
     }
 
     fn create_direct_uniform_bind_group_for_buffer(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         buffer: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &self.direct_uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: Some(label),
-        })
+        emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &self.direct_uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+                label: Some(label),
+            })
     }
 
     fn create_grid_uniform_bind_group_for_buffer(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         buffer: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &self.grid_uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        })
+        emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.grid_uniform_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            })
     }
 
     fn create_marker_screen_bind_group_for_buffer(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         buffer: &wgpu::Buffer,
         label: &str,
     ) -> wgpu::BindGroup {
-        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(label),
-            layout: &self.marker_screen_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        })
+        emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &self.marker_screen_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            })
     }
 
-    pub fn ensure_axes_uniform_capacity(&mut self, axes_count: usize) {
+    pub fn ensure_axes_uniform_capacity(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        axes_count: usize,
+    ) {
         while self.axes_uniform_buffers.len() < axes_count {
             let idx = self.axes_uniform_buffers.len();
-            let buffer = self
-                .device
+            let buffer = emission
+                .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(&format!("Axes Uniform Buffer {idx}")),
                     contents: bytemuck::cast_slice(&[Uniforms::new()]),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
             let bind_group = self.create_uniform_bind_group_for_buffer(
+                emission,
                 &buffer,
                 &format!("axes_uniform_bind_group_{idx}"),
             );
@@ -391,8 +407,8 @@ impl WgpuRenderer {
         }
         while self.axes_direct_uniform_buffers.len() < axes_count {
             let idx = self.axes_direct_uniform_buffers.len();
-            let buffer = self
-                .device
+            let buffer = emission
+                .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(&format!("Axes Direct Uniform Buffer {idx}")),
                     contents: bytemuck::cast_slice(&[DirectUniforms::new(
@@ -406,6 +422,7 @@ impl WgpuRenderer {
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
             let bind_group = self.create_direct_uniform_bind_group_for_buffer(
+                emission,
                 &buffer,
                 &format!("axes_direct_uniform_bind_group_{idx}"),
             );
@@ -414,14 +431,15 @@ impl WgpuRenderer {
         }
         while self.axes_grid_uniform_buffers.len() < axes_count {
             let idx = self.axes_grid_uniform_buffers.len();
-            let buffer = self
-                .device
+            let buffer = emission
+                .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(&format!("Axes Grid Uniform Buffer {idx}")),
                     contents: bytemuck::cast_slice(&[GridUniforms::default()]),
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
             let bind_group = self.create_grid_uniform_bind_group_for_buffer(
+                emission,
                 &buffer,
                 &format!("axes_grid_uniform_bind_group_{idx}"),
             );
@@ -430,8 +448,8 @@ impl WgpuRenderer {
         }
         while self.axes_marker_screen_uniform_buffers.len() < axes_count {
             let idx = self.axes_marker_screen_uniform_buffers.len();
-            let buffer = self
-                .device
+            let buffer = emission
+                .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some(&format!("Axes Marker Screen Uniform Buffer {idx}")),
                     contents: bytemuck::cast_slice(&[MarkerScreenUniforms {
@@ -441,6 +459,7 @@ impl WgpuRenderer {
                     usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 });
             let bind_group = self.create_marker_screen_bind_group_for_buffer(
+                emission,
                 &buffer,
                 &format!("axes_marker_screen_bind_group_{idx}"),
             );
@@ -450,11 +469,11 @@ impl WgpuRenderer {
     }
 
     /// Create a new WGPU renderer
-    pub async fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
+    pub fn new(
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         surface_config: wgpu::SurfaceConfiguration,
     ) -> Self {
+        let device = emission.device();
         // Create uniform buffer
         let uniforms = Uniforms::new();
         let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -644,8 +663,7 @@ impl WgpuRenderer {
         });
 
         Self {
-            device,
-            queue,
+            access: emission.access().clone(),
             surface_config,
             msaa_sample_count: 1,
             point_pipeline: None,
@@ -692,23 +710,32 @@ impl WgpuRenderer {
         }
     }
 
-    pub fn update_grid_uniforms(&mut self, uniforms: GridUniforms) {
-        self.queue.write_buffer(
+    pub fn update_grid_uniforms(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        uniforms: GridUniforms,
+    ) {
+        emission.queue().write_buffer(
             &self.grid_uniform_buffer,
             0,
             bytemuck::cast_slice(&[uniforms]),
         );
-        self.ensure_axes_uniform_capacity(1);
-        self.queue.write_buffer(
+        self.ensure_axes_uniform_capacity(emission, 1);
+        emission.queue().write_buffer(
             &self.axes_grid_uniform_buffers[0],
             0,
             bytemuck::cast_slice(&[uniforms]),
         );
     }
 
-    pub fn update_grid_uniforms_for_axes(&mut self, axes_index: usize, uniforms: GridUniforms) {
-        self.ensure_axes_uniform_capacity(axes_index + 1);
-        self.queue.write_buffer(
+    pub fn update_grid_uniforms_for_axes(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        axes_index: usize,
+        uniforms: GridUniforms,
+    ) {
+        self.ensure_axes_uniform_capacity(emission, axes_index + 1);
+        emission.queue().write_buffer(
             &self.axes_grid_uniform_buffers[axes_index],
             0,
             bytemuck::cast_slice(&[uniforms]),
@@ -789,12 +816,15 @@ impl WgpuRenderer {
         }
     }
 
-    pub fn ensure_depth_view(&mut self) -> Arc<wgpu::TextureView> {
+    pub fn ensure_depth_view(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Arc<wgpu::TextureView> {
         let width = self.surface_config.width.max(1);
         let height = self.surface_config.height.max(1);
         let samples = self.msaa_sample_count.max(1);
         if self.depth_view.is_none() || self.depth_extent != (width, height, samples) {
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
                 label: Some("runmat_depth_texture"),
                 size: wgpu::Extent3d {
                     width,
@@ -819,12 +849,15 @@ impl WgpuRenderer {
             .expect("depth view missing")
     }
 
-    pub fn ensure_msaa_color_view(&mut self) -> Arc<wgpu::TextureView> {
+    pub fn ensure_msaa_color_view(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Arc<wgpu::TextureView> {
         let width = self.surface_config.width.max(1);
         let height = self.surface_config.height.max(1);
         let samples = self.msaa_sample_count.max(1);
         if self.msaa_color_view.is_none() || self.msaa_color_extent != (width, height, samples) {
-            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
                 label: Some("runmat_msaa_color_plot"),
                 size: wgpu::Extent3d {
                     width,
@@ -852,11 +885,12 @@ impl WgpuRenderer {
     /// Create a GPU texture and bind group for an RGBA8 image
     pub fn create_image_texture_and_bind_group(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         width: u32,
         height: u32,
         data: &[u8],
     ) -> (wgpu::Texture, wgpu::TextureView, wgpu::BindGroup) {
-        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = emission.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("Image Texture"),
             size: wgpu::Extent3d {
                 width,
@@ -872,7 +906,7 @@ impl WgpuRenderer {
         });
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         // Upload data
-        self.queue.write_texture(
+        emission.queue().write_texture(
             crate::wgpu_compat::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
@@ -891,26 +925,33 @@ impl WgpuRenderer {
                 depth_or_array_layers: 1,
             },
         );
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Image Bind Group"),
-            layout: &self.image_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&self.image_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&texture_view),
-                },
-            ],
-        });
+        let bind_group = emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Image Bind Group"),
+                layout: &self.image_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&texture_view),
+                    },
+                ],
+            });
         (texture, texture_view, bind_group)
     }
 
     /// Create a vertex buffer from vertex data
-    pub fn create_vertex_buffer(&self, vertices: &[Vertex]) -> wgpu::Buffer {
-        self.device
+    pub fn create_vertex_buffer(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        vertices: &[Vertex],
+    ) -> wgpu::Buffer {
+        emission
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
                 contents: bytemuck::cast_slice(vertices),
@@ -921,13 +962,14 @@ impl WgpuRenderer {
     /// Choose the most efficient vertex buffer source for the provided data.
     pub fn vertex_buffer_from_sources(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         gpu: Option<&GpuVertexBuffer>,
         cpu_vertices: &[Vertex],
     ) -> Option<Arc<wgpu::Buffer>> {
         if let Some(buffer) = gpu {
             Some(buffer.buffer.clone())
         } else if !cpu_vertices.is_empty() {
-            Some(Arc::new(self.create_vertex_buffer(cpu_vertices)))
+            Some(Arc::new(self.create_vertex_buffer(emission, cpu_vertices)))
         } else {
             None
         }
@@ -958,8 +1000,13 @@ impl WgpuRenderer {
     }
 
     /// Create an index buffer from index data
-    pub fn create_index_buffer(&self, indices: &[u32]) -> wgpu::Buffer {
-        self.device
+    pub fn create_index_buffer(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        indices: &[u32],
+    ) -> wgpu::Buffer {
+        emission
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Index Buffer"),
                 contents: bytemuck::cast_slice(indices),
@@ -968,47 +1015,62 @@ impl WgpuRenderer {
     }
 
     /// Update uniform buffer with new matrices
-    pub fn update_uniforms(&mut self, view_proj: Mat4, model: Mat4) {
+    pub fn update_uniforms(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        view_proj: Mat4,
+        model: Mat4,
+    ) {
         self.uniforms.update_view_proj(view_proj);
         self.uniforms.update_model(model);
 
-        self.queue.write_buffer(
+        emission.queue().write_buffer(
             &self.uniform_buffer,
             0,
             bytemuck::cast_slice(&[self.uniforms]),
         );
-        self.ensure_axes_uniform_capacity(1);
-        self.queue.write_buffer(
+        self.ensure_axes_uniform_capacity(emission, 1);
+        emission.queue().write_buffer(
             &self.axes_uniform_buffers[0],
             0,
             bytemuck::cast_slice(&[self.uniforms]),
         );
     }
 
-    pub fn update_uniforms_for_axes(&mut self, axes_index: usize, view_proj: Mat4, model: Mat4) {
-        self.ensure_axes_uniform_capacity(axes_index + 1);
+    pub fn update_uniforms_for_axes(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        axes_index: usize,
+        view_proj: Mat4,
+        model: Mat4,
+    ) {
+        self.ensure_axes_uniform_capacity(emission, axes_index + 1);
         let mut uniforms = Uniforms::new();
         uniforms.update_view_proj(view_proj);
         uniforms.update_model(model);
-        self.queue.write_buffer(
+        emission.queue().write_buffer(
             &self.axes_uniform_buffers[axes_index],
             0,
             bytemuck::cast_slice(&[uniforms]),
         );
     }
 
-    pub fn update_marker_screen_uniforms(&mut self, viewport_px: [f32; 2]) {
+    pub fn update_marker_screen_uniforms(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        viewport_px: [f32; 2],
+    ) {
         let uniforms = MarkerScreenUniforms {
             viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
             _pad: [0.0, 0.0],
         };
-        self.queue.write_buffer(
+        emission.queue().write_buffer(
             &self.marker_screen_uniform_buffer,
             0,
             bytemuck::cast_slice(&[uniforms]),
         );
-        self.ensure_axes_uniform_capacity(1);
-        self.queue.write_buffer(
+        self.ensure_axes_uniform_capacity(emission, 1);
+        emission.queue().write_buffer(
             &self.axes_marker_screen_uniform_buffers[0],
             0,
             bytemuck::cast_slice(&[uniforms]),
@@ -1017,15 +1079,16 @@ impl WgpuRenderer {
 
     pub fn update_marker_screen_uniforms_for_axes(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         axes_index: usize,
         viewport_px: [f32; 2],
     ) {
-        self.ensure_axes_uniform_capacity(axes_index + 1);
+        self.ensure_axes_uniform_capacity(emission, axes_index + 1);
         let uniforms = MarkerScreenUniforms {
             viewport_px: [viewport_px[0].max(1.0), viewport_px[1].max(1.0)],
             _pad: [0.0, 0.0],
         };
-        self.queue.write_buffer(
+        emission.queue().write_buffer(
             &self.axes_marker_screen_uniform_buffers[axes_index],
             0,
             bytemuck::cast_slice(&[uniforms]),
@@ -1054,35 +1117,40 @@ impl WgpuRenderer {
     }
 
     /// Ensure pipeline exists for the specified type
-    pub fn ensure_pipeline(&mut self, pipeline_type: PipelineType) {
+    pub fn ensure_pipeline(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        pipeline_type: PipelineType,
+    ) {
         match pipeline_type {
             PipelineType::Points => {
                 if self.point_pipeline.is_none() {
-                    self.point_pipeline = Some(self.create_point_pipeline());
+                    self.point_pipeline = Some(self.create_point_pipeline(emission));
                 }
             }
             PipelineType::Lines => {
                 if self.line_pipeline.is_none() {
-                    self.line_pipeline = Some(self.create_line_pipeline());
+                    self.line_pipeline = Some(self.create_line_pipeline(emission));
                 }
             }
             PipelineType::LinesNoDepth => {
                 if self.line_no_depth_pipeline.is_none() {
-                    self.line_no_depth_pipeline = Some(self.create_line_no_depth_pipeline());
+                    self.line_no_depth_pipeline =
+                        Some(self.create_line_no_depth_pipeline(emission));
                 }
             }
             PipelineType::Triangles => {
                 if self.triangle_pipeline.is_none() {
-                    self.triangle_pipeline = Some(self.create_triangle_pipeline());
+                    self.triangle_pipeline = Some(self.create_triangle_pipeline(emission));
                 }
             }
             PipelineType::Scatter3 => {
                 // Scatter3 shares marker semantics with point-based marker plots.
-                self.ensure_pipeline(PipelineType::Points);
+                self.ensure_pipeline(emission, PipelineType::Points);
             }
             PipelineType::Textured => {
                 if self.image_pipeline.is_none() {
-                    self.image_pipeline = Some(self.create_image_pipeline());
+                    self.image_pipeline = Some(self.create_image_pipeline(emission));
                 }
             }
         }
@@ -1100,9 +1168,12 @@ impl WgpuRenderer {
         }
     }
 
-    pub fn ensure_grid_plane_pipeline(&mut self) {
+    pub fn ensure_grid_plane_pipeline(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         if self.grid_plane_pipeline.is_none() {
-            self.grid_plane_pipeline = Some(self.create_grid_plane_pipeline());
+            self.grid_plane_pipeline = Some(self.create_grid_plane_pipeline(emission));
         }
     }
 
@@ -1111,27 +1182,31 @@ impl WgpuRenderer {
     }
 
     /// Create point rendering pipeline
-    fn create_point_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_point_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Point Billboard Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::POINT_BILLBOARD.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Point Pipeline Layout"),
-                bind_group_layouts: &[
-                    &self.uniform_bind_group_layout,
-                    &self.point_style_bind_group_layout,
-                    &self.marker_screen_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Point Pipeline Layout"),
+                    bind_group_layouts: &[
+                        &self.uniform_bind_group_layout,
+                        &self.point_style_bind_group_layout,
+                        &self.marker_screen_bind_group_layout,
+                    ],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Point Billboard Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1167,12 +1242,19 @@ impl WgpuRenderer {
     }
 
     /// Create line rendering pipeline
-    fn create_line_pipeline(&self) -> wgpu::RenderPipeline {
-        self.create_camera_line_pipeline("Line Pipeline", true, self.depth_compare())
+    fn create_line_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        self.create_camera_line_pipeline(emission, "Line Pipeline", true, self.depth_compare())
     }
 
-    fn create_line_no_depth_pipeline(&self) -> wgpu::RenderPipeline {
+    fn create_line_no_depth_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
         self.create_camera_line_pipeline(
+            emission,
             "Line No Depth Pipeline",
             false,
             wgpu::CompareFunction::Always,
@@ -1181,26 +1263,28 @@ impl WgpuRenderer {
 
     fn create_camera_line_pipeline(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         label: &'static str,
         depth_write_enabled: bool,
         depth_compare: wgpu::CompareFunction,
     ) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::LINE.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some(label),
-                bind_group_layouts: &[&self.uniform_bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some(label),
+                    bind_group_layouts: &[&self.uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some(label),
                 layout: Some(&pipeline_layout),
@@ -1236,23 +1320,27 @@ impl WgpuRenderer {
     }
 
     /// Create optimized direct rendering pipeline for precise viewport mapping
-    fn create_direct_line_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_direct_line_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Direct Line Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::LINE_DIRECT.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Direct Line Pipeline Layout"),
-                bind_group_layouts: &[&self.direct_uniform_bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Direct Line Pipeline Layout"),
+                    bind_group_layouts: &[&self.direct_uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Direct Line Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1291,23 +1379,27 @@ impl WgpuRenderer {
     }
 
     /// Create optimized direct triangle pipeline (2D fills) for precise viewport mapping
-    fn create_direct_triangle_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_direct_triangle_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Direct Triangle Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::LINE_DIRECT.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Direct Triangle Pipeline Layout"),
-                bind_group_layouts: &[&self.direct_uniform_bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Direct Triangle Pipeline Layout"),
+                    bind_group_layouts: &[&self.direct_uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Direct Triangle Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1343,26 +1435,30 @@ impl WgpuRenderer {
     }
 
     /// Create optimized direct point pipeline (instanced quads per point)
-    fn create_direct_point_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_direct_point_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Direct Point Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::POINT_DIRECT.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Direct Point Pipeline Layout"),
-                bind_group_layouts: &[
-                    &self.direct_uniform_bind_group_layout,
-                    &self.point_style_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Direct Point Pipeline Layout"),
+                    bind_group_layouts: &[
+                        &self.direct_uniform_bind_group_layout,
+                        &self.point_style_bind_group_layout,
+                    ],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Direct Point Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1400,47 +1496,54 @@ impl WgpuRenderer {
     /// Create style bind group for scatter points. Returns (buffer, bind_group).
     pub fn create_point_style_bind_group(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         style: PointStyleUniforms,
     ) -> (wgpu::Buffer, wgpu::BindGroup) {
-        let buffer = self
-            .device
+        let buffer = emission
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Point Style Uniform Buffer"),
                 contents: bytemuck::bytes_of(&style),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             });
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Point Style Bind Group"),
-            layout: &self.point_style_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-        });
+        let bind_group = emission
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Point Style Bind Group"),
+                layout: &self.point_style_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: buffer.as_entire_binding(),
+                }],
+            });
         (buffer, bind_group)
     }
 
     /// Create textured image pipeline (direct viewport mapping + sampled texture)
-    fn create_image_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_image_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Image Direct Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::IMAGE_DIRECT.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Image Pipeline Layout"),
-                bind_group_layouts: &[
-                    &self.direct_uniform_bind_group_layout,
-                    &self.image_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Image Pipeline Layout"),
+                    bind_group_layouts: &[
+                        &self.direct_uniform_bind_group_layout,
+                        &self.image_bind_group_layout,
+                    ],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Image Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1476,23 +1579,27 @@ impl WgpuRenderer {
     }
 
     /// Create triangle rendering pipeline
-    fn create_triangle_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_triangle_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Triangle Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::TRIANGLE.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Triangle Pipeline Layout"),
-                bind_group_layouts: &[&self.uniform_bind_group_layout],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Triangle Pipeline Layout"),
+                    bind_group_layouts: &[&self.uniform_bind_group_layout],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Triangle Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1527,26 +1634,30 @@ impl WgpuRenderer {
             })
     }
 
-    fn create_grid_plane_pipeline(&self) -> wgpu::RenderPipeline {
-        let shader = self
-            .device
+    fn create_grid_plane_pipeline(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> wgpu::RenderPipeline {
+        let shader = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Grid Plane Shader"),
                 source: wgpu::ShaderSource::Wgsl(shaders::vertex::GRID_PLANE.into()),
             });
 
-        let pipeline_layout = self
-            .device
-            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Grid Plane Pipeline Layout"),
-                bind_group_layouts: &[
-                    &self.uniform_bind_group_layout,
-                    &self.grid_uniform_bind_group_layout,
-                ],
-                push_constant_ranges: &[],
-            });
+        let pipeline_layout =
+            emission
+                .device()
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Grid Plane Pipeline Layout"),
+                    bind_group_layouts: &[
+                        &self.uniform_bind_group_layout,
+                        &self.grid_uniform_bind_group_layout,
+                    ],
+                    push_constant_ranges: &[],
+                });
 
-        self.device
+        emission.device()
             .create_render_pipeline(&crate::wgpu_compat::wgpu_render_pipeline_descriptor! {
                 label: Some("Grid Plane Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -1584,6 +1695,7 @@ impl WgpuRenderer {
     /// Begin a render pass
     pub fn begin_render_pass<'a>(
         &'a self,
+        _emission: &'a runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &'a mut wgpu::CommandEncoder,
         view: &'a wgpu::TextureView,
         _depth_view: &'a wgpu::TextureView,
@@ -1612,6 +1724,7 @@ impl WgpuRenderer {
     /// Render vertices with the specified pipeline
     pub fn render_vertices<'a>(
         &'a mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         render_pass: &mut wgpu::RenderPass<'a>,
         pipeline_type: PipelineType,
         vertex_buffer: &'a wgpu::Buffer,
@@ -1620,7 +1733,7 @@ impl WgpuRenderer {
         indirect: Option<(&'a wgpu::Buffer, u64)>,
     ) {
         // Ensure the pipeline exists first
-        self.ensure_pipeline(pipeline_type);
+        self.ensure_pipeline(emission, pipeline_type);
 
         // Now get the pipeline and render
         let pipeline = self.get_pipeline(pipeline_type);
@@ -1645,52 +1758,70 @@ impl WgpuRenderer {
     }
 
     /// Ensure direct line pipeline exists
-    pub fn ensure_direct_line_pipeline(&mut self) {
+    pub fn ensure_direct_line_pipeline(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         if self.direct_line_pipeline.is_none() {
-            self.direct_line_pipeline = Some(self.create_direct_line_pipeline());
+            self.direct_line_pipeline = Some(self.create_direct_line_pipeline(emission));
         }
     }
 
     /// Ensure direct triangle pipeline exists
-    pub fn ensure_direct_triangle_pipeline(&mut self) {
+    pub fn ensure_direct_triangle_pipeline(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         if self.direct_triangle_pipeline.is_none() {
-            self.direct_triangle_pipeline = Some(self.create_direct_triangle_pipeline());
+            self.direct_triangle_pipeline = Some(self.create_direct_triangle_pipeline(emission));
         }
     }
 
     /// Ensure direct point pipeline exists
-    pub fn ensure_direct_point_pipeline(&mut self) {
+    pub fn ensure_direct_point_pipeline(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         if self.direct_point_pipeline.is_none() {
-            self.direct_point_pipeline = Some(self.create_direct_point_pipeline());
+            self.direct_point_pipeline = Some(self.create_direct_point_pipeline(emission));
         }
     }
 
     /// Ensure image pipeline exists
-    pub fn ensure_image_pipeline(&mut self) {
+    pub fn ensure_image_pipeline(&mut self, emission: &runmat_accelerate_api::WgpuEmission<'_>) {
         if self.image_pipeline.is_none() {
-            self.image_pipeline = Some(self.create_image_pipeline());
+            self.image_pipeline = Some(self.create_image_pipeline(emission));
         }
     }
 
     /// Update transformation uniforms for direct viewport rendering
-    pub fn update_direct_uniforms(&mut self, uniforms: DirectUniforms) {
+    pub fn update_direct_uniforms(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        uniforms: DirectUniforms,
+    ) {
         self.direct_uniforms = uniforms;
-        self.queue.write_buffer(
+        emission.queue().write_buffer(
             &self.direct_uniform_buffer,
             0,
             bytemuck::cast_slice(&[self.direct_uniforms]),
         );
-        self.ensure_axes_uniform_capacity(1);
-        self.queue.write_buffer(
+        self.ensure_axes_uniform_capacity(emission, 1);
+        emission.queue().write_buffer(
             &self.axes_direct_uniform_buffers[0],
             0,
             bytemuck::cast_slice(&[self.direct_uniforms]),
         );
     }
 
-    pub fn update_direct_uniforms_for_axes(&mut self, axes_index: usize, uniforms: DirectUniforms) {
-        self.ensure_axes_uniform_capacity(axes_index + 1);
-        self.queue.write_buffer(
+    pub fn update_direct_uniforms_for_axes(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        axes_index: usize,
+        uniforms: DirectUniforms,
+    ) {
+        self.ensure_axes_uniform_capacity(emission, axes_index + 1);
+        emission.queue().write_buffer(
             &self.axes_direct_uniform_buffers[axes_index],
             0,
             bytemuck::cast_slice(&[uniforms]),
