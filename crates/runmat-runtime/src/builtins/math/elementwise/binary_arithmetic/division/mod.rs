@@ -135,32 +135,6 @@ fn validate_integer_admission(
     })
 }
 
-#[cfg(test)]
-mod admission_tests {
-    use super::*;
-
-    #[test]
-    fn division_scalar_admission_requires_one_element_for_host_and_resident() {
-        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
-        for (shape, scalar) in [(vec![1, 1], true), (vec![0, 1], false), (vec![2, 1], false)] {
-            let host = runmat_value::Tensor::new(vec![0.0; shape.iter().product()], shape.clone())
-                .unwrap();
-            let resident = owner
-                .allocate_zeroed(
-                    shape,
-                    runmat_accelerate_api::NumericElementType::F64,
-                    runmat_accelerate_api::GpuTensorStorage::Real,
-                )
-                .unwrap();
-            assert_eq!(operand_is_scalar(&Value::Tensor(host)), scalar);
-            assert_eq!(
-                operand_is_scalar(&Value::GpuTensor(resident.handle)),
-                scalar
-            );
-        }
-    }
-}
-
 fn source_handle(value: &Value) -> Option<&runmat_accelerate_api::GpuTensorHandle> {
     match value {
         Value::GpuTensor(handle) => Some(handle),
@@ -214,4 +188,30 @@ fn restore_residency(
         return Err(context.internal_error("provider cannot preserve explicit gpuArray output"));
     }
     Ok(restored)
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+
+    #[test]
+    fn division_scalar_admission_requires_one_element_for_host_and_resident() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        for (shape, scalar) in [(vec![1, 1], true), (vec![0, 1], false), (vec![2, 1], false)] {
+            let host = runmat_value::Tensor::new(vec![0.0; shape.iter().product()], shape.clone())
+                .unwrap();
+            let resident = owner
+                .allocate_zeroed(
+                    shape,
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            assert_eq!(operand_is_scalar(&Value::Tensor(host)), scalar);
+            assert_eq!(
+                operand_is_scalar(&Value::GpuTensor(resident.handle)),
+                scalar
+            );
+        }
+    }
 }

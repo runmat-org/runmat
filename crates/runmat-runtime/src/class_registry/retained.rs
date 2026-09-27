@@ -24,54 +24,6 @@ pub fn visit_static_property_retained_values(
     result
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn retained_values_include_class_defaults_and_published_statics() {
-        let mut state = RuntimeClassState::default();
-        state.classes.clear();
-        let property = RuntimeProperty {
-            name: "payload".into(),
-            is_static: false,
-            is_constant: false,
-            is_dependent: false,
-            get_access: MemberAccess::Public,
-            set_access: MemberAccess::Public,
-            default_value: Some(Value::String("default".into())),
-        };
-        let class = RuntimeClass {
-            name: "RetainedRoots".into(),
-            parent: None,
-            properties: [(property.name.clone(), property)].into(),
-            methods: HashMap::new(),
-        };
-        state.classes.insert(class.name.clone(), class);
-        state.static_values.insert(
-            ("RetainedRoots".into(), "static".into()),
-            Value::String("static".into()),
-        );
-        let mut values = Vec::new();
-        visit_state(&state, &mut |value| values.push(value.clone()));
-        assert_eq!(
-            values,
-            vec![
-                Value::String("static".into()),
-                Value::String("default".into())
-            ]
-        );
-    }
-
-    #[test]
-    fn registry_borrow_conflict_is_unavailable_not_empty() {
-        FALLBACK_STATE.with(|state| {
-            let _borrow = state.borrow_mut();
-            assert!(visit_values(&mut |_| panic!("borrowed registry is unavailable")).is_none());
-        });
-    }
-}
-
 pub(super) fn visit_values(visitor: &mut impl FnMut(&Value)) -> Option<()> {
     FALLBACK_STATE.with(|state| {
         let state = state.try_borrow().ok()?;
@@ -125,5 +77,53 @@ pub(super) fn note_default_roots(class: &RuntimeClass) {
             mark_static_values_thread_active();
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_values_include_class_defaults_and_published_statics() {
+        let mut state = RuntimeClassState::default();
+        state.classes.clear();
+        let property = RuntimeProperty {
+            name: "payload".into(),
+            is_static: false,
+            is_constant: false,
+            is_dependent: false,
+            get_access: MemberAccess::Public,
+            set_access: MemberAccess::Public,
+            default_value: Some(Value::String("default".into())),
+        };
+        let class = RuntimeClass {
+            name: "RetainedRoots".into(),
+            parent: None,
+            properties: [(property.name.clone(), property)].into(),
+            methods: HashMap::new(),
+        };
+        state.classes.insert(class.name.clone(), class);
+        state.static_values.insert(
+            ("RetainedRoots".into(), "static".into()),
+            Value::String("static".into()),
+        );
+        let mut values = Vec::new();
+        visit_state(&state, &mut |value| values.push(value.clone()));
+        assert_eq!(
+            values,
+            vec![
+                Value::String("static".into()),
+                Value::String("default".into())
+            ]
+        );
+    }
+
+    #[test]
+    fn registry_borrow_conflict_is_unavailable_not_empty() {
+        FALLBACK_STATE.with(|state| {
+            let _borrow = state.borrow_mut();
+            assert!(visit_values(&mut |_| panic!("borrowed registry is unavailable")).is_none());
+        });
     }
 }

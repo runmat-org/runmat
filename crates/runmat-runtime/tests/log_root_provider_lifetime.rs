@@ -90,9 +90,8 @@ impl Provider {
             // A lawful allocation with the wrong operation result shape:
             // immutable descriptors cannot be forged to omit storage.
             self.allocate(vec![0.0], vec![1, 1], GpuTensorStorage::Real)
-                .map(|output| {
+                .inspect(|output| {
                     assert_ne!(output.shape(), input.shape());
-                    output
                 })
         })
     }

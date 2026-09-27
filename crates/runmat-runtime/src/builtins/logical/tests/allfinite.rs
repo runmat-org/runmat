@@ -101,7 +101,7 @@ impl AllFiniteBoundary {
         let mask = match mask_result {
             Ok(mask)
                 if !gpu_helpers::same_gpu_handle(&handle, &mask)
-                    && valid_provider_truth_handle(&mask, provider, &handle.shape()) =>
+                    && valid_provider_truth_handle(&mask, provider, handle.shape()) =>
             {
                 mask
             }

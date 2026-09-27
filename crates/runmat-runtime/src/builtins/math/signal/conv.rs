@@ -403,8 +403,8 @@ fn try_conv_gpu(
         return Ok(None);
     }
 
-    let lhs_meta = conv_meta_from_shape(&lhs_handle.shape());
-    let rhs_meta = conv_meta_from_shape(&rhs_handle.shape());
+    let lhs_meta = conv_meta_from_shape(lhs_handle.shape());
+    let rhs_meta = conv_meta_from_shape(rhs_handle.shape());
 
     if lhs_meta.len == 0 || rhs_meta.len == 0 {
         return Ok(None);

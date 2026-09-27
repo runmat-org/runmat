@@ -59,7 +59,7 @@ async fn try_provider(
         if let Ok(reduced) = reduced {
             let mut outputs = output::ReductionOutputs::new(handle);
             // Full reductions may choose a scalar rank, but never a non-scalar.
-            let expected = if is_scalar_shape(&reduced.shape()) {
+            let expected = if is_scalar_shape(reduced.shape()) {
                 reduced.shape().to_vec()
             } else {
                 vec![1, 1]
@@ -82,7 +82,7 @@ async fn reduce_dimensions(
     spec: &ReductionSpec,
     omit_nan: bool,
 ) -> BuiltinResult<Option<HostTruthTensorOwned>> {
-    let dimensions = shape::dimensions(spec, &handle.shape());
+    let dimensions = shape::dimensions(spec, handle.shape());
     if dimensions.is_empty() {
         return Ok(None);
     }

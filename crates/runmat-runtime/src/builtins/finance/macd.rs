@@ -614,9 +614,8 @@ mod tests {
             let upload = || {
                 let matrix =
                     Tensor::from_f32(vec![2.0, 1.0, 1.0, 1.0], vec![1, 4]).expect("matrix");
-                let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
-                    .expect("upload");
-                handle
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &matrix)
+                    .expect("upload")
             };
             let error = call_with_mode(Value::GpuTensor(upload()), false)
                 .expect_err("MATLAB mode rejects resident single matrix");

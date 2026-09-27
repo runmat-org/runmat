@@ -9,7 +9,7 @@ pub(super) fn valid_binary(
     owner: &'static dyn AccelProvider,
     builtin: &str,
 ) -> bool {
-    broadcast_shapes(builtin, &lhs.shape(), &rhs.shape())
+    broadcast_shapes(builtin, lhs.shape(), rhs.shape())
         .ok()
         .as_deref()
         == Some(output.shape())

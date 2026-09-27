@@ -130,7 +130,7 @@ impl ClassificationBoundary {
         provider: &dyn AccelProvider,
     ) -> bool {
         !gpu_helpers::same_gpu_handle(input, output)
-            && valid_provider_truth_handle(output, provider, &input.shape())
+            && valid_provider_truth_handle(output, provider, input.shape())
     }
 
     fn resident_integer_mask(&self, handle: &GpuTensorHandle) -> BuiltinResult<Value> {

@@ -163,6 +163,10 @@ fn valid_output(
         )
 }
 
+fn retained_error(error: crate::RuntimeError) -> CastError {
+    CastError::Runtime(Box::new(error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::representation_is_consistent;
@@ -185,8 +189,4 @@ mod tests {
             false,
         ));
     }
-}
-
-fn retained_error(error: crate::RuntimeError) -> CastError {
-    CastError::Runtime(Box::new(error))
 }

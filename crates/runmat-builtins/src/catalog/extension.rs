@@ -36,6 +36,15 @@ impl BuiltinExtensionDescriptor {
     }
 }
 
+pub const SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
+    id: "sparse-integer-storage",
+    mode: BuiltinExtensionMode::RunMatOnly,
+    description: "sparse integer storage is a RunMat extension",
+    error_identifier: Some("RunMat:compatibility:SparseIntegerExtension"),
+};
+
+pub const SPARSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPARSE_INTEGER_EXTENSION];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,12 +80,3 @@ mod tests {
         }
     }
 }
-
-pub const SPARSE_INTEGER_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "sparse-integer-storage",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "sparse integer storage is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:SparseIntegerExtension"),
-};
-
-pub const SPARSE_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [SPARSE_INTEGER_EXTENSION];

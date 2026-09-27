@@ -196,7 +196,7 @@ pub(crate) fn gpu_vector_len(
     label: &str,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<usize> {
-    ensure_vector_shape(builtin, label, &handle.shape())?;
+    ensure_vector_shape(builtin, label, handle.shape())?;
     if handle.shape().contains(&0) {
         return Ok(0);
     }

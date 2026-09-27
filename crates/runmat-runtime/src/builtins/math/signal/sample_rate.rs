@@ -964,7 +964,7 @@ async fn resample_gpu(
         return Ok(None);
     };
     let storage = runmat_accelerate_api::handle_storage(handle);
-    let handle_len = checked_product(&handle.shape())
+    let handle_len = checked_product(handle.shape())
         .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
     let mut shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = options
@@ -1229,7 +1229,7 @@ async fn parse_resample_filter_spec(
 async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Tensor(tensor) if !tensor::is_scalar_tensor(tensor) => return Ok(None),
-        Value::GpuTensor(handle) if checked_product(&handle.shape()) != Some(1) => return Ok(None),
+        Value::GpuTensor(handle) if checked_product(handle.shape()) != Some(1) => return Ok(None),
         Value::ComplexTensor(_) => return Ok(None),
         _ => {}
     }
@@ -1297,9 +1297,9 @@ async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
         ));
     }
     if let Value::GpuTensor(handle) = value {
-        let len = checked_product(&handle.shape())
+        let len = checked_product(handle.shape())
             .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
-        validate_filter_shape(len, &handle.shape())?;
+        validate_filter_shape(len, handle.shape())?;
         if runmat_accelerate_api::handle_storage(&handle)
             != runmat_accelerate_api::GpuTensorStorage::Real
         {
@@ -1568,7 +1568,7 @@ fn upsample_gpu(
     phase: usize,
     builtin: &'static str,
 ) -> BuiltinResult<Option<Value>> {
-    let handle_len = checked_product(&handle.shape())
+    let handle_len = checked_product(handle.shape())
         .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
     let shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = first_non_singleton_dim(&shape);
@@ -1617,7 +1617,7 @@ fn downsample_gpu(
     phase: usize,
     builtin: &'static str,
 ) -> BuiltinResult<Option<Value>> {
-    let handle_len = checked_product(&handle.shape())
+    let handle_len = checked_product(handle.shape())
         .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
     let shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = first_non_singleton_dim(&shape);

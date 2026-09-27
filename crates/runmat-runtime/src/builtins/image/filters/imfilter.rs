@@ -503,7 +503,7 @@ async fn imfilter_gpu(
         other => (host_kernel_tensor(other)?, None),
     };
     let expected_shape = build_imfilter_plan(
-        &image_handle.shape(),
+        image_handle.shape(),
         &kernel_tensor,
         &options,
         IMFILTER_BUILTIN,

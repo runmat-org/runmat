@@ -178,7 +178,7 @@ impl AxisSource {
     pub fn len(&self) -> usize {
         match self {
             AxisSource::Host(v) => v.len(),
-            AxisSource::Gpu(h) => vector_len_from_shape(&h.shape()),
+            AxisSource::Gpu(h) => vector_len_from_shape(h.shape()),
         }
     }
 
@@ -218,7 +218,7 @@ pub async fn axis_sources_from_xy_values(
 ) -> BuiltinResult<(AxisSource, AxisSource)> {
     match (x, y) {
         (Value::GpuTensor(xh), Value::GpuTensor(yh))
-            if is_vector_like_shape(&xh.shape()) && is_vector_like_shape(&yh.shape()) =>
+            if is_vector_like_shape(xh.shape()) && is_vector_like_shape(yh.shape()) =>
         {
             Ok((AxisSource::Gpu(xh), AxisSource::Gpu(yh)))
         }
@@ -324,7 +324,7 @@ async fn normalize_image_axis_source(
             axis_name,
         )?)),
         AxisSource::Gpu(handle) => {
-            let len = vector_len_from_shape(&handle.shape());
+            let len = vector_len_from_shape(handle.shape());
             if len == expected_len {
                 Ok(AxisSource::Gpu(handle))
             } else if len == 2 {

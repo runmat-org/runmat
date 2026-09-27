@@ -1013,7 +1013,7 @@ fn implicit_area_x(y: &Value) -> crate::BuiltinResult<Tensor> {
                 ));
             }
             let len = handle.shape().iter().product();
-            area_shape_from_gpu_shape(&handle.shape(), len).0
+            area_shape_from_gpu_shape(handle.shape(), len).0
         }
         _ => {
             return Err(area_error_with_detail(

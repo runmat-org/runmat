@@ -342,7 +342,7 @@ fn validate_value_source(value: &Value) -> BuiltinResult<()> {
                 &DATA_TIP_RESIDENT_VALUE_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            if !vector_shape(&handle.shape()) {
+            if !vector_shape(handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &DATA_TIP_NONVECTOR_VALUE_EXTENSION,
                     BUILTIN_NAME,

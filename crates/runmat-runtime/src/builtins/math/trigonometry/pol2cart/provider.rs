@@ -131,11 +131,11 @@ async fn evaluate(
 ) -> Result<Vec<GpuTensorHandle>, AttemptError> {
     let theta = &operands[0];
     let rho = &operands[1];
-    let pair_shape = matlab_broadcast_shape(&theta.shape(), &rho.shape())?;
+    let pair_shape = matlab_broadcast_shape(theta.shape(), rho.shape())?;
     let cos = outputs.run_protected(provider.unary_cos(theta)).await?;
-    let cos = outputs.adopt(provider, cos, theta, &theta.shape(), precision)?;
+    let cos = outputs.adopt(provider, cos, theta, theta.shape(), precision)?;
     let sin = outputs.run_protected(provider.unary_sin(theta)).await?;
-    let sin = outputs.adopt(provider, sin, theta, &theta.shape(), precision)?;
+    let sin = outputs.adopt(provider, sin, theta, theta.shape(), precision)?;
     let x = outputs.run_protected(provider.elem_mul(rho, &cos)).await?;
     let mut x = outputs.adopt(provider, x, theta, &pair_shape, precision)?;
     let y = outputs.run_protected(provider.elem_mul(rho, &sin)).await?;

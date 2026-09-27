@@ -503,7 +503,7 @@ fn gpu_signal_shape(
     else {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     };
-    let output_shape = tensor::default_shape_for(&handle.shape(), handle_len);
+    let output_shape = tensor::default_shape_for(handle.shape(), handle_len);
     let Some(total_len) = output_shape
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
