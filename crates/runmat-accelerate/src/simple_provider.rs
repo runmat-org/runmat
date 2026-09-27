@@ -1724,12 +1724,12 @@ fn tensor_to_weight_vector(tensor: &Tensor) -> Result<Vec<f64>> {
         ));
     }
     let values = tensor.materialize_f64();
-    ensure!(
-        values
-            .iter()
-            .all(|value| value.is_finite() && *value >= 0.0),
-        "covariance: weights must be non-negative finite values"
-    );
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(runmat_accelerate_api::CovarianceWeightDomainError::NonFinite.into());
+    }
+    if values.iter().any(|value| *value < 0.0) {
+        return Err(runmat_accelerate_api::CovarianceWeightDomainError::Negative.into());
+    }
     Ok(values)
 }
 
@@ -5515,8 +5515,7 @@ impl AccelProvider for InProcessProvider {
                 let host = <Self as AccelProvider>::download(self, handle).await?;
                 let tensor = Tensor::new(host.data.clone(), host.shape.clone())
                     .map_err(|e| anyhow!("covariance: {e}"))?;
-                let vec =
-                    tensor_to_weight_vector(&tensor).map_err(|e| anyhow!("covariance: {e}"))?;
+                let vec = tensor_to_weight_vector(&tensor)?;
                 CovWeightSpec::Vector(vec)
             } else {
                 CovWeightSpec::Scalar(options.normalization)

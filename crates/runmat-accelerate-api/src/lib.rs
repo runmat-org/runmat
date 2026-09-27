@@ -27,6 +27,8 @@ pub mod observation;
 mod residency;
 mod numeric_upload;
 mod provider_execution;
+mod covariance;
+pub use covariance::CovarianceWeightDomainError;
 pub use provider_execution::{
     ProviderExecutionError, ProviderExecutionFuture, ProviderExecutionResult,
 };

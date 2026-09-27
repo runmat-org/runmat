@@ -408,10 +408,22 @@ fn cov_error_with_detail(
 }
 
 fn cov_provider_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
-    crate::runtime_error::with_provider_execution_source(
-        cov_internal_error(error.to_string()),
-        error,
-    )
+    let mut source: &(dyn std::error::Error + 'static) = &error;
+    let mut weight_domain = false;
+    loop {
+        if source.is::<runmat_accelerate_api::CovarianceWeightDomainError>() {
+            weight_domain = true;
+            break;
+        }
+        let Some(next) = source.source() else { break };
+        source = next;
+    }
+    let fallback = if weight_domain {
+        cov_error_with_detail(&COV_ERROR_INVALID_ARGUMENT, &error)
+    } else {
+        cov_internal_error(error.to_string())
+    };
+    crate::runtime_error::with_provider_execution_source(fallback, error)
 }
 
 fn cov_internal_error(message: impl Into<String>) -> RuntimeError {

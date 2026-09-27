@@ -619,19 +619,21 @@ impl WgpuProvider {
         let all_finite_value = self.read_scalar_exec(&all_finite, 0);
         drop(finite_mask);
         drop(all_finite);
-        ensure!(
-            all_finite_value? != 0.0,
-            "covariance: weights must be non-negative finite values"
-        );
+        if all_finite_value? == 0.0 {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::NonFinite.into());
+        }
 
         let min_weight =
             self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Min)?;
         let min_value = self.read_scalar_exec(&min_weight, 0);
         drop(min_weight);
-        ensure!(
-            min_value? >= 0.0,
-            "covariance: weights must be non-negative finite values"
-        );
+        let min_value = min_value?;
+        if !min_value.is_finite() {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::NonFinite.into());
+        }
+        if min_value < 0.0 {
+            return Err(runmat_accelerate_api::CovarianceWeightDomainError::Negative.into());
+        }
 
         let sum_weight =
             self.reduce_global_exec(weights, crate::backend::wgpu::types::GlobalReduceOp::Sum)?;
