@@ -903,6 +903,9 @@ impl MxArray {
                 retained.insert(pointer, child);
             } else {
                 child.drain_persistent_descendants(retained);
+                // The enclosing detached array still owns nonpersistent
+                // children. Its caller chooses the safe finalization point.
+                *slot = Some(child);
             }
         }
     }

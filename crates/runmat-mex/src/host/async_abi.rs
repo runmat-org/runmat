@@ -412,9 +412,18 @@ pub(crate) unsafe extern "C" fn copy_result(
         }
         let updated = result.remove(0);
         match state.mx.arena_mut().get_mut(target as *mut MxArray) {
-            Ok(object) => *object = updated,
+            Ok(object) => {
+                let retired = std::mem::replace(object, updated);
+                // Only the single property result exists here; release the
+                // state before retiring the overwritten owning array.
+                drop(state);
+                drop(retired);
+                return 0;
+            }
             Err(error) => {
                 state.error = Some(invalid(error.to_string()));
+                drop(state);
+                drop(updated);
                 return 1;
             }
         }

@@ -73,7 +73,21 @@ impl MxApi {
         property: &str,
         child: *mut MxArray,
     ) -> Result<(), String> {
+        self.replace_property(value, element, property, child)
+            .map(drop)
+    }
+
+    pub(crate) fn replace_property(
+        &mut self,
+        value: *mut MxArray,
+        element: usize,
+        property: &str,
+        child: *mut MxArray,
+    ) -> Result<Option<Box<MxArray>>, String> {
         let (numel, property_index) = {
+            self.arena
+                .validate_adoption(value, child)
+                .map_err(|error| error.to_string())?;
             let value = self.arena.get(value).map_err(|error| error.to_string())?;
             let MxArrayData::Object { properties, .. } = value.data() else {
                 return Err("mxArray is not an object array".into());
@@ -99,7 +113,9 @@ impl MxApi {
         let MxArrayData::Object { values, .. } = value.data_mut() else {
             unreachable!("validated object array")
         };
-        values[property_index * numel + element] = child;
-        Ok(())
+        Ok(std::mem::replace(
+            &mut values[property_index * numel + element],
+            child,
+        ))
     }
 }

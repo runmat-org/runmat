@@ -56,6 +56,16 @@ impl MxArena {
         pointer: *mut MxArray,
         owned: bool,
     ) -> Result<(), MxArenaError> {
+        self.detach_data_api(pointer, owned).map(drop)
+    }
+
+    /// Transfer retired ownership to the caller so finalizers can run after
+    /// the surrounding host-state lock is released.
+    pub(crate) fn detach_data_api(
+        &mut self,
+        pointer: *mut MxArray,
+        owned: bool,
+    ) -> Result<Option<Box<MxArray>>, MxArenaError> {
         let key = self.root_key(pointer)?;
         let leases = self
             .data_api_leases
@@ -69,10 +79,10 @@ impl MxArena {
                 .get(&key)
                 .is_some_and(|value| value.is_persistent());
             if owned || (!self.call_active && !persistent) {
-                self.arrays.remove(&key);
+                return Ok(self.arrays.remove(&key));
             }
         }
-        Ok(())
+        Ok(None)
     }
 
     pub fn get(&self, pointer: *const MxArray) -> Result<&MxArray, MxArenaError> {
@@ -126,6 +136,19 @@ impl MxArena {
             .ok_or(MxArenaError::UnknownArray)
     }
 
+    pub(crate) fn validate_adoption(
+        &self,
+        parent: *const MxArray,
+        child: *const MxArray,
+    ) -> Result<(), MxArenaError> {
+        if !child.is_null() && self.get(child)?.find(parent).is_some() {
+            return Err(MxArenaError::Operation(
+                "an array cannot adopt itself or an ancestor".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn len(&self) -> usize {
         self.arrays.len()
     }
@@ -135,19 +158,26 @@ impl MxArena {
     }
 
     pub fn retain_persistent(&mut self) {
+        drop(self.detach_nonpersistent());
+    }
+
+    pub(crate) fn detach_nonpersistent(&mut self) -> Vec<Box<MxArray>> {
         self.call_active = false;
         let arrays = std::mem::take(&mut self.arrays);
         let mut retained = BTreeMap::new();
+        let mut retired = Vec::new();
         for (pointer, mut value) in arrays {
             if value.is_persistent() || self.data_api_leases.contains_key(&pointer) {
                 retained.insert(pointer, value);
             } else {
                 value.drain_persistent_descendants(&mut retained);
+                retired.push(value);
             }
         }
         self.arrays = retained;
         self.data_api_leases
             .retain(|pointer, _| self.arrays.contains_key(pointer));
+        retired
     }
 
     fn root_key(&self, pointer: *const MxArray) -> Result<usize, MxArenaError> {

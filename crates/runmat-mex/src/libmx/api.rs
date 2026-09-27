@@ -47,8 +47,13 @@ impl MxApi {
     }
 
     pub fn finish_call(&mut self) {
-        self.arena.retain_persistent();
+        drop(self.detach_finished_call());
+    }
+
+    pub(crate) fn detach_finished_call(&mut self) -> Vec<Box<MxArray>> {
+        let retired = self.arena.detach_nonpersistent();
         self.memory.finish_call();
+        retired
     }
 
     pub fn begin_call(&mut self) {
@@ -469,7 +474,19 @@ impl MxApi {
         index: usize,
         child: *mut MxArray,
     ) -> Result<(), String> {
+        self.replace_cell(value, index, child).map(drop)
+    }
+
+    pub(crate) fn replace_cell(
+        &mut self,
+        value: *mut MxArray,
+        index: usize,
+        child: *mut MxArray,
+    ) -> Result<Option<Box<MxArray>>, String> {
         {
+            self.arena
+                .validate_adoption(value, child)
+                .map_err(|error| error.to_string())?;
             let value = self.arena.get(value).map_err(|error| error.to_string())?;
             let MxArrayData::Cell(values) = value.data() else {
                 return Err("mxArray is not a cell array".into());
@@ -490,8 +507,7 @@ impl MxApi {
         let MxArrayData::Cell(values) = value.data_mut() else {
             unreachable!("validated cell array")
         };
-        values[index] = child;
-        Ok(())
+        Ok(std::mem::replace(&mut values[index], child))
     }
 
     pub fn field_names(&self, value: *const MxArray) -> Result<&[String], String> {
@@ -524,6 +540,14 @@ impl MxApi {
     }
 
     pub fn remove_field(&mut self, value: *mut MxArray, field: usize) -> Result<(), String> {
+        self.detach_field(value, field).map(drop)
+    }
+
+    pub(crate) fn detach_field(
+        &mut self,
+        value: *mut MxArray,
+        field: usize,
+    ) -> Result<Vec<Option<Box<MxArray>>>, String> {
         let value = self
             .arena
             .get_mut(value)
@@ -537,8 +561,7 @@ impl MxApi {
         }
         fields.remove(field);
         let start = field * numel;
-        values.drain(start..start + numel);
-        Ok(())
+        Ok(values.drain(start..start + numel).collect())
     }
 
     pub fn get_field(
@@ -568,7 +591,20 @@ impl MxApi {
         field: usize,
         child: *mut MxArray,
     ) -> Result<(), String> {
+        self.replace_field(value, element, field, child).map(drop)
+    }
+
+    pub(crate) fn replace_field(
+        &mut self,
+        value: *mut MxArray,
+        element: usize,
+        field: usize,
+        child: *mut MxArray,
+    ) -> Result<Option<Box<MxArray>>, String> {
         let numel = {
+            self.arena
+                .validate_adoption(value, child)
+                .map_err(|error| error.to_string())?;
             let value = self.arena.get(value).map_err(|error| error.to_string())?;
             let MxArrayData::Struct { fields, .. } = value.data() else {
                 return Err("mxArray is not a struct array".into());
@@ -590,8 +626,10 @@ impl MxApi {
         let MxArrayData::Struct { values, .. } = value.data_mut() else {
             unreachable!("validated struct array")
         };
-        values[field * numel + element] = child;
-        Ok(())
+        Ok(std::mem::replace(
+            &mut values[field * numel + element],
+            child,
+        ))
     }
 
     pub fn sparse_indices(

@@ -17,6 +17,9 @@ use crate::{
 
 pub const MEX_HOST_ABI_VERSION: u32 = 9;
 
+#[cfg(all(test, not(target_family = "wasm")))]
+mod retirement_tests;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MexDiagnostic {
     pub identifier: Option<String>,
@@ -332,16 +335,22 @@ impl MexCallState {
         let mut state = self.inner.lock().expect("MEX state is not poisoned");
         #[cfg(not(target_family = "wasm"))]
         let discarded_failures = std::mem::take(&mut state.gpu_failures);
-        state.mx.finish_call();
+        let retired_arrays = state.mx.detach_finished_call();
         state.error = None;
         state.warnings.clear();
         state.console.clear();
         state.field_name_cache.clear();
-        if !state.services.is_concurrent() {
-            state.local_service_guard = None;
-            state.services = BoundaryServiceSlot::Unavailable;
-        }
+        let retired_services = if !state.services.is_concurrent() {
+            Some((
+                state.local_service_guard.take(),
+                std::mem::replace(&mut state.services, BoundaryServiceSlot::Unavailable),
+            ))
+        } else {
+            None
+        };
         drop(state);
+        drop(retired_arrays);
+        drop(retired_services);
         #[cfg(not(target_family = "wasm"))]
         drop(discarded_failures);
     }
@@ -766,8 +775,12 @@ unsafe extern "C" fn release_data_array(host: *mut c_void, value: *mut MxArray, 
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    match state.mx.release_data_api(value, owned != 0) {
-        Ok(()) => 0,
+    match state.mx.arena_mut().detach_data_api(value, owned != 0) {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error.to_string());
             1
@@ -961,8 +974,15 @@ unsafe extern "C" fn destroy_array(host: *mut c_void, value: *mut MxArray) -> i3
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    match state.mx.destroy(value) {
-        Ok(()) => 0,
+    if value.is_null() {
+        return 0;
+    }
+    match state.mx.arena_mut().take(value) {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error.to_string());
             1
@@ -1172,8 +1192,12 @@ unsafe extern "C" fn set_cell(
     let Some(mut state) = (unsafe { state(host) }) else {
         return 1;
     };
-    match state.mx.set_cell(value, index, child) {
-        Ok(()) => 0,
+    match state.mx.replace_cell(value, index, child) {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error);
             1
@@ -1266,8 +1290,12 @@ unsafe extern "C" fn remove_field(host: *mut c_void, value: *mut MxArray, field:
         state.fail("struct field number must be non-negative");
         return 1;
     };
-    match state.mx.remove_field(value, field) {
-        Ok(()) => 0,
+    match state.mx.detach_field(value, field) {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error);
             1
@@ -1311,8 +1339,12 @@ unsafe extern "C" fn set_field(
         state.fail("struct field number must be non-negative");
         return 1;
     };
-    match state.mx.set_field(value, element, field, child) {
-        Ok(()) => 0,
+    match state.mx.replace_field(value, element, field, child) {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error);
             1
@@ -1416,30 +1448,31 @@ unsafe extern "C" fn set_property(
             state.fail("handle object index is out of range");
             return 1;
         }
-        let property_value = match state.mx.arena().get(child).cloned() {
+        let property_value = match state.mx.arena_mut().take(child) {
             Ok(value) => value,
             Err(error) => {
                 state.fail(error.to_string());
                 return 1;
             }
         };
-        if state.mx.destroy(child).is_err() {
-            state.fail("could not consume handle property value");
+        let services = state.services.clone();
+        drop(state);
+        let result = services.set_object_property(handle, index, &property_name, *property_value);
+        let Some(mut state) = (unsafe { self::state(host) }) else {
             return 1;
-        }
-        return match state.services.set_object_property(
-            handle,
-            index,
-            &property_name,
-            property_value,
-        ) {
+        };
+        return match result {
             Ok(updated) => match state.mx.arena_mut().get_mut(value) {
                 Ok(array) => {
-                    *array = updated;
+                    let retired = std::mem::replace(array, updated);
+                    drop(state);
+                    drop(retired);
                     0
                 }
                 Err(error) => {
                     state.fail(error.to_string());
+                    drop(state);
+                    drop(updated);
                     1
                 }
             },
@@ -1449,8 +1482,15 @@ unsafe extern "C" fn set_property(
             }
         };
     }
-    match state.mx.set_property(value, index, &property_name, child) {
-        Ok(()) => 0,
+    match state
+        .mx
+        .replace_property(value, index, &property_name, child)
+    {
+        Ok(retired) => {
+            drop(state);
+            drop(retired);
+            0
+        }
         Err(error) => {
             state.fail(error);
             1
