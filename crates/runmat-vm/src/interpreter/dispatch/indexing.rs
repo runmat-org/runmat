@@ -1465,10 +1465,10 @@ pub async fn dispatch_indexing(
                         *colon_mask,
                         *end_mask,
                         &numeric,
-                        &handle.shape,
+                        handle.shape(),
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, &handle.shape)?;
+                    let plan = build_index_plan(&selectors, *dims, handle.shape())?;
                     if delete {
                         idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                     } else {

@@ -66,7 +66,7 @@ pub fn value_kind(value: &Value) -> &'static str {
 #[inline]
 pub fn summarize_value(i: usize, v: &Value) -> String {
     match v {
-        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
+        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape()),
         Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
         Value::Num(n) => format!("in#{i}:Num({n:.6})"),
         Value::Int(n) => format!("in#{i}:Int({n:?})"),
@@ -83,7 +83,7 @@ fn is_scalarish_runtime_value(value: &Value) -> bool {
         Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
         Value::LogicalArray(array) => is_scalar_shape(&array.shape),
-        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
+        Value::GpuTensor(handle) => is_scalar_shape(handle.shape()),
         Value::CharArray(array) => array.data.len() == 1,
         _ => false,
     }
@@ -745,8 +745,8 @@ pub fn resolve_reduction_geometry(
         let shape_of = |value: &Value| -> Option<(usize, usize)> {
             match value {
                 Value::GpuTensor(h) => Some((
-                    h.shape.first().copied().unwrap_or(1).max(1),
-                    h.shape.get(1).copied().unwrap_or(1).max(1),
+                    h.shape().first().copied().unwrap_or(1).max(1),
+                    h.shape().get(1).copied().unwrap_or(1).max(1),
                 )),
                 Value::Tensor(t) => Some((
                     t.shape.first().copied().unwrap_or(1).max(1),
@@ -889,7 +889,7 @@ pub fn resolve_reduction_geometry(
             .filter_map(|value| value.as_ref())
             .chain(request.inputs.iter())
             .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle.shape.clone()),
+                Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
                 Value::Tensor(tensor) => Some(tensor.shape.clone()),
                 _ => None,
             })
@@ -915,11 +915,11 @@ pub fn resolve_reduction_geometry(
             .filter_map(|v| v.as_ref())
             .chain(request.inputs.iter())
             .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(if handle.shape.is_empty() {
+                Value::GpuTensor(handle) => Some(if handle.shape().is_empty() {
                     1
                 } else {
                     handle
-                        .shape
+                        .shape()
                         .iter()
                         .copied()
                         .map(|d| d.max(1))
@@ -1006,7 +1006,7 @@ pub fn resolve_reduction_geometry(
         let mut big = false;
         let mut check_val = |v: &Value| match v {
             Value::GpuTensor(h) => {
-                let prod = h.shape.iter().copied().product::<usize>();
+                let prod = h.shape().iter().copied().product::<usize>();
                 if prod > 1 {
                     big = true;
                 }
