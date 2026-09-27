@@ -16,7 +16,7 @@ fn power_gpu_left_rejects_nonscalar_host_integer_rhs() {
         assert!(error
             .message()
             .contains("integer arrays can only be combined with scalar double"));
-        let _ = provider.free(&base_handle);
+        base_handle.release().expect("release base");
     });
 }
 
@@ -38,7 +38,7 @@ fn power_gpu_right_rejects_nonscalar_host_integer_lhs() {
         assert!(error
             .message()
             .contains("integer arrays can only be combined with scalar double"));
-        let _ = provider.free(&exponent_handle);
+        exponent_handle.release().expect("release exponent");
     });
 }
 
@@ -74,8 +74,10 @@ fn power_gpu_integer_pairs_validate_exponents_before_provider_pow() {
                 Tensor::new_integer(IntegerStorage::I32(vec![8, -8, 1, 1]), vec![2, 2]).unwrap()
             )
         );
-        for handle in [&base_handle, &invalid_handle, &valid_handle] {
-            let _ = provider.free(handle);
+        for handle in [base_handle, invalid_handle, valid_handle] {
+            let weak = handle.downgrade();
+            handle.release().expect("release caller");
+            assert!(weak.acquire().is_err());
         }
     });
 }
@@ -110,7 +112,7 @@ fn power_like_gpu_residency() {
             }
             other => panic!("expected gpu result, got {other:?}"),
         }
-        let _ = provider.free(&proto);
+        proto.release().expect("release prototype");
     });
 }
 

@@ -59,16 +59,19 @@ fn provider_contract_rejects_alias_shape_and_storage_mismatch() {
         assert!(!super::super::super::provider::contract::valid(
             &input, &input, provider
         ));
-        let mut wrong_shape = output.clone();
-        wrong_shape.shape = vec![1, 2];
+        let wrong_shape = output
+            .with_view(runmat_accelerate_api::GpuTensorView::contiguous(vec![1, 2]))
+            .expect("valid differently shaped view");
         assert!(!super::super::super::provider::contract::valid(
             &wrong_shape,
             &input,
             provider
         ));
-        let mut wrong_storage = output;
-        wrong_storage.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
+        let wrong_storage = gpu_helpers::upload_complex_tensor(
+            provider,
+            &runmat_value::ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![2, 1]).unwrap(),
+        )
+        .expect("genuine complex allocation");
         assert!(!super::super::super::provider::contract::valid(
             &wrong_storage,
             &input,

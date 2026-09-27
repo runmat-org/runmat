@@ -56,30 +56,42 @@ fn sign_gpu_complex_input_stays_resident_when_provider_supports_sign() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn sign_gpu_complex_interleaved_rejects_odd_buffer_length() {
+fn sign_input_admission_rejects_odd_complex_payload_without_dispatch() {
     test_support::with_test_provider(|provider| {
+        // An operational complex handle can no longer be forged by changing a
+        // real handle's metadata. Exercise the actual typed upload boundary.
+        let input = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[-2.0, 3.0],
+                shape: &[2, 1],
+            })
+            .expect("valid caller input");
+        let original = input.wire_descriptor();
         let raw = vec![1.0, 2.0, 3.0];
         let shape = vec![2, 1];
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &raw,
+        let view = runmat_accelerate_api::HostNumericTensorView {
+            data: runmat_accelerate_api::HostNumericDataView::F64(&raw),
             shape: &shape,
+            storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
         };
-        let mut handle = provider.upload(&view).expect("upload");
-        handle.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        let err =
-            sign_builtin(Value::GpuTensor(handle)).expect_err("odd complex buffer should reject");
-        assert!(
-            err.message().contains("sign: internal error"),
-            "unexpected error: {err}"
+        provider.reset_telemetry();
+        let error = runmat_accelerate_api::upload_numeric_protecting(provider, &view, &[&input])
+            .expect_err("odd complex payload must reject before a live handle exists");
+        assert!(error.to_string().contains("3 elements"));
+        assert!(error.to_string().contains("expected 4"));
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.upload_bytes, 0);
+        assert_eq!(telemetry.download_bytes, 0);
+        assert_eq!(input.wire_descriptor(), original);
+        let weak = input.downgrade();
+        let result =
+            sign_builtin(Value::GpuTensor(input.clone())).expect("valid caller still works");
+        assert_eq!(
+            test_support::gather(result).unwrap().materialize_f64(),
+            vec![-1.0, 1.0]
         );
-        assert!(
-            err.message()
-                .contains("complex-interleaved buffer has odd length")
-                || err.message().contains("TensorShapeError")
-                || err.message().contains("shape"),
-            "unexpected error detail: {err}"
-        );
+        input.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
 }
 

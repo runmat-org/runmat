@@ -5,7 +5,9 @@ fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
         let divisor =
             Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).expect("divisor");
         let source = gpu_helpers::upload_tensor(provider, &divisor).expect("upload");
-        let source = source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let source = source
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit view");
         let result = ldivide_builtin(
             Value::GpuTensor(source.clone()),
             Value::Num(10.0),
@@ -16,7 +18,7 @@ fn ldivide_resident_integer_fallback_preserves_source_and_residency() {
             panic!("explicit gpuArray result must remain resident");
         };
         assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        assert!(!gpu_helpers::same_gpu_handle(&source, &output));
+        assert!(!source.shares_allocation_with(&output));
         let original = test_support::gather(Value::GpuTensor(source)).expect("source survives");
         assert_eq!(
             original.integer_storage(),
@@ -30,13 +32,15 @@ fn ldivide_fallback_prefers_explicit_second_resident_operand() {
     test_support::with_test_provider(|provider| {
         let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
         let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
-        let automatic =
-            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("automatic view");
         let integer =
             Tensor::new_integer(IntegerStorage::I32(vec![6, 10]), vec![2, 1]).expect("integer");
         let explicit = gpu_helpers::upload_tensor(provider, &integer).expect("explicit");
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit view");
 
         let result = ldivide_builtin(
             Value::GpuTensor(automatic),

@@ -34,9 +34,15 @@ fn singleton_resident_inference_matches_actual_opaque_result() {
             let Value::GpuTensor(output) = output else {
                 panic!("resident output")
             };
-            provider.free(&output).unwrap();
+            let weak = output.downgrade();
+            output.release().expect("release conversion result");
+            assert!(weak.acquire().is_err());
         }
-        provider.free(&input).unwrap();
+        let weak = input.downgrade();
+        let original = block_on(provider.download(&input)).expect("caller survives conversions");
+        assert_eq!(original.data, vec![7.0]);
+        input.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
 }
 
@@ -70,7 +76,7 @@ fn every_identity_returns_typed_resident_storage() {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(element_type)
             );
-            assert_eq!(output.device_id, provider.device_id());
+            assert_eq!(output.device_id(), provider.device_id());
         }
     });
 }
@@ -101,7 +107,7 @@ fn resident_conversion_uses_the_input_owner_and_preserves_exact_wide_values() {
     let Value::GpuTensor(output) = output else {
         panic!("conversion must remain resident");
     };
-    assert_eq!(output.device_id, owner.device_id());
+    assert_eq!(output.device_id(), owner.device_id());
     assert_eq!(
         runmat_accelerate_api::handle_integer_class(&output),
         Some(IntegerClass::Int64)

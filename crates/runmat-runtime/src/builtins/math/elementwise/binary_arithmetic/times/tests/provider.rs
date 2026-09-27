@@ -12,7 +12,8 @@ fn times_gpu_pair_roundtrip() {
         let ha = provider
             .upload(&view)
             .expect("upload")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit view");
         let hb = provider.upload(&view).expect("upload");
         let result = times_builtin(
             Value::GpuTensor(ha.clone()),

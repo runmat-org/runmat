@@ -92,8 +92,12 @@ fn numeric_limit_static_storage_matches_actual_resident_scalar_carrier() {
             let Value::GpuTensor(output) = output else {
                 panic!("resident scalar result");
             };
-            provider.free(&source).unwrap();
-            provider.free(&output).unwrap();
+            let source_weak = source.downgrade();
+            let output_weak = output.downgrade();
+            source.release().expect("release prototype");
+            output.release().expect("release output");
+            assert!(source_weak.acquire().is_err());
+            assert!(output_weak.acquire().is_err());
         }
     });
 }
