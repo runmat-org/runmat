@@ -111,6 +111,12 @@ fn strided_single_materialization_and_widening_have_distinct_scratch_allocations
     contiguous.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
     let work = physical_work(&provider, &contiguous).unwrap();
     assert_eq!(work.scratch_bytes, 128);
+    contiguous.inputs[0].element_type = ProviderElementType::F64;
+    contiguous.inputs[0].layout = ProviderLayout::Strided;
+    let work = physical_work(&provider, &contiguous).unwrap();
+    assert_eq!(work.scratch_bytes, 64); // Raw output only; input stays borrowed.
+    assert_eq!(work.estimate.dispatches, Some(2));
+    assert_eq!(work.queue_submissions, 2);
 }
 
 #[test]

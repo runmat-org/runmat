@@ -130,6 +130,12 @@ impl AccelProvider for Recorder {
             Ok(self.fresh(NumericElementType::F32))
         })
     }
+    fn unary_double<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { Ok(self.fresh(NumericElementType::F64)) })
+    }
 }
 
 fn request<'a>(
@@ -340,7 +346,7 @@ fn materialized_input_is_owned_through_later_suspension_and_layout_failures_pres
         OWNER.casts.store(0, Ordering::SeqCst);
         OWNER.next.store(10, Ordering::SeqCst);
         OWNER.freed.lock().unwrap().clear();
-        let input = OWNER.make(1, NumericElementType::F64);
+        let input = OWNER.make(1, NumericElementType::F32);
         record_handle_transpose(&input, 2, 1);
         let before = snapshot_handle_metadata(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
@@ -371,7 +377,7 @@ fn materialized_input_is_owned_through_later_suspension_and_layout_failures_pres
         assert_eq!(
             freed,
             if mode == 0 {
-                vec![10, 11, 12, 13]
+                vec![10, 11, 12, 13, 14]
             } else {
                 vec![]
             }

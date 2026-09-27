@@ -185,8 +185,15 @@ fn transposed_fusion(
     assert!(runmat_accelerate_api::handle_is_transposed(&transposed));
     provider.free(&source).unwrap(); // Alias owns its buffer independently.
     let before = runmat_accelerate_api::snapshot_handle_metadata(&transposed);
-    let mut plan = plan(vec![cast("single", 0, 2)], 2);
+    let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
     plan.group.shape = ShapeInfo::Tensor(vec![Some(3), Some(2)]);
+    plan.materialized_stores.push(FusionStoreMaterialization {
+        value_id: 2,
+        binding: VarBinding {
+            kind: VarKind::Global,
+            index: 0,
+        },
+    });
     let result = block_on(execute_elementwise(FusionExecutionRequest {
         plan: &plan,
         inputs: vec![Value::GpuTensor(transposed.clone())],
@@ -214,6 +221,17 @@ fn transposed_fusion(
     };
     same_f32(&actual, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
     provider.free(&output).unwrap();
+    let Value::GpuTensor(stored) = &result.materialized_stores[0].1 else {
+        panic!("resident second fused output")
+    };
+    assert_eq!(stored.shape, vec![3, 2]);
+    let HostNumericDataOwned::F32(actual) =
+        block_on(provider.download_numeric(stored)).unwrap().data
+    else {
+        panic!("physical Single stored output")
+    };
+    same_f32(&actual, &[1.0, 3.0, 5.0, 2.0, 4.0, 6.0]);
+    provider.free(stored).unwrap();
     let materialized = provider.reshape(&transposed, &[3, 2]).unwrap();
     assert_eq!(
         materialized.descriptor.element_type,
@@ -261,4 +279,97 @@ fn actual_f64_adapter_materializes_single_transpose_without_reinterpreting_bytes
     )
     .unwrap();
     transposed_fusion(provider, source);
+}
+
+#[test]
+fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
+    use runmat_accelerate_api::{snapshot_handle_metadata, PowerResultDomain};
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual WGPU adapter required");
+    let source = provider
+        .upload(&HostTensorView {
+            data: &[4., -9., 16., 25., 36., 49.],
+            shape: &[2, 3],
+        })
+        .unwrap();
+    let base = provider.transpose(&source).unwrap();
+    let before = snapshot_handle_metadata(&base);
+    // Logical column-major values are [4,16,36,-9,25,49], not the original bytes.
+    for (shape, exponents, domain, expected) in [
+        (
+            vec![3, 2],
+            vec![0.5, 0.5, 0.5, 2., 0.5, 0.5],
+            PowerResultDomain::Real,
+            vec![2., 4., 6., 81., 5., 7.],
+        ),
+        (
+            vec![3, 2],
+            vec![0.5, 2., 0.5, 0.5, 0.5, 0.5],
+            PowerResultDomain::Complex,
+            vec![],
+        ),
+        (
+            vec![1, 2],
+            vec![0.5, 2.],
+            PowerResultDomain::Real,
+            vec![2., 4., 6., 81., 625., 2401.],
+        ),
+    ] {
+        let exponent = provider
+            .upload(&HostTensorView {
+                data: &exponents,
+                shape: &shape,
+            })
+            .unwrap();
+        assert_eq!(
+            block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
+            domain
+        );
+        assert_eq!(snapshot_handle_metadata(&base), before);
+        if domain == PowerResultDomain::Real {
+            let mut plan = plan(
+                vec![FusionOp::Primitive {
+                    op: PrimitiveOp::ElemPow,
+                    inputs: vec![0, 1],
+                    output: Some(2),
+                }],
+                2,
+            );
+            plan.inputs = vec![0, 1];
+            plan.stack_pattern = vec![0, 1];
+            plan.group.shape = ShapeInfo::Tensor(vec![Some(3), Some(2)]);
+            let result = block_on(execute_elementwise(FusionExecutionRequest {
+                plan: &plan,
+                inputs: vec![
+                    Value::GpuTensor(base.clone()),
+                    Value::GpuTensor(exponent.clone()),
+                ],
+                placement: None,
+                runtime: None,
+            }))
+            .unwrap();
+            let Value::GpuTensor(output) = result.final_value else {
+                panic!("resident exact power")
+            };
+            let actual = block_on(provider.download(&output)).unwrap();
+            assert_eq!(actual.shape, vec![3, 2]);
+            for (actual, expected) in actual.data.iter().zip(expected) {
+                assert!((actual - expected).abs() <= 1e-4 * expected.abs().max(1.0));
+            }
+            provider.free(&output).unwrap();
+        }
+        let mut foreign = exponent.clone();
+        foreign.device_id ^= 0x8000_0000;
+        assert!(block_on(provider.classify_real_power(&base, &foreign)).is_err());
+        let mut wrong_class = exponent.clone();
+        wrong_class.descriptor.element_type = Some(NumericElementType::I32);
+        assert!(block_on(provider.classify_real_power(&base, &wrong_class)).is_err());
+        runmat_accelerate_api::record_handle_transpose(&base, 3, 2);
+        assert!(block_on(provider.classify_real_power(&base, &exponent)).is_err());
+        runmat_accelerate_api::restore_handle_metadata(&base, &before);
+        provider.free(&exponent).unwrap();
+    }
+    provider.free(&source).unwrap();
+    assert_eq!(snapshot_handle_metadata(&base), before);
+    provider.free(&base).unwrap();
 }

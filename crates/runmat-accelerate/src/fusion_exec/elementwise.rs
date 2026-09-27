@@ -200,7 +200,9 @@ async fn execute_elementwise_outputs(
                     ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                     ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                 };
-                let contiguous = if runmat_accelerate_api::handle_is_transposed(handle) {
+                let contiguous = if runmat_accelerate_api::handle_is_transposed(handle)
+                    && handle.descriptor.element_type != Some(expected)
+                {
                     let metadata = allocations.protect_metadata();
                     let started = Instant::now();
                     let materialized = provider.reshape(handle, &handle.shape);

@@ -122,9 +122,16 @@ fn analyze(
     let mut materialization_setup_submissions = 0u32;
     let mut shape = None;
     for input in &query.inputs {
-        let materialize =
+        let strided =
             input.residency == ProviderResidency::Device && input.layout == ProviderLayout::Strided;
-        if input.layout != ProviderLayout::ColumnMajorContiguous && !materialize {
+        let materialize = strided && input.element_type != native;
+        if strided && input.shape.len() != 2 {
+            return reject(
+                ProviderRejectionCode::UnsupportedRank,
+                "fusion.elementwise.strided_matrix_required",
+            );
+        }
+        if input.layout != ProviderLayout::ColumnMajorContiguous && !strided {
             return reject(
                 ProviderRejectionCode::UnsupportedLayout,
                 "fusion.elementwise.layout",

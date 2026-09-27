@@ -12,7 +12,7 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
         builtin: POWER_CATALOG_ENTRY.identity,
         variant: "default",
     },
-    revision: 1,
+    revision: 2,
     admit: Some(admit),
     helpers: &[FusionMathHelper::RealPower],
 };
@@ -45,10 +45,10 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
         let domain = if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (left, right) {
             // Classification is about the exact values that the kernel will
             // receive, not a future lossy conversion of different operands.
-            if [left, right].iter().any(|handle| {
-                runmat_accelerate_api::handle_precision(handle) != Some(precision)
-                    || runmat_accelerate_api::handle_is_transposed(handle)
-            }) {
+            if [left, right]
+                .iter()
+                .any(|handle| runmat_accelerate_api::handle_precision(handle) != Some(precision))
+            {
                 return Ok(None);
             }
             let provider = gpu_helpers::exact_provider_for_binary_inputs(left, right)
@@ -62,7 +62,11 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
                         Ok::<_, anyhow::Error>(runmat_accelerate_api::ProviderRepresentation {
                             element_type: precision.into(),
                             storage: runmat_accelerate_api::ProviderStorage::DenseReal,
-                            layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                            layout: if runmat_accelerate_api::handle_is_transposed(handle) {
+                                runmat_accelerate_api::ProviderLayout::Strided
+                            } else {
+                                runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                            },
                             shape: handle
                                 .shape
                                 .iter()

@@ -244,6 +244,71 @@ pub(super) fn canonical_vendor_name(info: &wgpu::AdapterInfo) -> String {
     }
 }
 
+/// Logical broadcast addressing for borrowed buffers. Lazy transpose changes
+/// strides, not the underlying bytes or numeric class.
+pub(super) fn fusion_operand_layout(
+    handle: &GpuTensorHandle,
+    entry: &BufferEntry,
+    output_shape: &[usize],
+) -> Result<(Vec<u32>, Vec<u32>)> {
+    ensure!(
+        handle.shape == entry.shape,
+        "fusion operand shape does not match allocation"
+    );
+    let rank = output_shape.len();
+    ensure!(
+        rank <= crate::backend::wgpu::params::BCAST_MAX_RANK,
+        "fusion broadcast rank exceeds provider limit"
+    );
+    let mut shape = if rank >= 2 {
+        canonical_matrix_shape(&entry.shape)
+    } else {
+        entry.shape.clone()
+    };
+    ensure!(
+        shape.iter().skip(rank).all(|extent| *extent == 1),
+        "fusion operand rank exceeds output rank"
+    );
+    shape.resize(rank, 1);
+    ensure!(
+        shape
+            .iter()
+            .zip(output_shape)
+            .all(|(input, output)| *input == 1 || input == output),
+        "fusion operand does not broadcast to output"
+    );
+    let transpose = if runmat_accelerate_api::handle_is_transposed(handle) {
+        ensure!(
+            entry.shape.len() == 2 && rank >= 2,
+            "fusion lazy transpose requires a matrix view"
+        );
+        Some(build_matrix_operand_view(handle, entry)?)
+    } else {
+        None
+    };
+    let mut strides = vec![0; rank];
+    let mut stride = 1usize;
+    for axis in 0..rank {
+        if shape[axis] != 1 {
+            let logical_stride = match (&transpose, axis) {
+                (Some(view), 0) => view.lda as usize,
+                (Some(_), 1) => 1,
+                _ => stride,
+            };
+            strides[axis] = u32::try_from(logical_stride)
+                .map_err(|_| anyhow!("fusion input stride exceeds GPU index limit"))?;
+        }
+        stride = stride
+            .checked_mul(shape[axis])
+            .ok_or_else(|| anyhow!("fusion input stride overflow"))?;
+    }
+    let shape = shape
+        .into_iter()
+        .map(u32::try_from)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok((shape, strides))
+}
+
 pub(super) const POLYDER_EPS: f64 = 1.0e-12;
 
 #[derive(Clone, Copy)]

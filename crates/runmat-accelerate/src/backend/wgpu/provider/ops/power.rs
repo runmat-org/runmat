@@ -23,6 +23,12 @@ impl WgpuProvider {
         for handle in [base, exponent] {
             let entry = self.get_entry(handle)?;
             ensure!(
+                handle.descriptor.element_type == Some(entry.element_type)
+                    && runmat_accelerate_api::handle_class_identity(handle)
+                        .is_none_or(|class| class == entry.element_type.class_identity()),
+                "real power class metadata mismatch"
+            );
+            ensure!(
                 entry.integer_type().is_none() && !runmat_accelerate_api::handle_is_logical(handle),
                 "real power requires floating operands"
             );
@@ -44,10 +50,6 @@ impl WgpuProvider {
             ensure!(
                 entry.shape == handle.shape,
                 "real power shape metadata mismatch"
-            );
-            ensure!(
-                runmat_accelerate_api::handle_transpose_info(handle).is_none(),
-                "real power requires materialized operands"
             );
             let len = handle
                 .shape
@@ -74,6 +76,9 @@ impl WgpuProvider {
             len <= u32::MAX as usize && shape.iter().all(|d| *d <= u32::MAX as usize),
             "power output exceeds GPU index limits"
         );
+        for handle in [base, exponent] {
+            super::backend_shared::fusion_operand_layout(handle, &self.get_entry(handle)?, &shape)?;
+        }
         Ok((shape, len))
     }
 

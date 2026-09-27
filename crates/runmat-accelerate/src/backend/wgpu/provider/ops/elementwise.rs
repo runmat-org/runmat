@@ -1651,6 +1651,26 @@ impl WgpuProvider {
             .iter()
             .map(|h| self.get_entry(h))
             .collect::<Result<Vec<_>>>()?;
+        let broadcast_mode = shader.contains("out_shape") || shader.contains("a_shape");
+        let layouts = if broadcast_mode {
+            inputs
+                .iter()
+                .zip(&entries)
+                .map(|(handle, entry)| {
+                    super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+                })
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            if inputs
+                .iter()
+                .any(runmat_accelerate_api::handle_is_transposed)
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "linear fused shader does not support a lazy transpose",
+                ));
+            }
+            Vec::new()
+        };
         let (output_buffer, _) = self.create_storage_buffer_for_usage(
             BufferUsageClass::FusionOut,
             len,
@@ -1693,8 +1713,6 @@ impl WgpuProvider {
             &pipeline,
         );
         self.device_ref().poll(wgpu::Maintain::Poll);
-
-        let broadcast_mode = shader.contains("out_shape") || shader.contains("a_shape");
 
         struct BroadcastUniformState {
             buffer: Arc<wgpu::Buffer>,
@@ -1739,22 +1757,9 @@ impl WgpuProvider {
             };
             let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
             write_packed_array(&mut bytes, &out_shape_u32);
-            for entry in &entries {
-                let mut shape = if rank >= 2 {
-                    super::backend_shared::canonical_matrix_shape(&entry.shape)
-                } else {
-                    entry.shape.clone()
-                };
-                shape.resize(rank, 1);
-                let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
-                write_packed_array(&mut bytes, &shape_u32);
-                let mut strides: Vec<u32> = vec![0; rank];
-                let mut s: u64 = 1;
-                for i in 0..rank {
-                    strides[i] = if shape[i] == 1 { 0 } else { s as u32 };
-                    s = s.saturating_mul(shape[i] as u64);
-                }
-                write_packed_array(&mut bytes, &strides);
+            for (shape_u32, strides) in &layouts {
+                write_packed_array(&mut bytes, shape_u32);
+                write_packed_array(&mut bytes, strides);
             }
             let buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("runmat-fusion-params"),
@@ -1939,7 +1944,13 @@ impl WgpuProvider {
             .iter()
             .map(|h| self.get_entry(h))
             .collect::<Result<Vec<_>>>()?;
-
+        let layouts = inputs
+            .iter()
+            .zip(&entries)
+            .map(|(handle, entry)| {
+                super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+            })
+            .collect::<Result<Vec<_>>>()?;
         let output_buffers: Vec<_> = (0..num_outputs)
             .map(|_| {
                 self.create_storage_buffer_for_usage(
@@ -2036,22 +2047,9 @@ impl WgpuProvider {
         };
         let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
         write_packed_array(&mut bytes, &out_shape_u32);
-        for entry in &entries {
-            let mut shape = if rank >= 2 {
-                super::backend_shared::canonical_matrix_shape(&entry.shape)
-            } else {
-                entry.shape.clone()
-            };
-            shape.resize(rank, 1);
-            let shape_u32: Vec<u32> = shape.iter().map(|&d| d as u32).collect();
-            write_packed_array(&mut bytes, &shape_u32);
-            let mut strides: Vec<u32> = vec![0; rank];
-            let mut s: u64 = 1;
-            for i in 0..rank {
-                strides[i] = if shape[i] == 1 { 0 } else { s as u32 };
-                s = s.saturating_mul(shape[i] as u64);
-            }
-            write_packed_array(&mut bytes, &strides);
+        for (shape_u32, strides) in &layouts {
+            write_packed_array(&mut bytes, shape_u32);
+            write_packed_array(&mut bytes, strides);
         }
         let uniform_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("runmat-fusion-multi-params"),

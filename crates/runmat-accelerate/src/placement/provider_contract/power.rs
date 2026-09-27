@@ -42,6 +42,13 @@ pub(super) fn feasibility(
         Err((code, detail)) => return Some(ProviderFeasibility::rejected(code, detail)),
     };
     let mut accounted = query.clone();
+    // Strided matrix views are read through validated shader strides. Their
+    // underlying allocations require no materialization or extra dispatch.
+    for input in &mut accounted.inputs {
+        if input.layout == ProviderLayout::Strided {
+            input.layout = ProviderLayout::ColumnMajorContiguous;
+        }
+    }
     if accounted.outputs.is_empty() {
         accounted.outputs.push(work.output.clone());
     }
@@ -122,6 +129,21 @@ fn work(
         ));
     }
     for input in &query.inputs {
+        let strided_allowed = {
+            #[cfg(feature = "wgpu")]
+            {
+                matches!(profile, HookProfile::Wgpu)
+                    && input.layout == ProviderLayout::Strided
+                    && input.shape.len() == 2
+            }
+            #[cfg(not(feature = "wgpu"))]
+            {
+                false
+            }
+        };
+        if input.layout != ProviderLayout::ColumnMajorContiguous && !strided_allowed {
+            return Err((Rejection::UnsupportedLayout, "power.layout.unsupported"));
+        }
         if input.element_type != element {
             return Err((
                 Rejection::UnsupportedElementType,
@@ -271,6 +293,16 @@ mod tests {
             assert_eq!(work.temporary_bytes, 40);
             assert_eq!(work.readback_bytes, 8);
             assert_eq!(work.dispatches, 4);
+            query.inputs[0].layout = ProviderLayout::Strided;
+            let strided = wgpu_work(ProviderPrecision::F64, &query).unwrap();
+            assert_eq!(strided.temporary_bytes, work.temporary_bytes);
+            assert_eq!(strided.readback_bytes, work.readback_bytes);
+            assert_eq!(strided.dispatches, work.dispatches);
+            assert!(super::work(HookProfile::InProcess, ProviderPrecision::F64, &query).is_err());
+            query.inputs[0].shape = vec![1, 3, 1];
+            assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+            query.inputs[0].shape = vec![1, 3];
+            query.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
             for input in &mut query.inputs {
                 input.shape = vec![0, 3];
             }
