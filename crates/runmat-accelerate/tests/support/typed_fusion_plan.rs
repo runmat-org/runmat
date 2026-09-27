@@ -14,6 +14,26 @@ pub fn cast(name: &str, input: u32, output: u32) -> FusionOp {
 }
 
 pub fn plan(operations: Vec<FusionOp>, output: u32) -> FusionGroupPlan {
+    // These fixtures invoke fusion directly, bypassing the runtime dispatcher
+    // and VM entrypoints that normally initialize the browser registry.
+    #[cfg(target_arch = "wasm32")]
+    runmat_runtime::builtins::wasm_registry::register_all();
+
+    // Verify real compiled registration, without selecting a provider route or
+    // bypassing invocation-specific binding and operand admission below.
+    for name in ["single", "double"] {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(name)
+            .expect("fixture conversion has a canonical catalog entry");
+        let [binding] = entry.bindings else {
+            panic!("fixture conversion {name} must have one canonical binding");
+        };
+        let identity = entry.binding_identity(binding);
+        let declaration =
+            runmat_runtime::builtins::common::spec::canonical_fusion_declaration(identity)
+                .expect("fixture requires the compiled canonical fusion declaration");
+        assert_eq!(declaration.binding, identity);
+        assert_eq!(declaration.spec.name, name);
+    }
     FusionGroupPlan {
         index: 0,
         group: FusionGroup {
