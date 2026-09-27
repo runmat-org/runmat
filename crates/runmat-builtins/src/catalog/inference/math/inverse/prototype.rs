@@ -12,6 +12,14 @@ pub(super) fn apply_inverse_trigonometric_like(
     let [_, keyword, prototype] = request.arguments.as_slice() else {
         return;
     };
+    if matches!(prototype.storage, runmat_types::StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-INVERSE-TRIGONOMETRIC-PROTOTYPE",
+            format!("{name} does not accept a sparse prototype"),
+            2,
+        ));
+        return;
+    }
     let keyword_literal = request
         .literals
         .literal_args
@@ -38,8 +46,7 @@ pub(super) fn apply_inverse_trigonometric_like(
             ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
         ) =>
         {
-            output.residency = ResidencyFact::Unknown;
-            return;
+            // A successful dynamic option can only be the admitted `like` form.
         }
         None => {
             diagnostics.push(argument_error(
@@ -85,6 +92,7 @@ pub(super) fn apply_inverse_trigonometric_like(
             output.residency = prototype.residency.clone();
         }
         ValueKindFact::Unknown => {
+            crate::catalog::inference::support::facts::preserve_shape_as_dynamic(output);
             output.residency = prototype.residency.clone();
         }
         _ => {

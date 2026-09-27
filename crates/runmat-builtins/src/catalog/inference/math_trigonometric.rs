@@ -111,7 +111,8 @@ pub(super) fn infer_trigonometric(
                     ValueKindFact::String | ValueKindFact::Character | ValueKindFact::Unknown
                 ) =>
                 {
-                    output.residency = ResidencyFact::Unknown;
+                    // On every successful call the dynamic text must be `like`.
+                    apply_trigonometric_prototype(&mut output, prototype, name, &mut diagnostics);
                 }
                 None => diagnostics.push(argument_error(
                     "RM-CATALOG-TRIGONOMETRIC-LIKE",
@@ -233,6 +234,14 @@ fn apply_trigonometric_prototype(
     name: &str,
     diagnostics: &mut Vec<runmat_types::InferenceDiagnostic>,
 ) {
+    if matches!(prototype.storage, StorageFact::Sparse) {
+        diagnostics.push(argument_error(
+            "RM-CATALOG-TRIGONOMETRIC-PROTOTYPE",
+            format!("{name} does not accept a sparse prototype"),
+            2,
+        ));
+        return;
+    }
     match &prototype.kind {
         ValueKindFact::Numeric(prototype_numeric) => {
             if let ValueKindFact::Numeric(output_numeric) = &mut output.kind {
@@ -242,7 +251,12 @@ fn apply_trigonometric_prototype(
             }
             output.residency = prototype.residency.clone();
         }
-        ValueKindFact::Logical | ValueKindFact::Unknown => {
+        ValueKindFact::Logical => {
+            output.residency = prototype.residency.clone();
+        }
+        ValueKindFact::Unknown => {
+            // An unknown prototype can request complex representation.
+            preserve_shape_as_dynamic(output);
             output.residency = prototype.residency.clone();
         }
         _ => {

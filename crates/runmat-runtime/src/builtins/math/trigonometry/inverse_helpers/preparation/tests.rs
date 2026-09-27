@@ -55,7 +55,16 @@ impl RuntimeAccelerationService for Service {
         assert!(NAMES.contains(&request.admission().binding.builtin.name));
         assert_eq!(request.form().operation, BuiltinPreparationOperation::Unary);
         assert_eq!(request.form().data_arguments, &[0]);
-        assert_eq!(request.admission().signature, 0);
+        assert!(request.admission().signature <= 1);
+        assert_eq!(
+            request.admission().input_count,
+            if request.admission().signature == 0 {
+                1
+            } else {
+                3
+            }
+        );
+        assert_eq!(request.operands().len(), 1);
         self.events.borrow_mut().push("prepare");
         let mode = self.mode;
         let values = if matches!(mode, Mode::Invalid) {
@@ -191,5 +200,44 @@ fn floating_trig_preparation_drop_and_replacement_cannot_record_success() {
         .is_err());
         assert_eq!(&*events.borrow(), &["prepare", "begin", "failure"]);
         events.borrow_mut().clear();
+    }
+}
+
+#[test]
+fn floating_trig_like_controls_are_admitted_before_service_and_remain_local() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    let events = Events::default();
+    let _context = enter(&events, Mode::Pass);
+    for name in ["sin", "cos", "tan", "atan"] {
+        let invalid = [
+            Value::Num(0.5),
+            Value::String("like".into()),
+            Value::String("bad prototype".into()),
+        ];
+        let error = block_on(crate::dispatcher::call_builtin_async(name, &invalid)).unwrap_err();
+        assert!(error.identifier().unwrap().ends_with(":LikePrototype"));
+        assert!(events.borrow().is_empty());
+        for prototype in [Value::Num(0.0), Value::Complex(0.0, 0.0)] {
+            let complex = matches!(prototype, Value::Complex(_, _));
+            let args = [Value::Num(0.5), Value::String("like".into()), prototype];
+            let result = block_on(crate::dispatcher::call_builtin_async(name, &args)).unwrap();
+            let expected = match name {
+                "sin" => 0.5_f64.sin(),
+                "cos" => 0.5_f64.cos(),
+                "tan" => 0.5_f64.tan(),
+                "atan" => 0.5_f64.atan(),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                result,
+                if complex {
+                    Value::Complex(expected, 0.0)
+                } else {
+                    Value::Num(expected)
+                }
+            );
+            assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
+            events.borrow_mut().clear();
+        }
     }
 }

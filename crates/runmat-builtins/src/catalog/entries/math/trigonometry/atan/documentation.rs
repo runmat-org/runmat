@@ -18,7 +18,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "RunMat extensions",
         paragraphs: &[
             "RunMat mode accepts all eight real fixed-width integer classes, logical arrays, and character arrays. These forms cross an explicit binary64 computation boundary and return real double output with the input shape. Character elements are interpreted as Unicode scalar values.",
-            "RunMat mode also accepts `atan(X, \"like\", P)`. A real or complex host prototype selects the corresponding result representation and host placement; a real provider-resident prototype requests provider placement. A real prototype cannot represent a complex result, and complex provider prototypes are not currently supported. Strings, sparse arrays, typed complex integers, direct table/timetable overloads, and tall containers are rejected.",
+            "RunMat mode also accepts `atan(X, \"like\", P)`. A real or complex prototype selects the corresponding result representation, with host placement for a host prototype or placement on the concrete owner of a provider-resident prototype. A complex prototype promotes a real result to complex storage with zero imaginary components without changing the input's floating precision. A real prototype cannot represent a complex result. Strings, sparse arrays, typed complex integers, direct table/timetable overloads, and tall containers are rejected.",
         ],
     },
     BuiltinDocumentationSection {
@@ -96,6 +96,19 @@ const EXAMPLES: &[BuiltinExample] = &[
         requirements: crate::BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
             source: "expected = atan([-3 -1 0 1 3]);\nassert(isa(deviceResult, \"gpuArray\"));\nassert(max(abs(result - expected)) < 1e-6);",
+        },
+    },
+    BuiltinExample {
+        id: "complex-provider-like-extension",
+        title: "Request complex single output on the prototype owner",
+        program: "x = single([0 0.5]);\nprototype = gpuArray(complex(single(0), single(1)));\ndeviceResult = atan(x, \"like\", prototype);\nresult = gather(deviceResult);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::RunMat,
+        harness: BuiltinExampleHarness::Wgpu,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isa(deviceResult, \"gpuArray\"));\nassert(isa(result, \"single\"));\nassert(~isreal(result));\nassert(isequal(size(result), [1 2]));\nassert(max(abs(real(result) - atan(x))) < single(1e-6));\nassert(all(imag(result) == 0));",
         },
     },
     BuiltinExample {

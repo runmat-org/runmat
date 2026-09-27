@@ -24,7 +24,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::dispatcher;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan";
@@ -100,18 +99,34 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         crate::compatibility::ensure_builtin_extension_enabled(&ATAN_LIKE_EXTENSION, BUILTIN_NAME)?;
     }
     let template = parse_output_template(&rest)?;
+    let template = admit_output_template(template)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "atan")?;
-    let base = if rest.is_empty() {
-        super::inverse_helpers::preparation::unary(
-            runmat_builtins::ATAN_CATALOG_ENTRY.identity,
-            value,
-            atan_admitted,
-        )
-        .await?
-    } else {
-        atan_admitted(value).await?
+    let original = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
     };
-    apply_output_template(base, &template).await
+    let signature = usize::from(!rest.is_empty());
+    super::inverse_helpers::preparation::unary_form(
+        runmat_builtins::ATAN_CATALOG_ENTRY.identity,
+        value,
+        signature,
+        1 + rest.len(),
+        |value| async move {
+            super::inverse_helpers::like::evaluate(
+                value,
+                original.as_ref(),
+                &template,
+                atan_admitted,
+                |result, protected| {
+                    let template = &template;
+                    async move { apply_output_template(result, template, &protected).await }
+                },
+                |error| atan_error_with_detail(&ATAN_ERROR_INTERNAL, error),
+            )
+            .await
+        },
+    )
+    .await
 }
 
 async fn atan_admitted(value: Value) -> BuiltinResult<Value> {
@@ -227,213 +242,8 @@ fn atan_complex_components(re: f64, im: f64) -> (f64, f64) {
     (value.re, value.im)
 }
 
-#[derive(Clone)]
-enum OutputTemplate {
-    Default,
-    Like(Value),
-}
-
-#[derive(Clone)]
-enum PlacementPreference {
-    Host,
-    Provider(GpuTensorHandle),
-}
-
-#[derive(Clone, Copy)]
-enum PrototypeClass {
-    Real,
-    Complex,
-}
-
-struct LikeAnalysis {
-    placement: PlacementPreference,
-    class: PrototypeClass,
-}
-
-fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
-    match args.len() {
-        0 => Ok(OutputTemplate::Default),
-        1 => {
-            if let Some(keyword) = keyword_of(&args[0]) {
-                if keyword.trim() == "like" {
-                    return Err(atan_error_with_detail(
-                        &ATAN_ERROR_INVALID_OPTION,
-                        "expected prototype after 'like'",
-                    ));
-                }
-            }
-            Err(atan_error_with_detail(
-                &ATAN_ERROR_INVALID_OPTION,
-                "unrecognised argument for atan",
-            ))
-        }
-        len if len >= 2 => {
-            if let Some(keyword) = keyword_of(&args[0]) {
-                if keyword.trim() == "like" {
-                    if len == 2 {
-                        return Ok(OutputTemplate::Like(args[1].clone()));
-                    }
-                    return Err(atan_error(&ATAN_ERROR_ARG_COUNT));
-                }
-            }
-            Err(atan_error_with_detail(
-                &ATAN_ERROR_INVALID_OPTION,
-                "unsupported option; only 'like' is accepted",
-            ))
-        }
-        _ => unreachable!(),
-    }
-}
-
-async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
-    match template {
-        OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => apply_like_template(value, proto).await,
-    }
-}
-
-async fn apply_like_template(value: Value, prototype: &Value) -> BuiltinResult<Value> {
-    let analysis = analyse_like_prototype(prototype).await?;
-    match (analysis.class, analysis.placement) {
-        (PrototypeClass::Real, PlacementPreference::Host) => ensure_host_real(value).await,
-        (PrototypeClass::Real, PlacementPreference::Provider(prototype)) => {
-            ensure_provider_real(value, &prototype).await
-        }
-        (PrototypeClass::Complex, PlacementPreference::Host) => ensure_host_complex(value).await,
-        (PrototypeClass::Complex, PlacementPreference::Provider(_)) => Err(atan_error_with_detail(
-            &ATAN_ERROR_LIKE_PROTOTYPE,
-            "GPU 'like' prototypes with complex outputs are not supported",
-        )),
-    }
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn analyse_like_prototype(prototype: &Value) -> BuiltinResult<LikeAnalysis> {
-    match prototype {
-        Value::GpuTensor(handle) => Ok(LikeAnalysis {
-            placement: PlacementPreference::Provider(handle.clone()),
-            class: PrototypeClass::Real,
-        }),
-        Value::Tensor(_)
-        | Value::Num(_)
-        | Value::Int(_)
-        | Value::Bool(_)
-        | Value::LogicalArray(_) => Ok(LikeAnalysis {
-            placement: PlacementPreference::Host,
-            class: PrototypeClass::Real,
-        }),
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(LikeAnalysis {
-            placement: PlacementPreference::Host,
-            class: PrototypeClass::Complex,
-        }),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            Err(atan_error_with_detail(
-                &ATAN_ERROR_LIKE_PROTOTYPE,
-                "'like' prototype must be numeric",
-            ))
-        }
-        other => {
-            let gathered = dispatcher::gather_if_needed_async(other).await?;
-            if &gathered == other {
-                Err(atan_error_with_detail(
-                    &ATAN_ERROR_LIKE_PROTOTYPE,
-                    format!("unsupported 'like' prototype {other:?}"),
-                ))
-            } else {
-                analyse_like_prototype(&gathered).await
-            }
-        }
-    }
-}
-
-async fn ensure_host_value(value: Value) -> BuiltinResult<Value> {
-    if let Value::GpuTensor(_) = &value {
-        gpu_helpers::gather_value_async(&value).await
-    } else {
-        Ok(value)
-    }
-}
-
-async fn ensure_host_real(value: Value) -> BuiltinResult<Value> {
-    let host_value = ensure_host_value(value).await?;
-    if is_complex_value(&host_value) {
-        return Err(atan_error_with_detail(
-            &ATAN_ERROR_LIKE_PROTOTYPE,
-            "result is complex but 'like' prototype is real",
-        ));
-    }
-    Ok(host_value)
-}
-
-async fn ensure_host_complex(value: Value) -> BuiltinResult<Value> {
-    let host_value = ensure_host_value(value).await?;
-    if is_complex_value(&host_value) {
-        Ok(host_value)
-    } else {
-        convert_real_to_complex(host_value)
-    }
-}
-
-async fn ensure_provider_real(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
-    if is_complex_value(&value) {
-        return Err(atan_error_with_detail(
-            &ATAN_ERROR_LIKE_PROTOTYPE,
-            "GPU 'like' prototypes do not support complex outputs",
-        ));
-    }
-    let host = ensure_host_value(value).await?;
-    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-        atan_error_with_detail(
-            &ATAN_ERROR_GPU_UNAVAILABLE,
-            "provider output requested via 'like' but the prototype has no owner",
-        )
-    })?;
-    crate::builtins::common::provider_restore::upload_value_like(
-        provider,
-        host,
-        BUILTIN_NAME,
-        prototype,
-    )
-}
-
-fn is_complex_value(value: &Value) -> bool {
-    matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
-}
-
-fn convert_real_to_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64_cow(&tensor);
-            let data: Vec<(f64, f64)> = values.iter().map(|&v| (v, 0.0)).collect();
-            let tensor = ComplexTensor::new(data, tensor.shape.clone())
-                .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;
-            Ok(complex_tensor_into_value(tensor))
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| atan_error_with_detail(&ATAN_ERROR_INTERNAL, e))?;
-            convert_real_to_complex(Value::Tensor(tensor))
-        }
-        Value::Int(i) => convert_real_to_complex(Value::Num(i.to_f64())),
-        Value::Bool(b) => convert_real_to_complex(Value::Num(if b { 1.0 } else { 0.0 })),
-        Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => {
-            Err(atan_error_with_detail(
-                &ATAN_ERROR_LIKE_PROTOTYPE,
-                "'like' prototype must be numeric",
-            ))
-        }
-        Value::GpuTensor(_) => Err(atan_error_with_detail(
-            &ATAN_ERROR_INTERNAL,
-            "internal error converting GPU value to complex output",
-        )),
-        other => Err(atan_error_with_detail(
-            &ATAN_ERROR_INTERNAL,
-            format!("cannot convert value {other:?} into a complex result for 'like'"),
-        )),
-    }
-}
+mod output_template;
+use output_template::{admit_output_template, apply_output_template, parse_output_template};
 
 #[cfg(test)]
 pub(crate) mod tests {

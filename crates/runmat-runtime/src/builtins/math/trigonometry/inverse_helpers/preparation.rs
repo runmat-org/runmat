@@ -53,6 +53,20 @@ where
     F: FnOnce(Value) -> Fut,
     Fut: Future<Output = BuiltinResult<Value>>,
 {
+    unary_form(identity, value, 0, 1, execute).await
+}
+
+pub(crate) async fn unary_form<F, Fut>(
+    identity: BuiltinCatalogIdentity,
+    value: Value,
+    signature: usize,
+    input_count: usize,
+    execute: F,
+) -> BuiltinResult<Value>
+where
+    F: FnOnce(Value) -> Fut,
+    Fut: Future<Output = BuiltinResult<Value>>,
+{
     if !admits(&value, identity)? {
         // These representations use the identity's exact host/complex or
         // owner-restoring path; they are not inputs to a real floating hook.
@@ -65,8 +79,8 @@ where
                 variant: "default",
             },
             form: BuiltinPreparationFormId(0),
-            signature: 0,
-            input_count: 1,
+            signature,
+            input_count,
             requested_outputs: crate::output_count::current_output_count(),
         },
         vec![value],

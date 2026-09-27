@@ -2,6 +2,57 @@ use crate::*;
 use runmat_types::EffectKind;
 
 #[test]
+fn trigonometric_like_dynamic_keywords_and_unknown_prototypes_do_not_invent_real_results() {
+    use runmat_types::*;
+    for entry in [
+        &SIN_CATALOG_ENTRY,
+        &COS_CATALOG_ENTRY,
+        &TAN_CATALOG_ENTRY,
+        &ATAN_CATALOG_ENTRY,
+    ] {
+        let input = ValueFact::proven(
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Real,
+            }),
+            ShapeFact::from(vec![Some(2), Some(3)]),
+            StorageFact::Dense,
+        );
+        let mut complex = input.clone();
+        complex.kind = ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        });
+        complex.residency = ResidencyFact::Host;
+        let keyword = ValueFact::unknown(DynamicReason::RuntimeValue);
+        let mut request = CallRequest {
+            arguments: vec![input.clone(), keyword, complex],
+            literals: LiteralContext::new(vec![LiteralValue::Unknown; 3]),
+            outputs: OutputSelection::new(RequestedOutputCount::Exactly(1)),
+        };
+        let result = crate::catalog::inference::infer_catalog_call(entry, &request);
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(
+            result.outputs[0].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Complex
+            })
+        );
+        assert_eq!(result.outputs[0].shape, input.shape);
+        request.arguments[2] = ValueFact::unknown(DynamicReason::RuntimeValue);
+        let result = crate::catalog::inference::infer_catalog_call(entry, &request);
+        assert!(result.diagnostics.is_empty());
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(result.outputs[0].shape, input.shape);
+        request.arguments[2] = input;
+        request.arguments[2].storage = StorageFact::Sparse;
+        let result = crate::catalog::inference::infer_catalog_call(entry, &request);
+        assert!(!result.diagnostics.is_empty());
+    }
+}
+
+#[test]
 fn admitted_trigonometric_float_facts_keep_class_shape_but_not_input_placement() {
     use runmat_types::*;
     for entry in [

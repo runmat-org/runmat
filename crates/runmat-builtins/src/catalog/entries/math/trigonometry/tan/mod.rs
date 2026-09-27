@@ -197,7 +197,7 @@ pub const TAN_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
             id: crate::BuiltinPreparationFormId(0),
             binding_variant: "default",
-            signatures: &[0],
+            signatures: &[0, 1],
             data_arguments: &[0],
             operation: crate::BuiltinPreparationOperation::Unary,
             provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,

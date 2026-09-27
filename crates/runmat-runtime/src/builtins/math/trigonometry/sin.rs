@@ -95,22 +95,38 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         "sin",
     )?;
     let output = parse_output_template(&rest)?;
+    let output = admit_output_template(output)?;
     ensure_sin_extensions(&value, &rest).await?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "sin")?;
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
-        return apply_output_template(symbolic, &output).await;
+        return apply_output_template(symbolic, &output, &[]).await;
     }
-    let base = if rest.is_empty() {
-        super::inverse_helpers::preparation::unary(
-            runmat_builtins::SIN_CATALOG_ENTRY.identity,
-            value,
-            sin_admitted,
-        )
-        .await?
-    } else {
-        sin_admitted(value).await?
+    let original = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
+        _ => None,
     };
-    apply_output_template(base, &output).await
+    let signature = usize::from(!rest.is_empty());
+    super::inverse_helpers::preparation::unary_form(
+        runmat_builtins::SIN_CATALOG_ENTRY.identity,
+        value,
+        signature,
+        1 + rest.len(),
+        |value| async move {
+            super::inverse_helpers::like::evaluate(
+                value,
+                original.as_ref(),
+                &output,
+                sin_admitted,
+                |result, protected| {
+                    let template = &output;
+                    async move { apply_output_template(result, template, &protected).await }
+                },
+                |error| sin_error_with_detail(&SIN_ERROR_INTERNAL, error),
+            )
+            .await
+        },
+    )
+    .await
 }
 
 async fn sin_admitted(value: Value) -> BuiltinResult<Value> {
@@ -299,276 +315,10 @@ fn sin_complex_im(re: f64, im: f64) -> f64 {
     re.cos() * im.sinh()
 }
 
-#[derive(Clone)]
-enum OutputTemplate {
-    Default,
-    Like(Value),
-}
-
-fn parse_output_template(args: &[Value]) -> BuiltinResult<OutputTemplate> {
-    match args.len() {
-        0 => Ok(OutputTemplate::Default),
-        1 => {
-            if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Err(sin_error_with_detail(
-                    &SIN_ERROR_INVALID_OPTION,
-                    "expected prototype after 'like'",
-                ))
-            } else {
-                Err(sin_error_with_detail(
-                    &SIN_ERROR_INVALID_OPTION,
-                    "unrecognised argument for sin",
-                ))
-            }
-        }
-        2 => {
-            if matches!(keyword_of(&args[0]).as_deref(), Some("like")) {
-                Ok(OutputTemplate::Like(args[1].clone()))
-            } else {
-                Err(sin_error_with_detail(
-                    &SIN_ERROR_INVALID_OPTION,
-                    "unsupported option; only 'like' is accepted",
-                ))
-            }
-        }
-        _ => Err(sin_error(&SIN_ERROR_ARG_COUNT)),
-    }
-}
-
-async fn apply_output_template(value: Value, template: &OutputTemplate) -> BuiltinResult<Value> {
-    match template {
-        OutputTemplate::Default => Ok(value),
-        OutputTemplate::Like(proto) => match proto {
-            Value::GpuTensor(handle) => {
-                if runmat_accelerate_api::handle_storage(handle)
-                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                {
-                    convert_to_gpu_complex(value, handle).await
-                } else {
-                    convert_to_gpu(value, handle).await
-                }
-            }
-            Value::Tensor(_)
-            | Value::Num(_)
-            | Value::Int(_)
-            | Value::Bool(_)
-            | Value::LogicalArray(_) => convert_to_host_like(value).await,
-            Value::Complex(_, _) | Value::ComplexTensor(_) => convert_to_host_complex(value).await,
-            _ => Err(sin_error_with_detail(
-                &SIN_ERROR_LIKE_PROTOTYPE,
-                "unsupported prototype; provide a numeric or gpuArray prototype",
-            )),
-        },
-    }
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
-        sin_error_with_detail(
-            &SIN_ERROR_GPU_UNAVAILABLE,
-            "GPU output requested via 'like' but no provider owns the prototype",
-        )
-    })?;
-    match value {
-        Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_storage(&handle)
-                == runmat_accelerate_api::GpuTensorStorage::Real
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
-        {
-            Ok(gpu_helpers::resident_gpu_value(handle))
-        }
-        Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_gpu(gathered, prototype).await
-        }
-        Value::Tensor(tensor) => {
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::resident_gpu_value(handle))
-        }
-        Value::Num(n) => {
-            let tensor = Tensor::new(vec![n], vec![1, 1])
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor), prototype).await
-        }
-        Value::Int(i) => convert_to_gpu(Value::Num(i.to_f64()), prototype).await,
-        Value::Bool(b) => convert_to_gpu(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await,
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu(Value::Tensor(tensor), prototype).await
-        }
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Err(sin_error_with_detail(
-            &SIN_ERROR_LIKE_PROTOTYPE,
-            "GPU prototypes for 'like' only support real numeric outputs",
-        )),
-        other => Err(sin_error_with_detail(
-            &SIN_ERROR_INTERNAL,
-            format!("unsupported result type for GPU output via 'like' ({other:?})"),
-        )),
-    }
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn convert_to_gpu_complex(value: Value, prototype: &GpuTensorHandle) -> BuiltinResult<Value> {
-    let provider = gpu_helpers::exact_provider_for_handle(prototype).ok_or_else(|| {
-        sin_error_with_detail(
-            &SIN_ERROR_GPU_UNAVAILABLE,
-            "complex GPU output requested via 'like' but no provider owns the prototype",
-        )
-    })?;
-    match value {
-        Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_storage(&handle)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-                && gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)) =>
-        {
-            Ok(gpu_helpers::complex_gpu_value(handle))
-        }
-        Value::GpuTensor(handle) => {
-            let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider));
-            if same_owner
-                && runmat_accelerate_api::handle_storage(&handle)
-                    == runmat_accelerate_api::GpuTensorStorage::Real
-            {
-                match provider.complex_from_real(&handle).await {
-                    Ok(output)
-                        if gpu_helpers::unary_gpu_output_matches(
-                            &output,
-                            &handle,
-                            provider,
-                            gpu_helpers::UnaryGpuOutputContract {
-                                storage:
-                                    runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-                                precision: runmat_accelerate_api::handle_precision(&handle),
-                                integer: None,
-                                logical: false,
-                                alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
-                            },
-                        ) =>
-                    {
-                        return Ok(gpu_helpers::complex_gpu_value(output));
-                    }
-                    Ok(output) => {
-                        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
-                        return Err(sin_error_with_detail(
-                            &SIN_ERROR_INTERNAL,
-                            "provider returned an invalid complex conversion result",
-                        ));
-                    }
-                    Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-                    Err(error) => {
-                        return Err(sin_error_with_detail(
-                            &SIN_ERROR_INTERNAL,
-                            format!("provider complex conversion failed: {error}"),
-                        ));
-                    }
-                }
-            }
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_gpu_complex(gathered, prototype).await
-        }
-        Value::Complex(re, im) => {
-            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
-        }
-        Value::ComplexTensor(tensor) => {
-            let handle = gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(gpu_helpers::complex_gpu_value(handle))
-        }
-        Value::Num(n) => convert_to_gpu_complex(Value::Complex(n, 0.0), prototype).await,
-        Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64_cow(&tensor);
-            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::from_f64_values_with_dtype(
-                data,
-                tensor.shape.clone(),
-                complex_floating_output_dtype(tensor.numeric_dtype()),
-            )
-            .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::ComplexTensor(complex), prototype).await
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_gpu_complex(Value::Tensor(tensor), prototype).await
-        }
-        Value::Int(i) => convert_to_gpu_complex(Value::Num(i.to_f64()), prototype).await,
-        Value::Bool(b) => {
-            convert_to_gpu_complex(Value::Num(if b { 1.0 } else { 0.0 }), prototype).await
-        }
-        other => Err(sin_error_with_detail(
-            &SIN_ERROR_INTERNAL,
-            format!("cannot convert value {other:?} to complex GPU output via 'like'"),
-        )),
-    }
-}
-
-async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::GpuTensor(handle) => {
-            let proxy = Value::GpuTensor(handle);
-            gpu_helpers::gather_value_async(&proxy).await
-        }
-        other => Ok(other),
-    }
-}
-
-#[async_recursion::async_recursion(?Send)]
-async fn convert_to_host_complex(value: Value) -> BuiltinResult<Value> {
-    match value {
-        Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
-        Value::Num(n) => Ok(Value::Complex(n, 0.0)),
-        Value::Tensor(tensor) => {
-            let values = tensor::tensor_values_f64_cow(&tensor);
-            let data = values.iter().map(|&re| (re, 0.0)).collect::<Vec<_>>();
-            let complex = ComplexTensor::from_f64_values_with_dtype(
-                data,
-                tensor.shape.clone(),
-                complex_floating_output_dtype(tensor.numeric_dtype()),
-            )
-            .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            Ok(complex_tensor_into_value(complex))
-        }
-        Value::GpuTensor(handle) => {
-            let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle))
-                .await
-                .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
-            convert_to_host_complex(gathered).await
-        }
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|e| sin_error_with_detail(&SIN_ERROR_INTERNAL, e))?;
-            convert_to_host_complex(Value::Tensor(tensor)).await
-        }
-        Value::Int(i) => convert_to_host_complex(Value::Num(i.to_f64())).await,
-        Value::Bool(b) => convert_to_host_complex(Value::Num(if b { 1.0 } else { 0.0 })).await,
-        other => Err(sin_error_with_detail(
-            &SIN_ERROR_INTERNAL,
-            format!("cannot convert value {other:?} to complex output via 'like'"),
-        )),
-    }
-}
-
-fn complex_floating_output_dtype(dtype: runmat_value::NumericDType) -> runmat_value::NumericDType {
-    if dtype == runmat_value::NumericDType::F32 {
-        runmat_value::NumericDType::F32
-    } else {
-        runmat_value::NumericDType::F64
-    }
-}
+mod output_template;
+#[cfg(test)]
+use output_template::convert_to_host_complex;
+use output_template::{admit_output_template, apply_output_template, parse_output_template};
 
 #[cfg(test)]
 pub(crate) mod tests {
