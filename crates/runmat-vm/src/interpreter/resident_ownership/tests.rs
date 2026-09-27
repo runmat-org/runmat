@@ -9,6 +9,21 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 #[test]
+fn retained_identity_distinguishes_devices_with_the_same_buffer_id() {
+    let first = GpuTensorHandle::new(vec![1], 101, 7);
+    let second = GpuTensorHandle::new(vec![1], 202, 7);
+    let values = Value::OutputList(vec![
+        Value::GpuTensor(first.clone()),
+        Value::GpuTensor(second.clone()),
+    ]);
+    let mut identities = HashSet::new();
+    retain_value(&values, &mut identities).expect("complete identity traversal");
+    assert_eq!(identities.len(), 2);
+    assert!(identities.contains(&handle_identity(&first)));
+    assert!(identities.contains(&handle_identity(&second)));
+}
+
+#[test]
 fn pure_host_arguments_do_not_register_roots_or_scan_global_owners() {
     let values = vec![Value::Tensor(
         runmat_value::Tensor::new(vec![2.0; 65_536], vec![256, 256]).unwrap(),

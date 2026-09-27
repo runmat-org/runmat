@@ -16,21 +16,6 @@ pub fn clear_value(_value: &Value) -> Result<(), String> {
 }
 
 #[cfg(feature = "native-accel")]
-pub fn clear_value_excluding_values(current: &Value, live: &[Value]) -> Result<(), String> {
-    runmat_accelerate::ensure_residency_hooks();
-    let mut keep_handles = HashSet::new();
-    for value in live {
-        collect_gpu_handle_identities(value, &mut keep_handles)?;
-    }
-    clear_handles_in_value_excluding(current, &keep_handles)
-}
-
-#[cfg(not(feature = "native-accel"))]
-pub fn clear_value_excluding_values(_current: &Value, _live: &[Value]) -> Result<(), String> {
-    Ok(())
-}
-
-#[cfg(feature = "native-accel")]
 fn clear_handles_in_value(value: &Value) -> Result<(), String> {
     clear_handles_in_value_excluding(value, &HashSet::new())
 }
@@ -170,119 +155,10 @@ fn clear_handles_in_value_excluding_with_visited(
     Ok(())
 }
 
-#[cfg(feature = "native-accel")]
-fn collect_gpu_handle_identities(
-    value: &Value,
-    output: &mut HashSet<GpuHandleIdentity>,
-) -> Result<(), String> {
-    let mut visited_handle_targets = HashSet::new();
-    collect_gpu_handle_identities_with_visited(value, output, &mut visited_handle_targets)
-}
-
-#[cfg(feature = "native-accel")]
-fn collect_gpu_handle_identities_with_visited(
-    value: &Value,
-    output: &mut HashSet<GpuHandleIdentity>,
-    visited_handle_targets: &mut HashSet<usize>,
-) -> Result<(), String> {
-    match value {
-        Value::GpuTensor(handle) => {
-            output.insert(handle_identity(handle));
-        }
-        Value::Cell(cell) => {
-            for elem in &cell.data {
-                collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
-            }
-        }
-        Value::Struct(struct_value) => {
-            for elem in struct_value.fields.values() {
-                collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
-            }
-        }
-        Value::StructArray(array) => {
-            let mut result = Ok(());
-            array.for_each_value(|elem| {
-                if result.is_ok() {
-                    result = collect_gpu_handle_identities_with_visited(
-                        elem,
-                        output,
-                        visited_handle_targets,
-                    );
-                }
-            });
-            result?;
-        }
-        Value::Object(object_value) => {
-            for elem in object_value.properties.values() {
-                collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
-            }
-        }
-        Value::ObjectArray(array) => {
-            for elem in array.data() {
-                collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
-            }
-        }
-        Value::Closure(closure) => {
-            for capture in &closure.captures {
-                collect_gpu_handle_identities_with_visited(
-                    capture,
-                    output,
-                    visited_handle_targets,
-                )?;
-            }
-        }
-        Value::OutputList(values) => {
-            for elem in values {
-                collect_gpu_handle_identities_with_visited(elem, output, visited_handle_targets)?;
-            }
-        }
-        Value::HandleObject(handle) => {
-            let raw_target = runmat_gc::gc_handle_addr(&handle.target);
-            if visited_handle_targets.insert(raw_target) {
-                runmat_gc::gc_with_value(&handle.target, |target| {
-                    collect_gpu_handle_identities_with_visited(
-                        target,
-                        output,
-                        visited_handle_targets,
-                    )
-                })
-                .map_err(|err| err.to_string())??;
-            }
-        }
-        Value::Int(_)
-        | Value::Num(_)
-        | Value::Complex(_, _)
-        | Value::Bool(_)
-        | Value::LogicalArray(_)
-        | Value::String(_)
-        | Value::StringArray(_)
-        | Value::CharArray(_)
-        | Value::Symbolic(_)
-        | Value::SymbolicArray(_)
-        | Value::Tensor(_)
-        | Value::SparseTensor(_)
-        | Value::ComplexTensor(_)
-        | Value::Listener(_)
-        | Value::FunctionHandle(_)
-        | Value::ExternalFunctionHandle(_)
-        | Value::MethodFunctionHandle(_)
-        | Value::BoundFunctionHandle { .. }
-        | Value::ClassRef(_)
-        | Value::MException(_)
-        | Value::Future(_)
-        | Value::Task(_)
-        | Value::Pool(_)
-        | Value::Job(_)
-        | Value::Distributed(_)
-        | Value::Composite(_)
-        | Value::Foreign(_) => {}
-    }
-    Ok(())
-}
-
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::{clear_value, clear_value_excluding_values, collect_gpu_handle_identities};
+    use super::clear_value;
+    use crate::interpreter::CompletedFrameProjection;
     use futures::executor::block_on;
     use once_cell::sync::Lazy;
     use runmat_accelerate::fusion_residency;
@@ -290,6 +166,7 @@ mod tests {
     use runmat_accelerate_api::{
         AccelProvider, GpuTensorHandle, HostTensorView, ThreadProviderGuard,
     };
+    use runmat_runtime::context::RuntimeContext;
     use runmat_value::{CellArray, Closure, HandleRef, StructValue, Value};
 
     static TEST_PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
@@ -301,33 +178,6 @@ mod tests {
                 shape: &shape,
             })
             .expect("upload should succeed")
-    }
-
-    #[test]
-    fn liveness_identity_includes_device_and_buffer() {
-        let first = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 101,
-            buffer_id: 7,
-            descriptor: Default::default(),
-        };
-        let second = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 202,
-            buffer_id: 7,
-            descriptor: Default::default(),
-        };
-        let value = Value::OutputList(vec![
-            Value::GpuTensor(first.clone()),
-            Value::GpuTensor(second.clone()),
-        ]);
-        let mut identities = std::collections::HashSet::new();
-
-        collect_gpu_handle_identities(&value, &mut identities).expect("collect identities");
-
-        assert_eq!(identities.len(), 2);
-        assert!(identities.contains(&runmat_accelerate_api::handle_identity(&first)));
-        assert!(identities.contains(&runmat_accelerate_api::handle_identity(&second)));
     }
 
     #[test]
@@ -375,7 +225,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_value_excluding_preserves_shared_handles() {
+    fn completed_projection_preserves_shared_handles() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let shared = upload_handle(vec![1.0], vec![1]);
         let old_only = upload_handle(vec![2.0], vec![1]);
@@ -391,8 +241,8 @@ mod tests {
             Value::GpuTensor(old_only.clone()),
         ]);
         let incoming = Value::GpuTensor(shared.clone());
-        clear_value_excluding_values(&current, std::slice::from_ref(&incoming))
-            .expect("clear excluding shared handles");
+        CompletedFrameProjection::new(vec![current], RuntimeContext::default())
+            .finish(std::iter::once(&incoming));
 
         assert!(
             fusion_residency::is_resident(&shared),
@@ -464,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn clear_value_excluding_preserves_handles_referenced_in_handle_object_target() {
+    fn completed_projection_preserves_handles_referenced_in_handle_object_target() {
         let _provider_guard = ThreadProviderGuard::set(Some(&*TEST_PROVIDER));
         let shared = upload_handle(vec![5.0], vec![1]);
         let old_only = upload_handle(vec![6.0], vec![1]);
@@ -489,8 +339,8 @@ mod tests {
             valid: true,
         });
 
-        clear_value_excluding_values(&current, std::slice::from_ref(&incoming))
-            .expect("clear excluding handle-object target handles");
+        CompletedFrameProjection::new(vec![current], RuntimeContext::default())
+            .finish(std::iter::once(&incoming));
 
         assert!(
             fusion_residency::is_resident(&shared),
