@@ -1,41 +1,35 @@
-//! Ownership conformance uses separate device namespaces backed by one host fixture.
+//! Ownership conformance uses separate genuine provider allocation owners.
 use super::*;
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, HostNumericTensorView, NumericElementType,
-    ThreadProviderGuard,
+    ThreadProviderGuard, WeakGpuTensorHandle,
 };
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
 };
-use std::collections::BTreeSet;
 use std::sync::{
-    atomic::{AtomicU32, AtomicUsize, Ordering},
-    Mutex, OnceLock,
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
 };
 
 struct Owner {
-    inner: &'static crate::simple_provider::InProcessProvider,
-    device: u32,
+    inner: crate::simple_provider::InProcessProvider,
     uploads: AtomicUsize,
-    live: Mutex<BTreeSet<u64>>,
+    allocations: Mutex<Vec<WeakGpuTensorHandle>>,
 }
 impl Owner {
-    fn publish(&self, mut handle: GpuTensorHandle) -> GpuTensorHandle {
-        assert_eq!(handle.device_id, self.inner.device_id());
-        assert!(self.live.lock().unwrap().insert(handle.buffer_id));
-        handle.device_id = self.device;
+    fn publish(&self, handle: GpuTensorHandle) -> GpuTensorHandle {
+        assert_eq!(handle.device_id(), self.inner.device_id());
+        self.allocations.lock().unwrap().push(handle.downgrade());
         handle
     }
-
-    fn backing_handle(&self, handle: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        anyhow::ensure!(handle.device_id == self.device, "fixture: foreign device");
-        anyhow::ensure!(
-            self.live.lock().unwrap().contains(&handle.buffer_id),
-            "fixture: unknown allocation"
-        );
-        let mut backing = handle.clone();
-        backing.device_id = self.inner.device_id();
-        Ok(backing)
+    fn live_count(&self) -> usize {
+        self.allocations
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|weak| weak.acquire().is_ok())
+            .count()
     }
 
     fn input(&self, data: &[f64]) -> GpuTensorHandle {
@@ -51,7 +45,7 @@ impl Owner {
 }
 impl AccelProvider for Owner {
     fn device_id(&self) -> u32 {
-        self.device
+        self.inner.device_id()
     }
     fn device_info(&self) -> String {
         "admitted-owner-fixture".into()
@@ -65,23 +59,13 @@ impl AccelProvider for Owner {
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        Ok(self.publish(self.inner.upload_numeric(host)?))
+        Ok(self.publish(self.inner.upload_numeric_raw(host)?))
     }
     fn download<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-        Box::pin(async move {
-            let backing = self.backing_handle(handle)?;
-            self.inner.download(&backing).await
-        })
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
-        let backing = self.backing_handle(handle)?;
-        self.inner.free(&backing)?;
-        assert!(self.live.lock().unwrap().remove(&handle.buffer_id));
-        runmat_accelerate_api::clear_handle_metadata(handle);
-        Ok(())
+        self.inner.download(handle)
     }
     fn query_feasibility(
         &self,
@@ -92,13 +76,10 @@ impl AccelProvider for Owner {
     }
 }
 fn owner() -> &'static Owner {
-    static INNER: OnceLock<crate::simple_provider::InProcessProvider> = OnceLock::new();
-    static NEXT: AtomicU32 = AtomicU32::new(29_000);
     let provider = Box::leak(Box::new(Owner {
-        inner: INNER.get_or_init(crate::simple_provider::InProcessProvider::new),
-        device: NEXT.fetch_add(1, Ordering::Relaxed),
+        inner: crate::simple_provider::InProcessProvider::new(),
         uploads: AtomicUsize::new(0),
-        live: Mutex::new(BTreeSet::new()),
+        allocations: Mutex::new(Vec::new()),
     }));
     // SAFETY: leaked owners have process lifetime and unique monotonically allocated IDs.
     unsafe {
@@ -166,10 +147,11 @@ fn admitted_mixed_or_other_owner_bypasses_selected_provider_and_preserves_runtim
         }
         assert_eq!(selected.uploads.load(Ordering::Relaxed), 0);
         assert!(probe.feedback.borrow().is_empty());
-        theta_owner.free(&theta).unwrap();
-        other.free(&rho).unwrap();
-        assert!(selected.live.lock().unwrap().is_empty());
-        assert!(other.live.lock().unwrap().is_empty());
+        drop(original);
+        drop(theta);
+        drop(rho);
+        assert_eq!(selected.live_count(), 0);
+        assert_eq!(other.live_count(), 0);
     }
 }
 
@@ -193,22 +175,18 @@ fn admitted_matching_owner_uses_retained_provider_not_ambient_selection() {
     assert_eq!(ambient.uploads.load(Ordering::Relaxed), 0);
     assert_eq!(probe.requests.borrow().len(), 1);
     assert!(prepared.args().iter().all(
-        |value| matches!(value, Value::GpuTensor(handle) if handle.device_id == selected.device)
+        |value| matches!(value, Value::GpuTensor(handle) if handle.device_id() == selected.device_id())
     ));
     drop(prepared);
-    assert_eq!(
-        selected.live.lock().unwrap().len(),
-        1,
-        "only the borrowed input survives"
-    );
+    assert_eq!(selected.live_count(), 1, "only the borrowed input survives");
     assert!(probe
         .feedback
         .borrow()
         .iter()
         .all(|feedback| !feedback.succeeded));
     assert!(futures::executor::block_on(selected.download(&borrowed)).is_ok());
-    selected.free(&borrowed).unwrap();
-    assert!(selected.live.lock().unwrap().is_empty());
+    drop(borrowed);
+    assert_eq!(selected.live_count(), 0);
 }
 
 #[test]
@@ -216,18 +194,22 @@ fn admitted_owner_proof_traverses_nested_values_and_rejects_unresolved_handles()
     let selected = owner();
     let other = owner();
     let borrowed = other.input(&[2.0]);
-    assert!(selected.free(&borrowed).is_err());
+    assert!(futures::executor::block_on(selected.download(&borrowed)).is_err());
     assert!(futures::executor::block_on(other.download(&borrowed)).is_ok());
     let nested = Value::OutputList(vec![Value::OutputList(vec![Value::GpuTensor(
         borrowed.clone(),
     )])]);
     assert!(!super::super::owner_admission::matches_selected_owner(selected, &[nested]).unwrap());
-    let unowned = GpuTensorHandle::new(vec![1, 1], u32::MAX - 100, 1)
-        .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real);
+    let unregistered_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let unowned = unregistered_owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
     assert!(!super::super::owner_admission::matches_selected_owner(
         selected,
-        &[Value::GpuTensor(unowned)]
+        &[Value::GpuTensor(unowned.handle)]
     )
     .unwrap());
-    other.free(&borrowed).unwrap();
+    assert_eq!(unowned.probe.retirements(), 1);
+    drop(borrowed);
+    assert_eq!(other.live_count(), 0);
 }

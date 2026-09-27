@@ -28,9 +28,6 @@ impl AccelProvider for UploadRejectingProvider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async { Err(anyhow!("unused download")) })
     }
-    fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
-        Ok(())
-    }
     fn device_info(&self) -> String {
         "builtin-observation-provider".into()
     }
@@ -201,16 +198,21 @@ fn provider_return_is_not_a_completed_device_cost_sample() {
 #[test]
 fn resident_input_or_output_prevents_unproven_cpu_sample() {
     let probe = Rc::new(Probe::default());
-    let device = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 1],
-        81,
-        42,
-    ));
+    let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let device = Value::GpuTensor(allocation.handle);
     for (input, output) in [(device.clone(), Value::Num(1.)), (Value::Num(1.), device)] {
         let prepared = observed(&probe, false, vec![input]);
         prepared.into_execution().1.finish(&Ok(output)).unwrap();
     }
     assert!(probe.feedback.borrow().is_empty());
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

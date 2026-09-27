@@ -63,7 +63,7 @@ fn pol2cart_actual_nary_preparation_preserves_all_outputs_and_provider_feedback(
                                 Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
                             );
                             let host = provider.download(&handle).await.unwrap();
-                            provider.free(&handle).unwrap();
+                            drop(handle);
                             (host.shape, host.data)
                         }
                         Value::Tensor(tensor) => {
