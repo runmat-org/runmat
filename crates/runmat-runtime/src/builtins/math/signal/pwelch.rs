@@ -419,7 +419,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, rows, complex_input).await?;
-        if let Ok(value) = output_gpu(handle, rows, cols, &options).await {
+        if let Some(value) = output_gpu(handle, rows, cols, &options).await? {
             return Ok(value);
         }
     }
@@ -539,9 +539,9 @@ async fn output_gpu(
     rows: usize,
     cols: usize,
     options: &PwelchOptions,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
-        return Err(pwelch_error(&PWELCH_ERROR_INTERNAL));
+        return Ok(None);
     };
     let window_len = options.window.len();
     let step = window_len - options.noverlap;
@@ -581,35 +581,62 @@ async fn output_gpu(
         range,
         denominator,
     };
-    let estimate = provider
-        .uniform_spectral_estimate(&request)
-        .await
-        .map_err(|err| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, err.to_string()))?;
+    let estimate = match provider.uniform_spectral_estimate(&request).await {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
 
     let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
         Ok(ps_frames) => ps_frames,
+        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            return Ok(None)
+        }
         Err(err) => {
-            return Err(pwelch_error_with_detail(
-                &PWELCH_ERROR_INTERNAL,
-                err.to_string(),
+            return Err(crate::runtime_error::with_provider_execution_source(
+                pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {err}"),
+                ),
+                err.into(),
             ));
         }
     };
     let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
         Ok(ps_mean) => ps_mean,
+        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            return Ok(None)
+        }
         Err(err) => {
-            return Err(pwelch_error_with_detail(
-                &PWELCH_ERROR_INTERNAL,
-                err.to_string(),
+            return Err(crate::runtime_error::with_provider_execution_source(
+                pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {err}"),
+                ),
+                err.into(),
             ));
         }
     };
     let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
         Ok(pxx) => pxx,
+        Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+            return Ok(None)
+        }
         Err(err) => {
-            return Err(pwelch_error_with_detail(
-                &PWELCH_ERROR_INTERNAL,
-                err.to_string(),
+            return Err(crate::runtime_error::with_provider_execution_source(
+                pwelch_error_with_detail(
+                    &PWELCH_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {err}"),
+                ),
+                err.into(),
             ));
         }
     };
@@ -621,10 +648,10 @@ async fn output_gpu(
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Some(Value::OutputList(Vec::new())));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![pxx]));
+            return Ok(Some(Value::OutputList(vec![pxx])));
         }
         let f_values = frequency_vector(nfft, options.fs, options.range);
         let f_shape = [estimate.rows, 1usize];
@@ -633,20 +660,26 @@ async fn output_gpu(
             shape: &f_shape,
         }) {
             Ok(f) => f,
+            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                return Ok(None)
+            }
             Err(err) => {
-                return Err(pwelch_error_with_detail(
-                    &PWELCH_ERROR_INTERNAL,
-                    err.to_string(),
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    pwelch_error_with_detail(
+                        &PWELCH_ERROR_INTERNAL,
+                        format!("provider output preparation failed: {err}"),
+                    ),
+                    err.into(),
                 ));
             }
         };
         let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
-        return Ok(crate::output_count::output_list_with_padding(
+        return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
-        ));
+        )));
     }
-    Ok(pxx)
+    Ok(Some(pxx))
 }
 
 async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {
