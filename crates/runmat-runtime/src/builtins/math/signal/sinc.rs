@@ -127,19 +127,6 @@ pub const SINC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     errors: &SINC_ERRORS,
 };
 
-#[derive(Debug)]
-struct ProviderAnyhowError {
-    message: String,
-}
-
-impl std::fmt::Display for ProviderAnyhowError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ProviderAnyhowError {}
-
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::signal::sinc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: BUILTIN_NAME,
@@ -199,31 +186,11 @@ fn sinc_error_with_message(
     builder.build()
 }
 
-fn sinc_error_with_source(
-    error: &'static BuiltinErrorDescriptor,
-    detail: impl AsRef<str>,
-    source: impl std::error::Error + Send + Sync + 'static,
-) -> RuntimeError {
-    let mut builder = build_runtime_error(format!("{}: {}", error.message, detail.as_ref()))
-        .with_builtin(BUILTIN_NAME)
-        .with_source(source);
-    if let Some(identifier) = error.identifier {
-        builder = builder.with_identifier(identifier);
-    }
-    builder.build()
-}
-
-fn provider_error_is_unsupported(err: &anyhow::Error) -> bool {
-    err.chain()
-        .any(|cause| cause.to_string() == "unary_sinc not supported by provider")
-}
-
 fn provider_error(err: anyhow::Error) -> RuntimeError {
-    let message = err.to_string();
-    let source = ProviderAnyhowError {
-        message: format!("{err:?}"),
-    };
-    sinc_error_with_source(&SINC_ERROR_PROVIDER_FAILED, message, source)
+    crate::runtime_error::with_provider_execution_source(
+        sinc_error_with_detail(&SINC_ERROR_PROVIDER_FAILED, err.to_string()),
+        err.into(),
+    )
 }
 
 #[runtime_builtin(
@@ -276,7 +243,7 @@ fn is_supported_nonfloating_input(value: &Value) -> bool {
 }
 
 async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         if runmat_accelerate_api::handle_precision(&handle)
             .is_some_and(|precision| precision != provider.precision())
             || runmat_accelerate_api::handle_integer_type(&handle).is_some()
@@ -284,8 +251,26 @@ async fn sinc_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             return sinc_gpu_host_fallback(provider, &handle).await;
         }
         match provider.unary_sinc(&handle).await {
-            Ok(out) => return gpu_helpers::resident_gpu_value(out),
-            Err(err) if provider_error_is_unsupported(&err) => {
+            Ok(mut out) => {
+                let contract = gpu_helpers::UnaryGpuOutputContract {
+                    storage: runmat_accelerate_api::handle_storage(&handle),
+                    precision: runmat_accelerate_api::handle_precision(&handle),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                };
+                if !gpu_helpers::unary_gpu_output_matches(&out, &handle, provider, contract) {
+                    let mut error = sinc_error_with_detail(
+                        &SINC_ERROR_INTERNAL,
+                        "provider returned malformed or aliased unary output",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(out, error));
+                }
+                gpu_helpers::propagate_output_provenance(&mut out, [&handle])?;
+                return gpu_helpers::resident_gpu_value(out);
+            }
+            Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => {
                 return sinc_gpu_host_fallback(provider, &handle).await;
             }
             Err(err) => return Err(provider_error(err)),
@@ -301,7 +286,12 @@ async fn sinc_gpu_host_fallback(
 ) -> BuiltinResult<Value> {
     let host = gpu_helpers::download_floating_projection_async(provider, handle)
         .await
-        .map_err(|err| sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string()))?;
+        .map_err(|err| {
+            let mut failure = sinc_error_with_detail(&SINC_ERROR_GATHER_FAILED, err.to_string());
+            failure.source = Some(Box::new(err));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            failure
+        })?;
 
     let runmat_accelerate_api::HostTensorOwned {
         mut data,
@@ -760,6 +750,12 @@ mod tests {
             })
             .expect("owned input");
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
+        let Value::GpuTensor(ref output) = result else {
+            panic!("supported fallback restoration must remain resident: {result:?}");
+        };
+        assert_eq!(output.shape(), &[1, 3]);
+        let result =
+            block_on(gpu_helpers::gather_value_async(&result)).expect("gather restored result");
         match result {
             Value::Tensor(out) => {
                 assert_eq!(out.shape, vec![1, 3]);
@@ -808,6 +804,15 @@ mod tests {
             .expect("owned complex input");
 
         let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
+        let Value::GpuTensor(ref output) = result else {
+            panic!("supported complex restoration must remain resident: {result:?}");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(output),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        let result = block_on(gpu_helpers::gather_value_async(&result))
+            .expect("gather restored complex result");
         match result {
             Value::ComplexTensor(out) => {
                 assert_eq!(out.shape, vec![2, 1]);
