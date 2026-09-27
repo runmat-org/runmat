@@ -257,19 +257,6 @@ fn extract_numeric_diagonal(
 
 static NEXT_PROVIDER_ID_BASE: AtomicU64 = AtomicU64::new(PROVIDER_ID_BLOCK_SIZE);
 
-fn owned_integer_data(data: HostIntegerDataView<'_>) -> HostIntegerDataOwned {
-    match data {
-        HostIntegerDataView::I8(values) => HostIntegerDataOwned::I8(values.to_vec()),
-        HostIntegerDataView::I16(values) => HostIntegerDataOwned::I16(values.to_vec()),
-        HostIntegerDataView::I32(values) => HostIntegerDataOwned::I32(values.to_vec()),
-        HostIntegerDataView::I64(values) => HostIntegerDataOwned::I64(values.to_vec()),
-        HostIntegerDataView::U8(values) => HostIntegerDataOwned::U8(values.to_vec()),
-        HostIntegerDataView::U16(values) => HostIntegerDataOwned::U16(values.to_vec()),
-        HostIntegerDataView::U32(values) => HostIntegerDataOwned::U32(values.to_vec()),
-        HostIntegerDataView::U64(values) => HostIntegerDataOwned::U64(values.to_vec()),
-    }
-}
-
 fn cast_f64_to_integer_data(values: &[f64], target: IntegerElementType) -> HostIntegerDataOwned {
     match target {
         IntegerElementType::I8 => HostIntegerDataOwned::I8(
