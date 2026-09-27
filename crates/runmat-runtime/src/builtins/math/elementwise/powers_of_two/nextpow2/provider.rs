@@ -37,7 +37,7 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         Err(source) => {
             let mut error = errors::internal(format!("provider unary_nextpow2 failed: {source}"));
-            error.source = Some(source.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             Err(error)
         }

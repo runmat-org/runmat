@@ -71,7 +71,7 @@ async fn try_provider(
                 &CONJ_ERROR_INTERNAL,
                 format!("provider unary_conj failed: {source}"),
             );
-            error.source = Some(source.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
             Err(error)
         }
     }

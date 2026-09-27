@@ -25,7 +25,8 @@ pub(in super::super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
                 let mut failure = errors::internal(format!("provider unary_pow2 failed: {error}"));
-                failure.source = Some(error.into_boxed_dyn_error());
+                failure =
+                    crate::runtime_error::with_provider_execution_source(failure, error.into());
                 failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(failure);
             }

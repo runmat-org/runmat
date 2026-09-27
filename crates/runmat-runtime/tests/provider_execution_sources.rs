@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[path = "provider_execution_sources/extrema_continuations.rs"]
 mod extrema_continuations;
 
+#[path = "provider_execution_sources/math_boundaries.rs"]
+mod math_boundaries;
+
 #[derive(Debug)]
 struct DeviceFailure;
 impl std::fmt::Display for DeviceFailure {

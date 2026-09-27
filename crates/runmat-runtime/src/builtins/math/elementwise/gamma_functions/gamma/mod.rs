@@ -127,7 +127,7 @@ async fn gamma_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Err(error) if resident_real_unary::hook_is_unsupported(&error) => {}
         Err(error) => {
             let mut failure = gamma_terminal_error(&GAMMA_ERROR_INTERNAL, error.to_string());
-            failure.source = Some(error.into_boxed_dyn_error());
+            failure = crate::runtime_error::with_provider_execution_source(failure, error.into());
             return Err(failure);
         }
     }

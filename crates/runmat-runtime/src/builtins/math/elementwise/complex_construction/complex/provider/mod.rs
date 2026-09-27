@@ -162,7 +162,7 @@ fn provider_error(operation: &str, source: anyhow::Error) -> crate::RuntimeError
         &COMPLEX_ERROR_INTERNAL,
         format!("provider {operation} failed: {source}"),
     );
-    failure.source = Some(source.into_boxed_dyn_error());
+    failure = crate::runtime_error::with_provider_execution_source(failure, source.into());
     failure
 }
 

@@ -63,7 +63,7 @@ async fn evaluate_floating(input: GpuTensorHandle) -> BuiltinResult<Value> {
         }
         Err(source) => {
             let mut error = factorial_error(FactorialError::Internal, source.to_string());
-            error.source = Some(source.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
             Err(error)
         }
     }

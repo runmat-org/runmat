@@ -152,7 +152,7 @@ async fn erfcinv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         Err(err) if real_unary::hook_is_unsupported(&err) => {}
         Err(err) => {
             let mut error = internal_error(format!("provider unary_erfcinv failed: {err}"));
-            error.source = Some(err.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, err.into());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             return Err(error);
         }

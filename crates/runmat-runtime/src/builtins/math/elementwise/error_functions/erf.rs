@@ -157,7 +157,7 @@ async fn erf_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 &ERF_ERROR_INTERNAL,
                 format!("provider unary_erf failed: {err}"),
             );
-            error.source = Some(err.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, err.into());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             return Err(error);
         }

@@ -40,7 +40,8 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
                 Err(error) => {
                     let mut failure =
                         errors::internal(format!("provider unary_sqrt failed: {error}"));
-                    failure.source = Some(error.into_boxed_dyn_error());
+                    failure =
+                        crate::runtime_error::with_provider_execution_source(failure, error.into());
                     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     Err(failure)
                 }
