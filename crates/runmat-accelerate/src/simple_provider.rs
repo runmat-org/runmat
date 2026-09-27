@@ -7415,7 +7415,6 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        ensure!(a.shape().len() == 2, "transpose: only 2D supported");
         let storage = a.physical().storage();
         let lanes = if storage == GpuTensorStorage::ComplexInterleaved {
             2
@@ -7429,6 +7428,11 @@ impl AccelProvider for InProcessProvider {
             let data = guard
                 .get(a)
                 .ok_or_else(|| anyhow!("transpose input is not a live owned allocation"))?;
+            if a.shape().len() != 2 {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "transpose: only 2D supported",
+                ));
+            }
             match data {
                 InProcessNumericData::F32(values) => {
                     let (values, shape) = permute_data(values, a.shape(), &[1, 0], lanes)?;
