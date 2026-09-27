@@ -45,6 +45,18 @@ impl DivisionContext {
             .with_builtin(self.identity.name)
             .build()
     }
+
+    fn provider_error(self, source: anyhow::Error) -> RuntimeError {
+        let mut error = self.provider_contract_error(&source);
+        error.source = Some(source.into_boxed_dyn_error());
+        error
+    }
+
+    fn provider_contract_error(self, detail: impl std::fmt::Display) -> RuntimeError {
+        let mut error = self.internal_error(detail);
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    }
 }
 
 pub(super) fn execute_host(

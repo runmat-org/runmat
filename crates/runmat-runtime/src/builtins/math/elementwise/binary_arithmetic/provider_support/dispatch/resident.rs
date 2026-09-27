@@ -41,6 +41,7 @@ async fn try_host_scalar(
     .map_err(|source| {
         crate::build_runtime_error(format!("{}: {source}", operation.name()))
             .with_builtin(operation.name())
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .with_source(source)
             .build()
     })? {

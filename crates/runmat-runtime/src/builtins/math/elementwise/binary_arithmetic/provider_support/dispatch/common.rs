@@ -82,6 +82,7 @@ pub(super) fn provider_error(
 ) -> crate::RuntimeError {
     let mut result = build_runtime_error(format!("{}: {error}", operation.name()))
         .with_builtin(operation.name())
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build();
     result.source = Some(error.into_boxed_dyn_error());
     result
@@ -93,5 +94,6 @@ pub(super) fn provider_contract_error(
 ) -> crate::RuntimeError {
     build_runtime_error(format!("{}: {message}", operation.name()))
         .with_builtin(operation.name())
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
 }

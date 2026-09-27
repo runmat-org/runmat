@@ -25,7 +25,53 @@ struct Provider {
     outputs: Mutex<Vec<RetirementProbe>>,
 }
 
+#[derive(Debug)]
+struct BinaryFailure;
+impl std::fmt::Display for BinaryFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("injected binary device failure")
+    }
+}
+impl std::error::Error for BinaryFailure {}
+
+impl Provider {
+    fn binary_failure(&self) -> AccelProviderFuture<'_, GpuTensorHandle> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::Error::new(BinaryFailure))
+        })
+    }
+}
+
 impl AccelProvider for Provider {
+    fn elem_add<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary_failure()
+    }
+    fn elem_sub<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary_failure()
+    }
+    fn elem_mul<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary_failure()
+    }
+    fn elem_div<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary_failure()
+    }
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
@@ -59,6 +105,73 @@ impl AccelProvider for Provider {
             }
         })
     }
+}
+
+#[test]
+fn automatic_binary_operational_errors_keep_source_and_never_retry() {
+    runmat_gc::gc_test_context(|| {
+        let provider = Box::leak(Box::new(Provider {
+            owner: TestAllocationOwner::new(),
+            fault: Fault::Failure,
+            calls: AtomicUsize::new(0),
+            outputs: Mutex::new(Vec::new()),
+        }));
+        let _scope = ThreadProviderGuard::set(Some(provider));
+        for name in ["plus", "minus", "times", "rdivide", "ldivide"] {
+            let left = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let right = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let left_handle = left
+                .handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
+            let right_handle = right
+                .handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .unwrap();
+            let before = provider.calls.load(Ordering::SeqCst);
+            let error = mapped(
+                name,
+                vec![
+                    Value::GpuTensor(left_handle),
+                    Value::GpuTensor(right_handle),
+                ],
+            )
+            .unwrap_err();
+            assert_eq!(
+                provider.calls.load(Ordering::SeqCst),
+                before + 1,
+                "{name}: one actual provider hook"
+            );
+            let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            let mut retained = false;
+            let mut terminal = false;
+            while let Some(cause) = cursor {
+                retained |= cause.is::<BinaryFailure>();
+                terminal |= cause
+                    .downcast_ref::<runmat_runtime::RuntimeError>()
+                    .is_some_and(|error| {
+                        error.gpu_gather_retry == runmat_runtime::GpuGatherRetry::Never
+                    });
+                cursor = cause.source();
+            }
+            assert!(
+                retained && terminal,
+                "{name}: original typed cause and terminal retry policy: {error:?}"
+            );
+            assert_eq!(left.probe.retirements(), 0);
+            assert_eq!(right.probe.retirements(), 0);
+            drop(left.handle);
+            drop(right.handle);
+            assert_eq!(left.probe.retirements(), 1);
+            assert_eq!(right.probe.retirements(), 1);
+        }
+    });
 }
 
 #[test]

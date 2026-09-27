@@ -26,7 +26,7 @@ pub(super) async fn try_pair(
     let output = match divide(provider, numerator, denominator).await {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-        Err(error) => return Err(context.internal_error(error)),
+        Err(error) => return Err(context.provider_error(error)),
     };
     if valid_real_binary_output(
         &output,
@@ -39,7 +39,9 @@ pub(super) async fn try_pair(
     } else {
         Err(gpu_helpers::reject_gpu_output(
             output,
-            context.internal_error("provider returned invalid element-wise division metadata"),
+            context.provider_contract_error(
+                "provider returned invalid element-wise division metadata",
+            ),
         ))
     }
 }
@@ -60,7 +62,7 @@ pub(super) async fn try_resident_numerator(
             provider, numerator, *scalar,
         )
         .map_err(|source| {
-            let mut error = context.internal_error(&source);
+            let mut error = context.provider_contract_error(&source);
             error.source = Some(Box::new(source));
             error
         })?
@@ -73,7 +75,7 @@ pub(super) async fn try_resident_numerator(
             Ok(output) => Some(output),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
             Err(error) => {
-                return Err(context.internal_error(error));
+                return Err(context.provider_error(error));
             }
         };
         let valid = result.as_ref().is_some_and(|output| {
@@ -93,7 +95,9 @@ pub(super) async fn try_resident_numerator(
         }
         return Err(gpu_helpers::reject_gpu_output(
             result.expect("validated present result"),
-            context.internal_error("provider returned invalid element-wise division metadata"),
+            context.provider_contract_error(
+                "provider returned invalid element-wise division metadata",
+            ),
         ));
     }
     if float_handle_supported(numerator) {
@@ -108,11 +112,13 @@ pub(super) async fn try_resident_numerator(
                 }
                 return Err(gpu_helpers::reject_gpu_output(
                     output,
-                    context.internal_error("provider returned invalid scalar division metadata"),
+                    context.provider_contract_error(
+                        "provider returned invalid scalar division metadata",
+                    ),
                 ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-            Err(error) => return Err(context.internal_error(error)),
+            Err(error) => return Err(context.provider_error(error)),
         }
     }
     Ok(None)
@@ -133,7 +139,7 @@ pub(super) async fn try_resident_denominator(
         let Some(uploaded) =
             gpu_helpers::upload_exact_integer_scalar_like(provider, denominator, *scalar).map_err(
                 |source| {
-                    let mut error = context.internal_error(&source);
+                    let mut error = context.provider_contract_error(&source);
                     error.source = Some(Box::new(source));
                     error
                 },
@@ -147,7 +153,7 @@ pub(super) async fn try_resident_denominator(
             Ok(output) => Some(output),
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => None,
             Err(error) => {
-                return Err(context.internal_error(error));
+                return Err(context.provider_error(error));
             }
         };
         let valid = result.as_ref().is_some_and(|output| {
@@ -167,7 +173,9 @@ pub(super) async fn try_resident_denominator(
         }
         return Err(gpu_helpers::reject_gpu_output(
             result.expect("validated present result"),
-            context.internal_error("provider returned invalid element-wise division metadata"),
+            context.provider_contract_error(
+                "provider returned invalid element-wise division metadata",
+            ),
         ));
     }
     if float_handle_supported(denominator) {
@@ -188,11 +196,13 @@ pub(super) async fn try_resident_denominator(
                 }
                 return Err(gpu_helpers::reject_gpu_output(
                     output,
-                    context.internal_error("provider returned invalid scalar division metadata"),
+                    context.provider_contract_error(
+                        "provider returned invalid scalar division metadata",
+                    ),
                 ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-            Err(error) => return Err(context.internal_error(error)),
+            Err(error) => return Err(context.provider_error(error)),
         }
     }
     Ok(None)
