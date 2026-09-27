@@ -110,7 +110,9 @@ fn actual_wgpu_floating_casts_preserve_square_rectangular_and_empty_transposed_v
 
 #[test]
 fn actual_wgpu_cast_rejects_incoherent_view_before_allocating_result() {
-    let provider = provider();
+    // A private instance makes the existing allocation-table counter independent
+    // of concurrent hardware tests.
+    let provider = WgpuProvider::new(Default::default()).expect("actual WGPU adapter required");
     let input = provider
         .upload_numeric(&HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
@@ -119,13 +121,97 @@ fn actual_wgpu_cast_rejects_incoherent_view_before_allocating_result() {
         })
         .unwrap();
     runmat_accelerate_api::record_handle_transpose(&input, 1, 4);
+    let allocations = provider.allocations.lock_entries().unwrap().len();
+    let pipelines = provider.fused_pipeline_cache.lock().unwrap().len();
     assert!(provider
         .floating_cast_exec(&input, NumericPrecision::F32)
         .is_err());
+    assert_eq!(
+        provider.allocations.lock_entries().unwrap().len(),
+        allocations
+    );
+    assert_eq!(
+        provider.fused_pipeline_cache.lock().unwrap().len(),
+        pipelines
+    );
     runmat_accelerate_api::clear_handle_transpose(&input);
     assert_eq!(
         block_on(provider.download_numeric(&input)).unwrap().data,
         HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
     );
     provider.free(&input).unwrap();
+}
+
+#[test]
+fn actual_wgpu_single_view_preserves_signed_zero_and_subnormal_bits() {
+    let provider = provider();
+    let values = [
+        0.0_f32,
+        -0.0,
+        f32::from_bits(1),
+        -f32::from_bits(1),
+        f32::MIN_POSITIVE,
+        -f32::MIN_POSITIVE,
+    ];
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&values),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let view = provider.transpose_exec(&input).unwrap();
+    let output = provider
+        .floating_cast_exec(&view, NumericPrecision::F32)
+        .unwrap();
+    let HostNumericDataOwned::F32(actual) =
+        block_on(provider.download_numeric(&output)).unwrap().data
+    else {
+        panic!("physical F32 required");
+    };
+    assert_eq!(
+        actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+        [0, 2, 4, 1, 3, 5].map(|i| values[i].to_bits())
+    );
+    provider.free(&input).unwrap();
+    provider.free(&view).unwrap();
+    provider.free(&output).unwrap();
+}
+
+#[test]
+#[ignore = "requires an actual shader-f64 adapter; run explicitly in the F64 qualification gate"]
+fn actual_wgpu_cross_precision_view_preserves_signed_zero_and_tiny_conversion() {
+    let provider = provider();
+    assert_eq!(provider.precision(), ProviderPrecision::F64);
+    let values = [
+        0.0_f64,
+        -0.0,
+        f64::from(f32::from_bits(1)),
+        -f64::from(f32::from_bits(1)),
+        f64::from_bits(1),
+        -f64::from_bits(1),
+    ];
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&values),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let view = provider.transpose_exec(&input).unwrap();
+    let output = provider
+        .floating_cast_exec(&view, NumericPrecision::F32)
+        .unwrap();
+    let HostNumericDataOwned::F32(actual) =
+        block_on(provider.download_numeric(&output)).unwrap().data
+    else {
+        panic!("physical F32 required");
+    };
+    assert_eq!(
+        actual.iter().map(|x| x.to_bits()).collect::<Vec<_>>(),
+        [0, 2, 4, 1, 3, 5].map(|i| (values[i] as f32).to_bits())
+    );
+    provider.free(&input).unwrap();
+    provider.free(&view).unwrap();
+    provider.free(&output).unwrap();
 }
