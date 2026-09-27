@@ -20,6 +20,10 @@ pub(crate) struct PhysicalWork {
     pub scratch_bytes: u64,
     #[cfg(any(feature = "wgpu", test))]
     pub queue_submissions: u32,
+    /// Logical element visits in host staging and device representation
+    /// adapters, excluding the primary fused program and transfer bytes.
+    #[cfg(any(feature = "wgpu", test))]
+    pub adapter_element_visits: u64,
 }
 
 pub(super) fn validate(
@@ -117,6 +121,7 @@ fn analyze(
     physical.inputs.clear();
     physical.outputs.clear();
     let mut adapter_dispatches = 0u64;
+    let mut adapter_element_visits = 0u64;
     let mut final_output_bytes = 0u64;
     let mut scratch_bytes = 0u64;
     let mut materialization_setup_submissions = 0u32;
@@ -149,6 +154,30 @@ fn analyze(
             );
         }
         let cast = input.residency == ProviderResidency::Device && input.element_type != native;
+        let Some(elements) = input.checked_element_count() else {
+            return reject(
+                ProviderRejectionCode::InvalidShape,
+                "fusion.elementwise.input_overflow",
+            );
+        };
+        // Host tensors materialize an f64 staging vector; F32 providers then
+        // convert that vector to f32 before upload. Resident inputs instead
+        // execute one pass per selected materialization/widening adapter.
+        let passes = if input.residency == ProviderResidency::Host {
+            1 + u64::from(native == ProviderElementType::F32)
+        } else {
+            u64::from(materialize) + u64::from(cast)
+        };
+        let Some(total) = elements
+            .checked_mul(passes)
+            .and_then(|visits| adapter_element_visits.checked_add(visits))
+        else {
+            return reject(
+                ProviderRejectionCode::ResourceLimit,
+                "fusion.elementwise.adapter_work_overflow",
+            );
+        };
+        adapter_element_visits = total;
         let mut physical_input = input.clone();
         physical_input.layout = ProviderLayout::ColumnMajorContiguous;
         if materialize {
@@ -253,6 +282,7 @@ fn analyze(
     }
     for output in &query.outputs {
         if output.storage != ProviderStorage::DenseReal
+            || output.layout != ProviderLayout::ColumnMajorContiguous
             || output.residency != ProviderResidency::Device
             || !matches!(
                 output.element_type,
@@ -316,6 +346,13 @@ fn analyze(
                     "fusion.elementwise.output_overflow",
                 );
             };
+            let Some(total) = adapter_element_visits.checked_add(count) else {
+                return reject(
+                    ProviderRejectionCode::ResourceLimit,
+                    "fusion.elementwise.adapter_work_overflow",
+                );
+            };
+            adapter_element_visits = total;
             let Some(dispatches) = dispatches(count) else {
                 return reject(
                     ProviderRejectionCode::ResourceLimit,
@@ -332,6 +369,23 @@ fn analyze(
                 }
             };
         }
+    }
+    // The execution owner exits to the shared runtime before any preparation
+    // for empty output shapes, including broadcasts with nonempty scalars.
+    if output_shape.contains(&0) {
+        return Some(Ok(PhysicalWork {
+            estimate: ProviderResourceEstimate {
+                transient_bytes: Some(0),
+                output_bytes: Some(0),
+                dispatches: Some(0),
+            },
+            #[cfg(any(feature = "wgpu", test))]
+            scratch_bytes: 0,
+            #[cfg(any(feature = "wgpu", test))]
+            queue_submissions: 0,
+            #[cfg(any(feature = "wgpu", test))]
+            adapter_element_visits: 0,
+        }));
     }
     let mut snapshot = dense_capability_snapshot(
         provider,
@@ -382,6 +436,8 @@ fn analyze(
                 scratch_bytes,
                 #[cfg(any(feature = "wgpu", test))]
                 queue_submissions: _queue_submissions,
+                #[cfg(any(feature = "wgpu", test))]
+                adapter_element_visits,
             })
         }
         rejected => Err(rejected),
@@ -393,8 +449,9 @@ fn dispatches(elements: u64) -> Option<u64> {
         return None;
     }
     #[cfg(feature = "wgpu")]
-    let capacity = u64::from(crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS)
-        * u64::from(crate::backend::wgpu::config::effective_workgroup_size());
+    let capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(
+        crate::backend::wgpu::config::effective_workgroup_size(),
+    )?;
     #[cfg(not(feature = "wgpu"))]
     let capacity = u64::from(u32::MAX);
     Some(elements.div_ceil(capacity))

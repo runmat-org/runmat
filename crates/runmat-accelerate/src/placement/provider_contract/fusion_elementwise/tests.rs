@@ -137,3 +137,96 @@ fn shared_resident_fact_preserves_lazy_transpose_layout() {
     assert_eq!(fact.layout, ProviderLayout::Strided);
     runmat_accelerate_api::clear_handle_metadata(&handle);
 }
+
+#[test]
+fn adapter_visits_follow_selected_source_and_output_passes() {
+    let provider = InProcessProvider::new();
+    let mut query = ProviderFeasibilityQuery {
+        operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        outputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        workload: Default::default(),
+    };
+    assert_eq!(
+        physical_work(&provider, &query)
+            .unwrap()
+            .adapter_element_visits,
+        16
+    ); // widen + output cast
+    query.inputs[0].layout = ProviderLayout::Strided;
+    assert_eq!(
+        physical_work(&provider, &query)
+            .unwrap()
+            .adapter_element_visits,
+        24
+    ); // materialize + widen + cast
+    query.inputs[0].element_type = ProviderElementType::F64;
+    assert_eq!(
+        physical_work(&provider, &query)
+            .unwrap()
+            .adapter_element_visits,
+        8
+    ); // native strided read, output cast only
+    query.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
+    query.inputs[0].residency = ProviderResidency::Host;
+    query.inputs[0].shape = vec![1, 1];
+    assert_eq!(
+        physical_work(&provider, &query)
+            .unwrap()
+            .adapter_element_visits,
+        9
+    ); // scalar staging + full output cast
+    query.outputs.push(query.outputs[0].clone());
+    assert_eq!(
+        physical_work(&provider, &query)
+            .unwrap()
+            .adapter_element_visits,
+        17
+    );
+    for output in &mut query.outputs {
+        output.shape = vec![0, 8];
+    }
+    let empty = physical_work(&provider, &query).unwrap();
+    assert_eq!(empty.adapter_element_visits, 0);
+    assert_eq!(empty.estimate.transient_bytes, Some(0));
+    assert_eq!(empty.estimate.dispatches, Some(0));
+}
+
+#[test]
+fn host_single_staging_counts_both_actual_conversion_passes_on_f32_abi() {
+    struct SingleGeometry;
+    impl AccelProvider for SingleGeometry {
+        fn precision(&self) -> ProviderPrecision {
+            ProviderPrecision::F32
+        }
+        fn device_info(&self) -> String {
+            "pure F32 geometry fixture".into()
+        }
+        fn upload(
+            &self,
+            _: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            anyhow::bail!("geometry fixture cannot execute")
+        }
+        fn download<'a>(
+            &'a self,
+            _: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async { anyhow::bail!("geometry fixture cannot execute") })
+        }
+        fn free(&self, _: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            anyhow::bail!("geometry fixture cannot execute")
+        }
+    }
+    let query = ProviderFeasibilityQuery {
+        operation: runmat_accelerate_api::ProviderOperationIdentity::new("fusion.elementwise"),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![value(ProviderElementType::F32, ProviderResidency::Host)],
+        outputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        workload: Default::default(),
+    };
+    let work = physical_work(&SingleGeometry, &query).unwrap();
+    assert_eq!(work.adapter_element_visits, 16); // materialize_f64 then upload's f32 conversion
+    assert_eq!(work.estimate.dispatches, Some(1)); // host passes are not GPU kernels
+}

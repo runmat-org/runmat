@@ -21,6 +21,9 @@ pub(crate) fn wgpu_cost_estimate(
 ) -> ProviderCostEstimate {
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
+    let fusion_empty = fusion_work
+        .as_ref()
+        .is_some_and(|work| work.estimate.dispatches == Some(0));
     let remainder_work = {
         #[cfg(feature = "wgpu")]
         {
@@ -116,8 +119,17 @@ pub(crate) fn wgpu_cost_estimate(
         allocations = work.allocations;
         upload_bytes = upload_bytes.saturating_add(work.extra_upload_bytes);
     }
-    let download_bytes = query.required_download_bytes.saturating_add(readback_bytes);
-    let synchronization_events = if unary_work.is_some() {
+    let download_bytes = if fusion_empty {
+        0
+    } else {
+        query.required_download_bytes.saturating_add(readback_bytes)
+    };
+    if fusion_empty {
+        upload_bytes = 0;
+    }
+    let synchronization_events = if fusion_empty {
+        0
+    } else if unary_work.is_some() {
         u64::from(readbacks) + u64::from(query.required_download_bytes > 0)
     } else {
         u64::from(download_bytes > 0)
@@ -177,6 +189,15 @@ pub(crate) fn wgpu_cost_estimate(
             work.execution_units.saturating_mul(2).max(5_000)
         }
     });
+    // Two ns per representation-conversion/copy visit is the same explicit
+    // scalar prior used for ordinary elementwise work, not enqueue timing.
+    // Undeclared-work callers retain their historical composite prior.
+    let execution_ns = execution_ns.saturating_add(
+        fusion_work
+            .as_ref()
+            .filter(|_| query.operation.workload.scalar_work_units.is_some())
+            .map_or(0, |work| work.adapter_element_visits.saturating_mul(2)),
+    );
     let allocations = digit_work
         .as_ref()
         .map_or(allocations, |work| work.allocations);
@@ -220,6 +241,11 @@ pub(crate) fn wgpu_cost_estimate(
         CandidatePreparationState::Cold => 100_000,
         CandidatePreparationState::Preparing => 50_000,
     };
+    let compile_or_prepare_ns = if fusion_empty {
+        0
+    } else {
+        compile_or_prepare_ns
+    };
     let compile_or_prepare_ns = if digit_work.as_ref().is_some_and(|work| work.dispatches == 0) {
         0
     } else {
@@ -243,7 +269,7 @@ pub(crate) fn wgpu_cost_estimate(
                 execution_ns,
                 synchronization_ns: 5_000u64.saturating_mul(synchronization_events),
                 download_ns: transfer_prior_ns(download_bytes),
-                downstream_ns: if query.downstream_materialization {
+                downstream_ns: if query.downstream_materialization && !fusion_empty {
                     5_000
                 } else {
                     0

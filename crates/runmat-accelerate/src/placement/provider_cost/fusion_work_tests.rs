@@ -45,7 +45,7 @@ fn weighted_primary_program_is_not_repeated_for_output_adapters() {
     )
     .cost;
     assert_eq!(native.components.execution_ns, 100_000);
-    assert_eq!(adapted.components.execution_ns, 100_000);
+    assert_eq!(adapted.components.execution_ns, 100_000 + 2 * (8 + 8));
     assert!(adapted.components.queue_ns > native.components.queue_ns);
     assert!(adapted.scratch_bytes > native.scratch_bytes);
     assert_eq!(adapted.source, EstimateSource::StaticPrior);
@@ -74,5 +74,22 @@ fn weighted_work_is_total_across_chunks_and_empty_work_stays_zero() {
     let empty = wgpu_cost_estimate(&provider, &query(ProviderElementType::F64, 0, Some(0))).cost;
     assert_eq!(empty.components.execution_ns, 0);
     assert_eq!(empty.components.queue_ns, 0);
+    assert_eq!(empty.scratch_bytes, 0);
+
+    let mut cold_empty = query(ProviderElementType::F32, 0, Some(0));
+    cold_empty.preparation = CandidatePreparationState::Cold;
+    cold_empty.operation.inputs[0].shape = vec![1, 1];
+    cold_empty.required_upload_bytes = 8;
+    cold_empty.required_download_bytes = 8;
+    cold_empty.downstream_materialization = true;
+    let empty = wgpu_cost_estimate(&provider, &cold_empty).cost;
+    assert_eq!(empty.components.execution_ns, 0);
+    assert_eq!(empty.components.compile_or_prepare_ns, 0);
+    assert_eq!(empty.components.queue_ns, 0);
+    assert_eq!(empty.components.allocation_ns, 0);
+    assert_eq!(empty.components.upload_ns, 0);
+    assert_eq!(empty.components.download_ns, 0);
+    assert_eq!(empty.components.synchronization_ns, 0);
+    assert_eq!(empty.components.downstream_ns, 0);
     assert_eq!(empty.scratch_bytes, 0);
 }
