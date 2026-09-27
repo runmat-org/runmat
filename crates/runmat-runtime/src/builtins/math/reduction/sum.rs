@@ -894,7 +894,7 @@ async fn sum_gpu_with_omitnan(
 
 fn sum_provider_error(source: anyhow::Error) -> RuntimeError {
     let mut error = sum_internal_error(format!("sum: provider execution failed: {source}"));
-    error.source = Some(source.into_boxed_dyn_error());
+    error = crate::runtime_error::with_provider_execution_source(error, source.into());
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
 }

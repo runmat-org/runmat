@@ -562,7 +562,8 @@ async fn gradient_gpu_outputs(
                 Err(source) => {
                     let mut error =
                         gradient_internal_error(format!("provider gradient failed: {source}"));
-                    error.source = Some(source.into_boxed_dyn_error());
+                    error =
+                        crate::runtime_error::with_provider_execution_source(error, source.into());
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(error);
                 }

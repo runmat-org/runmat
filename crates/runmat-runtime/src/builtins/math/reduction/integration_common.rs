@@ -303,9 +303,30 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
 
 fn provider_spacing_error(name: &str, source: anyhow::Error) -> RuntimeError {
     let mut error = integration_error(name, format!("{name}: spacing upload failed: {source}"));
-    error.source = Some(source.into_boxed_dyn_error());
+    error = crate::runtime_error::with_provider_execution_source(error, source.into());
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error
+}
+
+#[cfg(test)]
+#[test]
+fn spacing_failure_preserves_typed_unsupported_without_message_inference() {
+    for unsupported in [false, true] {
+        let source = if unsupported {
+            runmat_accelerate_api::unsupported_provider_operation("spacing unavailable")
+        } else {
+            anyhow::anyhow!("spacing unavailable")
+        };
+        let error = provider_spacing_error("cumtrapz", source);
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut cursor: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+        let mut found = false;
+        while let Some(source) = cursor {
+            found |= source.is::<runmat_accelerate_api::UnsupportedProviderOperation>();
+            cursor = source.source();
+        }
+        assert_eq!(found, unsupported);
+    }
 }
 
 fn admit_spacing_upload(

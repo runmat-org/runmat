@@ -537,6 +537,24 @@ fn unsupported_spacing_failure(error: &RuntimeError) -> bool {
 }
 
 #[cfg(test)]
+#[test]
+fn spacing_fallback_recognizes_only_retained_typed_capability_rejection() {
+    for unsupported in [false, true] {
+        let source = if unsupported {
+            runmat_accelerate_api::unsupported_provider_operation("spacing unavailable")
+        } else {
+            anyhow::anyhow!("spacing unavailable")
+        };
+        let error = crate::runtime_error::with_provider_execution_source(
+            cumtrapz_internal_error("spacing upload failed"),
+            source.into(),
+        );
+        assert_eq!(unsupported_spacing_failure(&error), unsupported);
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    }
+}
+
+#[cfg(test)]
 #[path = "cumtrapz/owning_tests.rs"]
 mod owning_tests;
 
@@ -639,7 +657,8 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
                             let mut error = cumtrapz_internal_error(format!(
                                 "provider execution failed: {source}"
                             ));
-                            error.source = Some(source.into_boxed_dyn_error());
+                            error =
+                                crate::runtime_error::with_provider_execution_source(error, source.into());
                             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                             return Err(error);
                         }

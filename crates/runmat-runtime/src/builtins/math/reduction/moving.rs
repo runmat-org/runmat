@@ -1072,7 +1072,7 @@ async fn moving_gpu_provider(
         Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => Ok(None),
         Err(source) => {
             let mut error = internal(name, format!("{name}: provider execution failed: {source}"));
-            error.source = Some(source.into_boxed_dyn_error());
+            error = crate::runtime_error::with_provider_execution_source(error, source.into());
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
             Err(error)
         }

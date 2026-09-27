@@ -119,16 +119,14 @@ fn mean_only_unsupported_hooks_allow_fallback_and_execution_errors_retain_source
             (Mode::Unsupported, Ok(None)) => {}
             (Mode::Failure, Err(error)) => {
                 assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
-                assert_eq!(
-                    error
-                        .source
-                        .as_ref()
-                        .unwrap()
-                        .downcast_ref::<std::io::Error>()
-                        .unwrap()
-                        .kind(),
-                    std::io::ErrorKind::BrokenPipe
-                );
+                let mut source: &(dyn std::error::Error + 'static) = &error;
+                loop {
+                    if let Some(error) = source.downcast_ref::<std::io::Error>() {
+                        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+                        break;
+                    }
+                    source = source.source().expect("typed provider cause retained");
+                }
             }
             (_, actual) => panic!("unexpected mean provider outcome: {actual:?}"),
         }

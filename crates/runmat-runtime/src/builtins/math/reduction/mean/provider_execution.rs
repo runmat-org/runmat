@@ -16,7 +16,7 @@ fn mean_provider_error(source: anyhow::Error) -> MeanProviderFailure {
         return MeanProviderFailure::Unsupported;
     }
     let mut failure = mean_internal_error(format!("mean: provider execution failed: {source}"));
-    failure.source = Some(source.into_boxed_dyn_error());
+    failure = crate::runtime_error::with_provider_execution_source(failure, source.into());
     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
     MeanProviderFailure::Execution(failure)
 }

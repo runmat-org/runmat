@@ -124,7 +124,7 @@ fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool 
 
 fn provider_error(stage: &str, source: anyhow::Error) -> crate::RuntimeError {
     let mut error = builtin_error(format!("power: {stage} failed: {source}"));
-    error.source = Some(source.into_boxed_dyn_error());
+    error = crate::runtime_error::with_provider_execution_source(error, source.into());
     error
 }
 
@@ -177,10 +177,14 @@ mod owning_tests {
                 "classifier transport closed",
             )),
         );
-        let source = error.source.as_ref().unwrap();
-        assert_eq!(
-            source.downcast_ref::<std::io::Error>().unwrap().kind(),
-            std::io::ErrorKind::BrokenPipe,
-        );
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        let mut source: &(dyn std::error::Error + 'static) = &error;
+        loop {
+            if let Some(error) = source.downcast_ref::<std::io::Error>() {
+                assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+                break;
+            }
+            source = source.source().expect("typed provider cause retained");
+        }
     }
 }
