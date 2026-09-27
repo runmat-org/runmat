@@ -18,6 +18,34 @@ struct Provider {
 
 struct Defaults;
 
+#[test]
+fn extrema_composite_defaults_are_typed_unsupported_without_device_work() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    for result in [
+        Defaults.scalar_min(&input.handle, 1.0),
+        Defaults.scalar_max(&input.handle, 1.0),
+        Defaults.scalar_mul(&input.handle, -1.0),
+        Defaults.scalar_add(&input.handle, 2.0),
+        Defaults.repmat(&input.handle, &[2, 1]),
+        ready_default(Defaults.elem_min(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_max(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_le(&input.handle, &input.handle)),
+        ready_default(Defaults.elem_ge(&input.handle, &input.handle)),
+    ] {
+        assert!(is_unsupported_provider_operation(&result.unwrap_err()));
+        input.handle.allocation_lease().validate_live().unwrap();
+        assert_eq!(input.probe.retirements(), 0);
+    }
+    assert!(!is_unsupported_provider_operation(&anyhow::anyhow!(
+        "repmat allocation failed"
+    )));
+    drop(input.handle);
+    assert_eq!(input.probe.retirements(), 1);
+}
+
 fn ready_default<F: std::future::Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     let mut context = std::task::Context::from_waker(std::task::Waker::noop());

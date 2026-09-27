@@ -2908,13 +2908,19 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!("scalar_sub not supported by provider"))
     }
     fn scalar_mul(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scalar_mul not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scalar_mul not supported by provider",
+        ))
     }
     fn scalar_max(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scalar_max not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scalar_max not supported by provider",
+        ))
     }
     fn scalar_min(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scalar_min not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scalar_min not supported by provider",
+        ))
     }
     fn scalar_div(&self, _a: &GpuTensorHandle, _scalar: f64) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("scalar_div not supported by provider"))
@@ -3292,7 +3298,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _handle: &GpuTensorHandle,
         _reps: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("repmat not supported by provider"))
+        Err(unsupported_provider_operation(
+            "repmat not supported by provider",
+        ))
     }
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
