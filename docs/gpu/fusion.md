@@ -58,27 +58,11 @@ The VM maps semantic instruction windows into `FusionKind` variants, then runtim
 
 Specialized patterns are detected before generic elementwise grouping so they are not swallowed by a broader chain.
 
-Matrix epilogues are admitted in source order before uploads. The provider
-descriptor has one arithmetic authority, `MatmulAffine`: optional multiplication
-followed by `Add`, `Subtract`, or `SubtractFrom`. An absent phase performs no
-arithmetic (including no implicit `+0`); legacy `alpha`/`beta` descriptor fields
-are rejected on deserialization. Provider implementations must consume this
-ordered descriptor rather than algebraically combine operations.
+Matrix epilogues are checked in source order before uploads. The provider descriptor uses `MatmulAffine`: optional multiplication followed by `Add`, `Subtract`, or `SubtractFrom`. An absent phase performs no arithmetic, including no implicit `+0`. Provider implementations preserve this order rather than algebraically combine operations.
 
-Binding-owned clamp/power/diagonal declarations do not authorize arbitrary
-overloads. Execution validates exact arity, floating representation, source
-order, single-consumer publication, and selected builtin-service authority.
-Fractional real powers require an established nonnegative base; integral powers
-use the same exceptional-value policy as standalone power. The WGPU diagonal
-route retains the full matrix and then calls diagonal extraction; it is not
-represented as a single matmul dispatch.
+Clamp, power, and diagonal declarations apply only to the builtin implementations that declare them. Execution checks argument count, floating representation, source order, intermediate-value uses, and the selected builtin implementation. Fractional real powers require an established nonnegative base; integral powers use the same exceptional-value policy as standalone power. The WGPU diagonal route retains the full matrix and then runs diagonal extraction as a separate operation.
 
-The request-local `ProviderWorkload.matmul` records data operand roles, geometry,
-and exact scalar-control bits. Feasibility derives and checks the output shape;
-costing includes retained product storage, diagonal warmup submission, uniforms,
-and data-only uploads. These are checked resource counts and static cost priors,
-not completed-device timing evidence. Matrix preparation remains conservatively
-cold until its exact provider cache-readiness inventory is available.
+The request-local `ProviderWorkload.matmul` records data operand roles, dimensions, and exact scalar-control bits. Feasibility checks derive and verify the output shape. Cost estimates include retained product storage, diagonal warmup submission, uniforms, and data uploads. These are checked resource counts and static estimates, not measured execution times. Without an exact provider cache-readiness query, matrix preparation uses a cold-start estimate.
 
 ## Runtime Gating
 
