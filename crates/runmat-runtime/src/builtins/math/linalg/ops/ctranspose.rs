@@ -1056,69 +1056,69 @@ pub(crate) mod tests {
     #[test]
     fn ctranspose_native_result_contract_checks_shape_device_storage_precision_and_owner() {
         test_support::with_test_provider(|provider| {
-            let input_tensor = tensor(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0], &[2, 3]);
             let input = provider
                 .upload(&HostTensorView {
-                    data: &input_tensor.materialize_f64(),
-                    shape: &input_tensor.shape,
+                    data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                    shape: &[2, 3],
                 })
                 .unwrap();
-            let mut output = provider.transpose(&input).unwrap();
+            let output = provider.transpose(&input).unwrap();
             assert!(native_ctranspose_output_matches(
                 &input,
                 &output,
                 provider,
                 &[3, 2]
             ));
-
-            let mut wrong_shape = output.clone();
-            wrong_shape.shape = vec![2, 3];
+            let wrong_shape = output
+                .with_view(output.view().clone().with_shape(vec![2, 3]))
+                .unwrap();
             assert!(!native_ctranspose_output_matches(
                 &input,
                 &wrong_shape,
                 provider,
                 &[3, 2]
             ));
-            let mut wrong_device = output.clone();
-            wrong_device.device_id = wrong_device.device_id.wrapping_add(1);
+
+            let other_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+            let other = other_owner
+                .allocate_zeroed(
+                    vec![3, 2],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                )
+                .unwrap();
             assert!(!native_ctranspose_output_matches(
                 &input,
-                &wrong_device,
+                &other.handle,
                 provider,
                 &[3, 2]
             ));
 
-            let original_storage = output.descriptor.storage;
-            output.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
+            let complex = ComplexTensor::new(vec![(0.0, 0.0); 6], vec![3, 2]).unwrap();
+            let wrong_storage = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
             assert!(!native_ctranspose_output_matches(
                 &input,
-                &output,
+                &wrong_storage,
                 provider,
                 &[3, 2]
             ));
-            output.descriptor.storage = original_storage;
-
-            let original_precision = runmat_accelerate_api::handle_precision(&output).unwrap();
-            let wrong_precision = match original_precision {
-                runmat_accelerate_api::ProviderPrecision::F32 => {
-                    runmat_accelerate_api::NumericElementType::F64
-                }
-                runmat_accelerate_api::ProviderPrecision::F64 => {
-                    runmat_accelerate_api::NumericElementType::F32
-                }
-            };
-            let original_element_type = output.descriptor.element_type;
-            output.descriptor.element_type = Some(wrong_precision);
+            let single = runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(&[0.0; 6]),
+                    shape: &[3, 2],
+                    storage: GpuTensorStorage::Real,
+                },
+                &[&input, &output],
+            )
+            .unwrap();
             assert!(!native_ctranspose_output_matches(
                 &input,
-                &output,
+                &single,
                 provider,
                 &[3, 2]
             ));
-            output.descriptor.element_type = original_element_type;
-
-            provider.free(&output).unwrap();
-            provider.free(&input).unwrap();
+            input.allocation_lease().validate_live().unwrap();
         });
     }
 
@@ -1164,12 +1164,15 @@ pub(crate) mod tests {
             runmat_accelerate::simple_provider::InProcessProvider::new(),
         ));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(ambient));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: ambient.device_id().wrapping_add(1),
-            buffer_id: u64::MAX - 396,
-            descriptor: Default::default(),
-        };
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let handle = owner
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         assert!(gpu_helpers::exact_provider_for_handle(&handle).is_none());
         call_ctranspose(Value::GpuTensor(handle))
             .expect_err("an unowned handle must not dispatch through the ambient provider");
@@ -1203,23 +1206,22 @@ pub(crate) mod tests {
 
     #[test]
     fn ctranspose_gpu_rejects_complex_integer_metadata_before_provider_dispatch() {
-        test_support::with_test_provider(|provider| {
-            for complex in [
-                ComplexTensor::new(vec![(1.0, 2.0)], vec![]).expect("complex scalar"),
-                ComplexTensor::new(vec![(1.0, 2.0), (3.0, 4.0)], vec![1, 2])
-                    .expect("complex vector"),
-            ] {
-                let mut handle =
-                    gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-                handle.descriptor.element_type =
-                    Some(runmat_accelerate_api::NumericElementType::I8);
-                let err = call_ctranspose(Value::GpuTensor(handle.clone()))
-                    .expect_err("complex integer GPU ctranspose must fail");
-                assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
-                assert!(err.message().contains("complex integer"));
-                provider.free(&handle).expect("free input");
-            }
-        });
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        for shape in [vec![], vec![1, 2]] {
+            let allocation = owner
+                .allocate_zeroed(
+                    shape,
+                    runmat_accelerate_api::NumericElementType::I8,
+                    GpuTensorStorage::ComplexInterleaved,
+                )
+                .unwrap();
+            let error = call_ctranspose(Value::GpuTensor(allocation.handle.clone())).unwrap_err();
+            assert_eq!(error.identifier(), Some("RunMat:ctranspose:InvalidInput"));
+            assert!(error.message().contains("complex integer"));
+            assert_eq!(allocation.probe.retirements(), 0);
+            drop(allocation.handle);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
     }
 
     #[test]
@@ -1313,20 +1315,19 @@ pub(crate) mod tests {
                 .expect_err("N-D GPU ctranspose must fail");
             assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
             assert!(err.message().contains("use permute"));
-            provider.free(&handle).expect("free input");
+            drop(handle);
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn ctranspose_wgpu_matches_cpu() {
         let _guard = test_support::accel_test_lock();
-        let Ok(provider) =
+        let provider =
             wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
-        else {
-            return;
-        };
+                .expect("requested WGPU ctranspose hardware gate requires an adapter");
         let data: Vec<f64> = (1..=12).map(|n| n as f64).collect();
         let tensor = Tensor::new(data, vec![3, 4]).expect("tensor");
         let cpu_value = call_ctranspose(Value::Tensor(tensor.clone())).expect("cpu");
@@ -1348,13 +1349,12 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn ctranspose_wgpu_complex_matches_cpu_and_stays_resident() {
         let _guard = test_support::accel_test_lock();
-        let Ok(provider) =
+        let provider =
             wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
-        else {
-            return;
-        };
+                .expect("requested WGPU ctranspose hardware gate requires an adapter");
         let complex = ComplexTensor::new(
             vec![
                 (1.0, 2.0),
@@ -1392,13 +1392,12 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(feature = "wgpu")]
+    #[ignore = "requires an actual WGPU adapter; run the explicit hardware gate"]
     fn ctranspose_wgpu_complex_nd_is_rejected() {
         let _guard = test_support::accel_test_lock();
-        let Ok(provider) =
+        let provider =
             wgpu_backend::register_wgpu_provider(wgpu_backend::WgpuProviderOptions::default())
-        else {
-            return;
-        };
+                .expect("requested WGPU ctranspose hardware gate requires an adapter");
         let complex = ComplexTensor::new(
             vec![
                 (1.0, -1.0),
@@ -1418,6 +1417,6 @@ pub(crate) mod tests {
             .expect_err("N-D GPU ctranspose must fail");
         assert_eq!(err.identifier(), Some("RunMat:ctranspose:InvalidInput"));
         assert!(err.message().contains("use permute"));
-        provider.free(&handle).expect("free input");
+        drop(handle);
     }
 }
