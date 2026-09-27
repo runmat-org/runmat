@@ -23,6 +23,7 @@ impl AccelProvider for DownloadOwner {
         self.inner.upload_numeric_raw(host)
     }
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
         self.inner.download(h)
     }
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
@@ -48,6 +49,21 @@ impl AccelProvider for DownloadOwner {
     fn precision(&self) -> ProviderPrecision {
         self.inner.precision()
     }
+}
+
+/// A live, registered owner whose payload access is observable even if a caller
+/// catches the injected error. Metadata-only predicates must leave it unread.
+pub(super) fn without_downloads(test: impl FnOnce(&dyn AccelProvider)) {
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let owner = Box::leak(Box::new(DownloadOwner {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        mode: AtomicUsize::new(2),
+        downloads: AtomicUsize::new(0),
+        abandoned: AtomicUsize::new(0),
+    }));
+    let _provider = ThreadProviderGuard::set(Some(owner));
+    test(owner);
+    assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
 }
 
 #[test]

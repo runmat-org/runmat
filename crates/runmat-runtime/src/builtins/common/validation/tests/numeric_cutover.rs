@@ -3,12 +3,8 @@ use futures::executor::block_on;
 
 #[test]
 fn every_numeric_guard_checks_outputs_before_data_or_provider_access() {
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::F64);
+    let resident = Value::GpuTensor(allocation.handle);
     for name in [
         "mustBeFile",
         "mustBeFolder",
@@ -41,6 +37,9 @@ fn every_numeric_guard_checks_outputs_before_data_or_provider_access() {
             "{name}: {error}"
         );
     }
+    assert_eq!(allocation.probe.retirements(), 0);
+    drop(resident);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 fn nested(value: Value) -> Value {
@@ -56,51 +55,65 @@ fn nested(value: Value) -> Value {
 
 #[test]
 fn nested_resident_missingness_checks_content_and_preserves_aliases() {
-    test_support::with_test_provider(|provider| {
-        for (number, expected) in [(1.0, true), (f64::NAN, false)] {
-            let tensor = Tensor::new(vec![number], vec![1, 1]).unwrap();
-            let handle =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-            let value = nested(Value::GpuTensor(handle.clone()));
-            assert_eq!(block_on(value_is_non_nan_async(&value)).unwrap(), expected);
-            assert_eq!(
-                block_on(value_is_nonmissing_async(&value)).unwrap(),
-                expected
-            );
-            let download = block_on(provider.download_numeric(&handle)).unwrap();
-            assert_eq!(download.shape, vec![1, 1]);
-            let args = vec![value.clone()];
-            // Abandoning an actual callable future never adopts or frees a borrowed input.
-            drop(must_be_nonmissing::evaluate(args));
-            assert!(block_on(provider.download_numeric(&handle)).is_ok());
-            provider.free(&handle).unwrap();
-            assert!(block_on(value_is_nonmissing_async(&value)).is_err());
-            runmat_accelerate_api::clear_handle_metadata(&handle);
-        }
+    runmat_gc::gc_test_context(|| {
+        test_support::with_test_provider(|provider| {
+            for (number, expected) in [(1.0, true), (f64::NAN, false)] {
+                let tensor = Tensor::new(vec![number], vec![1, 1]).unwrap();
+                let handle =
+                    crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+                let value = nested(Value::GpuTensor(handle.clone()));
+                assert_eq!(block_on(value_is_non_nan_async(&value)).unwrap(), expected);
+                assert_eq!(
+                    block_on(value_is_nonmissing_async(&value)).unwrap(),
+                    expected
+                );
+                let download = block_on(provider.download_numeric(&handle)).unwrap();
+                assert_eq!(download.shape, vec![1, 1]);
+                let args = vec![value.clone()];
+                // Abandoning an actual callable future never adopts or frees a borrowed input.
+                drop(must_be_nonmissing::evaluate(args));
+                assert!(block_on(provider.download_numeric(&handle)).is_ok());
+                let weak = handle.downgrade();
+                drop(handle);
+                assert_eq!(
+                    block_on(value_is_nonmissing_async(&value)).unwrap(),
+                    expected
+                );
+                assert!(weak.acquire().is_ok());
+                drop(value);
+                runmat_gc::gc_collect_major().unwrap();
+                assert!(weak.acquire().is_err());
+            }
+        });
     });
 }
 
 #[test]
 fn nested_integer_missingness_is_metadata_only_and_exact() {
-    test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-        let handle =
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        provider.free(&handle).unwrap(); // Any payload read now fails.
-        let value = nested(Value::GpuTensor(handle.clone()));
-        assert!(block_on(value_is_non_nan_async(&value)).unwrap());
-        assert!(block_on(value_is_nonmissing_async(&value)).unwrap());
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+    runmat_gc::gc_test_context(|| {
+        download_lifecycle::without_downloads(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let value = nested(Value::GpuTensor(handle.clone()));
+            assert!(block_on(value_is_non_nan_async(&value)).unwrap());
+            assert!(block_on(value_is_nonmissing_async(&value)).unwrap());
+            let weak = handle.downgrade();
+            drop(value);
+            runmat_gc::gc_collect_major().unwrap();
+            drop(handle);
+            assert!(weak.acquire().is_err());
+        });
     });
 }
 
 #[test]
 fn invalid_range_controls_and_comparison_shapes_precede_downloads() {
-    test_support::with_test_provider(|provider| {
+    download_lifecycle::without_downloads(|provider| {
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let handle =
             crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        provider.free(&handle).unwrap();
         let value = Value::GpuTensor(handle.clone());
         let error = block_on(must_be_in_range::evaluate(vec![
             value.clone(),
@@ -122,7 +135,10 @@ fn invalid_range_controls_and_comparison_shapes_precede_downloads() {
             error.identifier(),
             Some("RunMat:argumentValidation:InvalidArgument")
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        let weak = handle.downgrade();
+        drop(value);
+        drop(handle);
+        assert!(weak.acquire().is_err());
     });
 }
 

@@ -119,12 +119,8 @@ fn canonical_dispatch_preserves_zero_output_statements() {
 
 #[test]
 fn excess_outputs_and_invalid_controls_precede_provider_lookup() {
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 8,
-        buffer_id: u64::MAX - 8,
-        descriptor: Default::default(),
-    };
+    let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::F64);
+    let handle = allocation.handle;
     for (name, evaluate, mut args) in validators() {
         args[0] = Value::GpuTensor(handle.clone());
         let _outputs = crate::output_count::push_output_count(Some(1));
@@ -152,6 +148,7 @@ fn excess_outputs_and_invalid_controls_precede_provider_lookup() {
         error.identifier(),
         Some("RunMat:mustBeVector:InvalidArgument")
     );
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

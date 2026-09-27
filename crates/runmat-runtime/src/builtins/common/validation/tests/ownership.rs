@@ -2,37 +2,46 @@ use super::*;
 
 #[test]
 fn namedargs_preserves_nested_resident_payloads_and_source_reuse() {
-    test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new_integer(
-            IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
-            vec![1, 2],
-        )
-        .unwrap();
-        let handle =
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
-        let nested =
-            Value::Cell(CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap());
-        let mut structure = StructValue::new();
-        structure.insert("payload", nested.clone());
-        for count in [0, 1] {
-            let _outputs = crate::output_count::push_output_count(Some(count));
-            let output = namedargs2cell::evaluate(vec![Value::Struct(structure.clone())]).unwrap();
-            let Value::Cell(cell) = output else {
-                panic!("cell output")
-            };
-            assert_eq!(cell.data[1], nested);
-            assert_eq!(
-                runmat_accelerate_api::handle_integer_type(&handle),
-                Some(runmat_accelerate_api::IntegerElementType::U64)
-            );
-            let gathered = futures::executor::block_on(provider.download_integer(&handle)).unwrap();
-            assert!(
-                matches!(gathered.data, runmat_accelerate_api::HostIntegerDataOwned::U64(data)
+    runmat_gc::gc_test_context(|| {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new_integer(
+                IntegerStorage::U64(vec![9_007_199_254_740_993, u64::MAX]),
+                vec![1, 2],
+            )
+            .unwrap();
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let nested =
+                Value::Cell(CellArray::new(vec![Value::GpuTensor(handle.clone())], 1, 1).unwrap());
+            let mut structure = StructValue::new();
+            structure.insert("payload", nested.clone());
+            for count in [0, 1] {
+                let _outputs = crate::output_count::push_output_count(Some(count));
+                let output =
+                    namedargs2cell::evaluate(vec![Value::Struct(structure.clone())]).unwrap();
+                let Value::Cell(cell) = output else {
+                    panic!("cell output")
+                };
+                assert_eq!(cell.data[1], nested);
+                assert_eq!(
+                    runmat_accelerate_api::handle_integer_type(&handle),
+                    Some(runmat_accelerate_api::IntegerElementType::U64)
+                );
+                let gathered =
+                    futures::executor::block_on(provider.download_integer(&handle)).unwrap();
+                assert!(
+                    matches!(gathered.data, runmat_accelerate_api::HostIntegerDataOwned::U64(data)
                 if data == vec![9_007_199_254_740_993, u64::MAX])
-            );
-        }
-        provider.free(&handle).unwrap();
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+                );
+            }
+            let weak = handle.downgrade();
+            drop(structure);
+            drop(nested);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(futures::executor::block_on(provider.download_integer(&handle)).is_ok());
+            drop(handle);
+            assert!(weak.acquire().is_err());
+        });
     });
 }
 

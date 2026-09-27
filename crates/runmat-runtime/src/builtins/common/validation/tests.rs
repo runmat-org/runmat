@@ -35,6 +35,19 @@ fn sparse(values: Vec<f64>) -> Value {
     Value::SparseTensor(SparseTensor::new(2, 2, vec![0, 1, 1], vec![0], values).unwrap())
 }
 
+fn resident_fixture(
+    shape: Vec<usize>,
+    element: runmat_accelerate_api::NumericElementType,
+) -> runmat_accelerate_api::test_support::TestAllocation {
+    runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            shape,
+            element,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap()
+}
+
 #[test]
 fn fixed_width_integer_binary64_exactness_uses_significant_bits() {
     for value in [
@@ -55,30 +68,17 @@ fn fixed_width_integer_binary64_exactness_uses_significant_bits() {
 
 #[test]
 fn resident_integer_exactness_is_class_conservative() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
-
-    let narrow = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 1,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::U32.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(narrow)));
-    let wide = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 2,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::I64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    assert!(!native_integer_value_is_exact_f64(&Value::GpuTensor(wide)));
+    use runmat_accelerate_api::NumericElementType;
+    let narrow = resident_fixture(vec![1, 1], NumericElementType::U32);
+    assert!(native_integer_value_is_exact_f64(&Value::GpuTensor(
+        narrow.handle
+    )));
+    assert_eq!(narrow.probe.retirements(), 1);
+    let wide = resident_fixture(vec![1, 1], NumericElementType::I64);
+    assert!(!native_integer_value_is_exact_f64(&Value::GpuTensor(
+        wide.handle
+    )));
+    assert_eq!(wide.probe.retirements(), 1);
 }
 
 #[test]
@@ -105,8 +105,9 @@ fn resident_wide_integer_exactness_is_decided_from_gathered_values() {
                 .expect("exactness check"),
                 expected
             );
-            provider.free(&handle).expect("free resident uint64");
-            runmat_accelerate_api::clear_handle_metadata(&handle);
+            let weak = handle.downgrade();
+            handle.release().expect("release resident uint64");
+            assert!(weak.acquire().is_err());
         }
     });
 }
@@ -187,18 +188,8 @@ fn sparse_integer_storage_satisfies_sparse_validation_without_materialization() 
 
 #[test]
 fn resident_text_validators_reject_before_provider_lookup() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
-
-    let handle = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 1,
-        buffer_id: u64::MAX - 2,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::I32.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::I32);
+    let handle = allocation.handle;
     for builtin in ["mustBeText", "mustBeTextScalar", "mustBeValidVariableName"] {
         let error = invoke_validator(builtin, vec![Value::GpuTensor(handle.clone())])
             .expect_err("resident integer must fail text validation");
@@ -206,20 +197,17 @@ fn resident_text_validators_reject_before_provider_lookup() {
         assert_eq!(error.identifier(), Some(expected_identifier.as_str()));
         assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
     }
-    runmat_accelerate_api::clear_handle_metadata(&handle);
+    drop(handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
-fn resident_integer_structural_validators_do_not_read_freed_payloads() {
-    test_support::with_test_provider(|provider| {
+fn resident_integer_structural_validators_do_not_read_payloads() {
+    download_lifecycle::without_downloads(|provider| {
         let tensor = Tensor::new_integer(IntegerStorage::U64(vec![1, u64::MAX]), vec![1, 2])
             .expect("resident integer");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload resident integer");
-        provider
-            .free(&handle)
-            .expect("free payload before predicates");
-        runmat_accelerate_api::set_handle_logical(&handle, false);
         let value = Value::GpuTensor(handle.clone());
 
         ok("mustBeReal", vec![value.clone()]);
@@ -230,7 +218,9 @@ fn resident_integer_structural_validators_do_not_read_freed_payloads() {
             vec![value.clone(), Value::String("uint64".into())],
         );
         ok("mustBeVector", vec![value]);
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        let weak = handle.downgrade();
+        drop(handle);
+        assert!(weak.acquire().is_err());
     });
 }
 
@@ -468,33 +458,45 @@ fn complex_validators_use_component_integrality_real_ordering_and_exact_membersh
 }
 
 #[test]
-fn resident_secondary_validator_operands_require_coherent_metadata() {
+fn resident_secondary_validator_operands_reject_forged_physical_facts() {
     test_support::with_test_provider(|provider| {
         let value = Tensor::new_integer(IntegerStorage::U8(vec![2]), vec![1, 1]).expect("value");
         let lower = Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("lower");
         let value_handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
             .expect("upload value");
-        let mut lower_handle =
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &lower)
-                .expect("upload lower");
-        lower_handle.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        let error = invoke_validator(
+        let lower_handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &lower)
+            .expect("upload lower");
+        let mut forged = lower_handle.wire_descriptor();
+        forged.physical = runmat_accelerate_api::GpuPhysicalDescriptor::new(
+            runmat_accelerate_api::NumericElementType::U8,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            1,
+            2,
+            2,
+        )
+        .unwrap();
+        // A contradictory storage declaration cannot enter the validator: the
+        // captured allocation owner rejects it at acquisition.
+        assert_eq!(
+            lower_handle
+                .allocation_lease()
+                .downgrade()
+                .acquire_tensor(&forged)
+                .unwrap_err(),
+            runmat_accelerate_api::AllocationAcquisitionError::PhysicalMismatch,
+        );
+        ok(
             "mustBeGreaterThan",
             vec![
                 Value::GpuTensor(value_handle.clone()),
                 Value::GpuTensor(lower_handle.clone()),
             ],
-        )
-        .expect_err("contradictory bound metadata must reject");
-        assert_eq!(
-            error.identifier(),
-            Some("RunMat:validators:ProviderPayloadMismatch")
         );
-        provider.free(&value_handle).ok();
-        provider.free(&lower_handle).ok();
-        runmat_accelerate_api::clear_handle_metadata(&value_handle);
-        runmat_accelerate_api::clear_handle_metadata(&lower_handle);
+        for handle in [value_handle, lower_handle] {
+            let weak = handle.downgrade();
+            drop(handle);
+            assert!(weak.acquire().is_err());
+        }
     });
 }
 
@@ -609,7 +611,9 @@ fn must_be_a_distinguishes_explicit_gpuarray_from_automatic_residency() {
             Tensor::new_integer(IntegerStorage::U16(vec![7]), vec![1, 1]).expect("integer source");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload integer source");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("valid provenance");
         ok(
             "mustBeA",
             vec![
@@ -624,7 +628,9 @@ fn must_be_a_distinguishes_explicit_gpuarray_from_automatic_residency() {
                 Value::String("gpuArray".into()),
             ],
         );
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("valid provenance");
         ok(
             "mustBeA",
             vec![
@@ -639,8 +645,7 @@ fn must_be_a_distinguishes_explicit_gpuarray_from_automatic_residency() {
                 Value::String("uint16".into()),
             ],
         );
-        provider.free(&handle).expect("free resident source");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.release().expect("release resident source");
     });
 }
 
@@ -769,13 +774,10 @@ fn namedargs2cell_rejects_top_level_integers_and_preserves_integer_fields_exactl
         assert_eq!(cell.data[1], Value::Int(value));
     }
 
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_419_006,
-        descriptor: Default::default(),
-    });
+    let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::F64);
+    let resident = Value::GpuTensor(allocation.handle);
     assert!(namedargs2cell_value(resident).is_err());
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -1206,7 +1208,9 @@ fn resident_content_validators_download_exactly_and_preserve_source() {
             .expect("resident integer");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload resident integer");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("valid provenance");
         let value = Value::GpuTensor(handle.clone());
         assert!(block_on(invoke_validator_async("mustBeNonzero", vec![value.clone()],)).is_ok());
         assert!(block_on(invoke_validator_async("mustBePositive", vec![value],)).is_err());
@@ -1216,8 +1220,7 @@ fn resident_content_validators_download_exactly_and_preserve_source() {
             gathered.data,
             runmat_accelerate_api::HostIntegerDataOwned::I64(vec![-1, 2])
         );
-        provider.free(&handle).expect("free resident source");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.release().expect("release resident source");
     });
 }
 
@@ -1240,7 +1243,9 @@ fn wgpu_resident_integer_validators_preserve_exact_source_and_provenance() {
     .expect("wide integer source");
     let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
         .expect("upload wide integer source");
-    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    let handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .expect("valid provenance");
     let value = Value::GpuTensor(handle.clone());
 
     for name in [
@@ -1253,7 +1258,9 @@ fn wgpu_resident_integer_validators_preserve_exact_source_and_provenance() {
         block_on(invoke_validator_async(name, vec![value.clone()]))
             .unwrap_or_else(|error| panic!("{name} unexpectedly failed: {error}"));
     }
-    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("valid provenance");
     let value = Value::GpuTensor(handle.clone());
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     for name in ["mustBeReal", "mustBeVector"] {
@@ -1285,8 +1292,10 @@ fn wgpu_resident_integer_validators_preserve_exact_source_and_provenance() {
         gathered.data,
         runmat_accelerate_api::HostIntegerDataOwned::U64(vec![9_007_199_254_740_993, u64::MAX,])
     );
-    provider.free(&handle).expect("free source");
-    runmat_accelerate_api::clear_handle_metadata(&handle);
+    drop(value);
+    let weak = handle.downgrade();
+    handle.release().expect("release source");
+    assert!(weak.acquire().is_err());
 }
 
 #[test]
@@ -1296,7 +1305,9 @@ fn undocumented_explicit_resident_validators_are_mode_gated() {
             Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).expect("resident integer");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload resident integer");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("valid provenance");
         let value = Value::GpuTensor(handle.clone());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         for name in [
@@ -1319,8 +1330,7 @@ fn undocumented_explicit_resident_validators_are_mode_gated() {
         ] {
             ok(name, vec![value.clone()]);
         }
-        provider.free(&handle).expect("free resident source");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        handle.release().expect("release resident source");
     });
 }
 
@@ -1343,15 +1353,12 @@ fn validate_function_signatures_json_checks_json_syntax() {
         "validateFunctionSignaturesJSON",
         vec![Value::Int(IntValue::U64(u64::MAX))],
     );
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = resident_fixture(vec![1, 1], runmat_accelerate_api::NumericElementType::F64);
+    let resident = Value::GpuTensor(allocation.handle);
     let error = invoke_validator("validateFunctionSignaturesJSON", vec![resident])
         .expect_err("resident numeric input must reject as invalid text");
     assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 // Tests exercise canonical runtime binding selection, not a validator name switch.
