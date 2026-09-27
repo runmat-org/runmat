@@ -32,7 +32,9 @@ use provider::*;
 #[cfg(test)]
 use runmat_builtins::POL2CART_DESCRIPTOR;
 #[cfg(target_arch = "wasm32")]
-pub use specs::{FUSION_SPEC, GPU_SPEC};
+pub(crate) use specs::{
+    __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
+};
 const NAME: &str = "pol2cart";
 
 #[runtime_builtin(

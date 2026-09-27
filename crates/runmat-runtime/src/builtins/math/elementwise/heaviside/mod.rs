@@ -3,6 +3,10 @@ mod extensions;
 mod host;
 mod provider;
 pub(crate) mod specification;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use specification::{
+    __runmat_wasm_register_fusion_spec_FUSION_SPEC, __runmat_wasm_register_gpu_spec_GPU_SPEC,
+};
 
 use runmat_macros::runtime_builtin;
 use runmat_value::{SymbolicFunction, Value};
