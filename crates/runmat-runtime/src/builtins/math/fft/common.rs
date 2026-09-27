@@ -351,7 +351,7 @@ pub fn restore_real_gpu_result(
 }
 
 pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
+    left.shares_allocation_with(right)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -369,7 +369,13 @@ pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
     debug_assert_eq!(handle.descriptor(), snapshot.descriptor);
-    runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
+    debug_assert_eq!(
+        runmat_accelerate_api::handle_is_logical(handle),
+        snapshot.logical
+    );
+    // Semantic facts belong to this immutable owning view. Only the external
+    // residency marker may have changed while a provider consumed the borrow.
+    runmat_accelerate_api::mark_residency(handle);
 }
 
 pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
@@ -1400,20 +1406,48 @@ mod tests {
     use runmat_value::IntegerStorage;
 
     #[test]
-    fn fft_gpu_handle_identity_includes_device_and_buffer() {
-        let left = GpuTensorHandle {
-            shape: vec![2],
-            device_id: 1,
-            buffer_id: 7,
-            descriptor: Default::default(),
-        };
+    fn fft_gpu_handle_identity_uses_physical_lease_not_view() {
+        use runmat_accelerate_api::{test_support::TestAllocationOwner, NumericElementType};
+        let owner = TestAllocationOwner::new();
+        let left = owner
+            .allocate_zeroed(vec![2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+            .handle;
         let same = left.clone();
-        let other_device = GpuTensorHandle {
-            device_id: 2,
-            ..left.clone()
-        };
+        let view = left
+            .with_view(left.view().clone().with_shape(vec![1, 2]))
+            .unwrap();
+        let independent = owner
+            .allocate_zeroed(vec![2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap()
+            .handle;
         assert!(same_gpu_handle(&left, &same));
-        assert!(!same_gpu_handle(&left, &other_device));
+        assert!(same_gpu_handle(&left, &view));
+        assert_ne!(left.view_identity(), view.view_identity());
+        assert!(!same_gpu_handle(&left, &independent));
+    }
+
+    #[test]
+    fn fft_snapshot_restore_preserves_immutable_logical_view() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuHandleProvenance, ProviderPrecision,
+        };
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_logical_zeroed(vec![2, 1], ProviderPrecision::F32)
+            .unwrap();
+        let handle = allocation
+            .handle
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
+        let snapshot = gpu_metadata_snapshot(&handle);
+        let identity = handle.view_identity();
+        restore_gpu_metadata(&handle, snapshot);
+        assert_eq!(handle.view_identity(), identity);
+        assert_eq!(gpu_metadata_snapshot(&handle), snapshot);
+        assert!(runmat_accelerate_api::handle_is_logical(&handle));
+        assert!(runmat_accelerate_api::handle_is_explicit(&handle));
+        assert_eq!(allocation.probe.retirements(), 0);
     }
 
     #[test]
