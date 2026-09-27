@@ -4,6 +4,38 @@
 use super::*;
 use runmat_accelerate_api::{GpuTensorStorage, ProviderExecutionError};
 
+/// One call-local barrier before the first resident effect. Parsing pure host
+/// controls still reports its ordinary errors before ownership is needed.
+pub(super) struct InputAdmission<'a> {
+    inputs: Vec<&'a GpuTensorHandle>,
+    admitted: bool,
+}
+
+impl<'a> InputAdmission<'a> {
+    pub(super) fn new(inputs: impl Iterator<Item = &'a GpuTensorHandle>) -> Self {
+        Self {
+            inputs: inputs.collect(),
+            admitted: false,
+        }
+    }
+
+    pub(super) fn before_effect(&mut self) -> BuiltinResult<()> {
+        if self.admitted {
+            return Ok(());
+        }
+        for handle in &self.inputs {
+            gpu_helpers::exact_provider_for_handle(handle)
+                .ok_or_else(|| terminal("median: resident input has no exact owning provider"))?;
+            handle
+                .allocation_lease()
+                .validate_live()
+                .map_err(|error| provider_error(ProviderExecutionError::from_source(error)))?;
+        }
+        self.admitted = true;
+        Ok(())
+    }
+}
+
 pub(super) fn terminal(message: &str) -> RuntimeError {
     let mut error = median_internal_error(message);
     error.gpu_gather_retry = crate::GpuGatherRetry::Never;

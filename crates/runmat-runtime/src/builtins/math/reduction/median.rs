@@ -420,14 +420,26 @@ pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::Bui
         .iter()
         .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
-    let parsed = parse_arguments(&rest).await?;
+    let mut admission =
+        resident::InputAdmission::new(std::iter::once(&value).chain(rest.iter()).filter_map(
+            |value| match value {
+                Value::GpuTensor(handle) => Some(handle),
+                _ => None,
+            },
+        ));
+    let parsed = parse_arguments(&rest, &mut admission).await?;
+    admission.before_effect()?;
+    drop(admission);
     match value {
         Value::GpuTensor(handle) => median_gpu(handle, &parsed, &protected).await,
         other => median_host(other, &parsed),
     }
 }
 
-async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
+async fn parse_arguments(
+    args: &[Value],
+    admission: &mut resident::InputAdmission<'_>,
+) -> BuiltinResult<ParsedArguments> {
     let mut axes = MedianAxes::Default;
     let mut axes_set = false;
     let mut nan_mode = ReductionNaN::Include;
@@ -449,7 +461,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     let value = args.get(idx + 1).ok_or_else(|| {
                         median_invalid_argument("median: Weights requires a value")
                     })?;
-                    weights = Some(parse_weights(value).await?);
+                    weights = Some(parse_weights(value, admission).await?);
                     idx += 2;
                     continue;
                 }
@@ -489,7 +501,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                     let value = args.get(idx + 1).ok_or_else(|| {
                         median_invalid_argument("median: Weights requires a value")
                     })?;
-                    weights = Some(parse_weights(value).await?);
+                    weights = Some(parse_weights(value, admission).await?);
                     idx += 2;
                     continue;
                 }
@@ -534,7 +546,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
         }
 
         if !axes_set || matches!(axes, MedianAxes::Default) {
-            if let Some(selection) = parse_axes(arg).await? {
+            if let Some(selection) = parse_axes(arg, admission).await? {
                 if matches!(selection, MedianAxes::All) {
                     if axes_set && !matches!(axes, MedianAxes::Default) {
                         return Err(median_invalid_argument(
@@ -549,7 +561,7 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
                 idx += 1;
                 continue;
             }
-        } else if parse_axes(arg).await?.is_some() {
+        } else if parse_axes(arg, admission).await?.is_some() {
             return Err(median_invalid_argument(
                 "median: multiple dimension specifications provided",
             ));
@@ -573,7 +585,10 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<ParsedArguments> {
     })
 }
 
-async fn parse_weights(value: &Value) -> BuiltinResult<MedianWeights> {
+async fn parse_weights(
+    value: &Value,
+    admission: &mut resident::InputAdmission<'_>,
+) -> BuiltinResult<MedianWeights> {
     let tensor = match value {
         Value::Num(value) => Tensor::new(vec![*value], vec![1, 1])
             .map_err(|error| median_internal_error(format!("median: {error}")))?,
@@ -586,6 +601,7 @@ async fn parse_weights(value: &Value) -> BuiltinResult<MedianWeights> {
                     "median: Weights must be single or double",
                 ));
             }
+            admission.before_effect()?;
             gpu_helpers::gather_tensor_async(handle).await?
         }
         _ => {
@@ -794,7 +810,10 @@ fn median_tensor(
     }
 }
 
-async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
+async fn parse_axes(
+    value: &Value,
+    admission: &mut resident::InputAdmission<'_>,
+) -> BuiltinResult<Option<MedianAxes>> {
     if let Some(text) = value_as_str(value) {
         let trimmed = text.trim();
         if trimmed.is_empty() {
@@ -826,6 +845,9 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
         return Ok(Some(MedianAxes::Default));
     }
 
+    if matches!(value, Value::GpuTensor(_)) {
+        admission.before_effect()?;
+    }
     let dims = match value {
         Value::Tensor(_)
         | Value::LogicalArray(_)

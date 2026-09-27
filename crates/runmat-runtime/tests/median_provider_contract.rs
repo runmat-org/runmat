@@ -24,6 +24,8 @@ enum Mode {
     LaterUnsupported,
     LaterAlias,
     LaterPending,
+    RestoreUnsupported,
+    RestoreFailure,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -153,6 +155,17 @@ impl AccelProvider for Provider {
         host: &HostNumericTensorView<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.mode, Mode::RestoreUnsupported | Mode::RestoreFailure) {
+            assert_eq!(host.shape, &[1, 3]);
+            assert!(
+                matches!(host.data, HostNumericDataView::F64(values) if values.len() == 3 && values.iter().all(|value| value.is_nan()))
+            );
+            return Err(if matches!(self.mode, Mode::RestoreUnsupported) {
+                unsupported_provider_operation("fixture cannot restore Double empty median")
+            } else {
+                std::io::Error::new(std::io::ErrorKind::BrokenPipe, "restoration failed").into()
+            });
+        }
         self.inner.upload_numeric_raw(host)
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
@@ -180,6 +193,9 @@ impl AccelProvider for Provider {
         Box::pin(self.execute(input, Some(axis)))
     }
 }
+
+#[path = "median_provider_contract/preflight.rs"]
+mod preflight;
 fn input(provider: &Provider) -> GpuTensorHandle {
     provider
         .inner
