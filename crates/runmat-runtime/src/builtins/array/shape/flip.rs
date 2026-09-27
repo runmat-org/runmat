@@ -852,7 +852,7 @@ fn flip_native_output_matches(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && output.view().is_logical() == input.view().is_logical()
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
@@ -1083,7 +1083,7 @@ pub(crate) mod tests {
                 panic!("expected resident logical output");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&result));
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&result).expect("result owner"),
                 provider
             ));

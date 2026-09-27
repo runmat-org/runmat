@@ -55,7 +55,7 @@ pub(super) fn reshape(
     if output.shape() != shape
         || output.device_id() != source.device_id()
         || !gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         || output.physical().element_type() != source.physical().element_type()
         || output.physical().storage() != source.physical().storage()
         || output.view().is_logical() != source.view().is_logical()

@@ -704,7 +704,7 @@ fn validated_sequence_output(
         && output.shape() == shape
         && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(&output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&output) == Some(expected_precision)
@@ -737,7 +737,7 @@ fn validated_unowned_sequence_output(
     let valid = output.shape() == shape
         && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(&output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&output) == Some(expected_precision)

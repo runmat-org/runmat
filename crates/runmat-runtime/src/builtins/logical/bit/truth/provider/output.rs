@@ -29,8 +29,9 @@ pub(super) fn valid(
         && runmat_accelerate_api::handle_precision(output)
             == runmat_accelerate_api::handle_precision(input)
         && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|output_owner| {
+            runmat_accelerate_api::same_provider_instance(output_owner, owner)
+        })
 }
 
 pub(super) fn annotate<'a>(

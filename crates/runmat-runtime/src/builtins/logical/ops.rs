@@ -304,7 +304,7 @@ async fn provider_input_contains_nan(
         || !maximum.shape().iter().all(|dim| *dim == 1)
         || maximum.device_id() != source.device_id()
         || !gpu_helpers::exact_provider_for_handle(&maximum)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     {
         return Err(gpu_helpers::reject_gpu_output(
             maximum,
@@ -421,7 +421,7 @@ async fn try_gpu_cast(
         || zeros.physical().element_type() != input.physical().element_type()
         || zeros.view().is_logical() != input.view().is_logical()
         || !gpu_helpers::exact_provider_for_handle(&zeros)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
     {
         return Err(gpu_helpers::reject_gpu_output(
             zeros,
@@ -478,7 +478,7 @@ fn valid_logical_gpu_output(
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn conversion_error(type_name: &str) -> RuntimeError {

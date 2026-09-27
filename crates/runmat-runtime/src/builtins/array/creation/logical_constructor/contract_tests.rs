@@ -304,7 +304,9 @@ fn logical_constructors_upload_native_logical_when_f32_provider_has_no_fill_hook
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             assert!(
                 crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                    .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(
+                        owner, provider
+                    ))
             );
             let lease = handle.allocation_lease().downgrade();
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("logical gather");

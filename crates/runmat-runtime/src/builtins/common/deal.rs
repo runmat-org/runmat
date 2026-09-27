@@ -161,7 +161,7 @@ mod tests {
                     .expect("upload exact resident integer tensor");
                 let integer_type = runmat_accelerate_api::handle_integer_type(&handle)
                     .expect("resident integer class metadata");
-                assert!(std::ptr::eq(
+                assert!(runmat_accelerate_api::same_provider_instance(
                     runmat_accelerate_api::provider_for_handle(&handle).expect("handle owner"),
                     provider
                 ));
@@ -189,7 +189,7 @@ mod tests {
                         runmat_accelerate_api::handle_integer_type(&output),
                         Some(integer_type)
                     );
-                    assert!(std::ptr::eq(
+                    assert!(runmat_accelerate_api::same_provider_instance(
                         runmat_accelerate_api::provider_for_handle(&output).expect("output owner"),
                         provider
                     ));

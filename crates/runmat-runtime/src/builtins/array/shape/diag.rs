@@ -1035,7 +1035,7 @@ fn native_diag_output_matches(
     output.device_id() == input.device_id()
         && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
         && output.view().is_logical() == template.logical
         && (template.logical
@@ -2469,7 +2469,7 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&output),
                 Some(provider.precision())
             );
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
@@ -2615,7 +2615,7 @@ mod tests {
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
             assert_eq!(output.device_id(), proto.device_id());
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
@@ -2890,7 +2890,9 @@ mod tests {
                 };
                 let owner = runmat_accelerate_api::provider_for_handle(&output_handle)
                     .expect("output owner");
-                assert!(std::ptr::eq(owner, provider));
+                assert!(runmat_accelerate_api::same_provider_instance(
+                    owner, provider
+                ));
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(&output_handle),
                     runmat_accelerate_api::handle_integer_type(&input_for_cleanup)
@@ -2935,7 +2937,7 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&output),
                 Some(ProviderPrecision::F32)
             );
-            assert!(std::ptr::eq(
+            assert!(runmat_accelerate_api::same_provider_instance(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
             ));
