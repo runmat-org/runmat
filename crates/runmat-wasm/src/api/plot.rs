@@ -801,8 +801,7 @@ fn shared_webgpu_context() -> Option<SharedWgpuContext> {
         AccelContextHandle::Wgpu(ctx) => {
             let shared = SharedWgpuContext {
                 instance: ctx.instance.clone(),
-                device: ctx.device,
-                queue: ctx.queue,
+                access: ctx.access,
                 adapter: ctx.adapter,
                 adapter_info: ctx.adapter_info.clone(),
                 limits: ctx.limits,

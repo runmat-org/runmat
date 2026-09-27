@@ -709,22 +709,27 @@ async fn build_quiver_gpu_plot(
         xy_mode,
         scalar,
     };
-    let gpu_vertices = runmat_plot::gpu::quiver::pack_vertices(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &runmat_plot::gpu::quiver::QuiverGpuParams {
-            color: parsed.color,
-            scale: parsed.scale,
-            head_size: parsed.head_size,
-        },
-    )
-    .map_err(|e| {
-        plotting_error(
-            BUILTIN_NAME,
-            format!("quiver: failed to build GPU vertices: {e}"),
-        )
-    })?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::quiver::pack_vertices(
+                emission,
+                &inputs,
+                &runmat_plot::gpu::quiver::QuiverGpuParams {
+                    color: parsed.color,
+                    scale: parsed.scale,
+                    head_size: parsed.head_size,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| {
+            plotting_error(
+                BUILTIN_NAME,
+                format!("quiver: failed to build GPU vertices: {e}"),
+            )
+        })?;
     let mut plot = QuiverPlot::from_gpu_buffer(
         parsed.color,
         parsed.line_width,

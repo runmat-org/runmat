@@ -888,13 +888,14 @@ fn build_bar_gpu_series(
             orientation: config.gpu_orientation,
             layout: BarLayoutMode::Grouped,
         };
-        let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
-            &context.device,
-            &context.queue,
-            &inputs,
-            &params,
-        )
-        .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::bar::pack_vertices_from_values(emission, &inputs, &params)
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
         let labels = category_labels_from_x(x_tensor, shape.rows, config)?;
         let bounds = build_bar_gpu_bounds(values, shape.rows, params.bar_width, config)?;
         let vertex_count = gpu_vertices.vertex_count;
@@ -955,13 +956,14 @@ fn build_bar_gpu_matrix_charts(
             orientation: config.gpu_orientation,
             layout: layout_mode,
         };
-        let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
-            &context.device,
-            &context.queue,
-            inputs,
-            &params,
-        )
-        .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::bar::pack_vertices_from_values(emission, inputs, &params)
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| config.internal(format!("failed to build GPU vertices: {e}")))?;
         let vertex_count = gpu_vertices.vertex_count;
         let mut chart = BarChart::from_gpu_buffer(
             labels.clone(),

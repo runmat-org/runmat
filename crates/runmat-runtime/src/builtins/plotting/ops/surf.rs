@@ -657,13 +657,14 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         lod_y_len: lod.lod_y_len,
     };
 
-    let gpu_vertices = runmat_plot::gpu::surface::pack_surface_vertices(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::surface::pack_surface_vertices(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = lod.vertex_count();
     let lod_x_len = usize::try_from(lod.lod_x_len)

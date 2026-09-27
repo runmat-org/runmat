@@ -537,25 +537,30 @@ pub(crate) fn build_truecolor_image_surface_gpu(
             )
         }
     };
-    let gpu_vertices = runmat_plot::gpu::image::pack_truecolor_vertices(
-        &context.device,
-        &context.queue,
-        &runmat_plot::gpu::image::TrueColorImageGpuInputs {
-            x_axis: x_data,
-            y_axis: y_data,
-            image_buffer: image_ref.clone().into(),
-            rows: rows as u32,
-            cols: cols as u32,
-            channels,
-            scalar,
-        },
-    )
-    .map_err(|e| {
-        crate::builtins::plotting::plotting_error(
-            BUILTIN_NAME,
-            format!("image: failed to build GPU truecolor vertices: {e}"),
-        )
-    })?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::image::pack_truecolor_vertices(
+                emission,
+                &runmat_plot::gpu::image::TrueColorImageGpuInputs {
+                    x_axis: x_data,
+                    y_axis: y_data,
+                    image_buffer: image_ref.clone().into(),
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    channels,
+                    scalar,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| {
+            crate::builtins::plotting::plotting_error(
+                BUILTIN_NAME,
+                format!("image: failed to build GPU truecolor vertices: {e}"),
+            )
+        })?;
     let bounds = runmat_plot::core::BoundingBox::new(
         glam::Vec3::new(
             x_host.first().copied().unwrap_or(0.0) as f32,

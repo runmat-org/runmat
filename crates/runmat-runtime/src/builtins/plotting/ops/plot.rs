@@ -955,18 +955,23 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
             marker_size: marker.size.max(1.0),
         };
         Some(
-            runmat_plot::gpu::line::pack_marker_vertices_from_xy(
-                &context.device,
-                &context.queue,
-                &inputs,
-                &marker_params,
-            )
-            .map_err(|e| {
-                plotting_error(
-                    builtin,
-                    format!("{builtin}: failed to build marker vertices: {e}"),
-                )
-            })?,
+            context
+                .access
+                .with_shared(|emission| {
+                    runmat_plot::gpu::line::pack_marker_vertices_from_xy(
+                        emission,
+                        &inputs,
+                        &marker_params,
+                    )
+                })
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+                .map_err(|e| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: failed to build marker vertices: {e}"),
+                    )
+                })?,
         )
     } else {
         None

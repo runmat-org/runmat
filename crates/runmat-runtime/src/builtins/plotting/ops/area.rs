@@ -728,25 +728,37 @@ async fn build_area_gpu_plots(
                 runmat_plot::gpu::ScalarType::F32 => {
                     let values_f32: Vec<f32> = values.iter().map(|v| *v as f32).collect();
                     let axis = runmat_plot::gpu::axis::AxisData::F32(&values_f32);
-                    let buffer = runmat_plot::gpu::axis::axis_storage_buffer(
-                        &context.device,
-                        "area host x axis",
-                        &axis,
-                        scalar,
-                    )
-                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
-                    runmat_plot::gpu::axis::AxisData::Buffer(buffer.into())
+                    let buffer = context
+                        .access
+                        .with_shared(|emission| {
+                            runmat_plot::gpu::axis::axis_storage_buffer(
+                                emission,
+                                "area host x axis",
+                                &axis,
+                                scalar,
+                            )
+                        })
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result)
+                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
                 }
                 runmat_plot::gpu::ScalarType::F64 => {
                     let axis = runmat_plot::gpu::axis::AxisData::F64(&values);
-                    let buffer = runmat_plot::gpu::axis::axis_storage_buffer(
-                        &context.device,
-                        "area host x axis",
-                        &axis,
-                        scalar,
-                    )
-                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
-                    runmat_plot::gpu::axis::AxisData::Buffer(buffer.into())
+                    let buffer = context
+                        .access
+                        .with_shared(|emission| {
+                            runmat_plot::gpu::axis::axis_storage_buffer(
+                                emission,
+                                "area host x axis",
+                                &axis,
+                                scalar,
+                            )
+                        })
+                        .map_err(|error| error.to_string())
+                        .and_then(|result| result)
+                        .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
                 }
             };
             (
@@ -788,23 +800,28 @@ async fn build_area_gpu_plots(
             target_col: idx,
             scalar,
         };
-        let gpu_vertices = runmat_plot::gpu::area::pack_vertices(
-            &context.device,
-            &context.queue,
-            &inputs,
-            &runmat_plot::gpu::area::AreaGpuParams {
-                color: parsed
-                    .color
-                    .unwrap_or(MATLAB_COLOR_ORDER[idx % MATLAB_COLOR_ORDER.len()]),
-                baseline: parsed.base_value as f32,
-            },
-        )
-        .map_err(|e| {
-            area_error_with_detail(
-                &AREA_ERROR_INTERNAL,
-                format!("failed to build GPU vertices: {e}"),
-            )
-        })?;
+        let gpu_vertices = context
+            .access
+            .with_shared(|emission| {
+                runmat_plot::gpu::area::pack_vertices(
+                    emission,
+                    &inputs,
+                    &runmat_plot::gpu::area::AreaGpuParams {
+                        color: parsed
+                            .color
+                            .unwrap_or(MATLAB_COLOR_ORDER[idx % MATLAB_COLOR_ORDER.len()]),
+                        baseline: parsed.base_value as f32,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                area_error_with_detail(
+                    &AREA_ERROR_INTERNAL,
+                    format!("failed to build GPU vertices: {e}"),
+                )
+            })?;
         let mut plot = AreaPlot::from_gpu_buffer(
             parsed
                 .color

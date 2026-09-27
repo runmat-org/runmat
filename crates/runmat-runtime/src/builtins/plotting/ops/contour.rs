@@ -1923,13 +1923,14 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
         level_count: levels.len() as u32,
     };
 
-    let gpu_vertices = runmat_plot::gpu::contour::pack_contour_vertices(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::contour::pack_contour_vertices(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
@@ -2092,11 +2093,14 @@ pub(crate) fn build_contour_fill_gpu_plot(
 
     let params = contour_fill::ContourFillGpuParams { base_z, alpha: 1.0 };
 
-    let gpu_vertices =
-        contour_fill::pack_contour_fill_vertices(&context.device, &context.queue, &inputs, &params)
-            .map_err(|e| {
-                plotting_error(name, format!("{name}: failed to build GPU vertices: {e}"))
-            })?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            contour_fill::pack_contour_fill_vertices(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
     let vertex_count = gpu_vertices.vertex_count;
     Ok(
         ContourFillPlot::from_gpu_buffer(gpu_vertices, vertex_count, bounds)
