@@ -43,8 +43,8 @@ impl ExtremaKind {
 
     pub(super) fn contract_error(self, detail: impl std::fmt::Display) -> RuntimeError {
         let descriptor = match self {
-            Self::Min => &runmat_builtins::MIN_ERROR_INTERNAL,
-            Self::Max => &runmat_builtins::MAX_ERROR_INTERNAL,
+            Self::Min => &super::min::MIN_ERROR_INTERNAL,
+            Self::Max => &super::max::MAX_ERROR_INTERNAL,
         };
         let mut error = build_runtime_error(format!("{}: {detail}", self.name()))
             .with_builtin(self.name())

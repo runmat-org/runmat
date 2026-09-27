@@ -393,7 +393,7 @@ const MAX_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "max: size mismatch",
 };
 
-const MAX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub(super) const MAX_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MAX.INTERNAL",
     identifier: Some("RunMat:max:Internal"),
     when: "Execution fails due to gather, provider, allocation, or conversion internals.",
@@ -521,7 +521,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };

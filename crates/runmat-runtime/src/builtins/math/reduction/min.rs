@@ -280,7 +280,7 @@ const MIN_ERROR_SIZE_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     message: "min: size mismatch",
 };
 
-const MIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+pub(super) const MIN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.MIN.INTERNAL",
     identifier: Some("RunMat:min:Internal"),
     when: "Execution fails due to gather, provider, allocation, or conversion internals.",
@@ -367,7 +367,6 @@ use crate::builtins::common::spec::{
     ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{
-    gpu_helpers,
     shape::{is_scalar_shape, normalize_scalar_shape},
     tensor,
 };
