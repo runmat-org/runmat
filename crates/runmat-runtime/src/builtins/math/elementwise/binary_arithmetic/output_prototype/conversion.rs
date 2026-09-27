@@ -1,4 +1,7 @@
-use runmat_value::{ComplexStorage, ComplexTensor, NumericStorage, Tensor, Value};
+use runmat_value::{
+    ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericStorage, Tensor,
+    Value,
+};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
@@ -14,6 +17,11 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn real_to_c
     match value {
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(value),
         Value::Num(number) => Ok(Value::Complex(number, 0.0)),
+        Value::Int(integer) => {
+            let tensor = Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
+                .map_err(|error| context.internal_error(error))?;
+            real_to_complex(context, Value::Tensor(tensor)).await
+        }
         Value::Tensor(tensor) => {
             let shape = tensor.shape.clone();
             let storage = tensor
@@ -26,7 +34,8 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn real_to_c
                 NumericStorage::F32(values) => {
                     ComplexStorage::F32(values.into_iter().map(|value| (value, 0.0)).collect())
                 }
-                storage => promote_integer_storage(storage),
+                storage => promote_integer_storage(storage)
+                    .map_err(|error| context.internal_error(error))?,
             };
             let tensor = ComplexTensor::from_complex_storage(storage, shape)
                 .map_err(|error| context.internal_error(error))?;
@@ -54,14 +63,12 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn real_to_c
     }
 }
 
-fn promote_integer_storage(storage: NumericStorage) -> ComplexStorage {
-    ComplexStorage::F64(
-        storage
-            .materialize_f64()
-            .into_iter()
-            .map(|value| (value, 0.0))
-            .collect(),
-    )
+fn promote_integer_storage(storage: NumericStorage) -> Result<ComplexStorage, String> {
+    let real = storage
+        .into_integer_storage()
+        .map_err(|_| "expected integer storage for complex promotion".to_owned())?;
+    let imaginary = real.zeros_like(real.len());
+    IntegerComplexStorage::new(real, imaginary).map(ComplexStorage::Integer)
 }
 
 pub(super) fn char_array_to_tensor(
