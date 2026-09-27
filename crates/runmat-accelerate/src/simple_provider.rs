@@ -7,6 +7,7 @@ mod remainder;
 mod unary;
 mod arithmetic;
 mod dimensional_extrema;
+mod median;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -16,12 +17,11 @@ use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture, AccelProvider,
     AccelProviderFuture, CorrcoefOptions, CovarianceOptions, FindDirection, FspecialRequest,
-    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned,
-    HostIntegerTensorOwned, HostIntegerTensorView, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned, HostTensorView,
-    ImfilterOptions, IntegerElementType, NumericElementType, PagefunRequest,
-    ProviderAdamUpdateRequest, ProviderAdamUpdateResult, ProviderBandwidth,
-    ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
+    GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostIntegerTensorOwned,
+    HostIntegerTensorView, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
+    HostNumericTensorView, HostTensorOwned, HostTensorView, ImfilterOptions, IntegerElementType,
+    NumericElementType, PagefunRequest, ProviderAdamUpdateRequest, ProviderAdamUpdateResult,
+    ProviderBandwidth, ProviderBitModulationRequest, ProviderBlackScholesPriceRequest,
     ProviderBlackScholesPriceResult, ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions,
     ProviderConvMode, ProviderConvOrientation, ProviderCovarianceToCorrelationResult,
     ProviderCrossentropyMode, ProviderCrossentropyRequest, ProviderCrossentropyResult,
@@ -62,9 +62,8 @@ use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::issymmetric_host_real_data;
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::reduction::{
-    compute_median_inplace, diff_tensor_host, gradient_complex_tensor_host,
-    gradient_complex_tensor_host_with_coordinates, gradient_real_tensor_host,
-    gradient_real_tensor_host_with_coordinates,
+    diff_tensor_host, gradient_complex_tensor_host, gradient_complex_tensor_host_with_coordinates,
+    gradient_real_tensor_host, gradient_real_tensor_host_with_coordinates,
 };
 use std::cmp::Ordering as CmpOrdering;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8826,22 +8825,7 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?
-                    .clone()
-            };
-            let median = if data.is_empty() || data.iter().any(|v| v.is_nan()) {
-                f64::NAN
-            } else {
-                let mut scratch = data.clone();
-                compute_median_inplace(&mut scratch)
-            };
-            self.allocate_tensor_with_storage(vec![median], vec![1, 1], GpuTensorStorage::Real)
-        })
+        Box::pin(async move { self.native_median(a, None) })
     }
 
     fn reduce_median_dim<'a>(
@@ -8849,68 +8833,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            if a.shape().len() != 2 {
-                return Err(anyhow::anyhow!("reduce_median_dim: only 2D supported"));
-            }
-            let rows = a.shape()[0];
-            let cols = a.shape()[1];
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let mut scratch = Vec::<f64>::with_capacity(rows.max(cols));
-            let out = if dim == 0 {
-                let mut v = vec![f64::NAN; cols];
-                for c in 0..cols {
-                    scratch.clear();
-                    let mut saw_nan = false;
-                    for r in 0..rows {
-                        let val = abuf[r + c * rows];
-                        if val.is_nan() {
-                            saw_nan = true;
-                            scratch.clear();
-                            break;
-                        }
-                        scratch.push(val);
-                    }
-                    v[c] = if saw_nan || scratch.is_empty() {
-                        f64::NAN
-                    } else {
-                        compute_median_inplace(&mut scratch)
-                    };
-                }
-                v
-            } else {
-                let mut v = vec![f64::NAN; rows];
-                for r in 0..rows {
-                    scratch.clear();
-                    let mut saw_nan = false;
-                    for c in 0..cols {
-                        let val = abuf[r + c * rows];
-                        if val.is_nan() {
-                            saw_nan = true;
-                            scratch.clear();
-                            break;
-                        }
-                        scratch.push(val);
-                    }
-                    v[r] = if saw_nan || scratch.is_empty() {
-                        f64::NAN
-                    } else {
-                        compute_median_inplace(&mut scratch)
-                    };
-                }
-                v
-            };
-            drop(guard);
-            let shape = if dim == 0 {
-                vec![1, cols]
-            } else {
-                vec![rows, 1]
-            };
-            self.allocate_tensor(out, shape)
-        })
+        Box::pin(async move { self.native_median(a, Some(dim)) })
     }
 
     fn moving_window<'a>(
