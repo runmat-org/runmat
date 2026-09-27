@@ -1,8 +1,8 @@
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    AliasFact, CallInference, CallRequest, DynamicReason, MutationFact, NumericDomain, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    AliasFact, CallInference, CallRequest, DynamicReason, MutationFact, ShapeFact, ValueFact,
+    ValueKindFact,
 };
 
 pub(super) fn infer_get(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -46,6 +46,25 @@ fn infer(
     operation: PositionOperation,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
+    diagnostics.extend(super::options::numeric_control(request, 1));
+    match operation {
+        PositionOperation::Get => {
+            diagnostics.extend(super::options::assumed_type(request, 2, &[0]))
+        }
+        PositionOperation::Set => {
+            if request.arguments.len() == 3
+                && matches!(
+                    request.arguments[2].kind,
+                    ValueKindFact::String | ValueKindFact::Character
+                )
+            {
+                diagnostics.extend(super::options::assumed_type(request, 2, &[0]));
+            } else {
+                diagnostics.extend(super::options::numeric_control(request, 2));
+                diagnostics.extend(super::options::assumed_type(request, 3, &[0]));
+            }
+        }
+    }
     let name = operation.name();
     let max = operation.maximum_arity();
     if !(2..=max).contains(&request.arguments.len()) {
@@ -63,8 +82,7 @@ fn infer(
             diagnostics,
         );
     };
-    if !matches!(value.kind, ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real)
-    {
+    let Some(kind) = super::facts::result_kind(value) else {
         if !matches!(value.kind, ValueKindFact::Unknown) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-BIT-POSITION-INPUT",
@@ -78,21 +96,33 @@ fn infer(
             ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
             diagnostics,
         );
-    }
-    let shape = scalar_or_equal_shape(
+    };
+    let values = if matches!(operation, PositionOperation::Set)
+        && request.arguments.len() == 3
+        && matches!(
+            request.arguments[2].kind,
+            ValueKindFact::String | ValueKindFact::Character
+        ) {
+        2
+    } else {
+        operation.value_argument_count()
+    };
+    let mut shape = scalar_or_equal_shape(
         request
             .arguments
             .iter()
-            .take(operation.value_argument_count())
+            .take(values)
             .map(|argument| &argument.shape),
     );
-    let mut output = value.clone();
-    output.shape = shape;
-    output.storage = if output.shape.element_count() == Some(1) {
-        StorageFact::Scalar
-    } else {
-        StorageFact::Unknown
-    };
+    if matches!(operation, PositionOperation::Set)
+        && request.arguments.len() == 3
+        && matches!(request.arguments[2].kind, ValueKindFact::Unknown)
+    {
+        // The third argument may be an assumed type or a shape-bearing V.
+        shape = ShapeFact::Unknown;
+    }
+    let mut output = ValueFact::proven(kind, shape.clone(), super::facts::storage(value, &shape));
+    output.residency = value.residency.clone();
     output.alias = AliasFact::Unique;
     output.mutation = MutationFact::ValueSemantics;
     finish_fixed(entry, request, output, diagnostics)
@@ -101,14 +131,7 @@ fn infer(
 fn scalar_or_equal_shape<'a>(shapes: impl Iterator<Item = &'a ShapeFact>) -> ShapeFact {
     let mut output = ShapeFact::Scalar;
     for shape in shapes {
-        if shape.element_count() == Some(1) {
-            continue;
-        }
-        if matches!(output, ShapeFact::Scalar) {
-            output = shape.clone();
-        } else if output != *shape {
-            return ShapeFact::Unknown;
-        }
+        output = super::facts::scalar_or_equal(&output, shape);
     }
     output
 }

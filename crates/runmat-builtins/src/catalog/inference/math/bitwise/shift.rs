@@ -1,12 +1,13 @@
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    AliasFact, CallInference, CallRequest, DynamicReason, MutationFact, NumericDomain, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    AliasFact, CallInference, CallRequest, DynamicReason, MutationFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
+    diagnostics.extend(super::options::numeric_control(request, 1));
+    diagnostics.extend(super::options::assumed_type(request, 2, &[0]));
     if !(2..=3).contains(&request.arguments.len()) {
         diagnostics.push(argument_error(
             "RM-CATALOG-BITSHIFT-ARITY",
@@ -22,8 +23,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             diagnostics,
         );
     };
-    if !matches!(value.kind, ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Real)
-    {
+    let Some(kind) = super::facts::result_kind(value) else {
         if !matches!(value.kind, ValueKindFact::Unknown) {
             diagnostics.push(argument_error(
                 "RM-CATALOG-BITSHIFT-INPUT",
@@ -37,29 +37,14 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
             diagnostics,
         );
-    }
+    };
     let shape = request.arguments.get(1).map_or_else(
         || value.shape.clone(),
-        |count| scalar_or_equal(&value.shape, &count.shape),
+        |count| super::facts::scalar_or_equal(&value.shape, &count.shape),
     );
-    let mut output = value.clone();
-    output.shape = shape;
-    output.storage = if output.shape.element_count() == Some(1) {
-        StorageFact::Scalar
-    } else {
-        StorageFact::Unknown
-    };
+    let mut output = ValueFact::proven(kind, shape.clone(), super::facts::storage(value, &shape));
+    output.residency = runmat_types::ResidencyFact::Unknown;
     output.alias = AliasFact::Unique;
     output.mutation = MutationFact::ValueSemantics;
     finish_fixed(entry, request, output, diagnostics)
-}
-
-fn scalar_or_equal(left: &ShapeFact, right: &ShapeFact) -> ShapeFact {
-    if left.element_count() == Some(1) {
-        right.clone()
-    } else if right.element_count() == Some(1) || left == right {
-        left.clone()
-    } else {
-        ShapeFact::Unknown
-    }
 }

@@ -32,6 +32,11 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let supported = matches!(output.kind, ValueKindFact::Numeric(ref numeric) if numeric.domain == NumericDomain::Real)
         && !matches!(output.storage, StorageFact::Sparse);
     if supported {
+        output = ValueFact::proven(
+            input.kind.clone(),
+            input.shape.clone(),
+            input.storage.clone(),
+        );
         output.alias = AliasFact::Unique;
         output.mutation = MutationFact::ValueSemantics;
         output.residency = ResidencyFact::Host;

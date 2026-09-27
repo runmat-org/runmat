@@ -11,6 +11,7 @@ pub(super) fn infer(
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
     let mut diagnostics = Vec::new();
+    diagnostics.extend(super::options::assumed_type(request, 2, &[0, 1]));
     if !(2..=3).contains(&request.arguments.len()) {
         diagnostics.push(argument_error(
             "RM-CATALOG-BITWISE-BINARY-ARITY",
@@ -27,6 +28,19 @@ pub(super) fn infer(
 
     let left = &request.arguments[0];
     let right = &request.arguments[1];
+    for (index, input) in [left, right].into_iter().enumerate() {
+        if input.storage == StorageFact::Sparse
+            && input
+                .numeric()
+                .is_some_and(|numeric| numeric.class.integer_class().is_some())
+        {
+            diagnostics.push(argument_error(
+                "RM-CATALOG-BITWISE-SPARSE",
+                "native integer sparse storage is not supported by bitwise operations",
+                index,
+            ));
+        }
+    }
     let shape = match broadcast_shape(&left.shape, &right.shape) {
         Ok(shape) => shape,
         Err(diagnostic) => {
@@ -40,7 +54,9 @@ pub(super) fn infer(
         }
     };
 
-    let kind = match (&left.kind, &right.kind) {
+    let left_kind = super::facts::result_kind(left).unwrap_or_else(|| left.kind.clone());
+    let right_kind = super::facts::result_kind(right).unwrap_or_else(|| right.kind.clone());
+    let kind = match (&left_kind, &right_kind) {
         (ValueKindFact::Logical, ValueKindFact::Logical) => ValueKindFact::Logical,
         (ValueKindFact::Numeric(left_numeric), ValueKindFact::Numeric(right_numeric))
             if left_numeric.domain == NumericDomain::Real
@@ -63,6 +79,14 @@ pub(super) fn infer(
             ));
             ValueKindFact::Unknown
         }
+    };
+    let kind = if matches!(
+        (&left.kind, &right.kind),
+        (ValueKindFact::Logical, ValueKindFact::Logical)
+    ) {
+        ValueKindFact::Logical
+    } else {
+        kind
     };
 
     let mut output = if matches!(kind, ValueKindFact::Unknown) {

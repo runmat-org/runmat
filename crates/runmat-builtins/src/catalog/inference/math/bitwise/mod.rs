@@ -1,5 +1,7 @@
 mod binary;
 mod complement;
+mod facts;
+mod options;
 mod position;
 mod shift;
 mod swapbytes;
