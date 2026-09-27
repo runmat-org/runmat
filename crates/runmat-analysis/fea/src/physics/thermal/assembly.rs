@@ -1,13 +1,14 @@
 use runmat_analysis_core::{
-    AnalysisConstraint, AnalysisModel, BoundaryOperator, ThermalConstraintKind,
+    AnalysisConstraint, AnalysisModel, BoundaryOperator, PrescribedValue, Temperature,
+    ThermalConstraintKind,
 };
 use thiserror::Error;
 
 use crate::{
     algebra::{
         spmv, AssembledRealSystem, CanonicalRealOperators, ContributionDomain, ContributionId,
-        ContributionProvenance, MatrixProperties, NullspaceEliminationEvidence, OperatorRole,
-        RealSparseAssembler, RealSparseMatrix,
+        ContributionProvenance, MatrixProperties, OperatorRole, RealSparseAssembler,
+        RealSparseMatrix,
     },
     excitation::{
         sample_prescribed_heat_flux, sample_prescribed_temperature, ExcitationSamplePoint,
@@ -21,7 +22,10 @@ use super::{constitutive_stats, ThermalConstitutiveStats};
 
 #[cfg(test)]
 mod convergence_tests;
+mod energy_recovery;
 mod recovery;
+mod steady;
+mod steady_reference;
 mod temperature_field;
 
 #[derive(Debug, Clone)]
@@ -32,6 +36,8 @@ pub(crate) struct ThermalOperatorAssembly {
     pub conductivity: RealSparseMatrix,
     pub capacity: RealSparseMatrix,
     pub source: Vec<f64>,
+    /// Applied generation/flux only; excludes the algebraic Robin ambient forcing.
+    pub applied_source: Vec<f64>,
     pub source_evidence: Vec<SpatialProjectionEvidence>,
     pub prescribed_temperature_k: Vec<Option<f64>>,
     pub positive_robin_weight: Vec<f64>,
@@ -40,38 +46,6 @@ pub(crate) struct ThermalOperatorAssembly {
 }
 
 impl ThermalOperatorAssembly {
-    pub(crate) fn steady_operator(&self) -> Result<AssembledRealSystem, ThermalAssemblyError> {
-        let stiffness = self.conductivity.clone();
-        let mut rhs = self.source.clone();
-        apply_prescribed_values(&self.prescribed_temperature_k, &mut rhs);
-        let constrained = self
-            .prescribed_temperature_k
-            .iter()
-            .map(Option::is_some)
-            .collect::<Vec<_>>();
-        let mass = self.capacity.clone();
-        let damping = RealSparseMatrix::diagonal(
-            vec![0.0; self.projection.nodes.len()],
-            OperatorRole::Damping,
-            MatrixProperties::SYMMETRIC_POSITIVE_SEMIDEFINITE,
-        )
-        .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
-        let operators = CanonicalRealOperators::try_new(stiffness, mass, damping)
-            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?;
-        let evidence = match NullspaceEliminationEvidence::prove_thermal(
-            &self.projection,
-            operators.stiffness(),
-            &constrained,
-            &self.positive_robin_weight,
-        ) {
-            Ok(evidence) => Some(evidence),
-            Err(crate::algebra::NullspaceEvidenceError::UnderconstrainedComponent) => None,
-            Err(error) => return Err(ThermalAssemblyError::SparseOperator(error.to_string())),
-        };
-        AssembledRealSystem::try_new_with_nullspace_evidence(operators, constrained, rhs, evidence)
-            .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))
-    }
-
     pub(crate) fn transient_operator(
         &self,
         time_step_s: f64,
@@ -373,6 +347,7 @@ pub(crate) fn assemble(
         source_evidence.push(evidence);
     }
 
+    let mut applied_source = source.clone();
     let mut prescribed_temperature_k =
         temperature_field::prescribed_temperatures(&projection, excitations)?;
     let mut positive_robin_weight = vec![0.0; projection.nodes.len()];
@@ -444,6 +419,7 @@ pub(crate) fn assemble(
                                 face.node_indices.iter().zip(point.shape_values())
                             {
                                 source[node] += power * shape;
+                                applied_source[node] += power * shape;
                             }
                         })
                         .map_err(|error| {
@@ -455,17 +431,12 @@ pub(crate) fn assemble(
                 ambient_temperature,
                 coefficient,
             } => {
-                let ambient =
-                    sample_prescribed_temperature(ambient_temperature, &model.signals, sample)
-                        .map_err(|error| ThermalAssemblyError::SignalRealization {
-                            operator_id: boundary.boundary_id.clone(),
-                            message: error.to_string(),
-                        })?;
-                if ambient.imaginary != 0.0 {
-                    return Err(ThermalAssemblyError::ComplexBoundary {
-                        operator_id: boundary.boundary_id.clone(),
-                    });
-                }
+                let ambient = sample_ambient_temperature(
+                    model,
+                    &boundary.boundary_id,
+                    ambient_temperature,
+                    sample,
+                )?;
                 if faces.peek().is_none() {
                     return Err(ThermalAssemblyError::UnmappedBoundary {
                         operator_id: boundary.boundary_id.clone(),
@@ -484,7 +455,7 @@ pub(crate) fn assemble(
                                         * point.area_weight_m2;
                                 }
                                 source[row] +=
-                                    heat_transfer * ambient.real * row_shape * point.area_weight_m2;
+                                    heat_transfer * ambient * row_shape * point.area_weight_m2;
                                 for (local_column, &column) in face.node_indices.iter().enumerate()
                                 {
                                     conductivity.add(
@@ -529,12 +500,35 @@ pub(crate) fn assemble(
             .finish()
             .map_err(|error| ThermalAssemblyError::SparseOperator(format!("{error:?}")))?,
         source,
+        applied_source,
         source_evidence,
         prescribed_temperature_k,
         positive_robin_weight,
         element_conductivity_w_per_mk,
         element_volumetric_capacity_j_per_m3k,
     })
+}
+
+/// Shared by operator assembly and physical recovery, including signal side/approach.
+fn sample_ambient_temperature(
+    model: &AnalysisModel,
+    boundary_id: &str,
+    value: &PrescribedValue<Temperature>,
+    sample: ExcitationSamplePoint<'_>,
+) -> Result<f64, ThermalAssemblyError> {
+    let ambient =
+        sample_prescribed_temperature(value, &model.signals, sample).map_err(|error| {
+            ThermalAssemblyError::SignalRealization {
+                operator_id: boundary_id.into(),
+                message: error.to_string(),
+            }
+        })?;
+    if ambient.imaginary != 0.0 {
+        return Err(ThermalAssemblyError::ComplexBoundary {
+            operator_id: boundary_id.into(),
+        });
+    }
+    Ok(ambient.real)
 }
 
 fn volume_matches(element: &ProjectedElement, target: &RealizedExcitationTarget) -> bool {

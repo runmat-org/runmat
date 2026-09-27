@@ -18,7 +18,7 @@ pub use matrix::{
     RealSparseMatrixError, ScalarDomain, ScalarPrecision,
 };
 pub(crate) use nullspace::{
-    ConnectorAnchoredSolidInput, ConnectorAnchoredStructuralFrameInput,
+    connected_components, ConnectorAnchoredSolidInput, ConnectorAnchoredStructuralFrameInput,
     MixedStructuralNullspaceInput,
 };
 pub use nullspace::{

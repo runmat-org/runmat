@@ -162,25 +162,13 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
         malformed.energy_balances[0].residual_w += 1.0;
         assert!(malformed.validate().is_err());
         let mut excessive = result.clone();
-        excessive.energy_balances[0] = crate::contracts::ThermalEnergyBalance {
-            storage_rate_w: 1.0,
-            boundary_loss_w: 0.0,
-            applied_power_w: 0.0,
-            prescribed_boundary_power_w: 0.0,
-            residual_w: 1.0,
-            relative_residual: 1.0,
-        };
+        excessive.energy_balances[0] =
+            crate::contracts::ThermalEnergyBalance::from_powers(1.0, 0.0, 0.0, 0.0);
         excessive.energy_balances[0].validate().unwrap();
         assert!(excessive.validate_complete().is_err());
         let mut changed_energy = result.clone();
-        changed_energy.energy_balances[0] = crate::contracts::ThermalEnergyBalance {
-            storage_rate_w: 1.0,
-            boundary_loss_w: 0.0,
-            applied_power_w: 1.0,
-            prescribed_boundary_power_w: 0.0,
-            residual_w: 0.0,
-            relative_residual: 0.0,
-        };
+        changed_energy.energy_balances[0] =
+            crate::contracts::ThermalEnergyBalance::from_powers(1.0, 0.0, 1.0, 0.0);
         assert_ne!(
             changed_energy.source_result_identity().unwrap(),
             result.source_result_identity().unwrap()

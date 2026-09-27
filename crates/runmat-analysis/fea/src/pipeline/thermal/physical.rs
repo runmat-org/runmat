@@ -118,15 +118,17 @@ pub(super) fn run(
         Some(5),
     );
     let outcome = match options.procedure {
-        ThermalProcedureControl::Steady => solve_steady(
-            &initial_assembly,
-            &initial.temperature_k,
+        ThermalProcedureControl::Steady => solve_steady(SteadySolveInput {
+            assembly: &initial_assembly,
+            model: &active_model,
+            sample: initial_sample,
+            initial_temperature_k: &initial.temperature_k,
             time_origin_s,
             requested_solver_backend,
-            algebra.as_ref(),
+            algebra: algebra.as_ref(),
             facts,
-            options.residual_target,
-        )?,
+            residual_target: options.residual_target,
+        })?,
         ThermalProcedureControl::BackwardEuler { .. } => solve_transient(TransientSolveInput {
             properties: &facts.properties,
             model: &active_model,
@@ -263,30 +265,70 @@ struct ProcedureOutcome {
     accelerator_evidence: Vec<crate::solve::accelerator::AcceleratorSolveEvidence>,
 }
 
-fn solve_steady(
-    assembly: &crate::physics::thermal::assembly::ThermalOperatorAssembly,
-    initial_temperature_k: &[f64],
+struct SteadySolveInput<'a> {
+    assembly: &'a crate::physics::thermal::assembly::ThermalOperatorAssembly,
+    model: &'a AnalysisModel,
+    sample: ExcitationSamplePoint<'a>,
+    initial_temperature_k: &'a [f64],
     time_origin_s: f64,
     requested_solver_backend: LinearAlgebraBackendKind,
-    algebra: &dyn LinearAlgebraBackend,
-    facts: &crate::planning::resource::ThermalPreassemblyResourceFacts,
+    algebra: &'a dyn LinearAlgebraBackend,
+    facts: &'a crate::planning::resource::ThermalPreassemblyResourceFacts,
     residual_target: f64,
-) -> Result<ProcedureOutcome, FeaRunError> {
-    let operator = assembly
-        .steady_operator()
+}
+
+fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunError> {
+    let SteadySolveInput {
+        assembly,
+        model,
+        sample,
+        initial_temperature_k,
+        time_origin_s,
+        requested_solver_backend,
+        algebra,
+        facts,
+        residual_target,
+    } = input;
+    let reference_temperature_k = assembly
+        .steady_reference_temperatures(model, sample, initial_temperature_k[0])
         .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    let operator = assembly
+        .steady_increment_operator(model, sample, &reference_temperature_k)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
+    // A homogeneous anchored increment system has the exact zero solution. Starting it at
+    // zero avoids introducing a spurious heat flow by iterating an unrelated warm guess.
+    // This chooses the solver's initial state, never rewrites a computed solution.
+    let initial_increment = (!operator.load().iter().all(|&value| value == 0.0)).then(|| {
+        initial_temperature_k
+            .iter()
+            .zip(&reference_temperature_k)
+            .map(|(value, reference)| value - reference)
+            .collect::<Vec<_>>()
+    });
     let rhs_norm = rhs_norm(operator.load());
     let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
         algebra,
-        Some(initial_temperature_k),
+        initial_increment.as_deref(),
         &facts.operators,
         residual_target,
     )?;
+    for ((temperature, prescribed), reference) in solve
+        .solution
+        .iter_mut()
+        .zip(&assembly.prescribed_temperature_k)
+        .zip(&reference_temperature_k)
+    {
+        // Prescribed coordinates are known exactly; avoid losing them in a shift/unshift
+        // round trip when their magnitude differs greatly from the reference.
+        *temperature = prescribed.unwrap_or(*temperature + reference);
+    }
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, &mut recovered)?;
-    let energy_balance = assembly.energy_balance(&solve.solution, &solve.solution, 1.0);
+    let energy_balance = assembly
+        .energy_balance(model, sample, &solve.solution, &solve.solution, 1.0)
+        .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let mut accelerator_evidence = Vec::new();
     backend_evidence::retain(
         &mut accelerator_evidence,
@@ -394,7 +436,11 @@ fn solve_transient(input: TransientSolveInput<'_>) -> Result<ProcedureOutcome, F
             &input.facts.metadata.backend_evidence,
         )?;
         residual_norms.push(solve.residual_norm / rhs_norm);
-        energy_balances.push(assembly.energy_balance(&previous, &solve.solution, time_step_s));
+        energy_balances.push(
+            assembly
+                .energy_balance(input.model, sample, &previous, &solve.solution, time_step_s)
+                .map_err(|error| FeaRunError::Assembly(error.to_string()))?,
+        );
         push_recovered_snapshot(
             &assembly,
             &solve.solution,

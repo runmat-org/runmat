@@ -9,7 +9,7 @@ use super::FeaRunResult;
 
 mod energy;
 mod initial_evidence;
-pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError};
+pub use energy::{ThermalEnergyBalance, ThermalEnergyBalanceError, ThermalPowerScale};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]

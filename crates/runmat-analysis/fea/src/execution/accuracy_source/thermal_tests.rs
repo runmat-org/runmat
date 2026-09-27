@@ -13,6 +13,13 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 fn receipt(order: ElementOrder) -> ThermalNumericalReceiptArtifact {
+    receipt_with_energy(order, None)
+}
+
+fn receipt_with_energy(
+    order: ElementOrder,
+    energy: Option<crate::contracts::ThermalEnergyBalance>,
+) -> ThermalNumericalReceiptArtifact {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.thermal = Some(ThermalDomain {
         reference_temperature: Temperature::new(293.15),
@@ -35,7 +42,54 @@ fn receipt(order: ElementOrder) -> ThermalNumericalReceiptArtifact {
     // Controlled accepted-residual fixture exercises policy thresholds; this injected value is
     // not presented as independently measured numerical accuracy of the equilibrium solution.
     result.residual_norms[0] = 5e-6;
+    if let Some(energy) = energy {
+        // Controlled accounting evidence, not a claim about the fixture's actual heating.
+        result.energy_balances.fill(energy);
+    }
     ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap()
+}
+
+#[test]
+fn conservation_accuracy_does_not_improve_when_power_units_shrink() {
+    for exponent in [-100, -40, 0, 40, 100] {
+        let power = 2.0_f64.powi(exponent);
+        let fraction = 2.0_f64.powi(-20);
+        let balance = crate::contracts::ThermalEnergyBalance::from_powers(
+            power,
+            0.0,
+            power * (1.0 - fraction),
+            0.0,
+        );
+        let receipt = receipt_with_energy(ElementOrder::Tet4, Some(balance));
+        let source = AccuracySourceReceipt::from_canonical_bytes(
+            AccuracySourceKind::Thermal,
+            &receipt.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        let request = request(
+            &receipt,
+            vec![criterion(
+                "conservation",
+                RequiredAccuracyEvidence::ConservationBalance,
+                fraction / 2.0,
+            )],
+        );
+        let evidence = source.evidence(&request).unwrap();
+        assert_eq!(evidence.len(), 1);
+        assert_eq!(evidence[0].measured, AccuracyMeasure::Relative(fraction));
+        let evaluated = evaluate_accuracy(&request.plan, &evidence).unwrap();
+        assert_eq!(evaluated.report().status, AccuracyStatus::NotSatisfied);
+        assert_eq!(
+            publication_gate(
+                &request.plan,
+                FormulationRequirement::Production,
+                &evaluated
+            )
+            .unwrap()
+            .decision,
+            PublicationDecision::Block
+        );
+    }
 }
 
 fn criterion(id: &str, evidence: RequiredAccuracyEvidence, tolerance: f64) -> AccuracyCriterion {

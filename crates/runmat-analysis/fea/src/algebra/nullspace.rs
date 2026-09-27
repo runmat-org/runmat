@@ -23,6 +23,8 @@ mod solid_components;
 mod structural_frame;
 mod thermal;
 
+pub(crate) use components::connected_components;
+
 const EVIDENCE_PREFIX: &[u8] = b"runmat-fea-nullspace-evidence/v1\0";
 const EVIDENCE_DOMAIN: &str = "fea-nullspace-evidence";
 const BINDING_DOMAIN: &str = "fea-prepared-nullspace-binding";

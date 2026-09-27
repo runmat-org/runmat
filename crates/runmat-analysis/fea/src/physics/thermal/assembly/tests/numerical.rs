@@ -91,7 +91,14 @@ fn uniform_heat_generation_is_conserved_and_uniform_temperature_is_preserved() {
     assert!(heated.converged);
     assert!(
         assembly
-            .energy_balance(&heated_initial, &heated.solution, 0.1)
+            .energy_balance(
+                &model,
+                ExcitationSamplePoint::Static,
+                &heated_initial,
+                &heated.solution,
+                0.1
+            )
+            .unwrap()
             .relative_residual
             <= 1.0e-10
     );
@@ -182,7 +189,14 @@ fn exact_face_flux_and_convection_preserve_integrated_power_and_ambient_state() 
         .all(|temperature| (temperature - 305.0).abs() <= 1.0e-9));
     assert!(
         convection
-            .energy_balance(&initial, &solved.solution, 0.25)
+            .energy_balance(
+                &model,
+                ExcitationSamplePoint::Static,
+                &initial,
+                &solved.solution,
+                0.25
+            )
+            .unwrap()
             .relative_residual
             <= 1.0e-10
     );
@@ -229,7 +243,14 @@ fn prescribed_face_temperature_is_enforced_exactly() {
     }
     assert!(
         assembly
-            .energy_balance(&initial, &solved.solution, 0.25)
+            .energy_balance(
+                &model,
+                ExcitationSamplePoint::Static,
+                &initial,
+                &solved.solution,
+                0.25
+            )
+            .unwrap()
             .relative_residual
             <= 1.0e-10
     );
@@ -347,7 +368,13 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
         + convection_diagonal * (2.0 * ambient_temperature_k - 350.0))
         / (conductivity_term + convection_diagonal);
     let solve = solve_operator_system(
-        &assembly.steady_operator().unwrap(),
+        &assembly
+            .steady_increment_operator(
+                &model,
+                ExcitationSamplePoint::Static,
+                &vec![350.0; assembly.projection.nodes.len()],
+            )
+            .unwrap(),
         SpdPreconditionerKind::Jacobi,
         LinearAlgebraBackendKind::CpuReference,
         &CpuReferenceBackend,
@@ -355,5 +382,5 @@ fn steady_convection_matches_the_closed_form_single_free_node_balance() {
     );
 
     assert!(solve.converged);
-    assert!((solve.solution[free_node] - expected).abs() <= 1.0e-10);
+    assert!((350.0 + solve.solution[free_node] - expected).abs() <= 1.0e-10);
 }

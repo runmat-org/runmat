@@ -37,6 +37,25 @@ fn receipts_bind_workload_manifest_and_accepted_thermal_evidence() {
         let receipt = ThermalNumericalReceiptArtifact::new(&workload, &result).unwrap();
         let header_receipt =
             ThermalNumericalReceiptArtifact::from_manifest(&workload, &manifest).unwrap();
+        // A completely unbalanced source cannot become acceptable merely by changing
+        // its power scale. Exercise both full-result and persisted-manifest admission.
+        for power_w in [1.0e-12, 1.0e-9, 1.0, 1.0e9] {
+            let balance =
+                crate::contracts::ThermalEnergyBalance::from_powers(0.0, 0.0, power_w, 0.0);
+            balance.validate().unwrap();
+            let mut unbalanced = result.clone();
+            unbalanced.energy_balances[0] = balance;
+            assert!(
+                ThermalNumericalReceiptArtifact::new(&workload, &unbalanced).is_err(),
+                "accepted a fully unbalanced {power_w:e} W result"
+            );
+            let mut unbalanced = manifest.clone();
+            unbalanced.energy_balances[0] = balance;
+            assert!(
+                ThermalNumericalReceiptArtifact::from_manifest(&workload, &unbalanced).is_err(),
+                "accepted a fully unbalanced {power_w:e} W manifest"
+            );
+        }
         assert_eq!(header_receipt, receipt);
         assert_eq!(
             header_receipt.canonical_bytes().unwrap(),

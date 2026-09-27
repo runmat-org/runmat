@@ -1,7 +1,27 @@
 use super::*;
 
 #[test]
-fn signed_power_balance_checks_arithmetic_and_one_watt_normalization() {
+fn relative_conservation_is_invariant_under_power_scaling() {
+    // Powers of two avoid introducing decimal scaling roundoff into this contract test.
+    // The independently calculated imbalance is 1/8 of the largest power term.
+    for exponent in [-900, -100, -40, 0, 40, 100, 900] {
+        let scale = 2.0_f64.powi(exponent);
+        let balance =
+            ThermalEnergyBalance::from_powers(4.0 * scale, 3.0 * scale, 8.0 * scale, 2.0 * scale);
+        balance.validate().unwrap();
+        assert_eq!(balance.relative_residual, 0.125, "power scale {scale:e}");
+        for sign in [-1.0, 1.0] {
+            let unbalanced = ThermalEnergyBalance::from_powers(0.0, 0.0, sign * scale, 0.0);
+            assert_eq!(unbalanced.relative_residual, 1.0, "unbalanced {scale:e} W");
+        }
+    }
+    let zero = ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0);
+    zero.validate().unwrap();
+    assert_eq!(zero.relative_residual, 0.0);
+}
+
+#[test]
+fn signed_power_balance_checks_arithmetic_and_relative_normalization() {
     let balanced = ThermalEnergyBalance::from_powers(4.0, 3.0, 9.0, 2.0);
     assert_eq!(balanced.residual_w, 0.0);
     assert_eq!(balanced.relative_residual, 0.0);
@@ -11,7 +31,7 @@ fn signed_power_balance_checks_arithmetic_and_one_watt_normalization() {
     assert_eq!(unbalanced.relative_residual, 0.125);
     unbalanced.validate().unwrap(); // arithmetic consistency is distinct from acceptance
     let small = ThermalEnergyBalance::from_powers(0.25, 0.0, 0.0, 0.0);
-    assert_eq!(small.relative_residual, 0.25);
+    assert_eq!(small.relative_residual, 1.0);
     small.validate().unwrap();
     let mut forged = balanced;
     forged.applied_power_w += 1.0;
@@ -47,4 +67,58 @@ fn energy_balance_rejects_nonfinite_and_overflow_without_rewriting_evidence() {
     let decoded: ThermalEnergyBalance = serde_json::from_slice(&encoded).unwrap();
     assert_eq!(balance, decoded);
     decoded.validate().unwrap();
+}
+
+#[test]
+fn persisted_balance_rejects_a_dimensional_floor_disguised_as_relative_evidence() {
+    let balance = ThermalEnergyBalance::from_powers(0.0, 0.0, 2.0_f64.powi(-40), 0.0);
+    let mut encoded = serde_json::to_value(balance).unwrap();
+    encoded["relative_residual"] = serde_json::json!(balance.residual_w.abs());
+    let forged: ThermalEnergyBalance = serde_json::from_value(encoded).unwrap();
+    assert_eq!(
+        forged.validate(),
+        Err(ThermalEnergyBalanceError::Inconsistent)
+    );
+    // Validation must not silently normalize persisted numerical claims into new evidence.
+    assert_eq!(forged.relative_residual, balance.residual_w.abs());
+    assert_eq!(balance.relative_residual, 1.0);
+}
+
+#[test]
+fn opposing_physical_transfers_retain_a_scale_before_signed_cancellation() {
+    // Unit-conductance three-node bar, fixed 300/400 K, center 350+epsilon K:
+    // outward prescribed reactions are +(50+epsilon) and -(50-epsilon) W.
+    let epsilon = 2.0_f64.powi(-20);
+    for exponent in [-100, 0, 100] {
+        let factor = 2.0_f64.powi(exponent);
+        let balance = ThermalEnergyBalance::from_power_transfers(
+            0.0,
+            0.0,
+            0.0,
+            2.0 * epsilon * factor,
+            ThermalPowerScale {
+                storage_w: 0.0,
+                boundary_w: 0.0,
+                applied_w: 0.0,
+                prescribed_w: 100.0 * factor,
+            },
+        );
+        balance.validate().unwrap();
+        assert_eq!(balance.relative_residual, 2.0 * epsilon / 100.0);
+        let decoded: ThermalEnergyBalance =
+            serde_json::from_slice(&serde_json::to_vec(&balance).unwrap()).unwrap();
+        decoded.validate().unwrap();
+        assert_eq!(decoded, balance);
+        let mut forged = balance;
+        forged.scale.prescribed_w *= 2.0;
+        assert_eq!(
+            forged.validate(),
+            Err(ThermalEnergyBalanceError::Inconsistent)
+        );
+        for scale in [-1.0, 0.0, f64::NAN, f64::INFINITY] {
+            let mut invalid = balance;
+            invalid.scale.prescribed_w = scale;
+            assert!(invalid.validate().is_err());
+        }
+    }
 }

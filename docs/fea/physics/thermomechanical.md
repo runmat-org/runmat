@@ -402,11 +402,33 @@ Per-solve global energy balances and the residual target are mandatory retained 
 including in the partition manifest. Steady runs retain one balance; transient runs retain one per
 advance, not for the initial-only sample. Validation recomputes the signed power residual
 `storage + boundary_loss - applied_power + prescribed_boundary_power` and its normalization by
-the largest absolute power term with a one-watt floor. All terms must be finite, the recorded
+the largest retained physical transfer scale, without a dimensional floor. Scales retain nodal
+L1 sums of storage, applied heat and prescribed reactions, and the integral of absolute net Robin
+transfer, before global signed cancellation. Exactly zero transfers have zero relative residual;
+uniformly scaling all powers does not improve acceptance. All terms must be finite, each scale
+must bound its signed power, the recorded
 arithmetic must agree, and both linear and normalized energy residuals must meet the target.
 Receipts bind the target to the authored workload and retain both maximum residuals. Diagnostic
 severity/text is no longer acceptance authority. These checks do not independently establish
 engineering accuracy or verify power terms against unread field histories.
+The physical balance separates applied generation/flux from the algebraic Robin ambient forcing:
+boundary loss is the net outward convection integral `h * (T - T_ambient)`, not the sum of the
+conductivity matrix applied to absolute temperature. Internal conduction redistributes heat;
+it is not external boundary power. Prescribed-temperature reaction power includes conductive
+exchange across prescribed/free-node pairs, storage, applied heat and convection. Temperature
+differences are evaluated before gradient products so uniform fields do not create fictitious
+conductive power. These reaction terms are equation-based accounting, not an independent
+verification of a fully prescribed thermal solution. A tiny load unresolved by the numerical
+temperature solution must still fail conservation; absolute-temperature energy is not a substitute
+normalization scale. Opposing prescribed heat flows retain their individual nodal-reaction scale
+even when the net reaction vanishes. Quadratic-element signed source weights can make their nodal
+L1 scale larger than the integrated applied power; this is explicit normalization, not an absolute
+tolerance. Scales are required persisted metadata and participate in result identity; old claims
+without these terms are not silently upgraded.
+Steady solves use a constant temperature reference per connected body, selected from its prescribed
+temperature or ambient boundary when available. The increment equation forms Robin differences
+before multiplication and retains the original nullspace/anchor checks. Reconstruction restores
+authoritative prescribed temperatures exactly; free-node increments are not clamped or overwritten.
 Thermal solver stopping uses the tighter of the shared default and authored acceptance target;
 the latter cannot relax the established numerical stopping policy. The shared PCG path propagates
 this tolerance through its CPU and accelerator request/final-residual checks. No new successful

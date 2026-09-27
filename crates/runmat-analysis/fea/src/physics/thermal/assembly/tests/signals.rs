@@ -163,3 +163,68 @@ fn time_signals_drive_prescribed_temperature_flux_and_ambient_temperature() {
     assert!((hot_ambient_power / cold_ambient_power - 340.0 / 280.0).abs() <= 1.0e-12);
     assert_eq!(cold.conductivity, hot.conductivity);
 }
+
+#[test]
+fn energy_recovery_uses_the_same_robin_signal_side_as_assembly() {
+    use runmat_analysis_core::{SignalPointContinuity, SignalSampleApproach};
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    let mesh =
+        runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet10);
+    let projection = AnalysisProjection::derive(&mesh).unwrap();
+    let face = &projection.boundary_faces[0];
+    let selector = face.provenance[0].analysis_selection_id().unwrap();
+    let ordinate = |value| SignalOrdinate::Real(SignalValue::Scalar(Temperature::new(value)));
+    let mut signal = temperature_signal("jump_ambient", [280.0, 340.0]);
+    let PhysicalSignal::Temperature(temperature) = &mut signal else {
+        unreachable!()
+    };
+    let SignalRepresentation::Tabulated(table) = &mut temperature.representation else {
+        unreachable!()
+    };
+    table.knots.insert(
+        1,
+        SignalKnot::jump(
+            0.5,
+            ordinate(280.0),
+            ordinate(340.0),
+            SignalPointContinuity::Right,
+        ),
+    );
+    temperature.evidence.sample_count = 3;
+    model.signals.push(signal);
+    model.boundaries = vec![AnalysisBoundary {
+        boundary_id: "jump_convection".into(),
+        target: RegionTarget::boundary(selector),
+        operator: BoundaryOperator::ThermalConvection {
+            ambient_temperature: PrescribedValue::Signal(SignalId("jump_ambient".into())),
+            coefficient: HeatTransferCoefficient::new(5.0),
+        },
+    }];
+    for (approach, ambient) in [
+        (SignalSampleApproach::LeftLimit, 280.0),
+        (SignalSampleApproach::At, 340.0),
+        (SignalSampleApproach::RightLimit, 340.0),
+    ] {
+        let sample = ExcitationSamplePoint::TimeSeconds {
+            value: 0.5,
+            approach,
+        };
+        let assembly = assemble(
+            &model,
+            &mesh,
+            crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
+                .unwrap()
+                .support(),
+            &RealizedExcitations::default(),
+            sample,
+        )
+        .unwrap();
+        let equilibrium = vec![ambient; projection.nodes.len()];
+        let energy = assembly
+            .energy_balance(&model, sample, &equilibrium, &equilibrium, 1.0)
+            .unwrap();
+        assert_eq!(energy.boundary_loss_w, 0.0, "{approach:?}");
+        assert_eq!(energy.applied_power_w, 0.0);
+        assert_eq!(energy.relative_residual, 0.0);
+    }
+}

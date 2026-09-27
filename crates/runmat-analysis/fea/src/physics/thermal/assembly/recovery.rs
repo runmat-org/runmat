@@ -1,6 +1,4 @@
-use super::{apply_matrix, ThermalAssemblyError, ThermalOperatorAssembly};
-
-use crate::contracts::ThermalEnergyBalance;
+use super::{ThermalAssemblyError, ThermalOperatorAssembly};
 
 impl ThermalOperatorAssembly {
     pub(crate) fn recover_element_temperature_gradients(
@@ -13,6 +11,9 @@ impl ThermalOperatorAssembly {
             .map(|element| {
                 let mut integrated = [0.0; 3];
                 let mut volume = 0.0;
+                // Partition of unity makes the reference temperature immaterial analytically.
+                // Subtract before multiplication so a constant field has exactly zero gradient.
+                let reference = temperature_k[element.node_indices[0]];
                 self.projection
                     .visit_element_quadrature(element, |point| {
                         for (&node, gradient) in element
@@ -21,8 +22,9 @@ impl ThermalOperatorAssembly {
                             .zip(point.physical_shape_gradients())
                         {
                             for axis in 0..3 {
-                                integrated[axis] +=
-                                    temperature_k[node] * gradient[axis] * point.volume_weight_m3;
+                                integrated[axis] += (temperature_k[node] - reference)
+                                    * gradient[axis]
+                                    * point.volume_weight_m3;
                             }
                         }
                         volume += point.volume_weight_m3;
@@ -79,36 +81,5 @@ impl ThermalOperatorAssembly {
                 Ok(integrated_rate / volume)
             })
             .collect()
-    }
-
-    pub(crate) fn energy_balance(
-        &self,
-        previous_temperature_k: &[f64],
-        temperature_k: &[f64],
-        time_step_s: f64,
-    ) -> ThermalEnergyBalance {
-        let rate = previous_temperature_k
-            .iter()
-            .zip(temperature_k)
-            .map(|(previous, current)| (current - previous) / time_step_s)
-            .collect::<Vec<_>>();
-        let storage_rate = apply_matrix(&self.capacity, &rate);
-        let conduction = apply_matrix(&self.conductivity, temperature_k);
-        let storage_rate_w = storage_rate.iter().sum::<f64>();
-        let boundary_loss_w = conduction.iter().sum::<f64>();
-        let applied_power_w = self.source.iter().sum::<f64>();
-        let prescribed_boundary_power_w = self
-            .prescribed_temperature_k
-            .iter()
-            .enumerate()
-            .filter(|(_, value)| value.is_some())
-            .map(|(node, _)| -(storage_rate[node] + conduction[node] - self.source[node]))
-            .sum::<f64>();
-        ThermalEnergyBalance::from_powers(
-            storage_rate_w,
-            boundary_loss_w,
-            applied_power_w,
-            prescribed_boundary_power_w,
-        )
     }
 }

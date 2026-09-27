@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use super::NullspaceEvidenceError;
 
-pub(super) fn connected_components(
+pub(crate) fn connected_components(
     neighbors: &[Vec<usize>],
 ) -> Result<Vec<Vec<usize>>, NullspaceEvidenceError> {
     if neighbors

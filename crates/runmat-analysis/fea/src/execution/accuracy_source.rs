@@ -116,7 +116,7 @@ impl AccuracySourceReceipt {
                 {
                     Some((
                         receipt.receipt().maximum_relative_energy_residual,
-                        "maximum accepted absolute thermal energy imbalance divided by max(absolute storage, boundary-loss, applied, prescribed-boundary powers, 1 W) over solved samples; includes prescribed-temperature reaction power and is not a field-accuracy or convergence estimate",
+                        "maximum accepted absolute thermal energy imbalance divided by the largest retained absolute physical storage, boundary-transfer, applied or nodal prescribed-reaction sum before global signed cancellation; exactly zero transfers have zero residual, with no dimensional or absolute-temperature floor; this is equation-based conservation evidence, not a field-accuracy or convergence estimate",
                     ))
                 }
                 Self::StructuralLinear(receipt)

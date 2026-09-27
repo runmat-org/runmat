@@ -50,14 +50,7 @@ pub(super) fn diagnostics(
     let final_energy = energy_balances
         .last()
         .copied()
-        .unwrap_or(ThermalEnergyBalance {
-            storage_rate_w: 0.0,
-            boundary_loss_w: 0.0,
-            applied_power_w: 0.0,
-            prescribed_boundary_power_w: 0.0,
-            residual_w: 0.0,
-            relative_residual: 0.0,
-        });
+        .unwrap_or(ThermalEnergyBalance::from_powers(0.0, 0.0, 0.0, 0.0));
     let constitutive = assembly.constitutive_stats;
     let thermal = [
         ThermalDiagnosticMessage::Initial {

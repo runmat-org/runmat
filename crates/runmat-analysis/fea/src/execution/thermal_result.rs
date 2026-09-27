@@ -215,9 +215,17 @@ impl ThermalResultMetadata<'_> {
                 .validate()
                 .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
             if balance.relative_residual > self.residual_target {
-                return Err(AnalysisExecutionError::Invalid(
-                    "thermal energy residual exceeds retained acceptance target".into(),
-                ));
+                return Err(AnalysisExecutionError::Invalid(format!(
+                    "thermal energy residual {} exceeds retained acceptance target {}; residual={} W, storage={} W, boundary loss={} W, applied={} W, prescribed={} W, physical scale={} W",
+                    balance.relative_residual,
+                    self.residual_target,
+                    balance.residual_w,
+                    balance.storage_rate_w,
+                    balance.boundary_loss_w,
+                    balance.applied_power_w,
+                    balance.prescribed_boundary_power_w,
+                    balance.scale.maximum(),
+                )));
             }
         }
         Ok(())

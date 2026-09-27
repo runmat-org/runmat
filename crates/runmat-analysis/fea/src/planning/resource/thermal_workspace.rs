@@ -12,6 +12,7 @@ pub struct ThermalWorkspaceResourceFacts {
     pub assembly_vector_bytes: ByteCount,
     pub recovery_scratch_bytes: ByteCount,
     pub excitation_scratch_bytes: ByteCount,
+    pub steady_reference_scratch_bytes: ByteCount,
     pub projection_estimated_bytes: ByteCount,
 }
 
@@ -32,22 +33,26 @@ impl ThermalWorkspaceResourceFacts {
     ) -> Result<Self, ResourcePlanningError> {
         // Jacobi-PCG: diagonal + x/r/z/p + ap + replacement z = 7N doubles.
         // Derived/prepared RHS = 2N; driver initial/previous/prior solution = 3N.
+        // Reserve another 2N for steady nodal references and the shifted initial guess.
         // Two system masks plus a possible accelerator prepared-mask clone = 3N bools.
         // Accelerator host iteration uses fewer vectors; device/provider storage is excluded.
         let solver_vector_bytes = add(
-            scale(nodes, 12 * 8)?,
+            scale(nodes, 14 * 8)?,
             scale(nodes, 3 * std::mem::size_of::<bool>() as u64)?,
         )?;
-        // Initial assembly remains live during step assembly: each has source, Robin weight,
+        // Initial assembly remains live during step assembly: each has algebraic and applied
+        // source vectors, Robin weight,
         // prescribed Option<f64>, conductivity and volumetric capacity. Construction also
         // retains specific-heat and density arrays for the new assembly (two extra E doubles).
         let assembly_vector_bytes = add(
-            scale(nodes, 4 * 8 + 2 * std::mem::size_of::<Option<f64>>() as u64)?,
+            scale(nodes, 6 * 8 + 2 * std::mem::size_of::<Option<f64>>() as u64)?,
             scale(elements, 6 * 8)?,
         )?;
         // Recovery can hold vector-valued gradients/flux and a flattened destination together.
-        // Energy-balance's 3N doubles fit inside the separately reserved solver vector envelope.
-        let recovery_scratch_bytes = ByteCount(scale(elements, 6 * 8)?);
+        // Energy-balance's rate/storage 2N doubles fit in the solver vector envelope.
+        // Reserve another N for nodal prescribed reactions and their physical gross scale;
+        // boundary/conductive recovery otherwise streams quadrature without retained descriptors.
+        let recovery_scratch_bytes = ByteCount(add(scale(elements, 6 * 8)?, scale(nodes, 8)?)?);
         // Scalar source evidence uses one visited-node mask, not an allocation-per-node tree.
         // Temperature-field conflict checking borrows identifiers from the realized inventory;
         // its regional values/owners and selected-node mask coexist with the output vector
@@ -57,11 +62,22 @@ impl ThermalWorkspaceResourceFacts {
             2 * std::mem::size_of::<bool>() as u64
                 + std::mem::size_of::<Option<(f64, &str)>>() as u64,
         )?);
+        // Shared component traversal: seen mask, queue and component node indices, plus
+        // at most N component Vec headers. Reference selection adds a node/component map
+        // and at most N optional component references; conservatively reserve all together.
+        let steady_reference_scratch_bytes = ByteCount(scale(
+            nodes,
+            std::mem::size_of::<bool>() as u64
+                + 3 * std::mem::size_of::<usize>() as u64
+                + std::mem::size_of::<Vec<usize>>() as u64
+                + std::mem::size_of::<Option<f64>>() as u64,
+        )?);
         Ok(Self {
             solver_vector_bytes: ByteCount(solver_vector_bytes),
             assembly_vector_bytes: ByteCount(assembly_vector_bytes),
             recovery_scratch_bytes,
             excitation_scratch_bytes,
+            steady_reference_scratch_bytes,
             projection_estimated_bytes: ByteCount(scale(projection.0, 2)?),
         })
     }
@@ -72,6 +88,7 @@ impl ThermalWorkspaceResourceFacts {
             self.assembly_vector_bytes,
             self.recovery_scratch_bytes,
             self.excitation_scratch_bytes,
+            self.steady_reference_scratch_bytes,
             self.projection_estimated_bytes,
         ]
         .into_iter()
@@ -98,17 +115,24 @@ mod tests {
     #[test]
     fn workspace_counts_live_arrays_and_checks_overflow() {
         let facts = ThermalWorkspaceResourceFacts::from_counts(10, 2, ByteCount(100)).unwrap();
-        assert_eq!(facts.solver_vector_bytes.0, 10 * (12 * 8 + 3));
+        assert_eq!(facts.solver_vector_bytes.0, 10 * (14 * 8 + 3));
         assert_eq!(
             facts.assembly_vector_bytes.0,
-            10 * (32 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48
+            10 * (48 + 2 * std::mem::size_of::<Option<f64>>() as u64) + 2 * 48
         );
-        assert_eq!(facts.recovery_scratch_bytes.0, 96);
+        assert_eq!(facts.recovery_scratch_bytes.0, 96 + 10 * 8);
         assert_eq!(
             facts.excitation_scratch_bytes.0,
             10 * (2 + std::mem::size_of::<Option<(f64, &str)>>() as u64)
         );
         assert_eq!(facts.projection_estimated_bytes.0, 200);
+        assert_eq!(
+            facts.steady_reference_scratch_bytes.0,
+            10 * (std::mem::size_of::<bool>() as u64
+                + 3 * std::mem::size_of::<usize>() as u64
+                + std::mem::size_of::<Vec<usize>>() as u64
+                + std::mem::size_of::<Option<f64>>() as u64)
+        );
         for (nodes, elements, projection) in [(u64::MAX, 1, 1), (1, u64::MAX, 1), (1, 1, u64::MAX)]
         {
             assert!(ThermalWorkspaceResourceFacts::from_counts(

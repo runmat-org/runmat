@@ -109,8 +109,15 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
             ExcitationSamplePoint::Static,
         )
         .expect("assemble two-material thermal system");
-        let operator = assembly.steady_operator().expect("steady operator");
-        let result = solve_operator_system(
+        let reference_temperature_k = 300.0;
+        let operator = assembly
+            .steady_increment_operator(
+                model,
+                ExcitationSamplePoint::Static,
+                &vec![reference_temperature_k; assembly.projection.nodes.len()],
+            )
+            .expect("steady increment operator");
+        let mut result = solve_operator_system(
             &operator,
             SpdPreconditionerKind::Jacobi,
             LinearAlgebraBackendKind::CpuReference,
@@ -118,6 +125,9 @@ fn two_material_slab_matches_series_resistance_and_authored_order_is_invariant()
             None,
         );
         assert!(result.converged, "two-material solve did not converge");
+        for value in &mut result.solution {
+            *value += reference_temperature_k;
+        }
         (assembly, result.solution)
     };
     let (assembly, solution) = solve(&model);

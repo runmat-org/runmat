@@ -13,6 +13,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::{ElementOrder, PersistentEntityId, PersistentEntityKind};
 
 use super::*;
+use crate::algebra::NullspaceEliminationEvidence;
 use crate::{
     excitation::{
         ComplexScalar, RealizedExcitation, RealizedExcitationKind, RealizedExcitationPolicy,
@@ -263,7 +264,13 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         ExcitationSamplePoint::Static,
     )
     .unwrap();
-    let anchored = assembly.steady_operator().unwrap();
+    let anchored = assembly
+        .steady_increment_operator(
+            &model,
+            ExcitationSamplePoint::Static,
+            &vec![300.0; mesh.topology.nodes.len()],
+        )
+        .unwrap();
     assert!(anchored.nullspace_evidence().is_some());
 
     let mut disconnected_projection = assembly.projection.clone();
@@ -286,8 +293,9 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         Err(crate::algebra::NullspaceEvidenceError::NullModeViolation)
     );
 
+    let unanchored_model = thermal_reference_model().0;
     let unanchored = assemble(
-        &thermal_reference_model().0,
+        &unanchored_model,
         &mesh,
         crate::planning::resource::ThermalOperatorResourceFacts::derive(&mesh)
             .unwrap()
@@ -296,7 +304,11 @@ fn steady_nullspace_proof_requires_an_anchor_in_every_component() {
         ExcitationSamplePoint::Static,
     )
     .unwrap()
-    .steady_operator()
+    .steady_increment_operator(
+        &unanchored_model,
+        ExcitationSamplePoint::Static,
+        &vec![300.0; mesh.topology.nodes.len()],
+    )
     .unwrap();
     assert!(unanchored.nullspace_evidence().is_none());
 }
@@ -363,7 +375,11 @@ fn positive_convection_anchors_a_steady_thermal_component() {
         ExcitationSamplePoint::Static,
     )
     .unwrap()
-    .steady_operator()
+    .steady_increment_operator(
+        &model,
+        ExcitationSamplePoint::Static,
+        &vec![295.0; mesh.topology.nodes.len()],
+    )
     .unwrap();
     let prepared = system.prepare_linear().unwrap();
     assert!(prepared.admissibility().is_some());
@@ -389,7 +405,11 @@ fn deserialization_discards_process_local_nullspace_proof() {
         ExcitationSamplePoint::Static,
     )
     .unwrap()
-    .steady_operator()
+    .steady_increment_operator(
+        &model,
+        ExcitationSamplePoint::Static,
+        &vec![300.0; mesh.topology.nodes.len()],
+    )
     .unwrap();
     let encoded = serde_json::to_value(system).unwrap();
     assert!(encoded.get("nullspace_evidence").is_none());
@@ -411,7 +431,11 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
         ExcitationSamplePoint::Static,
     )
     .unwrap()
-    .steady_operator()
+    .steady_increment_operator(
+        &model,
+        ExcitationSamplePoint::Static,
+        &vec![300.0; mesh.topology.nodes.len()],
+    )
     .unwrap();
     let mut encoded = serde_json::to_value(system).unwrap();
     encoded["nullspace_evidence"] = serde_json::json!({
@@ -420,6 +444,8 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
     assert!(serde_json::from_value::<AssembledRealSystem>(encoded).is_err());
 }
 
+mod energy_recovery;
 mod numerical;
 mod signals;
+mod steady;
 mod target_resolution;
