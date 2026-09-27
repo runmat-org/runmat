@@ -6,8 +6,7 @@ use runmat_value::{Value, ValueSequence};
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
-mod running_future;
-use running_future::RunningFuture;
+use runmat_runtime::execution::RunningFutureLease;
 
 pub(super) enum AwaitStart {
     Ready(Value),
@@ -29,7 +28,7 @@ pub(super) struct PendingAwait {
 enum AwaitWork {
     Poll(Value),
     Execute {
-        running: RunningFuture,
+        running: RunningFutureLease,
         call: Box<DeferredCall>,
     },
 }
@@ -61,7 +60,7 @@ pub(super) fn begin(
             })
         }
         AwaitAction::ExecuteFuture { handle, call } => {
-            let running = RunningFuture::new(state.runtime.clone(), handle);
+            let running = RunningFutureLease::new(state.runtime.clone(), handle);
             let (continuation, generation) = state.next_suspension_identity()?;
             state.pending_await = Some(PendingAwait {
                 continuation,
@@ -108,7 +107,7 @@ pub(super) async fn complete(
                     AwaitAction::Pending(value) => work = AwaitWork::Poll(value),
                     AwaitAction::ExecuteFuture { handle, call } => {
                         work = AwaitWork::Execute {
-                            running: RunningFuture::new(runtime.clone(), handle),
+                            running: RunningFutureLease::new(runtime.clone(), handle),
                             call,
                         };
                     }

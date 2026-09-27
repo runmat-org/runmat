@@ -1,17 +1,19 @@
+use crate::context::RuntimeContext;
+use crate::execution::ExecutionServiceError;
 use runmat_execution::{CancellationReason, FutureHandle};
-use runmat_runtime::context::RuntimeContext;
-use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::{Value, ValueSequence};
 
 /// Owns exactly the service handle transitioned to Running by begin_await.
 /// Cancellation/abandonment never drains unrelated futures or sibling scopes.
-pub(super) struct RunningFuture {
+#[must_use]
+pub struct RunningFutureLease {
     runtime: RuntimeContext,
     handle: FutureHandle,
     complete: bool,
 }
 
-impl RunningFuture {
+impl RunningFutureLease {
+    /// Take ownership only after this service returns `AwaitAction::ExecuteFuture`.
     pub fn new(runtime: RuntimeContext, handle: FutureHandle) -> Self {
         Self {
             runtime,
@@ -32,9 +34,10 @@ impl RunningFuture {
     }
 }
 
-impl Drop for RunningFuture {
+impl Drop for RunningFutureLease {
     fn drop(&mut self) {
         if !self.complete {
+            let _context = self.runtime.enter();
             let reason = self
                 .runtime
                 .cancellation()
@@ -54,7 +57,7 @@ impl Drop for RunningFuture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_runtime::execution::{
+    use crate::execution::{
         AwaitAction, DeferredCall, DeferredInvocation, RuntimeExecutionService,
         RuntimeExecutionServices,
     };
@@ -63,12 +66,12 @@ mod tests {
     fn deferred() -> DeferredCall {
         DeferredCall {
             invocation: DeferredInvocation::Callable(
-                runmat_runtime::call::descriptor::CallableDescriptor::resolved(
+                crate::call::descriptor::CallableDescriptor::resolved(
                     runmat_types::CallableIdentity::BoundFunction(runmat_types::FunctionId(1)),
                     vec![],
                     0,
                     runmat_types::CallableFallbackPolicy::None,
-                    runmat_runtime::call::descriptor::CallableCallKind::Direct,
+                    crate::call::descriptor::CallableCallKind::Direct,
                 ),
             ),
             retry: runmat_execution::RetryPolicy::Never,
@@ -88,7 +91,7 @@ mod tests {
             service.begin_await(Value::Future(owned.clone())).unwrap(),
             AwaitAction::ExecuteFuture { .. }
         ));
-        let running = RunningFuture::new(runtime.clone(), owned.clone());
+        let running = RunningFutureLease::new(runtime.clone(), owned.clone());
         drop(running);
         assert!(matches!(
             service.begin_await(Value::Future(owned)),
@@ -98,7 +101,7 @@ mod tests {
             service.begin_await(Value::Future(sibling.clone())).unwrap(),
             AwaitAction::ExecuteFuture { .. }
         ));
-        let mut sibling = RunningFuture::new(runtime, sibling);
+        let mut sibling = RunningFutureLease::new(runtime, sibling);
         sibling.complete(Ok(ValueSequence::empty())).unwrap();
         let handle = sibling.handle.clone();
         drop(sibling);
@@ -106,5 +109,27 @@ mod tests {
             service.begin_await(Value::Future(handle)).unwrap(),
             AwaitAction::Completed(_)
         ));
+    }
+
+    #[test]
+    fn completed_failure_is_not_replaced_with_cancellation_on_drop() {
+        let service = Rc::new(RuntimeExecutionService::new());
+        let runtime = RuntimeContext::new(service.clone());
+        let handle = service.create_future(deferred()).unwrap();
+        assert!(matches!(
+            service.begin_await(Value::Future(handle.clone())).unwrap(),
+            AwaitAction::ExecuteFuture { .. }
+        ));
+        let mut running = RunningFutureLease::new(runtime, handle.clone());
+        running
+            .complete(Err(ExecutionServiceError::Failed("body failure".into())))
+            .unwrap();
+        drop(running);
+        let Err(ExecutionServiceError::Failed(message)) =
+            service.begin_await(Value::Future(handle))
+        else {
+            panic!("completion must retain the language failure");
+        };
+        assert_eq!(message, "body failure");
     }
 }

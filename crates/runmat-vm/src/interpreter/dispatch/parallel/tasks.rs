@@ -276,6 +276,10 @@ async fn await_sequence(
                 value = pending;
             }
             AwaitAction::ExecuteFuture { handle, call } => {
+                let mut running = runmat_runtime::execution::RunningFutureLease::new(
+                    context.runtime.clone(),
+                    handle,
+                );
                 let result = match &call.invocation {
                     runmat_runtime::execution::DeferredInvocation::Callable(descriptor) => {
                         runmat_runtime::call::descriptor::execute_callable_descriptor(
@@ -292,11 +296,7 @@ async fn await_sequence(
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {
                     runmat_runtime::execution::ExecutionServiceError::Failed(error.to_string())
                 });
-                context
-                    .runtime
-                    .execution()
-                    .complete_future(&handle, stored)
-                    .map_err(execution_error)?;
+                running.complete(stored).map_err(execution_error)?;
                 return result;
             }
         }
