@@ -184,44 +184,52 @@ fn ceil_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn ceil_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
-    for ch in ca.data {
+    for ch in ca.to_column_major() {
         data.push(apply_ceil_scalar(ch as u32 as f64));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+    let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&CEIL_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
 async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &CEIL_ERROR_INTERNAL)?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         return Ok(gpu_helpers::resident_gpu_value(handle));
     }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
-    if !runmat_accelerate_api::handle_is_logical(&handle) {
-        if let Some(provider) = provider {
-            match provider.unary_ceil(&handle).await {
-                Ok(output) => {
-                    return super::unary::validate_provider_output(
-                        provider,
-                        &handle,
-                        output,
-                        BUILTIN_NAME,
-                        &CEIL_ERROR_INTERNAL,
-                    )
-                }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-                Err(error) => {
-                    return Err(builtin_error_with_detail(
-                        &CEIL_ERROR_INTERNAL,
-                        format!("provider unary_ceil failed: {error}"),
-                    ))
-                }
+    if !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        let result = {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            provider.unary_ceil(&handle).await
+        };
+        match result {
+            Ok(output) => {
+                return super::unary::validate_provider_output(
+                    provider,
+                    &handle,
+                    output,
+                    BUILTIN_NAME,
+                    &CEIL_ERROR_INTERNAL,
+                )
+            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) => {
+                return Err(builtin_error_with_detail(
+                    &CEIL_ERROR_INTERNAL,
+                    format!("provider unary_ceil failed: {error}"),
+                ))
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let ceiled = ceil_tensor(tensor)?;
-    super::unary::restore_tensor(provider, ceiled, BUILTIN_NAME, &CEIL_ERROR_INTERNAL)
+    let host = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
+    };
+    let ceiled = ceil_host_value(host)?;
+    gpu_helpers::restore_class_preserving_value(&handle, ceiled, BUILTIN_NAME)
 }
 
 fn apply_ceil_scalar(value: f64) -> f64 {

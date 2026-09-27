@@ -202,44 +202,52 @@ fn floor_complex_tensor(ct: ComplexTensor) -> BuiltinResult<Value> {
 
 fn floor_char_array(ca: CharArray) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
-    for ch in ca.data {
+    for ch in ca.to_column_major() {
         data.push(apply_floor_scalar(ch as u32 as f64));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+    let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&FLOOR_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
 
 async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+    let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &FLOOR_ERROR_INTERNAL)?;
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         return Ok(gpu_helpers::resident_gpu_value(handle));
     }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle);
-    if !runmat_accelerate_api::handle_is_logical(&handle) {
-        if let Some(provider) = provider {
-            match provider.unary_floor(&handle).await {
-                Ok(output) => {
-                    return super::unary::validate_provider_output(
-                        provider,
-                        &handle,
-                        output,
-                        BUILTIN_NAME,
-                        &FLOOR_ERROR_INTERNAL,
-                    )
-                }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
-                Err(error) => {
-                    return Err(builtin_error_with_detail(
-                        &FLOOR_ERROR_INTERNAL,
-                        format!("provider unary_floor failed: {error}"),
-                    ))
-                }
+    if !runmat_accelerate_api::handle_is_logical(&handle)
+        && runmat_accelerate_api::handle_storage(&handle)
+            == runmat_accelerate_api::GpuTensorStorage::Real
+    {
+        let result = {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            provider.unary_floor(&handle).await
+        };
+        match result {
+            Ok(output) => {
+                return super::unary::validate_provider_output(
+                    provider,
+                    &handle,
+                    output,
+                    BUILTIN_NAME,
+                    &FLOOR_ERROR_INTERNAL,
+                )
+            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) => {
+                return Err(builtin_error_with_detail(
+                    &FLOOR_ERROR_INTERNAL,
+                    format!("provider unary_floor failed: {error}"),
+                ))
             }
         }
     }
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let floored = floor_tensor(tensor)?;
-    super::unary::restore_tensor(provider, floored, BUILTIN_NAME, &FLOOR_ERROR_INTERNAL)
+    let host = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
+    };
+    let floored = floor_host_value(host)?;
+    gpu_helpers::restore_class_preserving_value(&handle, floored, BUILTIN_NAME)
 }
 
 fn apply_floor_scalar(value: f64) -> f64 {

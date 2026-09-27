@@ -140,28 +140,27 @@ fn has_exact_integer_storage(value: &Value) -> bool {
 }
 
 async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinResult<Value> {
+    let provider = super::unary::input_provider(&handle, BUILTIN_NAME, &ROUND_ERROR_INTERNAL)?;
     if matches!(strategy, RoundStrategy::Integer)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
         return Ok(Value::GpuTensor(handle));
     }
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        builtin_error_with_detail(
-            &ROUND_ERROR_INTERNAL,
-            "no acceleration provider owns the input handle",
-        )
-    })?;
     if !runmat_accelerate_api::handle_is_logical(&handle) {
-        let provider_result = match strategy.provider_digits() {
-            Some((digits, significant)) => {
-                provider.round_digits(&handle, digits, significant).await
+        let storage = runmat_accelerate_api::handle_storage(&handle);
+        let provider_result = {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            match strategy.provider_digits() {
+                Some((digits, significant)) => {
+                    provider.round_digits(&handle, digits, significant).await
+                }
+                None if runmat_accelerate_api::handle_storage(&handle)
+                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
+                {
+                    provider.round_digits(&handle, 0, false).await
+                }
+                None => provider.unary_round(&handle).await,
             }
-            None if runmat_accelerate_api::handle_storage(&handle)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
-            {
-                provider.round_digits(&handle, 0, false).await
-            }
-            None => provider.unary_round(&handle).await,
         };
         match provider_result {
             Ok(output) => {
@@ -169,7 +168,7 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
                     provider,
                     &handle,
                     output,
-                    runmat_accelerate_api::handle_storage(&handle),
+                    storage,
                     BUILTIN_NAME,
                     &ROUND_ERROR_INTERNAL,
                 )
@@ -183,7 +182,10 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
             }
         }
     }
-    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let host = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
+    };
     let rounded = round_host_value(host, strategy)?;
     gpu_helpers::restore_class_preserving_value(&handle, rounded, BUILTIN_NAME)
 }
@@ -260,10 +262,10 @@ fn round_complex_tensor(ct: ComplexTensor, strategy: RoundStrategy) -> BuiltinRe
 
 fn round_char_array(ca: CharArray, strategy: RoundStrategy) -> BuiltinResult<Value> {
     let mut data = Vec::with_capacity(ca.data.len());
-    for ch in ca.data {
+    for ch in ca.to_column_major() {
         data.push(round_scalar(ch as u32 as f64, strategy));
     }
-    let tensor = Tensor::new(data, vec![ca.rows, ca.cols])
+    let tensor = Tensor::new(data, ca.shape)
         .map_err(|e| builtin_error_with_detail(&ROUND_ERROR_INTERNAL, e))?;
     Ok(Value::Tensor(tensor))
 }
