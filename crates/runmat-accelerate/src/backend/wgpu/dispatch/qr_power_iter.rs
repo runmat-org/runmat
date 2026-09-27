@@ -1,14 +1,18 @@
 use super::common::submit;
+use super::observation::PendingSubmissions;
+use runmat_accelerate_api::WgpuEmission;
 
-pub fn run(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+pub(crate) fn run(
+    emission: &WgpuEmission<'_>,
+    pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
-) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-qr-power-encoder"),
-    });
+) -> anyhow::Result<()> {
+    let mut enc = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-qr-power-encoder"),
+        });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-qr-power-pass"),
@@ -18,5 +22,6 @@ pub fn run(
         pass.set_bind_group(0, bind_group, &[]);
         pass.dispatch_workgroups(1, 1, 1);
     }
-    submit(device, queue, enc);
+    submit(emission, pending, enc)?;
+    Ok(())
 }
