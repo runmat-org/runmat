@@ -457,7 +457,7 @@ async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult
     })?;
     // Reshape hooks may mutate provider registry metadata in place. Synthetic
     // trailing dimensions therefore use the exact owner-preserving host path.
-    if plan.ext_shape == handle.shape {
+    if plan.ext_shape == handle.shape() {
         let input_metadata = gpu_metadata_snapshot(&handle);
         match provider.circshift(&handle, &plan.provider) {
             Ok(out) => {
@@ -522,8 +522,8 @@ fn valid_ifftshift_gpu_output(
     input: &GpuTensorHandle,
     expected: super::common::GpuMetadataSnapshot,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && !same_gpu_handle(output, input)
         && gpu_metadata_snapshot(output) == expected
         && runmat_accelerate_api::provider_for_handle(output)

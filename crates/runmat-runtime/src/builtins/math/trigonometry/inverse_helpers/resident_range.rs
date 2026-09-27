@@ -84,7 +84,7 @@ pub(crate) async fn requires_complex(
     domain: RealDomain,
     builtin: &str,
 ) -> BuiltinResult<Option<bool>> {
-    if input.shape.contains(&0) {
+    if input.shape().contains(&0) {
         return Ok(None);
     }
     let owner = gpu_helpers::exact_provider_for_handle(input)

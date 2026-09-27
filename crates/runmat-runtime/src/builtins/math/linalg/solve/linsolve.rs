@@ -569,8 +569,8 @@ async fn try_gpu_linsolve(
     }
 
     let mut provider_opts: ProviderLinsolveOptions = options.into();
-    let lhs_rows = lhs_operand.handle().shape.first().copied().unwrap_or(1);
-    let lhs_cols = lhs_operand.handle().shape.get(1).copied().unwrap_or(1);
+    let lhs_rows = lhs_operand.handle().shape().first().copied().unwrap_or(1);
+    let lhs_cols = lhs_operand.handle().shape().get(1).copied().unwrap_or(1);
     let effective_rows = if options.transposed {
         lhs_cols
     } else {
@@ -613,11 +613,11 @@ async fn try_gpu_linsolve(
         let aliases_lhs = gpu_helpers::same_gpu_handle(&solution, lhs_operand.handle());
         let aliases_rhs = gpu_helpers::same_gpu_handle(&solution, rhs_operand.handle());
         let expected_rows = effective_cols;
-        let expected_cols = rhs_operand.handle().shape.get(1).copied().unwrap_or(1);
+        let expected_cols = rhs_operand.handle().shape().get(1).copied().unwrap_or(1);
         let valid = !aliases_lhs
             && !aliases_rhs
-            && solution.shape == vec![expected_rows, expected_cols]
-            && solution.device_id == provider.device_id()
+            && solution.shape() == vec![expected_rows, expected_cols]
+            && solution.device_id() == provider.device_id()
             && gpu_helpers::exact_provider_for_handle(&solution)
                 .is_some_and(|owner| std::ptr::eq(owner, provider))
             && runmat_accelerate_api::handle_storage(&solution)
@@ -915,7 +915,7 @@ fn prepare_gpu_operand(
 ) -> BuiltinResult<Option<PreparedOperand>> {
     match value {
         Value::GpuTensor(handle) => {
-            if handle.device_id != provider.device_id()
+            if handle.device_id() != provider.device_id()
                 || gpu_helpers::exact_provider_for_handle(handle)
                     .is_none_or(|owner| !std::ptr::eq(owner, provider))
                 || is_scalar_handle(handle)

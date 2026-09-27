@@ -329,10 +329,10 @@ async fn trapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let shape = if handle.shape.is_empty() {
+            let shape = if handle.shape().is_empty() {
                 vec![1, 1]
             } else {
-                handle.shape.clone()
+                handle.shape().to_vec()
             };
             let dim = parsed
                 .dim

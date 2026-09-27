@@ -551,7 +551,7 @@ fn valid_provider_lu_result(
     input: &GpuTensorHandle,
     owner: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    let rows = input.shape.first().copied().unwrap_or(1);
+    let rows = input.shape().first().copied().unwrap_or(1);
     let outputs = [
         &result.combined,
         &result.lower,
@@ -560,7 +560,7 @@ fn valid_provider_lu_result(
         &result.perm_vector,
     ];
     let expected = [
-        input.shape.clone(),
+        input.shape().to_vec(),
         vec![rows, rows],
         input.shape.clone(),
         vec![rows, rows],
@@ -568,7 +568,7 @@ fn valid_provider_lu_result(
     ];
     outputs.iter().zip(expected.iter()).all(|(output, shape)| {
         output.shape == *shape
-            && output.device_id == input.device_id
+            && output.device_id == input.device_id()
             && !gpu_helpers::same_gpu_handle(output, input)
             && runmat_accelerate_api::handle_storage(output)
                 == runmat_accelerate_api::GpuTensorStorage::Real

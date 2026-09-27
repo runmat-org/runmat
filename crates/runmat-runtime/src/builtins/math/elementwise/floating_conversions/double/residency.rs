@@ -31,7 +31,7 @@ pub(super) async fn convert_to_gpu(
             let same_owner = resolved_actual_double_owner(&handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider));
             if same_owner
-                && handle.device_id == prototype.device_id
+                && handle.device_id() == prototype.device_id()
                 && runmat_accelerate_api::handle_precision(&handle) == Some(ProviderPrecision::F64)
                 && runmat_accelerate_api::handle_integer_type(&handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(&handle)
@@ -128,8 +128,8 @@ pub(super) fn valid_double_like_output(
     } else {
         runmat_accelerate_api::GpuTensorStorage::Real
     };
-    output.shape == expected_shape
-        && output.device_id == prototype.device_id
+    output.shape() == expected_shape
+        && output.device_id() == prototype.device_id()
         && !gpu_handles_alias(output, prototype)
         && runmat_accelerate_api::handle_precision(output) == Some(ProviderPrecision::F64)
         && gpu_helpers::numeric_descriptor_matches(
@@ -146,11 +146,11 @@ pub(super) fn resolved_actual_double_owner(
     handle: &GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 pub(super) fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 #[cfg(test)]

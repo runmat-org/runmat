@@ -19,7 +19,7 @@ pub(super) fn value(
     match value {
         Value::ComplexTensor(tensor) => complex(operation, provider, input, tensor, provenance),
         Value::Complex(real, imag) => {
-            let tensor = ComplexTensor::new(vec![(real, imag)], input.shape.clone())
+            let tensor = ComplexTensor::new(vec![(real, imag)], input.shape().to_vec())
                 .map_err(|error| super::super::errors::internal(operation, error))?;
             complex(operation, provider, input, tensor, provenance)
         }
@@ -31,7 +31,7 @@ pub(super) fn value(
             contract::precision(input),
         ),
         Value::Num(value) => {
-            let tensor = Tensor::new(vec![value], input.shape.clone())
+            let tensor = Tensor::new(vec![value], input.shape().to_vec())
                 .map_err(|error| super::super::errors::internal(operation, error))?;
             real(
                 operation,

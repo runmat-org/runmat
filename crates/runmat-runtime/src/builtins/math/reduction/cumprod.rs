@@ -602,7 +602,7 @@ async fn cumprod_gpu(
                     "dimension must be >= 1",
                 ));
             }
-            if target > handle.shape.len() {
+            if target > handle.shape().len() {
                 return Ok(Value::GpuTensor(handle));
             }
         }
@@ -638,7 +638,7 @@ async fn cumprod_gpu(
                 "dimension must be >= 1",
             ));
         }
-        if target > handle.shape.len() {
+        if target > handle.shape().len() {
             return Ok(Value::GpuTensor(handle));
         }
     }
@@ -652,7 +652,7 @@ async fn cumprod_gpu(
     }
 
     let zero_based_dim = fallback_dim.saturating_sub(1);
-    if zero_based_dim < handle.shape.len() {
+    if zero_based_dim < handle.shape().len() {
         let provider_direction = match direction {
             CumprodDirection::Forward => ProviderScanDirection::Forward,
             CumprodDirection::Reverse => ProviderScanDirection::Reverse,

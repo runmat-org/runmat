@@ -502,7 +502,7 @@ async fn gradient_gpu_outputs(
     requires_host_gpu: bool,
 ) -> BuiltinResult<Vec<Value>> {
     let owner = runmat_accelerate_api::provider_for_handle(&handle)
-        .filter(|owner| owner.device_id() == handle.device_id);
+        .filter(|owner| owner.device_id() == handle.device_id());
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
@@ -578,7 +578,7 @@ async fn gradient_host_fallback(
 }
 
 fn gradient_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
@@ -600,8 +600,8 @@ fn valid_gradient_provider_result(
     } else {
         GpuTensorStorage::Real
     };
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && !gradient_handles_alias(output, input)
         && prior_outputs
             .iter()
@@ -613,7 +613,7 @@ fn valid_gradient_provider_result(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::provider_for_handle(output)
-            .filter(|owner| owner.device_id() == output.device_id)
+            .filter(|owner| owner.device_id() == output.device_id())
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
@@ -631,7 +631,7 @@ fn free_gradient_handle_if_fresh(
         return;
     }
     if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
     {
         let _ = owner.free(handle);
     }
@@ -641,12 +641,12 @@ fn free_gradient_outputs(outputs: &[Value], input: &GpuTensorHandle) {
     let mut freed = std::collections::BTreeSet::new();
     for handle in outputs.iter().filter_map(gradient_output_handle) {
         if gradient_handles_alias(handle, input)
-            || !freed.insert((handle.device_id, handle.buffer_id))
+            || !freed.insert((handle.device_id(), handle.buffer_id()))
         {
             continue;
         }
         if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-            .filter(|owner| owner.device_id() == handle.device_id)
+            .filter(|owner| owner.device_id() == handle.device_id())
         {
             let _ = owner.free(handle);
         }
@@ -671,7 +671,7 @@ fn restore_gradient_outputs_if_supported(
         ) {
             Ok(output) => {
                 let valid = gradient_output_handle(&output).is_some_and(|handle| {
-                    handle.device_id == prototype.device_id
+                    handle.device_id() == prototype.device_id()
                         && !gradient_handles_alias(handle, prototype)
                         && restored
                             .iter()

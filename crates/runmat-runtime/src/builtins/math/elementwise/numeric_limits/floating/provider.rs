@@ -13,7 +13,7 @@ pub(super) fn like(
     let precision = runmat_accelerate_api::handle_precision(prototype)
         .ok_or_else(|| super::super::errors::invalid_floating_prototype(builtin))?;
     let storage = prototype
-        .descriptor
+        .descriptor()
         .storage
         .ok_or_else(|| super::super::errors::invalid_floating_prototype(builtin))?;
     if !matches!(
@@ -86,12 +86,12 @@ fn validate(
     precision: ProviderPrecision,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let valid = output.shape == shape
-        && output.device_id == prototype.device_id
+    let valid = output.shape() == shape
+        && output.device_id() == prototype.device_id()
         && !gpu_helpers::same_gpu_handle(prototype, &output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && output.descriptor.storage == Some(storage)
+        && output.descriptor().storage == Some(storage)
         && runmat_accelerate_api::handle_precision(&output) == Some(precision)
         && gpu_helpers::gpu_class_metadata_matches(&output, Some(precision), None, false);
     if !valid {

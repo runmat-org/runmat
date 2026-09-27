@@ -212,7 +212,7 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                     ));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
-                    shape: floating_shape.clone().unwrap_or_else(|| a.shape.clone()),
+                    shape: floating_shape.clone().unwrap_or_else(|| a.shape().to_vec()),
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
                     precision: runmat_accelerate_api::handle_precision(&a),
                     integer: runmat_accelerate_api::handle_integer_type(&a),

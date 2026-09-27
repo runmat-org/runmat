@@ -33,7 +33,8 @@ where
         Value::GpuTensor(handle) => {
             gpu_helpers::exact_provider_for_handle(handle).is_some()
                 && gpu_helpers::expected_handle_numeric_element_type(handle).is_ok()
-                && handle.descriptor.storage == Some(runmat_accelerate_api::GpuTensorStorage::Real)
+                && handle.descriptor().storage
+                    == Some(runmat_accelerate_api::GpuTensorStorage::Real)
         }
         _ => false,
     };

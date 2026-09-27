@@ -22,7 +22,7 @@ pub(in super::super) fn try_direct(
     match provider.pow2_scale(significand, exponent) {
         Ok(output) => {
             let contract = gpu_helpers::BinaryGpuOutputContract {
-                shape: significand.shape.clone(),
+                shape: significand.shape().to_vec(),
                 storage: runmat_accelerate_api::handle_storage(significand),
                 precision: runmat_accelerate_api::handle_precision(significand),
                 integer: None,
@@ -46,6 +46,6 @@ fn shared_owner(
 ) -> Option<&'static dyn AccelProvider> {
     let left_owner = gpu_helpers::exact_provider_for_handle(left)?;
     let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
-    (std::ptr::eq(left_owner, right_owner) && left.device_id == right.device_id)
+    (std::ptr::eq(left_owner, right_owner) && left.device_id() == right.device_id())
         .then_some(left_owner)
 }

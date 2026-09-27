@@ -339,10 +339,10 @@ fn value_shape(value: &Value) -> Option<Vec<usize>> {
         } else {
             array.shape.clone()
         }),
-        Value::GpuTensor(handle) => Some(if handle.shape.is_empty() {
+        Value::GpuTensor(handle) => Some(if handle.shape().is_empty() {
             vec![1, 1]
         } else {
-            handle.shape.clone()
+            handle.shape().to_vec()
         }),
         _ => None,
     }
@@ -489,8 +489,8 @@ fn native_result_is_valid(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_shape: &[usize],
 ) -> bool {
-    result.device_id == input.device_id
-        && result.shape == expected_shape
+    result.device_id() == input.device_id()
+        && result.shape() == expected_shape
         && runmat_accelerate_api::handle_storage(result)
             == runmat_accelerate_api::handle_storage(input)
         && runmat_accelerate_api::handle_precision(result)
@@ -592,10 +592,10 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let owner_handle = first_resident_handle(&parsed);
     if let Value::GpuTensor(handle) = &parsed.y {
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-            let shape = if handle.shape.is_empty() {
+            let shape = if handle.shape().is_empty() {
                 vec![1, 1]
             } else {
-                handle.shape.clone()
+                handle.shape().to_vec()
             };
             let dim = parsed
                 .dim

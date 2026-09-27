@@ -412,7 +412,7 @@ async fn ifftn_gpu(
             return ifftn_gpu_fallback(handle, sizes, symmetric).await;
         }
         let mut current = handle.clone();
-        let mut logical_shape = current.shape.clone();
+        let mut logical_shape = current.shape().to_vec();
         if logical_shape.is_empty() {
             logical_shape.push(1);
         }
@@ -662,7 +662,7 @@ fn ifftn_input_rank(value: &Value) -> usize {
         Value::Tensor(tensor) => tensor.shape.len(),
         Value::ComplexTensor(tensor) => tensor.shape.len(),
         Value::LogicalArray(array) => array.shape.len(),
-        Value::GpuTensor(handle) => handle.shape.len(),
+        Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
     };
     rank.max(2)

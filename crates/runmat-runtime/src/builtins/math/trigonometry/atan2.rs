@@ -188,7 +188,7 @@ async fn atan2_gpu_pair(
                     ));
                 }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
-                    shape: y.shape.clone(),
+                    shape: y.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                     precision: runmat_accelerate_api::handle_precision(&y),
                     integer: None,

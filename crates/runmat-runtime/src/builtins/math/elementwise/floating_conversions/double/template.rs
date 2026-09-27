@@ -28,7 +28,7 @@ impl OutputTemplate {
                     .map_err(|detail| {
                         double_error_with_detail(&DOUBLE_ERROR_INVALID_INPUT, detail)
                     })?;
-                if handle.descriptor.storage.is_none() {
+                if handle.descriptor().storage.is_none() {
                     return Err(double_error_with_detail(
                         &DOUBLE_ERROR_INVALID_INPUT,
                         "GPU prototype requires explicit storage",

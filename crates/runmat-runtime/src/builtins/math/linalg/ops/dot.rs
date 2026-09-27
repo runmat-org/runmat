@@ -380,8 +380,8 @@ async fn try_provider_dot(
             != runmat_accelerate_api::GpuTensorStorage::Real
         || runmat_accelerate_api::handle_storage(rhs_handle)
             != runmat_accelerate_api::GpuTensorStorage::Real
-        || lhs_handle.shape != rhs_handle.shape
-        || lhs_handle.device_id != rhs_handle.device_id
+        || lhs_handle.shape() != rhs_handle.shape()
+        || lhs_handle.device_id() != rhs_handle.device_id()
     {
         return Ok(None);
     }
@@ -422,8 +422,8 @@ fn valid_provider_dot_output(
     if target_dim <= expected_shape.len() {
         expected_shape[target_dim - 1] = 1;
     }
-    output.shape == expected_shape
-        && output.device_id == lhs.device_id
+    output.shape() == expected_shape
+        && output.device_id() == lhs.device_id()
         && !gpu_handles_alias(output, lhs)
         && !gpu_handles_alias(output, rhs)
         && runmat_accelerate_api::handle_storage(output)
@@ -882,7 +882,7 @@ fn valid_dot_uploaded_output(
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
     output.shape == expected_shape
-        && output.device_id == anchor.device_id
+        && output.device_id() == anchor.device_id()
         && !gpu_handles_alias(output, anchor)
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::GpuTensorStorage::Real
@@ -896,14 +896,14 @@ fn resolved_actual_dot_owner(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 fn gpu_handles_alias(
     lhs: &runmat_accelerate_api::GpuTensorHandle,
     rhs: &runmat_accelerate_api::GpuTensorHandle,
 ) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn free_rejected_dot_handle(

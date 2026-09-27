@@ -371,7 +371,9 @@ async fn fft2_gpu(
         if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0).await {
             match provider.fft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
-                    if first.buffer_id != handle.buffer_id && first.buffer_id != second.buffer_id {
+                    if first.buffer_id() != handle.buffer_id()
+                        && first.buffer_id() != second.buffer_id()
+                    {
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
@@ -388,7 +390,7 @@ async fn fft2_gpu(
                                     source,
                                 )
                             });
-                    if first.buffer_id != handle.buffer_id {
+                    if first.buffer_id() != handle.buffer_id() {
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }

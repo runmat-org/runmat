@@ -21,7 +21,7 @@ pub(super) async fn pair(left: GpuTensorHandle, right: GpuTensorHandle) -> Built
         match provider.elem_hypot(&left, &right).await {
             Ok(handle) => {
                 let contract = gpu_helpers::BinaryGpuOutputContract {
-                    shape: left.shape.clone(),
+                    shape: left.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                     precision: runmat_accelerate_api::handle_precision(&left),
                     integer: None,

@@ -105,9 +105,9 @@ pub(super) fn input_provider(
         input,
         element,
         runmat_accelerate_api::handle_storage(input),
-    ) || (!input.shape.contains(&0)
+    ) || (!input.shape().contains(&0)
         && input
-            .shape
+            .shape()
             .iter()
             .try_fold(1usize, |count, extent| count.checked_mul(*extent))
             .is_none())

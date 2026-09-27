@@ -819,7 +819,8 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
-        if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape)
+        {
             return provider
                 .reduce_integer_prod_native(&handle)
                 .await
@@ -844,7 +845,7 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return Ok(Value::GpuTensor(current));
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape) {
         if let Ok(reduced) = provider.reduce_prod(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }

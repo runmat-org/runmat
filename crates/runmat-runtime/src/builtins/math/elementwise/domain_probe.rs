@@ -56,11 +56,11 @@ pub(super) async fn probe_gpu_lower_bound(
     {
         return Err(GpuDomainProbeError::MalformedInput);
     }
-    if handle.shape.contains(&0) {
+    if handle.shape().contains(&0) {
         return Ok(GpuLowerBoundResult::AtOrAbove);
     }
     if handle
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |count, extent| count.checked_mul(*extent))
         .is_none()
@@ -83,7 +83,7 @@ pub(super) async fn probe_gpu_lower_bound(
     if gpu_helpers::same_gpu_handle(&minimum, handle) {
         return Err(GpuDomainProbeError::AliasedReduction);
     }
-    if minimum.device_id != handle.device_id
+    if minimum.device_id() != handle.device_id()
         || gpu_helpers::exact_provider_for_handle(&minimum)
             .is_none_or(|owner| !std::ptr::eq(owner, provider))
         || runmat_accelerate_api::handle_storage(&minimum) != GpuTensorStorage::Real
@@ -93,7 +93,7 @@ pub(super) async fn probe_gpu_lower_bound(
         || runmat_accelerate_api::handle_is_logical(&minimum)
         || !gpu_helpers::numeric_descriptor_matches(&minimum, element, GpuTensorStorage::Real)
         || minimum
-            .shape
+            .shape()
             .iter()
             .try_fold(1usize, |count, extent| count.checked_mul(*extent))
             != Some(1)

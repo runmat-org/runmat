@@ -454,14 +454,14 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "ctranspose: complex integer input is not supported",
         ));
     }
-    let rank = handle.shape.len();
+    let rank = handle.shape().len();
     if rank == 0 {
         return Ok(Value::GpuTensor(handle));
     }
 
     let owner = runmat_accelerate_api::provider_for_handle(&handle);
     if let Some(provider) = owner {
-        let mut expected_shape = handle.shape.clone();
+        let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() >= 2 {
             expected_shape.swap(0, 1);
         }
@@ -626,8 +626,8 @@ fn native_ctranspose_output_matches(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     expected_shape: &[usize],
 ) -> bool {
-    output.shape == expected_shape
-        && output.device_id == input.device_id
+    output.shape() == expected_shape
+        && output.device_id() == input.device_id()
         && runmat_accelerate_api::handle_precision(output)
             == Some(
                 runmat_accelerate_api::handle_precision(input)
@@ -680,7 +680,7 @@ fn free_rejected_native_output(
 }
 
 fn same_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
 }
 
 fn ctranspose_order(rank: usize) -> Vec<usize> {

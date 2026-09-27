@@ -890,7 +890,7 @@ async fn std_gpu_reduce(
         return Some(handle.clone());
     }
 
-    if dims.len() == handle.shape.len() {
+    if dims.len() == handle.shape().len() {
         if is_scalar_shape(&handle.shape) {
             return Some(handle.clone());
         }
@@ -922,7 +922,7 @@ async fn reduce_std_dim_gpu(
     if dim == 0 {
         return None;
     }
-    if handle.shape.len() < dim {
+    if handle.shape().len() < dim {
         return Some(handle);
     }
     provider

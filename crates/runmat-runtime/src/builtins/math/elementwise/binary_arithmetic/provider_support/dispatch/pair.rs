@@ -25,7 +25,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
     if !compatible_inputs(left, right) {
         return Ok(None);
     }
-    if left.shape == right.shape {
+    if left.shape() == right.shape() {
         match operation.apply(provider, left, right).await {
             Ok(output) => {
                 return accept_output(operation, output, left, Some(right), provider, &left.shape)
@@ -34,7 +34,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn try_pair(
             Err(error) => return Err(provider_error(operation, error)),
         }
     }
-    if left.shape != right.shape {
+    if left.shape() != right.shape() {
         if let Some(output) = try_broadcast(operation, provider, left, right).await? {
             return Ok(Some(output));
         }
@@ -112,12 +112,12 @@ async fn try_device_scalar(
     if !float_handle_supported(left) || !float_handle_supported(right) {
         return Ok(None);
     }
-    let (result, class_source, other_source) = if left.shape.iter().product::<usize>() <= 1 {
+    let (result, class_source, other_source) = if left.shape().iter().product::<usize>() <= 1 {
         let Some(scalar) = device_real_scalar(identity, left).await? else {
             return Ok(None);
         };
         (operation.scalar_left(provider, right, scalar), right, left)
-    } else if right.shape.iter().product::<usize>() <= 1 {
+    } else if right.shape().iter().product::<usize>() <= 1 {
         let Some(scalar) = device_real_scalar(identity, right).await? else {
             return Ok(None);
         };

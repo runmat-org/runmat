@@ -555,7 +555,7 @@ async fn evaluate_gpu(
 }
 
 fn eig_gpu_order(handle: &GpuTensorHandle) -> Option<usize> {
-    match handle.shape.as_slice() {
+    match handle.shape() {
         [rows, cols] if rows == cols => Some(*rows),
         _ => None,
     }
@@ -565,7 +565,7 @@ fn resolved_actual_eig_owner(
     handle: &GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<&GpuTensorHandle> {
@@ -577,7 +577,7 @@ fn eig_result_handles(result: &runmat_accelerate_api::ProviderEigResult) -> Vec<
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn valid_provider_eig_result(
@@ -605,9 +605,9 @@ fn valid_provider_eig_result(
     ) {
         let storage = runmat_accelerate_api::handle_storage(handle);
         if gpu_handles_alias(handle, input)
-            || !identities.insert((handle.device_id, handle.buffer_id))
-            || handle.device_id != input.device_id
-            || handle.shape != *expected_shape
+            || !identities.insert((handle.device_id(), handle.buffer_id()))
+            || handle.device_id() != input.device_id()
+            || handle.shape() != *expected_shape
             || resolved_actual_eig_owner(handle).is_none_or(|owner| !std::ptr::eq(owner, provider))
             || !matches!(
                 storage,
@@ -633,7 +633,7 @@ fn free_provider_eig_result_unique(
 ) {
     let mut freed = HashSet::new();
     for handle in eig_result_handles(result) {
-        let identity = (handle.device_id, handle.buffer_id);
+        let identity = (handle.device_id(), handle.buffer_id());
         if gpu_handles_alias(handle, input) || !freed.insert(identity) {
             continue;
         }

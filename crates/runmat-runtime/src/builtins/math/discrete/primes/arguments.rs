@@ -37,7 +37,7 @@ pub(super) async fn parse_request(value: Value) -> BuiltinResult<PrimeRequest> {
 
 async fn from_gpu(handle: GpuTensorHandle) -> BuiltinResult<PrimeRequest> {
     if handle
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |count, &dimension| count.checked_mul(dimension))
         != Some(1)

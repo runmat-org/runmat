@@ -351,7 +351,7 @@ pub fn restore_real_gpu_result(
 }
 
 pub fn same_gpu_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
+    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -362,13 +362,13 @@ pub struct GpuMetadataSnapshot {
 
 pub fn gpu_metadata_snapshot(handle: &GpuTensorHandle) -> GpuMetadataSnapshot {
     GpuMetadataSnapshot {
-        descriptor: handle.descriptor,
+        descriptor: handle.descriptor(),
         logical: runmat_accelerate_api::handle_is_logical(handle),
     }
 }
 
 pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnapshot) {
-    debug_assert_eq!(handle.descriptor, snapshot.descriptor);
+    debug_assert_eq!(handle.descriptor(), snapshot.descriptor);
     runmat_accelerate_api::set_handle_logical(handle, snapshot.logical);
 }
 
@@ -385,8 +385,8 @@ pub fn valid_provider_fft_output(
     expected_storage: GpuTensorStorage,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.shape == expected_shape
-        && handle.device_id == provider.device_id()
+    handle.shape() == expected_shape
+        && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == expected_storage

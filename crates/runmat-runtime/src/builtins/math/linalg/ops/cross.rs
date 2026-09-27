@@ -372,7 +372,7 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             || runmat_accelerate_api::handle_is_logical(rhs_handle);
         if !requires_floating_boundary
             && !complex_output
-            && lhs_handle.device_id == rhs_handle.device_id
+            && lhs_handle.device_id() == rhs_handle.device_id()
         {
             if let (Some(provider), Some(rhs_provider)) = (
                 runmat_accelerate_api::provider_for_handle(lhs_handle),
@@ -461,7 +461,7 @@ fn native_result_matches_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.device_id == input_device
+    handle.device_id() == input_device
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real

@@ -298,8 +298,8 @@ fn valid_inv_gpu_output(
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
 ) -> bool {
-    output.shape == input.shape
-        && output.device_id == input.device_id
+    output.shape() == input.shape()
+        && output.device_id() == input.device_id()
         && !gpu_helpers::same_gpu_handle(input, output)
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))

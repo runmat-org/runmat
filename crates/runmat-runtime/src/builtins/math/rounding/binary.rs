@@ -10,9 +10,9 @@ pub(super) fn floating_pair_shape(
 ) -> Result<Option<Vec<usize>>, String> {
     use runmat_accelerate_api::NumericElementType;
     if !matches!(
-        left.descriptor.element_type,
+        left.descriptor().element_type,
         Some(NumericElementType::F32 | NumericElementType::F64)
-    ) || left.descriptor.element_type != right.descriptor.element_type
+    ) || left.descriptor().element_type != right.descriptor().element_type
         || runmat_accelerate_api::handle_is_logical(left)
         || runmat_accelerate_api::handle_is_logical(right)
     {
@@ -49,9 +49,9 @@ pub(super) fn admit_real_resident(
         )
     }) && crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
         .is_some()
-        && (handle.shape.contains(&0)
+        && (handle.shape().contains(&0)
             || handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |count, extent| count.checked_mul(*extent))
                 .is_some());

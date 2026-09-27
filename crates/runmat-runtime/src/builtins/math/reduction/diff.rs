@@ -584,13 +584,13 @@ async fn diff_gpu(
     }
 
     if let Ok(device_result) = provider.diff_dim(&handle, order, working_dim.saturating_sub(1)) {
-        let mut expected_shape = handle.shape.clone();
+        let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() < working_dim {
             expected_shape.resize(working_dim, 1);
         }
         expected_shape[working_dim - 1] = expected_shape[working_dim - 1].saturating_sub(order);
-        let valid = device_result.shape == expected_shape
-            && device_result.device_id == handle.device_id
+        let valid = device_result.shape() == expected_shape
+            && device_result.device_id() == handle.device_id()
             && runmat_accelerate_api::handle_storage(&device_result)
                 == runmat_accelerate_api::handle_storage(&handle)
             && runmat_accelerate_api::handle_precision(&device_result)

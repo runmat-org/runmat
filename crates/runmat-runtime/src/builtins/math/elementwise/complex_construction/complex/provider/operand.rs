@@ -53,7 +53,7 @@ impl RealGpuOperand {
                         "GPU input provider is unavailable",
                     )
                 })?;
-                if !std::ptr::eq(owner, provider) || handle.device_id != provider.device_id() {
+                if !std::ptr::eq(owner, provider) || handle.device_id() != provider.device_id() {
                     return Err(error(
                         &COMPLEX_ERROR_INVALID_INPUT,
                         "GPU inputs must belong to the same provider",

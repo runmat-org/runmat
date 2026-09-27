@@ -80,7 +80,7 @@ fn invoke_scalar_product(
             )))
         }
     };
-    let contract = output_contract(operand.handle().shape.clone(), provider);
+    let contract = output_contract(operand.handle().shape().to_vec(), provider);
     if gpu_helpers::unary_gpu_output_matches(
         &output,
         operand.handle(),
@@ -157,13 +157,14 @@ async fn real_scalar_value(
 }
 
 fn product_shape(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> BuiltinResult<Vec<usize>> {
-    if lhs.shape.len() != 2 || rhs.shape.len() != 2 || lhs.shape[1] != rhs.shape[0] {
+    if lhs.shape().len() != 2 || rhs.shape().len() != 2 || lhs.shape()[1] != rhs.shape()[0] {
         return Err(super::errors::invalid_input(format!(
             "mtimes: incompatible matrix dimensions {:?} and {:?}",
-            lhs.shape, rhs.shape
+            lhs.shape(),
+            rhs.shape()
         )));
     }
-    Ok(vec![lhs.shape[0], rhs.shape[1]])
+    Ok(vec![lhs.shape()[0], rhs.shape()[1]])
 }
 
 fn contains_complex(value: &Value) -> bool {

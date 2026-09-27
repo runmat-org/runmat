@@ -289,7 +289,7 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut current = handle.clone();
         let mut prior_handles = Vec::new();
-        let mut logical_shape = current.shape.clone();
+        let mut logical_shape = current.shape().to_vec();
         if logical_shape.is_empty() {
             logical_shape.push(1);
         }
@@ -302,7 +302,7 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
             let len = sizes.as_ref().and_then(|v| v.get(axis).copied());
             match provider.fft_dim(&current, len, axis).await {
                 Ok(next) => {
-                    if current.buffer_id != next.buffer_id {
+                    if current.buffer_id() != next.buffer_id() {
                         prior_handles.push(current);
                     }
                     current = next;
@@ -334,12 +334,12 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
                         });
                     }
                     for prior in prior_handles {
-                        if prior.buffer_id != handle.buffer_id {
+                        if prior.buffer_id() != handle.buffer_id() {
                             provider.free(&prior).ok();
                             runmat_accelerate_api::clear_residency(&prior);
                         }
                     }
-                    if current.buffer_id != handle.buffer_id {
+                    if current.buffer_id() != handle.buffer_id() {
                         provider.free(&current).ok();
                         runmat_accelerate_api::clear_residency(&current);
                     }
@@ -349,7 +349,7 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
             }
         }
         for prior in prior_handles {
-            if prior.buffer_id != handle.buffer_id && prior.buffer_id != current.buffer_id {
+            if prior.buffer_id() != handle.buffer_id() && prior.buffer_id() != current.buffer_id() {
                 provider.free(&prior).ok();
                 runmat_accelerate_api::clear_residency(&prior);
             }
@@ -429,7 +429,7 @@ fn fftn_input_rank(value: &Value) -> usize {
         Value::Tensor(tensor) => tensor.shape.len(),
         Value::ComplexTensor(tensor) => tensor.shape.len(),
         Value::LogicalArray(array) => array.shape.len(),
-        Value::GpuTensor(handle) => handle.shape.len(),
+        Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
     };
     rank.max(2)

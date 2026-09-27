@@ -509,7 +509,7 @@ async fn ifft2_gpu(
         if input_is_floating {
             let precision = runmat_accelerate_api::handle_precision(&handle)
                 .unwrap_or_else(|| provider.precision());
-            let mut first_shape = handle.shape.clone();
+            let mut first_shape = handle.shape().to_vec();
             if first_shape.is_empty() {
                 first_shape.push(1);
             }

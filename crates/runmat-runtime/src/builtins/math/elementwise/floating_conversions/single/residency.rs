@@ -104,8 +104,8 @@ fn valid_single_resident_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_shape: &[usize],
 ) -> bool {
-    output.shape == expected_shape
-        && output.device_id == prototype.device_id
+    output.shape() == expected_shape
+        && output.device_id() == prototype.device_id()
         && runmat_accelerate_api::handle_precision(output)
             == Some(runmat_accelerate_api::ProviderPrecision::F32)
         && gpu_helpers::numeric_descriptor_matches(
@@ -120,7 +120,7 @@ fn valid_single_resident_value(
 }
 
 fn single_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 #[cfg(test)]

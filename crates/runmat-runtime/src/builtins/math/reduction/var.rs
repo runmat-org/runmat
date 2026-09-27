@@ -850,7 +850,7 @@ async fn var_gpu_reduce(
         ReductionNaN::Omit => ProviderNanMode::Omit,
     };
 
-    let std_handle = if dims.len() == handle.shape.len() {
+    let std_handle = if dims.len() == handle.shape().len() {
         if is_scalar_shape(&handle.shape) {
             return Some(handle.clone());
         }
@@ -889,7 +889,7 @@ async fn reduce_std_dim_gpu(
     if dim == 0 {
         return None;
     }
-    if handle.shape.len() < dim {
+    if handle.shape().len() < dim {
         return Some(handle);
     }
     provider

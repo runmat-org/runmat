@@ -887,8 +887,8 @@ async fn reduction_min_gpu(
         None => {
             log::trace!(
                 "min: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
-                handle.shape,
-                handle.device_id
+                handle.shape(),
+                handle.device_id()
             );
             return Ok(None);
         }
@@ -898,7 +898,7 @@ async fn reduction_min_gpu(
         DimSelection::Dim(dim) => dim,
         DimSelection::Vec(ref dims) if dims.len() == 1 => dims[0],
         DimSelection::All => {
-            if handle.shape.len() <= 1 {
+            if handle.shape().len() <= 1 {
                 1
             } else {
                 return Ok(None);
@@ -911,15 +911,15 @@ async fn reduction_min_gpu(
     }
     // MATLAB dimensions are 1-based; `reduce_min_dim` expects zero-based.
     let zero_based = target_dim.saturating_sub(1);
-    if zero_based >= handle.shape.len() {
+    if zero_based >= handle.shape().len() {
         return Ok(None);
     }
     log::trace!(
         "min: attempting reduce_min_dim dim={} (zero_based={}) shape={:?} device_id={}",
         target_dim,
         zero_based,
-        handle.shape,
-        handle.device_id
+        handle.shape(),
+        handle.device_id()
     );
     match provider.reduce_min_dim(&handle, zero_based).await {
         Ok(ReduceDimResult { values, indices }) => Ok(Some(MinEvaluation {
@@ -1806,12 +1806,12 @@ async fn elementwise_min_gpu_pair(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    if a.device_id != b.device_id {
+    if a.device_id() != b.device_id() {
         return None;
     }
     let provider = runmat_accelerate_api::provider_for_handle(a)?;
     // Equal-shape fast path
-    if a.shape == b.shape {
+    if a.shape() == b.shape() {
         let values = provider.elem_min(a, b).await.ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_le(a, b).await {
@@ -1865,7 +1865,7 @@ async fn elementwise_min_gpu_pair(
         let _ = provider.free(&b_exp);
     }
     let values = values?;
-    if values.shape != out_shape {
+    if values.shape() != out_shape {
         let _ = provider.free(&values);
         return None;
     }

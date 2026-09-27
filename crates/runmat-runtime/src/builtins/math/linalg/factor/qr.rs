@@ -566,7 +566,7 @@ async fn evaluate_gpu(
     if std::env::var("RUNMAT_DEBUG_QR").is_ok() {
         log::debug!(
             "qr evaluate_gpu: handle={} mode={:?} pivot={:?}",
-            handle.buffer_id,
+            handle.buffer_id(),
             options.mode,
             options.pivot
         );
@@ -669,7 +669,7 @@ async fn is_zero_scalar(value: &Value) -> bool {
             }
         }
         Value::GpuTensor(handle) => {
-            if handle.shape.iter().product::<usize>() == 1 {
+            if handle.shape().iter().product::<usize>() == 1 {
                 if let Ok(host) = gpu_helpers::gather_tensor_async(handle).await {
                     return host
                         .integer_storage()

@@ -445,8 +445,8 @@ fn upload_scalar(
     let handle = provider
         .upload(&view)
         .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
-    let valid = handle.shape == shape
-        && handle.device_id == prototype.device_id
+    let valid = handle.shape() == shape
+        && handle.device_id() == prototype.device_id()
         && runmat_accelerate_api::handle_storage(&handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(&handle).is_none()
@@ -468,7 +468,7 @@ async fn det_gpu_via_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Option<Value>> {
-    let (rows, cols) = matrix_dimensions(handle.shape.as_slice())?;
+    let (rows, cols) = matrix_dimensions(handle.shape())?;
     if rows != cols {
         return Err(builtin_error(format!(
             "{NAME}: input must be a square matrix."
@@ -613,14 +613,14 @@ fn validate_lu_result(
     ];
     let mut identities = HashSet::new();
     for (handle, expected_shape) in lu_handles(result).into_iter().zip(expected_shapes.iter()) {
-        if handle.buffer_id == input.buffer_id && handle.device_id == input.device_id {
+        if handle.buffer_id() == input.buffer_id() && handle.device_id() == input.device_id() {
             return false;
         }
-        if !identities.insert((handle.device_id, handle.buffer_id)) {
+        if !identities.insert((handle.device_id(), handle.buffer_id())) {
             return false;
         }
-        if handle.device_id != input.device_id
-            || handle.shape != *expected_shape
+        if handle.device_id() != input.device_id()
+            || handle.shape() != *expected_shape
             || runmat_accelerate_api::provider_for_handle(handle)
                 .is_none_or(|owner| !std::ptr::eq(owner, provider))
             || runmat_accelerate_api::handle_storage(handle)
@@ -642,8 +642,8 @@ fn free_lu_result_unique(
 ) {
     let mut freed = HashSet::new();
     for handle in lu_handles(result) {
-        let identity = (handle.device_id, handle.buffer_id);
-        if identity == (input.device_id, input.buffer_id) || !freed.insert(identity) {
+        let identity = (handle.device_id(), handle.buffer_id());
+        if identity == (input.device_id(), input.buffer_id()) || !freed.insert(identity) {
             continue;
         }
         let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);

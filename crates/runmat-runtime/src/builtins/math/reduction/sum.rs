@@ -797,7 +797,8 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
-        if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape)
+        {
             return provider
                 .reduce_integer_sum_native(&handle)
                 .await
@@ -822,7 +823,7 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
         return Ok(Value::GpuTensor(current));
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape.len() && !is_scalar_shape(&handle.shape) {
+    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape) {
         if let Ok(reduced) = provider.reduce_sum(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }
@@ -902,8 +903,8 @@ fn reduce_omitnan_2d(
     axis: usize,
     expected_shape: &[usize],
 ) -> Option<GpuTensorHandle> {
-    let rows = handle.shape.first().copied()?;
-    let cols = *handle.shape.get(1)?;
+    let rows = handle.shape().first().copied()?;
+    let cols = *handle.shape().get(1)?;
     let (reduce_len, num_slices, axis_is_row) = if axis == 0 {
         (rows, cols, false)
     } else if axis == 1 {

@@ -16,7 +16,7 @@ pub(super) fn like(
         return Err(super::super::errors::invalid_integer_prototype(builtin));
     };
     let storage_kind = prototype
-        .descriptor
+        .descriptor()
         .storage
         .ok_or_else(|| super::super::errors::invalid_integer_prototype(builtin))?;
     if !matches!(
@@ -94,12 +94,12 @@ fn validate(
     output: GpuTensorHandle,
     expected: ExpectedOutput<'_>,
 ) -> BuiltinResult<Value> {
-    let valid = output.shape == expected.shape
-        && output.device_id == prototype.device_id
+    let valid = output.shape() == expected.shape
+        && output.device_id() == prototype.device_id()
         && !gpu_helpers::same_gpu_handle(prototype, &output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && output.descriptor.storage == Some(expected.storage)
+        && output.descriptor().storage == Some(expected.storage)
         && runmat_accelerate_api::handle_integer_type(&output) == Some(expected.element_type)
         && runmat_accelerate_api::handle_precision(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output)

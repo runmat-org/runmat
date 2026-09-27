@@ -319,7 +319,7 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
         Some(dim) => {
             if let Some(p) = provider {
                 let zero_based = dim.saturating_sub(1);
-                if zero_based < handle.shape.len() {
+                if zero_based < handle.shape().len() {
                     match p.reduce_nnz_dim(&handle, zero_based).await {
                         Ok(result) => {
                             let mut expected_shape = normalize_scalar_shape(&handle.shape);
@@ -384,8 +384,8 @@ fn validate_provider_result(
     expected_shape: &[usize],
 ) -> BuiltinResult<()> {
     let valid = !gpu_helpers::same_gpu_handle(source, result)
-        && result.shape == expected_shape
-        && result.device_id == provider.device_id()
+        && result.shape() == expected_shape
+        && result.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(result)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(result)

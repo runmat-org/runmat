@@ -192,7 +192,7 @@ async fn pagetranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
 async fn pagetranspose_value(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => {
-            let order = page_transpose_order(handle.shape.len());
+            let order = page_transpose_order(handle.shape().len());
             permute_gpu(NAME, handle, &order).await
         }
         Value::Tensor(t) => {

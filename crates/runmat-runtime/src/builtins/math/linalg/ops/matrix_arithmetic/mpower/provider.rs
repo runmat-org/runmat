@@ -25,7 +25,7 @@ pub(super) async fn try_power(base: &Value, exponent: &Value) -> BuiltinResult<O
             "Negative matrix powers not supported yet",
         ));
     }
-    let [rows, columns] = base.shape.as_slice() else {
+    let [rows, columns] = base.shape() else {
         return Ok(None);
     };
     if rows != columns {
@@ -49,7 +49,7 @@ fn identity(
     let output = match provider.eye_like(prototype) {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-            let identity = crate::builtins::common::matrix::matrix_eye(prototype.shape[0]);
+            let identity = crate::builtins::common::matrix::matrix_eye(prototype.shape()[0]);
             return gpu_helpers::upload_tensor(provider, &identity)
                 .map(Some)
                 .map_err(|error| {
@@ -132,7 +132,7 @@ async fn multiply(
         }
     };
     let contract = BinaryGpuOutputContract {
-        shape: lhs.shape.clone(),
+        shape: lhs.shape().to_vec(),
         storage: GpuTensorStorage::Real,
         precision: Some(provider.precision()),
         integer: None,

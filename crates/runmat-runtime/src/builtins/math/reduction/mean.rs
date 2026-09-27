@@ -759,7 +759,7 @@ async fn mean_native_integer_gpu(
     let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
         mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
     })?;
-    let result = if dims.len() == handle.shape.len() {
+    let result = if dims.len() == handle.shape().len() {
         provider.reduce_integer_mean_native(&handle).await
     } else if dims.len() == 1 {
         provider
@@ -1928,7 +1928,7 @@ async fn mean_gpu_try(
                 Ok(out) => Some(out),
                 Err(err) => {
                     log::trace!("mean: provider reduce_mean fallback triggered: {err}");
-                    let rank = handle.shape.len();
+                    let rank = handle.shape().len();
                     if is_scalar_shape(&handle.shape) || rank == 0 {
                         Some(handle.clone())
                     } else {
@@ -1962,7 +1962,7 @@ async fn reduce_mean_dim_gpu(
     if dim == 0 {
         return None;
     }
-    if handle.shape.len() < dim {
+    if handle.shape().len() < dim {
         return Some(handle);
     }
     provider
@@ -1984,7 +1984,7 @@ async fn reduce_mean_vecdim_nd_gpu(
     handle: &GpuTensorHandle,
     dims_1based: &[usize],
 ) -> Option<GpuTensorHandle> {
-    let rank = handle.shape.len();
+    let rank = handle.shape().len();
     if rank == 0 || dims_1based.is_empty() {
         return Some(handle.clone());
     }
@@ -2014,9 +2014,9 @@ async fn reduce_mean_vecdim_nd_gpu(
     // Compute rows/cols
     let mut reduce_len: usize = 1;
     for &d in &reduce_dims {
-        reduce_len = reduce_len.saturating_mul(handle.shape[d]);
+        reduce_len = reduce_len.saturating_mul(handle.shape()[d]);
     }
-    let total_elems: usize = handle.shape.iter().copied().product();
+    let total_elems: usize = handle.shape().iter().copied().product();
     if reduce_len == 0 || total_elems == 0 {
         let _ = provider.free(&permuted);
         return provider.fill(&[1, 1], f64::NAN).ok();
@@ -2031,7 +2031,7 @@ async fn reduce_mean_vecdim_nd_gpu(
     let _ = provider.free(&reshaped2d);
     let _ = provider.free(&permuted);
     // Reshape to kept sizes (permuted order)
-    let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape[d]).collect();
+    let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape()[d]).collect();
     let kept_shape = if kept_sizes.is_empty() {
         vec![1, 1]
     } else {
@@ -2071,7 +2071,7 @@ async fn mean_gpu_omitnan(
             vec![default_dimension_from_shape(&handle.shape) - 1]
         }
         MeanAxes::Dim(d) => {
-            if *d == 0 || *d > handle.shape.len() {
+            if *d == 0 || *d > handle.shape().len() {
                 return Some(handle.clone());
             }
             vec![*d - 1]
@@ -2080,7 +2080,7 @@ async fn mean_gpu_omitnan(
             let mut dims: Vec<usize> = v
                 .iter()
                 .filter_map(|&d| {
-                    if d > 0 && d <= handle.shape.len() {
+                    if d > 0 && d <= handle.shape().len() {
                         Some(d - 1)
                     } else {
                         None
@@ -2095,7 +2095,7 @@ async fn mean_gpu_omitnan(
             if is_scalar_shape(&handle.shape) {
                 return Some(handle.clone());
             }
-            (0..handle.shape.len()).collect()
+            (0..handle.shape().len()).collect()
         }
     };
 

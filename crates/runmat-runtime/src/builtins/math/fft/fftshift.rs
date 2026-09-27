@@ -429,7 +429,7 @@ async fn fftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         // Provider reshape may mutate a handle's registry entry in place. Only use
         // the native path when no synthetic trailing dimensions are required.
-        if plan.ext_shape == handle.shape {
+        if plan.ext_shape == handle.shape() {
             if let Ok(out) = provider.circshift(&handle, &plan.provider) {
                 return gpu_helpers::resident_gpu_value(out);
             }

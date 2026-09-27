@@ -1118,8 +1118,8 @@ async fn reduction_max_gpu(
         None => {
             log::trace!(
                 "max: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
-                handle.shape,
-                handle.device_id
+                handle.shape(),
+                handle.device_id()
             );
             return Ok(None);
         }
@@ -1129,7 +1129,7 @@ async fn reduction_max_gpu(
         DimSelection::Dim(dim) => dim,
         DimSelection::Vec(ref dims) if dims.len() == 1 => dims[0],
         DimSelection::All => {
-            if handle.shape.len() <= 1 {
+            if handle.shape().len() <= 1 {
                 1
             } else {
                 return Ok(None);
@@ -1142,15 +1142,15 @@ async fn reduction_max_gpu(
     }
     // MATLAB dimensions are 1-based; `reduce_max_dim` expects zero-based.
     let zero_based = target_dim.saturating_sub(1);
-    if zero_based >= handle.shape.len() {
+    if zero_based >= handle.shape().len() {
         return Ok(None);
     }
     log::trace!(
         "max: attempting reduce_max_dim dim={} (zero_based={}) shape={:?} device_id={}",
         target_dim,
         zero_based,
-        handle.shape,
-        handle.device_id
+        handle.shape(),
+        handle.device_id()
     );
     match provider.reduce_max_dim(&handle, zero_based).await {
         Ok(ReduceDimResult { values, indices }) => Ok(Some(MaxEvaluation {
@@ -2104,12 +2104,12 @@ async fn elementwise_max_gpu_pair(
     if comparison != ComparisonMethod::Auto {
         return None;
     }
-    if a.device_id != b.device_id {
+    if a.device_id() != b.device_id() {
         return None;
     }
     let provider = runmat_accelerate_api::provider_for_handle(a)?;
     // Equal-shape fast path
-    if a.shape == b.shape {
+    if a.shape() == b.shape() {
         let values = provider.elem_max(a, b).await.ok()?;
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_ge(a, b).await {
@@ -2157,7 +2157,7 @@ async fn elementwise_max_gpu_pair(
         let _ = provider.free(&b_exp);
     }
     let values = values?;
-    if values.shape != out_shape {
+    if values.shape() != out_shape {
         let _ = provider.free(&values);
         return None;
     }
@@ -2331,7 +2331,7 @@ fn extract_scalar(v: &Value) -> Option<f64> {
 }
 
 fn gpu_tensor_is_scalar(handle: &GpuTensorHandle) -> bool {
-    handle.shape.iter().copied().product::<usize>().max(1) == 1
+    handle.shape().iter().copied().product::<usize>().max(1) == 1
 }
 
 async fn gpu_tensor_scalar_value(handle: &GpuTensorHandle) -> Option<f64> {

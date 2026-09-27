@@ -620,7 +620,7 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
             &INTERP1_ERROR_INTERNAL,
         )
     })?;
-    let series_shape = series.y.shape.clone();
+    let series_shape = series.y.shape().to_vec();
     let series_metadata = gpu_helpers::snapshot_handle_metadata(series.y);
     let resident_query_metadata = match query_value {
         Value::GpuTensor(handle) => Some((handle, gpu_helpers::snapshot_handle_metadata(handle))),
@@ -807,8 +807,8 @@ fn valid_interp1_gpu_output(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
 ) -> bool {
-    output.shape == output_shape
-        && output.device_id == y.device_id
+    output.shape() == output_shape
+        && output.device_id() == y.device_id()
         && ![y, x, xq]
             .iter()
             .any(|input| gpu_helpers::same_gpu_handle(input, output))
@@ -828,8 +828,8 @@ fn valid_interp1_gpu_input(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     protected: &[&GpuTensorHandle],
 ) -> bool {
-    handle.shape == expected_shape
-        && handle.device_id == provider.device_id()
+    handle.shape() == expected_shape
+        && handle.device_id() == provider.device_id()
         && !protected
             .iter()
             .any(|input| gpu_helpers::same_gpu_handle(input, handle))
@@ -899,7 +899,7 @@ fn gpu_y_layout(
     explicit_sample_len: Option<usize>,
 ) -> crate::BuiltinResult<Option<(usize, usize, Vec<usize>)>> {
     let len = handle
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
         .ok_or_else(|| {
@@ -945,7 +945,7 @@ async fn gpu_query_points(
                 return Ok(None);
             }
             let len = handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |acc, dim| acc.checked_mul(*dim))
                 .ok_or_else(|| {

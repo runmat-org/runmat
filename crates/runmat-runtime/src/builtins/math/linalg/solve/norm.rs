@@ -450,8 +450,8 @@ fn valid_provider_norm_result(
     result: &GpuTensorHandle,
 ) -> bool {
     !gpu_helpers::same_gpu_handle(source, result)
-        && result.shape == [1, 1]
-        && result.device_id == provider.device_id()
+        && result.shape() == [1, 1]
+        && result.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(result)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(result)

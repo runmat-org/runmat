@@ -642,7 +642,7 @@ async fn cummax_gpu(
         ));
     }
 
-    if target_dim > handle.shape.len() {
+    if target_dim > handle.shape().len() {
         let indices = ones_indices(&handle.shape)?;
         return Ok(CummaxEvaluation {
             values: Value::GpuTensor(handle),
@@ -672,7 +672,7 @@ async fn cummax_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         let zero_based_dim = target_dim.saturating_sub(1);
-        if zero_based_dim < handle.shape.len() {
+        if zero_based_dim < handle.shape().len() {
             let provider_direction = match direction {
                 CummaxDirection::Forward => ProviderScanDirection::Forward,
                 CummaxDirection::Reverse => ProviderScanDirection::Reverse,
