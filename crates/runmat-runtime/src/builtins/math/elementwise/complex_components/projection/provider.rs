@@ -32,13 +32,13 @@ async fn try_provider(
     input: &GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(input);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
     let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = match kind {
         ProjectionKind::Real => provider.unary_real(input).await,
         ProjectionKind::Imaginary => provider.unary_imag(input).await,
     };
-    gpu_helpers::restore_handle_metadata(input, &metadata);
+    drop(metadata);
 
     match result {
         Ok(mut output) if valid_output(kind, &output, input, provider) => {
@@ -89,9 +89,9 @@ async fn gather_project_restore(
     handle: GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+    drop(metadata);
     let host_value = gathered.map_err(|error| kind.internal(error.to_string()))?;
     let projected = host::execute(kind, host_value)?;
     gpu_helpers::restore_class_preserving_value(&handle, projected, kind.name())

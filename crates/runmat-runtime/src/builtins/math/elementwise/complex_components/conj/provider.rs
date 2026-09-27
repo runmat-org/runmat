@@ -17,6 +17,9 @@ pub(super) async fn execute(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             "GPU input class metadata contradicts its physical storage",
         ));
     }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        builtin_error_with_detail(&CONJ_ERROR_INTERNAL, "GPU provider unavailable for input")
+    })?;
     if storage == GpuTensorStorage::Real {
         if handle_integer_type(&handle).is_some() {
             return Ok(gpu_helpers::resident_gpu_value(handle));
@@ -26,9 +29,6 @@ pub(super) async fn execute(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
 
-    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-        builtin_error_with_detail(&CONJ_ERROR_INTERNAL, "GPU provider unavailable for input")
-    })?;
     let kernel_compatible = handle_integer_type(&handle).is_none()
         && !handle_is_logical(&handle)
         && handle_precision(&handle) == Some(provider.precision());
@@ -45,10 +45,10 @@ async fn try_provider(
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
     let storage = handle_storage(input);
-    let metadata = gpu_helpers::snapshot_handle_metadata(input);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
     let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = provider.unary_conj(input).await;
-    gpu_helpers::restore_handle_metadata(input, &metadata);
+    drop(metadata);
     match result {
         Ok(mut output) if valid_output(&output, input, provider) => {
             set_handle_provenance(&mut output, provenance);
@@ -103,9 +103,9 @@ async fn gather_conjugate_restore(
     handle: GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+    drop(metadata);
     let host_value = gathered
         .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error.to_string()))?;
     let conjugated = host::execute(host_value)?;

@@ -78,10 +78,10 @@ async fn try_unary_provider(
     input: &GpuTensorHandle,
     owner: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(input);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
     let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = owner.complex_from_real(input).await;
-    gpu_helpers::restore_handle_metadata(input, &metadata);
+    drop(metadata);
     match result {
         Ok(mut output) if output::valid_unary(&output, input, owner) => {
             set_handle_provenance(&mut output, provenance);
@@ -120,13 +120,13 @@ async fn try_binary_provider(
     let Some(shape) = output::compatible_shape(&real.handle.shape, &imaginary.handle.shape) else {
         return Ok(None);
     };
-    let real_metadata = gpu_helpers::snapshot_handle_metadata(&real.handle);
-    let imaginary_metadata = gpu_helpers::snapshot_handle_metadata(&imaginary.handle);
+    let real_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&real.handle);
+    let imaginary_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&imaginary.handle);
     let result = owner
         .complex_from_real_imag(&real.handle, &imaginary.handle)
         .await;
-    gpu_helpers::restore_handle_metadata(&real.handle, &real_metadata);
-    gpu_helpers::restore_handle_metadata(&imaginary.handle, &imaginary_metadata);
+    drop(real_metadata);
+    drop(imaginary_metadata);
     match result {
         Ok(mut output)
             if output::valid_binary(
@@ -165,9 +165,9 @@ async fn unary_fallback(
     handle: GpuTensorHandle,
     owner: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(owner, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+    drop(metadata);
     let output = host::unary(gathered.map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?)?;
     gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME)
 }
