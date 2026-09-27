@@ -8,8 +8,8 @@ pub(super) fn output_shape(
     rhs: &GpuTensorHandle,
 ) -> Vec<usize> {
     match orientation {
-        SolveOrientation::Left => vec![matrix_columns(&lhs.shape), matrix_columns(&rhs.shape)],
-        SolveOrientation::Right => vec![matrix_rows(&lhs.shape), matrix_rows(&rhs.shape)],
+        SolveOrientation::Left => vec![matrix_columns(lhs.shape()), matrix_columns(rhs.shape())],
+        SolveOrientation::Right => vec![matrix_rows(lhs.shape()), matrix_rows(rhs.shape())],
     }
 }
 
@@ -25,7 +25,7 @@ pub(super) fn disallowed_scalar(
 }
 
 fn is_scalar(handle: &GpuTensorHandle) -> bool {
-    crate::builtins::common::shape::is_scalar_shape(&handle.shape)
+    crate::builtins::common::shape::is_scalar_shape(handle.shape())
 }
 
 fn matrix_rows(shape: &[usize]) -> usize {

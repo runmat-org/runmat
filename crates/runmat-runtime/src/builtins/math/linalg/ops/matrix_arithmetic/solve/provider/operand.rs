@@ -6,10 +6,12 @@ use crate::BuiltinResult;
 
 use super::super::{errors, SolveOrientation};
 
+#[cfg(test)]
+#[path = "operand_tests.rs"]
+mod owning_tests;
+
 pub(super) struct PreparedOperand {
-    provider: &'static dyn AccelProvider,
     handle: GpuTensorHandle,
-    owned: bool,
 }
 
 impl PreparedOperand {
@@ -17,54 +19,36 @@ impl PreparedOperand {
         orientation: SolveOrientation,
         value: &Value,
         provider: &'static dyn AccelProvider,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<Option<Self>> {
         match value {
             Value::GpuTensor(handle) if compatible_handle(handle, provider) => Ok(Some(Self {
-                provider,
                 handle: handle.clone(),
-                owned: false,
             })),
             Value::GpuTensor(_) => Ok(None),
             Value::Tensor(value) if !tensor::is_scalar_tensor(value) => {
-                Self::upload(orientation, provider, value).map(Some)
+                Self::upload(provider, value, protected).map(Some)
             }
             Value::LogicalArray(value) if value.data.len() != 1 => {
                 let value = tensor::logical_to_tensor(value)
                     .map_err(|error| errors::invalid_input(orientation, error))?;
-                Self::upload(orientation, provider, &value).map(Some)
+                Self::upload(provider, &value, protected).map(Some)
             }
             _ => Ok(None),
         }
     }
 
     fn upload(
-        orientation: SolveOrientation,
         provider: &'static dyn AccelProvider,
         tensor: &Tensor,
+        protected: &[&GpuTensorHandle],
     ) -> BuiltinResult<Self> {
-        let handle = gpu_helpers::upload_tensor(provider, tensor).map_err(|error| {
-            errors::internal(
-                orientation,
-                format!("{}: provider upload failed: {error}", orientation.name()),
-            )
-        })?;
-        Ok(Self {
-            provider,
-            handle,
-            owned: true,
-        })
+        let handle = gpu_helpers::upload_tensor_protecting(provider, tensor, protected)?;
+        Ok(Self { handle })
     }
 
     pub(super) fn handle(&self) -> &GpuTensorHandle {
         &self.handle
-    }
-}
-
-impl Drop for PreparedOperand {
-    fn drop(&mut self) {
-        if self.owned {
-            let _ = self.provider.free(&self.handle);
-        }
     }
 }
 

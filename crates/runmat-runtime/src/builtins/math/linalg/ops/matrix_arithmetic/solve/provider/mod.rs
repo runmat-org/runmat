@@ -31,10 +31,18 @@ pub(super) async fn try_solve(
         return Ok(None);
     }
 
-    let Some(lhs) = PreparedOperand::new(orientation, lhs, provider)? else {
+    let mut protected: Vec<&runmat_accelerate_api::GpuTensorHandle> = [lhs, rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
+    let Some(lhs) = PreparedOperand::new(orientation, lhs, provider, &protected)? else {
         return Ok(None);
     };
-    let Some(rhs) = PreparedOperand::new(orientation, rhs, provider)? else {
+    protected.push(lhs.handle());
+    let Some(rhs) = PreparedOperand::new(orientation, rhs, provider, &protected)? else {
         return Ok(None);
     };
     if disallowed_scalar(orientation, lhs.handle(), rhs.handle()) {
