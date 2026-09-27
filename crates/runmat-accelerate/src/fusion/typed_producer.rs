@@ -66,10 +66,9 @@ impl TypedProducer {
                 .collect::<Result<HashMap<_, _>>>()?;
             let expression = if let Some(declaration) = program.declaration(output) {
                 if selected.is_some() {
-                    let entry = runmat_builtins::builtin_catalog_entry_by_name(
-                        declaration.binding.builtin.name,
-                    )
-                    .ok_or_else(|| anyhow!("missing typed producer contract"))?;
+                    let entry = program
+                        .catalog_entry(output)
+                        .ok_or_else(|| anyhow!("missing typed producer contract"))?;
                     if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
                         || entry.contract.workspace_effect.is_some()
                         || entry.contract.environment_effect.is_some()

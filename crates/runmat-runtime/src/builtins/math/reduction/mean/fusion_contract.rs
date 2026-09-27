@@ -1,24 +1,46 @@
 use super::*;
 use crate::builtins::common::spec::{
     checked_reduction_elements, FusionReductionContext, FusionReductionContract,
-    FusionReductionCount, FusionReductionDeclaration, FusionReductionEmpty, FusionReductionFuture,
-    FusionReductionOperation, FusionReductionTies,
+    FusionReductionControls, FusionReductionCount, FusionReductionDeclaration,
+    FusionReductionEmpty, FusionReductionOperation, FusionReductionPrepareFuture,
+    FusionReductionTies, PreparedFusionReduction,
 };
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 1,
-    resolve,
+    revision: 2,
+    prepare,
 };
-fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
+fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
     Box::pin(async move {
-        let Some((input_class, shape)) = context.real_floating_input() else {
+        if !controls.supported() {
             return Ok(None);
-        };
-        let parsed = parse_arguments(context.controls).await?;
+        }
+        let parsed = parse_arguments(controls.values).await?;
         if parsed.weights.is_some() {
             return Ok(None);
         }
+        Ok(Some(
+            Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
+        ))
+    })
+}
+
+struct Prepared(ParsedArguments);
+impl PreparedFusionReduction for Prepared {
+    fn resolve(
+        &self,
+        input: &runmat_types::ValueFact,
+    ) -> BuiltinResult<Option<FusionReductionContract>> {
+        let Some((input_class, shape)) = (FusionReductionContext {
+            input,
+            controls: &[],
+            requested_outputs: 1,
+        })
+        .real_floating_input() else {
+            return Ok(None);
+        };
+        let parsed = &self.0;
         let mut dimensions = match &parsed.axes {
             MeanAxes::Default => vec![default_dimension_from_shape(&shape)],
             MeanAxes::Dim(dim) => vec![*dim],
@@ -75,7 +97,7 @@ fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
             empty: FusionReductionEmpty::NaN,
             ties: FusionReductionTies::NotApplicable,
         }))
-    })
+    }
 }
 
 #[cfg(test)]
@@ -85,7 +107,7 @@ mod tests {
 
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {
         let fact = value_fact(value);
-        futures::executor::block_on((DECLARATION.resolve)(FusionReductionContext {
+        futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {
             input: &fact,
             controls,
             requested_outputs: 1,

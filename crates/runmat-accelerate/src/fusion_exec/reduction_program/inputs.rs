@@ -11,6 +11,7 @@ pub(super) struct Inputs<'a> {
     pub controls: Vec<Value>,
     pub root: ValueId,
     pub terminal: usize,
+    pub producer_indices: Vec<usize>,
 }
 
 pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<'a>> {
@@ -135,25 +136,43 @@ pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<
     }) {
         return None;
     }
-    let mut producer = plan.clone();
-    producer.operations = plan
+    let producer_indices: Vec<_> = (0..plan.operations.len())
+        .filter(|index| selected.contains(index))
+        .collect();
+    let operations = plan
         .operations
         .iter()
         .enumerate()
         .filter(|(index, _)| selected.contains(index))
         .map(|(_, op)| op.clone())
         .collect();
-    producer.inputs = data.iter().map(|input| input.value_id).collect();
-    producer.constants.clear();
-    producer.const_values.clear();
-    producer.materialized_stores.clear();
-    producer.output = Some(root);
+    // Copy only structural metadata. In particular never clone the cached
+    // Value maps merely to discard them (numeric carriers are COW, others may
+    // own their payload directly).
+    let producer = FusionGroupPlan {
+        index: plan.index,
+        group: plan.group.clone(),
+        operations,
+        inputs: data.iter().map(|input| input.value_id).collect(),
+        stack_pattern: Vec::new(),
+        constants: HashMap::new(),
+        const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
+        output: Some(root),
+        kernel: plan.kernel.clone(),
+        reduction_data: None,
+        reduction_dim: None,
+        reduction_flavor: None,
+        reduction_axes: None,
+        pattern: None,
+    };
     Some(Inputs {
         producer,
         data,
         controls,
         root,
         terminal,
+        producer_indices,
     })
 }
 

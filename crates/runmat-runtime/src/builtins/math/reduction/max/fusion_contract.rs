@@ -1,26 +1,48 @@
 use super::*;
 use crate::builtins::common::spec::{
     checked_reduction_elements, FusionReductionContext, FusionReductionContract,
-    FusionReductionCount, FusionReductionDeclaration, FusionReductionEmpty, FusionReductionFuture,
-    FusionReductionOperation, FusionReductionTies,
+    FusionReductionControls, FusionReductionCount, FusionReductionDeclaration,
+    FusionReductionEmpty, FusionReductionOperation, FusionReductionPrepareFuture,
+    FusionReductionTies, PreparedFusionReduction,
 };
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 1,
-    resolve,
+    revision: 2,
+    prepare,
 };
-fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
+fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
     Box::pin(async move {
-        let Some((input_class, shape)) = context.real_floating_input() else {
+        if !controls.supported() {
             return Ok(None);
-        };
-        let ParsedCall::Reduction(parsed) = parse_call(context.controls).await? else {
+        }
+        let ParsedCall::Reduction(parsed) = parse_call(controls.values).await? else {
             return Ok(None);
         };
         if parsed.comparison == ComparisonMethod::Abs || parsed.linear_index {
             return Ok(None);
         }
+        Ok(Some(
+            Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
+        ))
+    })
+}
+
+struct Prepared(ReductionArgs);
+impl PreparedFusionReduction for Prepared {
+    fn resolve(
+        &self,
+        input: &runmat_types::ValueFact,
+    ) -> BuiltinResult<Option<FusionReductionContract>> {
+        let Some((input_class, shape)) = (FusionReductionContext {
+            input,
+            controls: &[],
+            requested_outputs: 1,
+        })
+        .real_floating_input() else {
+            return Ok(None);
+        };
+        let parsed = &self.0;
         // Empty extrema have a separate host shape path; it is not an identity
         // value suitable for the initial nonempty fused reduction contract.
         if checked_reduction_elements(&shape) == Some(0) {
@@ -48,7 +70,7 @@ fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
             empty: FusionReductionEmpty::NaN,
             ties: FusionReductionTies::FirstWithPositiveZero,
         }))
-    })
+    }
 }
 
 #[cfg(test)]
@@ -58,7 +80,7 @@ mod tests {
 
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {
         let fact = value_fact(value);
-        futures::executor::block_on((DECLARATION.resolve)(FusionReductionContext {
+        futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {
             input: &fact,
             controls,
             requested_outputs: 1,

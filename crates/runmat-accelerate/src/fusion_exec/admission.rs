@@ -1,6 +1,7 @@
 //! Selected-binding evidence exists only for this invocation. It is acquired
 //! before domain probes, placement, compilation, uploads or provider execution.
 use super::FusionExecutionRequest;
+use crate::fusion::semantic_bindings::SemanticBinding;
 use crate::{
     fusion::FusionOp,
     graph::{FusionCallOrigin, PrimitiveOp},
@@ -27,6 +28,7 @@ struct Operation {
     structural: Option<FusionStructuralOperation>,
     epilogue: Option<FusionEpilogueOperation>,
     reduction: Option<&'static runmat_runtime::builtins::common::spec::FusionReductionDeclaration>,
+    semantic: Option<SemanticBinding>,
 }
 pub(super) struct AdmittedBindings {
     operations: Vec<Operation>,
@@ -50,20 +52,14 @@ impl AdmittedBindings {
             .map(|operation| {
                 let (name, origin) = match operation {
                     FusionOp::Primitive { op, .. } => {
-                        let epilogue = if *op == PrimitiveOp::ElemPow {
-                            let entry = &runmat_builtins::POWER_CATALOG_ENTRY;
-                            let [binding] = entry.bindings else {
-                                return None;
-                            };
-                            canonical_fusion_declaration(entry.binding_identity(binding))?.epilogue
-                        } else {
-                            None
-                        };
+                        let semantic = SemanticBinding::capture(operation).ok()?;
+                        let epilogue = semantic.and_then(|binding| binding.declaration.epilogue);
                         return Some(Operation {
                             identity: Identity::Primitive(*op),
                             structural: None,
                             epilogue,
                             reduction: None,
+                            semantic,
                         });
                     }
                     FusionOp::Builtin { name, origin, .. } => (name, *origin),
@@ -87,6 +83,7 @@ impl AdmittedBindings {
                         structural: declaration.structural,
                         epilogue: declaration.epilogue,
                         reduction: declaration.reduction,
+                        semantic: Some(SemanticBinding::selected(declaration)?),
                     });
                 }
                 let expected = match origin {
@@ -94,6 +91,10 @@ impl AdmittedBindings {
                     _ => None,
                 };
                 let selected = selected_fusion_binding(name, expected, request.runtime.as_ref())?;
+                let semantic = match selected.canonical {
+                    Some(declaration) => Some(SemanticBinding::selected(declaration)?),
+                    None => None,
+                };
                 Some(Operation {
                     identity: Identity::Call {
                         origin,
@@ -102,6 +103,7 @@ impl AdmittedBindings {
                     structural: selected.structural,
                     epilogue: selected.epilogue,
                     reduction: selected.reduction,
+                    semantic,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -110,6 +112,9 @@ impl AdmittedBindings {
 
     pub fn structural(&self, index: usize) -> Option<FusionStructuralOperation> {
         self.operations.get(index)?.structural
+    }
+    pub fn semantic(&self, index: usize) -> Option<SemanticBinding> {
+        self.operations.get(index)?.semantic
     }
     pub fn epilogue(&self, index: usize) -> Option<FusionEpilogueOperation> {
         self.operations.get(index)?.epilogue

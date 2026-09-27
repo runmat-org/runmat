@@ -13,6 +13,7 @@ use runmat_builtins::{
 /// method-overload, output-count, or numerical-domain admission.
 pub struct SelectedFusionBinding {
     pub identity: SelectedFusionIdentity,
+    pub canonical: Option<super::CanonicalFusionDeclaration>,
     pub epilogue: Option<FusionEpilogueOperation>,
     pub structural: Option<FusionStructuralOperation>,
     pub reduction: Option<&'static super::FusionReductionDeclaration>,
@@ -82,6 +83,7 @@ pub fn selected_fusion_binding(
         let declaration = canonical_fusion_declaration(identity)?;
         return Some(SelectedFusionBinding {
             identity: SelectedFusionIdentity::Canonical(identity),
+            canonical: Some(declaration),
             epilogue: declaration.epilogue,
             structural: declaration.structural,
             reduction: declaration.reduction,
@@ -111,6 +113,7 @@ pub fn selected_fusion_binding(
         declarations.next().is_none().then_some(declaration)
     })?;
     Some(SelectedFusionBinding {
+        canonical: None,
         identity: SelectedFusionIdentity::Legacy {
             physical_owner: implementation.builtin_path,
         },

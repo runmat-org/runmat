@@ -51,12 +51,61 @@ impl FusionReductionContext<'_> {
 
 pub type FusionReductionFuture<'a> =
     Pin<Box<dyn Future<Output = crate::BuiltinResult<Option<FusionReductionContract>>> + 'a>>;
-pub type FusionReductionResolver =
-    for<'a> fn(FusionReductionContext<'a>) -> FusionReductionFuture<'a>;
-
 pub struct FusionReductionDeclaration {
     pub revision: u32,
-    pub resolve: FusionReductionResolver,
+    pub prepare: FusionReductionPreparer,
+}
+
+/// Parsed by the operation owner before producer admission can touch a device.
+/// Resolving the final, domain-refined fact is pure and does not parse again.
+pub trait PreparedFusionReduction {
+    fn resolve(&self, input: &ValueFact) -> crate::BuiltinResult<Option<FusionReductionContract>>;
+}
+
+pub struct FusionReductionControls<'a> {
+    pub values: &'a [Value],
+    pub requested_outputs: usize,
+}
+impl FusionReductionControls<'_> {
+    pub fn supported(&self) -> bool {
+        self.requested_outputs == 1
+            && self.values.iter().all(|value| {
+                matches!(
+                    value,
+                    Value::Num(_)
+                        | Value::Int(_)
+                        | Value::String(_)
+                        | Value::CharArray(_)
+                        | Value::StringArray(_)
+                        | Value::Tensor(_)
+                )
+            })
+    }
+}
+pub type FusionReductionPrepareFuture<'a> = Pin<
+    Box<dyn Future<Output = crate::BuiltinResult<Option<Box<dyn PreparedFusionReduction>>>> + 'a>,
+>;
+pub type FusionReductionPreparer =
+    for<'a> fn(FusionReductionControls<'a>) -> FusionReductionPrepareFuture<'a>;
+
+impl FusionReductionDeclaration {
+    pub fn resolve<'a>(&'a self, context: FusionReductionContext<'a>) -> FusionReductionFuture<'a> {
+        Box::pin(async move {
+            // Preserve the standalone resolver's existing unsupported-input gate.
+            if context.real_floating_input().is_none() {
+                return Ok(None);
+            }
+            let Some(prepared) = (self.prepare)(FusionReductionControls {
+                values: context.controls,
+                requested_outputs: context.requested_outputs,
+            })
+            .await?
+            else {
+                return Ok(None);
+            };
+            prepared.resolve(context.input)
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

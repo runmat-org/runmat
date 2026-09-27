@@ -1,21 +1,43 @@
 use super::*;
 use crate::builtins::common::spec::{
     checked_reduction_elements, FusionReductionContext, FusionReductionContract,
-    FusionReductionCount, FusionReductionDeclaration, FusionReductionEmpty, FusionReductionFuture,
-    FusionReductionOperation, FusionReductionTies,
+    FusionReductionControls, FusionReductionCount, FusionReductionDeclaration,
+    FusionReductionEmpty, FusionReductionOperation, FusionReductionPrepareFuture,
+    FusionReductionTies, PreparedFusionReduction,
 };
 use runmat_types::NumericClass;
 
 pub(super) const DECLARATION: FusionReductionDeclaration = FusionReductionDeclaration {
-    revision: 1,
-    resolve,
+    revision: 2,
+    prepare,
 };
-fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
+fn prepare(controls: FusionReductionControls<'_>) -> FusionReductionPrepareFuture<'_> {
     Box::pin(async move {
-        let Some((input_class, shape)) = context.real_floating_input() else {
+        if !controls.supported() {
+            return Ok(None);
+        }
+        let parsed = parse_arguments(controls.values).await?;
+        Ok(Some(
+            Box::new(Prepared(parsed)) as Box<dyn PreparedFusionReduction>
+        ))
+    })
+}
+
+struct Prepared(ParsedArguments);
+impl PreparedFusionReduction for Prepared {
+    fn resolve(
+        &self,
+        input: &runmat_types::ValueFact,
+    ) -> BuiltinResult<Option<FusionReductionContract>> {
+        let Some((input_class, shape)) = (FusionReductionContext {
+            input,
+            controls: &[],
+            requested_outputs: 1,
+        })
+        .real_floating_input() else {
             return Ok(None);
         };
-        let parsed = parse_arguments(context.controls).await?;
+        let parsed = &self.0;
         let resolved = resolve_dims(&shape, &parsed.selection)?;
         let identity = resolved.dims_in_bounds.is_empty();
         let raw_class = if identity {
@@ -58,7 +80,7 @@ fn resolve(context: FusionReductionContext<'_>) -> FusionReductionFuture<'_> {
             empty: FusionReductionEmpty::PositiveZero,
             ties: FusionReductionTies::NotApplicable,
         }))
-    })
+    }
 }
 
 #[cfg(test)]
@@ -68,7 +90,7 @@ mod tests {
 
     fn receipt(value: &Value, controls: &[Value]) -> Option<FusionReductionContract> {
         let fact = value_fact(value);
-        futures::executor::block_on((DECLARATION.resolve)(FusionReductionContext {
+        futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {
             input: &fact,
             controls,
             requested_outputs: 1,
@@ -107,11 +129,13 @@ mod tests {
             Value::Num(0.0)
         );
         let fact = value_fact(&input);
-        assert!(futures::executor::block_on(resolve(FusionReductionContext {
-            input: &fact,
-            controls: &[Value::Num(0.5)],
-            requested_outputs: 1
-        }))
-        .is_err());
+        assert!(
+            futures::executor::block_on(DECLARATION.resolve(FusionReductionContext {
+                input: &fact,
+                controls: &[Value::Num(0.5)],
+                requested_outputs: 1
+            }))
+            .is_err()
+        );
     }
 }

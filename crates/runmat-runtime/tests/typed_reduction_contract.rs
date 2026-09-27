@@ -23,7 +23,7 @@ fn declaration(name: &str) -> &'static FusionReductionDeclaration {
         "{name}: update explicit lineage witness when canonical migration lands"
     );
     let declaration = selected.reduction.expect("joined typed declaration");
-    assert_eq!(declaration.revision, 1);
+    assert_eq!(declaration.revision, 2);
     declaration
 }
 fn receipt(
@@ -33,7 +33,7 @@ fn receipt(
     outputs: usize,
 ) -> BuiltinResult<Option<FusionReductionContract>> {
     let fact = value_fact(input);
-    block_on((declaration(name).resolve)(FusionReductionContext {
+    block_on(declaration(name).resolve(FusionReductionContext {
         input: &fact,
         controls,
         requested_outputs: outputs,

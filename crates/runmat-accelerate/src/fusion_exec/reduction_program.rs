@@ -9,7 +9,7 @@ use crate::graph::ValueId;
 use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult, ProviderPrecision};
 use runmat_execution::Digest;
 use runmat_runtime::builtins::common::spec::{
-    FusionReductionContext, FusionReductionContract, ScalarType,
+    FusionReductionContract, FusionReductionControls, ScalarType,
 };
 use runmat_types::NumericClass;
 use runmat_value::Value;
@@ -72,12 +72,19 @@ pub async fn resolve_reduction_program<'a>(
     let Some(declaration) = bindings.reduction(mapped.terminal) else {
         return Ok(None);
     };
-    // Preflight pure canonical producer declarations before resolve can probe.
-    for operation in &mapped.producer.operations {
-        if let crate::fusion::FusionOp::Builtin { name, .. } = operation {
-            let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) else {
-                return Ok(None);
-            };
+    // Capture the original operation's selected authority, not a fresh lookup
+    // in the pruned program after an earlier admission has suspended.
+    let snapshots: Vec<_> = mapped
+        .producer_indices
+        .iter()
+        .map(|&index| bindings.semantic(index))
+        .collect();
+    for (operation, snapshot) in mapped.producer.operations.iter().zip(&snapshots) {
+        if matches!(operation, crate::fusion::FusionOp::Builtin { .. }) && snapshot.is_none() {
+            return Ok(None);
+        }
+        if let Some(snapshot) = snapshot {
+            let entry = snapshot.entry;
             if entry.contract.purity != runmat_builtins::BuiltinPurity::Pure
                 || entry.contract.workspace_effect.is_some()
                 || entry.contract.environment_effect.is_some()
@@ -86,12 +93,22 @@ pub async fn resolve_reduction_program<'a>(
             }
         }
     }
+    let Some(prepared) = (declaration.prepare)(FusionReductionControls {
+        values: &mapped.controls,
+        requested_outputs: 1,
+    })
+    .await
+    .map_err(ProviderExecutionError::from_source)?
+    else {
+        return Ok(None);
+    };
     let values: Vec<_> = mapped.data.iter().map(|input| input.value).collect();
-    let program = match ResolvedProgram::resolve_borrowed(
+    let program = match ResolvedProgram::resolve_captured(
         &mapped.producer,
         &values,
         precision,
         request.placement,
+        &snapshots,
     )
     .await
     {
@@ -107,13 +124,9 @@ pub async fn resolve_reduction_program<'a>(
         Ok(fact) => fact,
         Err(_) => return Ok(None),
     };
-    let Some(contract) = (declaration.resolve)(FusionReductionContext {
-        input: fact,
-        controls: &mapped.controls,
-        requested_outputs: 1,
-    })
-    .await
-    .map_err(ProviderExecutionError::from_source)?
+    let Some(contract) = prepared
+        .resolve(fact)
+        .map_err(ProviderExecutionError::from_source)?
     else {
         return Ok(None);
     };
