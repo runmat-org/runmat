@@ -108,15 +108,14 @@ fn actual_single_f64_dispatch_defers_exactly_one_success_until_private_fence_com
     );
 
     let submission = gate.release();
-    let AccelContextHandle::Wgpu(device) = provider
+    let AccelContextHandle::Wgpu(context) = provider
         .inner
         .export_context(AccelContextKind::Plotting)
         .unwrap();
     // Only the test waits. Production submission and publication stay nonblocking.
     // Wait for this exact ticket, never a newest/global queue prefix or a sleep.
-    device
-        .device
-        .poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
+    let access = context.access.clone();
+    access.poll(wgpu::Maintain::WaitForSubmissionIndex(submission));
     let mut source = probe.source.borrow_mut().take().unwrap();
     let feedback = source
         .take_ready()
