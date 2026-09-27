@@ -20,6 +20,7 @@ enum Fault {
     Pending,
     Alias,
     BadStorage,
+    MutateAlias,
 }
 #[derive(Default)]
 struct State {
@@ -108,6 +109,10 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             let fault = self.step();
             self.before(fault).await?;
+            if matches!(fault, Fault::MutateAlias) {
+                runmat_accelerate_api::set_handle_logical(input, true);
+                return Ok(input.clone());
+            }
             if matches!(fault, Fault::Alias) {
                 return Ok(input.clone());
             }
@@ -235,12 +240,52 @@ fn provider_zero_through_three_outputs_expand_xy_with_z_and_release_discarded_ha
 #[test]
 fn malformed_and_aliased_provider_outputs_are_rejected_without_freeing_inputs() {
     let _lock = test_support::accel_test_lock();
-    for (at, fault) in [(3, Fault::Alias), (5, Fault::Alias), (3, Fault::BadStorage)] {
+    for (at, fault) in [
+        (3, Fault::Alias),
+        (5, Fault::Alias),
+        (3, Fault::BadStorage),
+        (3, Fault::MutateAlias),
+    ] {
         let provider = provider(at, fault);
         let _provider = ThreadProviderGuard::set(Some(provider));
         let (borrowed, args) = inputs(provider);
+        let metadata = runmat_accelerate_api::snapshot_handle_metadata(&borrowed);
         let error = run(&args, 3).unwrap_err();
         assert_eq!(error.identifier(), ERROR_INTERNAL.identifier);
+        assert_eq!(
+            runmat_accelerate_api::snapshot_handle_metadata(&borrowed),
+            metadata
+        );
+        provider.assert_reclaimed(0);
+        assert_borrowed_live(provider, &borrowed);
+    }
+}
+
+#[test]
+fn pol2cart_outputs_preserve_automatic_and_explicit_input_provenance() {
+    let _lock = test_support::accel_test_lock();
+    for provenance in [
+        runmat_accelerate_api::GpuHandleProvenance::Automatic,
+        runmat_accelerate_api::GpuHandleProvenance::Explicit,
+    ] {
+        let provider = provider(0, Fault::None);
+        let _provider = ThreadProviderGuard::set(Some(provider));
+        let (mut borrowed, mut args) = inputs(provider);
+        runmat_accelerate_api::set_handle_provenance(&mut borrowed, provenance);
+        args[0] = Value::GpuTensor(borrowed.clone());
+        let Value::OutputList(outputs) = run(&args, 3).unwrap() else {
+            panic!("outputs")
+        };
+        for output in outputs {
+            let Value::GpuTensor(handle) = output else {
+                panic!("resident output")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_provenance(&handle),
+                Some(provenance)
+            );
+            provider.free(&handle).unwrap();
+        }
         provider.assert_reclaimed(0);
         assert_borrowed_live(provider, &borrowed);
     }

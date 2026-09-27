@@ -62,6 +62,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         .arguments
         .iter()
         .all(|input| input.residency == ResidencyFact::Host);
+    let may_prepare = [NumericClass::Double, NumericClass::Single].iter().any(|class| {
+        request.arguments.iter().all(|input| {
+            matches!(input.kind, ValueKindFact::Unknown)
+                || matches!(input.kind, ValueKindFact::Numeric(numeric) if numeric.class == *class && numeric.domain == NumericDomain::Real)
+        })
+    });
     let outputs = (0..count)
         .map(|index| {
             let class = if index < 2 {
@@ -90,7 +96,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
             fact.shape = shape.clone();
             crate::catalog::inference::materialize(&mut fact);
-            fact.residency = if all_host {
+            fact.residency = if all_host && !may_prepare {
                 ResidencyFact::Host
             } else {
                 ResidencyFact::Unknown

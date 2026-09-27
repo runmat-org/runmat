@@ -19,11 +19,14 @@ mod admission;
 mod host;
 mod owned;
 mod provider;
+mod preparation;
 mod specs;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 mod provider_tests;
+#[cfg(test)]
+mod preparation_tests;
 use host::*;
 use provider::*;
 #[cfg(test)]
@@ -63,7 +66,7 @@ async fn pol2cart_builtin(theta: Value, rho: Value, rest: Vec<Value>) -> Builtin
             _ => None,
         })
         .collect();
-    let result = execute(inputs, &shape, requested_outputs).await?;
+    let result = preparation::execute(inputs, &shape, requested_outputs).await?;
     // A terminal coordinate transform ends fusion use only after successful
     // semantic work; this never frees inputs or changes explicit GPU intent.
     for source in sources {

@@ -129,13 +129,13 @@ async fn evaluate(
     let theta = &operands[0];
     let rho = &operands[1];
     let pair_shape = matlab_broadcast_shape(&theta.shape, &rho.shape)?;
-    let cos = provider.unary_cos(theta).await?;
+    let cos = outputs.run_protected(provider.unary_cos(theta)).await?;
     let cos = outputs.adopt(provider, cos, theta, &theta.shape, precision)?;
-    let sin = provider.unary_sin(theta).await?;
+    let sin = outputs.run_protected(provider.unary_sin(theta)).await?;
     let sin = outputs.adopt(provider, sin, theta, &theta.shape, precision)?;
-    let x = provider.elem_mul(rho, &cos).await?;
+    let x = outputs.run_protected(provider.elem_mul(rho, &cos)).await?;
     let mut x = outputs.adopt(provider, x, theta, &pair_shape, precision)?;
-    let y = provider.elem_mul(rho, &sin).await?;
+    let y = outputs.run_protected(provider.elem_mul(rho, &sin)).await?;
     let mut y = outputs.adopt(provider, y, theta, &pair_shape, precision)?;
     let count = requested.unwrap_or(1);
     let needs_xy_expansion = pair_shape != shape;
@@ -161,9 +161,9 @@ async fn evaluate(
     };
     if needs_xy_expansion {
         let ones = ones.as_ref().expect("expansion multiplier");
-        let expanded = provider.elem_mul(&x, ones).await?;
+        let expanded = outputs.run_protected(provider.elem_mul(&x, ones)).await?;
         x = outputs.adopt(provider, expanded, theta, shape, precision)?;
-        let expanded = provider.elem_mul(&y, ones).await?;
+        let expanded = outputs.run_protected(provider.elem_mul(&y, ones)).await?;
         y = outputs.adopt(provider, expanded, theta, shape, precision)?;
     }
     let mut result = Vec::with_capacity(count);
@@ -191,7 +191,9 @@ async fn evaluate(
                 outputs.adopt(provider, handle, theta, &[1, 1], precision)?
             }
         };
-        let output = provider.elem_mul(z, &multiplier).await?;
+        let output = outputs
+            .run_protected(provider.elem_mul(z, &multiplier))
+            .await?;
         result.push(outputs.adopt(provider, output, theta, shape, precision)?);
     }
     Ok(result)

@@ -6,6 +6,7 @@ use runmat_accelerate_api::ProviderPrecision;
 pub(super) struct Outputs {
     borrowed: Vec<GpuTensorHandle>,
     owned: Vec<(GpuTensorHandle, &'static dyn AccelProvider)>,
+    provenance: Option<runmat_accelerate_api::GpuHandleProvenance>,
 }
 
 impl Outputs {
@@ -19,7 +20,35 @@ impl Outputs {
                 })
                 .collect(),
             owned: Vec::new(),
+            provenance: inputs
+                .iter()
+                .filter_map(|value| match value {
+                    Value::GpuTensor(handle) => runmat_accelerate_api::handle_provenance(handle),
+                    _ => None,
+                })
+                .reduce(|left, right| {
+                    use runmat_accelerate_api::GpuHandleProvenance::Explicit;
+                    if left == Explicit || right == Explicit {
+                        Explicit
+                    } else {
+                        left
+                    }
+                }),
         }
+    }
+
+    pub(super) async fn run_protected<T>(
+        &self,
+        future: impl std::future::Future<Output = anyhow::Result<T>>,
+    ) -> anyhow::Result<T> {
+        let guards: Vec<_> = self
+            .protected()
+            .into_iter()
+            .map(runmat_accelerate_api::HandleMetadataRestoreGuard::new)
+            .collect();
+        let result = future.await;
+        drop(guards);
+        result
     }
 
     pub(super) fn protected(&self) -> Vec<&GpuTensorHandle> {
@@ -32,7 +61,7 @@ impl Outputs {
     pub(super) fn adopt(
         &mut self,
         provider: &'static dyn AccelProvider,
-        output: GpuTensorHandle,
+        mut output: GpuTensorHandle,
         anchor: &GpuTensorHandle,
         shape: &[usize],
         precision: ProviderPrecision,
@@ -59,6 +88,9 @@ impl Outputs {
                 &ERROR_INTERNAL,
                 "provider returned an invalid or aliased coordinate result",
             ));
+        }
+        if let Some(provenance) = self.provenance {
+            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
         }
         self.owned.push((output.clone(), provider));
         Ok(output)

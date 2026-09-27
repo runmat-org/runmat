@@ -28,7 +28,24 @@ pub const POL2CART_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
-        preparation: BuiltinOperandPreparation::RuntimeOwned,
+        preparation: BuiltinOperandPreparation::Forms(&[
+            BuiltinPreparationForm {
+                id: BuiltinPreparationFormId(0),
+                binding_variant: "default",
+                signatures: &[0],
+                data_arguments: &[0, 1],
+                operation: BuiltinPreparationOperation::ElementwiseNary { data_arity: 2 },
+                provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
+            },
+            BuiltinPreparationForm {
+                id: BuiltinPreparationFormId(1),
+                binding_variant: "default",
+                signatures: &[1],
+                data_arguments: &[0, 1, 2],
+                operation: BuiltinPreparationOperation::ElementwiseNary { data_arity: 3 },
+                provider_requirement: BuiltinPreparationProviderRequirement::InputSupported,
+            },
+        ]),
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

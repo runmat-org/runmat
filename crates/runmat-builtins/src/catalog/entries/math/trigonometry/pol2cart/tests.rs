@@ -43,7 +43,7 @@ fn polar_and_cylindrical_shapes_include_trailing_dimensions_and_elevation() {
         assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
         for output in result.outputs {
             assert_eq!(output.shape, numeric(NumericClass::Double, &expected).shape);
-            assert_eq!(output.residency, ResidencyFact::Host);
+            assert_eq!(output.residency, ResidencyFact::Unknown);
         }
     }
 }
