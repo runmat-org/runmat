@@ -25,8 +25,8 @@ pub fn value_shape_2d(value: &Value) -> (usize, usize) {
             array.shape().get(1).copied().unwrap_or(1),
         ),
         Value::GpuTensor(handle) => {
-            let rows = handle.shape.first().copied().unwrap_or(1);
-            let cols = handle.shape.get(1).copied().unwrap_or(1);
+            let rows = handle.shape().first().copied().unwrap_or(1);
+            let cols = handle.shape().get(1).copied().unwrap_or(1);
             (rows, cols)
         }
         _ => (1, 1),
@@ -45,7 +45,7 @@ pub fn value_is_empty(value: &Value) -> bool {
         Value::StructArray(array) => array.is_empty(),
         Value::SymbolicArray(array) => array.data.is_empty(),
         Value::ObjectArray(array) => array.is_empty(),
-        Value::GpuTensor(handle) => handle.shape.contains(&0),
+        Value::GpuTensor(handle) => handle.shape().contains(&0),
         _ => false,
     }
 }
@@ -61,7 +61,7 @@ pub fn value_is_scalar_or_empty(value: &Value) -> bool {
         Value::SymbolicArray(value) => &value.shape,
         Value::ObjectArray(value) => value.shape(),
         Value::CharArray(value) => &value.shape,
-        Value::GpuTensor(handle) => &handle.shape,
+        Value::GpuTensor(handle) => handle.shape(),
         _ => {
             let (rows, cols) = value_shape_2d(value);
             return (rows == 1 && cols == 1) || rows == 0 || cols == 0;
@@ -81,7 +81,7 @@ pub fn value_is_column(value: &Value) -> bool {
         Value::SymbolicArray(value) => &value.shape,
         Value::ObjectArray(value) => value.shape(),
         Value::CharArray(value) => &value.shape,
-        Value::GpuTensor(handle) => &handle.shape,
+        Value::GpuTensor(handle) => handle.shape(),
         _ => {
             let (_, cols) = value_shape_2d(value);
             return cols == 1;
@@ -110,7 +110,7 @@ pub fn value_is_vector(value: &Value) -> Result<bool, RuntimeError> {
         Value::SymbolicArray(value) => shape_is_vector(&value.shape),
         Value::ObjectArray(value) => shape_is_vector(value.shape()),
         Value::CharArray(value) => shape_is_vector(&value.shape),
-        Value::GpuTensor(handle) => shape_is_vector(&handle.shape),
+        Value::GpuTensor(handle) => shape_is_vector(handle.shape()),
         Value::SparseTensor(value) => value.rows == 1 || value.cols == 1,
         _ => true,
     })

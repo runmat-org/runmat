@@ -180,17 +180,18 @@ pub async fn native_integer_value_is_exact_f64_async(value: &Value) -> Result<bo
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build());
         }
-        let snapshot = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+        let _residency = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
         let gathered = provider.download_integer(handle).await.map_err(|error| {
-            build_runtime_error(format!(
+            let mut failure = build_runtime_error(format!(
                 "integer exactness check: owner-preserving download failed: {error}"
             ))
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build()
+            .build();
+            failure.source = Some(error.into_boxed_dyn_error());
+            failure
         });
-        crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &snapshot);
         let gathered = gathered?;
-        if gathered.shape != handle.shape || gathered.data.element_type() != expected_type {
+        if gathered.shape != handle.shape() || gathered.data.element_type() != expected_type {
             return Err(build_runtime_error(
                 "integer exactness check: provider returned contradictory integer payload metadata",
             )
