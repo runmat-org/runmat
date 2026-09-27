@@ -11,6 +11,7 @@ use crate::backend::wgpu::params::{
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::resources::UniformBufferKey;
 use crate::backend::wgpu::types::NumericPrecision;
+#[path = "image/imfilter.rs"]
 mod imfilter;
 
 impl WgpuProvider {
