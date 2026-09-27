@@ -20,7 +20,7 @@ struct Provider {
 }
 
 impl Provider {
-    fn reduce(&self) -> anyhow::Result<ReduceDimResult> {
+    fn reject<T>(&self) -> anyhow::Result<T> {
         self.reductions.fetch_add(1, Ordering::SeqCst);
         match self.fault {
             Fault::Execution => Err(std::io::Error::new(
@@ -70,14 +70,38 @@ impl AccelProvider for Provider {
         _: &'a GpuTensorHandle,
         _: usize,
     ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reduce() })
+        Box::pin(async move { self.reject() })
     }
     fn reduce_max_dim<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
         _: usize,
     ) -> AccelProviderFuture<'a, ReduceDimResult> {
-        Box::pin(async move { self.reduce() })
+        Box::pin(async move { self.reject() })
+    }
+
+    fn elem_min<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject() })
+    }
+    fn elem_max<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject() })
+    }
+    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
+    }
+    fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
+    }
+    fn scalar_max(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
     }
 }
 
@@ -163,4 +187,74 @@ fn dimensional_extrema_never_dispatch_unregistered_input_to_selected_provider() 
     input.handle.allocation_lease().validate_live().unwrap();
     drop(input.handle);
     assert_eq!(input.probe.retirements(), 1);
+}
+
+#[test]
+fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback() {
+    for name in ["min", "max"] {
+        for form in 0..3 {
+            for fault in [Fault::Execution, Fault::Unsupported] {
+                let provider = Box::leak(Box::new(Provider {
+                    owner: TestAllocationOwner::new(),
+                    fault,
+                    reductions: AtomicUsize::new(0),
+                    downloads: AtomicUsize::new(0),
+                }));
+                let _selected = ThreadProviderGuard::set(Some(provider));
+                let left = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let right = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let args = match form {
+                    0 => vec![
+                        Value::GpuTensor(left.handle.clone()),
+                        Value::GpuTensor(right.handle.clone()),
+                    ],
+                    1 => vec![Value::GpuTensor(left.handle.clone()), Value::Num(2.0)],
+                    _ => vec![Value::Num(2.0), Value::GpuTensor(right.handle.clone())],
+                };
+                let result = futures::executor::block_on(crate::call_builtin_async(name, &args));
+                if matches!(fault, Fault::Execution) {
+                    let error = result.unwrap_err();
+                    assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+                    let source = error.source.as_ref().unwrap();
+                    let source = source
+                        .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                        .unwrap();
+                    assert_eq!(
+                        std::error::Error::source(source)
+                            .unwrap()
+                            .downcast_ref::<std::io::Error>()
+                            .unwrap()
+                            .kind(),
+                        std::io::ErrorKind::BrokenPipe,
+                    );
+                    assert_eq!(provider.reductions.load(Ordering::SeqCst), 1);
+                    assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+                } else {
+                    let Value::Tensor(output) = result.unwrap() else {
+                        panic!("host capability fallback");
+                    };
+                    assert_eq!(output.shape, vec![2, 1]);
+                    let expected = if name == "max" && form != 0 { 2.0 } else { 0.0 };
+                    assert_eq!(output.materialize_f64(), vec![expected, expected]);
+                    assert_eq!(
+                        provider.downloads.load(Ordering::SeqCst),
+                        if form == 0 { 2 } else { 1 }
+                    );
+                }
+                drop(args);
+                for input in [left, right] {
+                    assert_eq!(input.probe.retirements(), 0);
+                    input.handle.allocation_lease().validate_live().unwrap();
+                    drop(input.handle);
+                    assert_eq!(input.probe.retirements(), 1);
+                }
+            }
+        }
+    }
 }

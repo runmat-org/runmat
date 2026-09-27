@@ -4,7 +4,17 @@
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, GpuGatherRetry, RuntimeError};
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, ReduceDimResult};
-use runmat_value::Value;
+use runmat_value::{Tensor, Value};
+
+macro_rules! supported {
+    ($kind:expr, $operation:expr, $result:expr) => {
+        match $kind.optional($operation, $result)? {
+            Some(value) => value,
+            None => return Ok(None),
+        }
+    };
+}
+pub(super) use supported;
 
 #[derive(Clone, Copy)]
 pub(super) enum ExtremaKind {
@@ -68,6 +78,28 @@ impl ExtremaKind {
             Self::Max => provider.reduce_max_dim(input, dimension).await,
         };
         self.optional("dimensional extrema reduction", result)
+    }
+
+    pub(super) fn pair_owner(
+        self,
+        left: &GpuTensorHandle,
+        right: &GpuTensorHandle,
+    ) -> BuiltinResult<Option<&'static dyn AccelProvider>> {
+        let left_owner = self.owner(left)?;
+        let right_owner = self.owner(right)?;
+        // The existing mixed-provider route gathers each input through its
+        // own provider. Never dispatch one owner's allocation to the other.
+        Ok(std::ptr::eq(left_owner, right_owner).then_some(left_owner))
+    }
+
+    pub(super) async fn gather_tensor(self, input: &GpuTensorHandle) -> BuiltinResult<Tensor> {
+        self.owner(input)?;
+        gpu_helpers::gather_tensor_async(input)
+            .await
+            .map_err(|mut error| {
+                error.gpu_gather_retry = GpuGatherRetry::Never;
+                error
+            })
     }
 
     pub(super) async fn gather(self, input: &GpuTensorHandle) -> BuiltinResult<Value> {

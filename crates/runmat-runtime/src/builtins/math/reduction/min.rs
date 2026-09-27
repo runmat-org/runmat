@@ -1748,38 +1748,36 @@ async fn elementwise_min(value: Value, args: ElementwiseArgs) -> BuiltinResult<M
     }
     match (value, other) {
         (Value::GpuTensor(handle_a), Value::GpuTensor(handle_b)) => {
-            if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await {
+            if let Some(eval) = elementwise_min_gpu_pair(&handle_a, &handle_b, comparison).await? {
                 return Ok(eval);
             }
-            if let (Ok(ta), Ok(tb)) = (
-                gpu_helpers::gather_tensor_async(&handle_a).await,
-                gpu_helpers::gather_tensor_async(&handle_b).await,
-            ) {
-                if let Ok(eval) =
-                    elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
-                {
-                    return Ok(eval);
-                }
-            }
-            Err(min_internal_error("min: elementwise GPU path failed"))
+            let ta = super::extrema_provider::ExtremaKind::Min
+                .gather_tensor(&handle_a)
+                .await?;
+            let tb = super::extrema_provider::ExtremaKind::Min
+                .gather_tensor(&handle_b)
+                .await?;
+            elementwise_real_or_complex(Value::Tensor(ta), Value::Tensor(tb), comparison)
         }
         (Value::GpuTensor(handle), other) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await {
-                return Ok(eval);
-            }
-            let t = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|_| min_internal_error("min: elementwise GPU scalar path failed"))?;
-            elementwise_real_or_complex(Value::Tensor(t), other, comparison)
-        }
-        (other, Value::GpuTensor(handle)) => {
-            if let Some(eval) = elementwise_min_gpu_scalar_right(&other, &handle, comparison).await
+            if let Some(eval) = elementwise_min_gpu_scalar_left(&handle, &other, comparison).await?
             {
                 return Ok(eval);
             }
-            let t = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|_| min_internal_error("min: elementwise GPU scalar path failed"))?;
+            let t = super::extrema_provider::ExtremaKind::Min
+                .gather_tensor(&handle)
+                .await?;
+            elementwise_real_or_complex(Value::Tensor(t), other, comparison)
+        }
+        (other, Value::GpuTensor(handle)) => {
+            if let Some(eval) =
+                elementwise_min_gpu_scalar_right(&other, &handle, comparison).await?
+            {
+                return Ok(eval);
+            }
+            let t = super::extrema_provider::ExtremaKind::Min
+                .gather_tensor(&handle)
+                .await?;
             elementwise_real_or_complex(other, Value::Tensor(t), comparison)
         }
         (lhs, rhs) => elementwise_real_or_complex(lhs, rhs, comparison),
@@ -1790,89 +1788,96 @@ async fn elementwise_min_gpu_pair(
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
     comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
+) -> BuiltinResult<Option<MinEvaluation>> {
+    let kind = super::extrema_provider::ExtremaKind::Min;
     if comparison != ComparisonMethod::Auto {
-        return None;
+        return Ok(None);
     }
-    if a.device_id() != b.device_id() {
-        return None;
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(a)?;
+    let Some(provider) = kind.pair_owner(a, b)? else {
+        return Ok(None);
+    };
     // Equal-shape fast path
     if a.shape() == b.shape() {
-        let values = provider.elem_min(a, b).await.ok()?;
+        let values =
+            super::extrema_provider::supported!(kind, "elem_min", provider.elem_min(a, b).await);
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
-        if let Ok(mask) = provider.elem_le(a, b).await {
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
+        if let Some(mask) = kind.optional("elem_le", provider.elem_le(a, b).await)? {
+            let mask_host = kind.gather_tensor(&mask).await?;
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
-            let index_tensor = Tensor::new(indices, mask_host.shape.clone()).ok()?;
-            return Some(MinEvaluation {
+            let index_tensor = Tensor::new(indices, mask_host.shape.clone())
+                .map_err(|error| kind.contract_error(error))?;
+            return Ok(Some(MinEvaluation {
                 values: Value::GpuTensor(values),
                 indices: tensor::tensor_into_value(index_tensor),
-            });
+            }));
         } else {
             // Host indices only
-            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
-            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
+            let ta = kind.gather_tensor(a).await?;
+            let tb = kind.gather_tensor(b).await?;
             let a_values = tensor::tensor_values_f64_cow(&ta);
             let b_values = tensor::tensor_values_f64_cow(&tb);
             let mut indices = Vec::with_capacity(a_values.len());
             for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
                 indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
             }
-            let index_tensor = Tensor::new(indices, ta.shape.clone()).ok()?;
-            return Some(MinEvaluation {
+            let index_tensor = Tensor::new(indices, ta.shape.clone())
+                .map_err(|error| kind.contract_error(error))?;
+            return Ok(Some(MinEvaluation {
                 values: Value::GpuTensor(values),
                 indices: tensor::tensor_into_value(index_tensor),
-            });
+            }));
         }
     }
     // Broadcast-compatible path via repmat, then device compare
-    let (out_shape, reps_a, reps_b) = broadcast_reps(a.shape(), b.shape())?;
+    let Some((out_shape, reps_a, reps_b)) = broadcast_reps(a.shape(), b.shape()) else {
+        return Ok(None);
+    };
     let a_exp = if reps_a.iter().any(|&r| r != 1) {
-        provider.repmat(a, &reps_a).ok()?
+        super::extrema_provider::supported!(kind, "repmat", provider.repmat(a, &reps_a))
     } else {
         a.clone()
     };
     let b_exp = if reps_b.iter().any(|&r| r != 1) {
-        provider.repmat(b, &reps_b).ok()?
+        super::extrema_provider::supported!(kind, "repmat", provider.repmat(b, &reps_b))
     } else {
         b.clone()
     };
-    let values = provider.elem_min(&a_exp, &b_exp).await.ok();
-    let mask = provider.elem_le(&a_exp, &b_exp).await.ok();
-    let values = values?;
+    let values = kind.optional("elem_min", provider.elem_min(&a_exp, &b_exp).await)?;
+    let Some(values) = values else {
+        return Ok(None);
+    };
+    let mask = kind.optional("elem_le", provider.elem_le(&a_exp, &b_exp).await)?;
     if values.shape() != out_shape {
-        return None;
+        return Err(kind.contract_error("provider extrema output has incorrect broadcast shape"));
     }
     let index_tensor = if let Some(mask) = mask {
-        let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
+        let mask_host = kind.gather_tensor(&mask).await?;
         let mask_values = tensor::tensor_values_f64_cow(&mask_host);
         let mut indices = Vec::with_capacity(mask_values.len());
         for &m in mask_values.iter() {
             indices.push(if m != 0.0 { 1.0 } else { 2.0 });
         }
-        Tensor::new(indices, out_shape).ok()?
+        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
     } else {
         // Host indices fallback
-        let ta = gpu_helpers::gather_tensor_async(&a_exp).await.ok()?;
-        let tb = gpu_helpers::gather_tensor_async(&b_exp).await.ok()?;
+        let ta = kind.gather_tensor(&a_exp).await?;
+        let tb = kind.gather_tensor(&b_exp).await?;
         let a_values = tensor::tensor_values_f64_cow(&ta);
         let b_values = tensor::tensor_values_f64_cow(&tb);
         let mut indices = Vec::with_capacity(a_values.len());
         for (&a_value, &b_value) in a_values.iter().zip(b_values.iter()) {
             indices.push(if a_value <= b_value { 1.0 } else { 2.0 });
         }
-        Tensor::new(indices, out_shape).ok()?
+        Tensor::new(indices, out_shape).map_err(|error| kind.contract_error(error))?
     };
-    Some(MinEvaluation {
+    Ok(Some(MinEvaluation {
         values: Value::GpuTensor(values),
         indices: tensor::tensor_into_value(index_tensor),
-    })
+    }))
 }
 
 fn broadcast_reps(a: &[usize], b: &[usize]) -> Option<(Vec<usize>, Vec<usize>, Vec<usize>)> {
@@ -1905,90 +1910,104 @@ async fn elementwise_min_gpu_scalar_left(
     a: &GpuTensorHandle,
     other: &Value,
     comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
+) -> BuiltinResult<Option<MinEvaluation>> {
+    let kind = super::extrema_provider::ExtremaKind::Min;
     if comparison != ComparisonMethod::Auto {
-        return None;
+        return Ok(None);
     }
-    let provider = runmat_accelerate_api::provider_for_handle(a)?;
-    let scalar = extract_scalar(other)?;
-    let values = provider.scalar_min(a, scalar).ok()?;
+    let provider = kind.owner(a)?;
+    let Some(scalar) = extract_scalar(other) else {
+        return Ok(None);
+    };
+    let values =
+        super::extrema_provider::supported!(kind, "scalar_min", provider.scalar_min(a, scalar));
     // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
-        if let Ok(mask) = provider.elem_le(a, &fill).await {
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
+    let index_tensor = if let Some(fill) =
+        kind.optional("fill_like", provider.fill_like(a, scalar))?
+    {
+        if let Some(mask) = kind.optional("elem_le", provider.elem_le(a, &fill).await)? {
+            let mask_host = kind.gather_tensor(&mask).await?;
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
+            Tensor::new(indices, mask_host.shape.clone())
+                .map_err(|error| kind.contract_error(error))?
         } else {
-            let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
+            let ta = kind.gather_tensor(a).await?;
             let values = tensor::tensor_values_f64_cow(&ta);
             let mut indices = Vec::with_capacity(values.len());
             for &v in values.iter() {
                 indices.push(if v <= scalar { 1.0 } else { 2.0 });
             }
-            Tensor::new(indices, ta.shape.clone()).ok()?
+            Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
         }
     } else {
-        let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
+        let ta = kind.gather_tensor(a).await?;
         let values = tensor::tensor_values_f64_cow(&ta);
         let mut indices = Vec::with_capacity(values.len());
         for &v in values.iter() {
             indices.push(if v <= scalar { 1.0 } else { 2.0 });
         }
-        Tensor::new(indices, ta.shape.clone()).ok()?
+        Tensor::new(indices, ta.shape.clone()).map_err(|error| kind.contract_error(error))?
     };
-    Some(MinEvaluation {
+    Ok(Some(MinEvaluation {
         values: Value::GpuTensor(values),
         indices: tensor::tensor_into_value(index_tensor),
-    })
+    }))
 }
 
 async fn elementwise_min_gpu_scalar_right(
     other: &Value,
     b: &GpuTensorHandle,
     comparison: ComparisonMethod,
-) -> Option<MinEvaluation> {
+) -> BuiltinResult<Option<MinEvaluation>> {
+    let kind = super::extrema_provider::ExtremaKind::Min;
     if comparison != ComparisonMethod::Auto {
-        return None;
+        return Ok(None);
     }
-    let provider = runmat_accelerate_api::provider_for_handle(b)?;
-    let scalar = extract_scalar(other)?;
-    let values = provider.scalar_min(b, scalar).ok()?;
+    let provider = kind.owner(b)?;
+    let Some(scalar) = extract_scalar(other) else {
+        return Ok(None);
+    };
+    let values =
+        super::extrema_provider::supported!(kind, "scalar_min", provider.scalar_min(b, scalar));
     // Try device mask; if unavailable, compute on host
-    let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
-        if let Ok(mask) = provider.elem_le(&fill, b).await {
-            let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
+    let index_tensor = if let Some(fill) =
+        kind.optional("fill_like", provider.fill_like(b, scalar))?
+    {
+        if let Some(mask) = kind.optional("elem_le", provider.elem_le(&fill, b).await)? {
+            let mask_host = kind.gather_tensor(&mask).await?;
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
                 indices.push(if m != 0.0 { 1.0 } else { 2.0 });
             }
-            Tensor::new(indices, mask_host.shape.clone()).ok()?
+            Tensor::new(indices, mask_host.shape.clone())
+                .map_err(|error| kind.contract_error(error))?
         } else {
-            let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
+            let tb = kind.gather_tensor(b).await?;
             let values = tensor::tensor_values_f64_cow(&tb);
             let mut indices = Vec::with_capacity(values.len());
             for &v in values.iter() {
                 indices.push(if scalar <= v { 1.0 } else { 2.0 });
             }
-            Tensor::new(indices, tb.shape.clone()).ok()?
+            Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
         }
     } else {
-        let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
+        let tb = kind.gather_tensor(b).await?;
         let values = tensor::tensor_values_f64_cow(&tb);
         let mut indices = Vec::with_capacity(values.len());
         for &v in values.iter() {
             indices.push(if scalar <= v { 1.0 } else { 2.0 });
         }
-        Tensor::new(indices, tb.shape.clone()).ok()?
+        Tensor::new(indices, tb.shape.clone()).map_err(|error| kind.contract_error(error))?
     };
-    Some(MinEvaluation {
+    Ok(Some(MinEvaluation {
         values: Value::GpuTensor(values),
         indices: tensor::tensor_into_value(index_tensor),
-    })
+    }))
 }
 
 fn extract_scalar(v: &Value) -> Option<f64> {
