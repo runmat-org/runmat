@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use runmat_accelerate_api::{ProviderExecutionError, ProviderExecutionResult as ExecutionResult};
 
 use crate::fusion::{
     FusionGroupPlan, FusionKind, FusionPattern, FusionStoreMaterialization, ImageScalar,
@@ -35,7 +36,9 @@ use provider_observation::FusionPlacementSelection;
 mod admission;
 use admission::AdmittedBindings;
 mod reduction_program;
-pub use reduction_program::{resolve_reduction_program, ReductionDataInput, ResolvedReductionProgram};
+pub use reduction_program::{
+    resolve_reduction_program, ReductionDataInput, ResolvedReductionProgram,
+};
 mod outputs;
 mod explained_input;
 mod explained_output;
@@ -201,7 +204,7 @@ fn select_fusion_provider(
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     output_shapes: &[Vec<usize>],
-) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     select_fusion_provider_with_contract(
         request,
         bindings,
@@ -224,7 +227,7 @@ fn select_fusion_provider_with_contract(
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     contract: FusionProviderContract<'_>,
-) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
+) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
     let FusionProviderContract {
         outputs,
         semantic_identity,
@@ -375,10 +378,12 @@ fn select_fusion_provider_with_contract(
             runtime: request.runtime.as_ref(),
         },
         PlacementPolicy::default(),
-    )? {
+    )
+    .map_err(|error| ProviderExecutionError::from_source(*error))?
+    {
         LocalPlacementOutcome::ProviderRejected { code, .. } => {
             observer.provider_rejected(code);
-            Err(anyhow!("fusion provider rejected operation"))
+            Err(anyhow!("fusion provider rejected operation").into())
         }
         LocalPlacementOutcome::Selected {
             selected,
@@ -468,7 +473,7 @@ fn reject_native_integer_fusion_inputs(request: &FusionExecutionRequest<'_>) -> 
     reject_native_integer_fusion_values(&request.inputs, &constants)
 }
 
-fn scalar_from_value(value: &Value, observer: FusionPlacementObserver) -> Result<f64> {
+fn scalar_from_value(value: &Value, observer: FusionPlacementObserver) -> ExecutionResult<f64> {
     reject_native_integer_fusion_values(std::slice::from_ref(value), &[])?;
     if let Some(v) = value_to_f64(value) {
         return Ok(v);
@@ -483,12 +488,13 @@ fn scalar_from_value(value: &Value, observer: FusionPlacementObserver) -> Result
                 Err(anyhow!(
                     "image normalize: expected scalar tensor, got {} elements",
                     t.len()
-                ))
+                )
+                .into())
             }
         }
         Value::GpuTensor(_) => {
             let started = Instant::now();
-            let gathered = gather_if_needed(value).map_err(|e| anyhow!("image normalize: {e}"))?;
+            let gathered = gather_if_needed(value).map_err(ProviderExecutionError::from_source)?;
             let bytes = match &gathered {
                 Value::Tensor(tensor) => host_f64_bytes(tensor.len()),
                 _ => None,
@@ -499,7 +505,8 @@ fn scalar_from_value(value: &Value, observer: FusionPlacementObserver) -> Result
         _ => Err(anyhow!(
             "image normalize: expected numeric scalar value, got {:?}",
             value
-        )),
+        )
+        .into()),
     }
 }
 
@@ -508,7 +515,7 @@ fn resolve_image_scalar_value(
     plan: &FusionGroupPlan,
     request: &FusionExecutionRequest<'_>,
     observer: FusionPlacementObserver,
-) -> Result<f64> {
+) -> ExecutionResult<f64> {
     match scalar {
         ImageScalar::Constant(v) => Ok(*v),
         ImageScalar::Value(vid) => {
@@ -525,7 +532,8 @@ fn resolve_image_scalar_value(
             Err(anyhow!(
                 "image normalize: scalar input {:?} not materialized in plan",
                 vid
-            ))
+            )
+            .into())
         }
     }
 }
@@ -566,7 +574,7 @@ pub fn execute_reduction(
     reduce_len: usize,
     num_slices: usize,
     workgroup_size: u32,
-) -> Result<Value> {
+) -> ExecutionResult<Value> {
     match execute_reduction_with_shape_placed(
         request,
         reduce_len,
@@ -576,7 +584,7 @@ pub fn execute_reduction(
     )? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
@@ -589,7 +597,7 @@ pub fn execute_reduction_with_shape(
     num_slices: usize,
     output_shape: &[usize],
     workgroup_size: u32,
-) -> Result<Value> {
+) -> ExecutionResult<Value> {
     match execute_reduction_with_shape_placed(
         request,
         reduce_len,
@@ -599,7 +607,7 @@ pub fn execute_reduction_with_shape(
     )? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
@@ -610,34 +618,35 @@ pub fn execute_reduction_with_shape_placed(
     num_slices: usize,
     output_shape: &[usize],
     workgroup_size: u32,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
     };
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").is_ok() {
-        return Err(anyhow!("fused reduction disabled by env"));
+        return Err(anyhow!("fused reduction disabled by env").into());
     }
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_reduction() {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err(anyhow!("unsupported fusion kind").into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     if !request.plan.kernel.supported {
-        return Err(anyhow!("fusion kernel not supported for this plan"));
+        return Err(anyhow!("fusion kernel not supported for this plan").into());
     }
     if request.inputs.len() != request.plan.inputs.len() {
         return Err(anyhow!(
             "fusion input mismatch: expected {}, got {}",
             request.plan.inputs.len(),
             request.inputs.len()
-        ));
+        )
+        .into());
     }
     reject_native_integer_fusion_inputs(&request)?;
     let len = reduce_len * num_slices;
     if len == 0 {
-        return Err(anyhow!("fusion: zero-length execution not supported"));
+        return Err(anyhow!("fusion: zero-length execution not supported").into());
     }
     let scalar_shape = {
         let constant_shape = request.plan.constant_shape(len);
@@ -665,7 +674,8 @@ pub fn execute_reduction_with_shape_placed(
                 if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
-                    ));
+                    )
+                    .into());
                 }
                 let data = t.materialize_f64();
                 let view = HostTensorView {
@@ -681,7 +691,8 @@ pub fn execute_reduction_with_shape_placed(
                 if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: scalar input requires unsupported precision ({msg})"
-                    ));
+                    )
+                    .into());
                 }
                 let scalar = match provider.precision() {
                     ProviderPrecision::F32 => (*n as f32) as f64,
@@ -699,7 +710,7 @@ pub fn execute_reduction_with_shape_placed(
                 prepared.push(PreparedInput { handle });
             }
             Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
-            _ => return Err(anyhow!("fusion: unsupported value type")),
+            _ => return Err(anyhow!("fusion: unsupported value type").into()),
         }
     }
     timer.mark("prepare_inputs");
@@ -712,7 +723,8 @@ pub fn execute_reduction_with_shape_placed(
             output_shape,
             output_len,
             num_slices
-        ));
+        )
+        .into());
     }
 
     let scalar_ty = match provider.precision() {
@@ -851,18 +863,20 @@ pub async fn execute_centered_gram_placed(
 
 /// Direct provider execution retaining the established value-returning API.
 /// Executors that can run shared bytecode use the placement-aware entrypoint.
-pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_power_step_normalize(
+    request: FusionExecutionRequest<'_>,
+) -> ExecutionResult<Value> {
     match execute_power_step_normalize_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
 
 pub async fn execute_power_step_normalize_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -871,7 +885,7 @@ pub async fn execute_power_step_normalize_placed(
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err(anyhow!("unsupported fusion kind").into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
@@ -884,11 +898,7 @@ pub async fn execute_power_step_normalize_placed(
     let observer = selection.observer;
     let (lhs_vid, rhs_vid, epsilon) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::PowerStepNormalize { lhs, rhs, epsilon }) => (*lhs, *rhs, *epsilon),
-        _ => {
-            return Err(anyhow!(
-                "power-step normalization: missing pattern metadata"
-            ))
-        }
+        _ => return Err(anyhow!("power-step normalization: missing pattern metadata").into()),
     };
 
     let lhs_index = request
@@ -1141,18 +1151,20 @@ pub async fn execute_explained_variance_placed(
 
 /// Direct provider execution retaining the established value-returning API.
 /// Executors that can run shared bytecode use the placement-aware entrypoint.
-pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_image_normalize(
+    request: FusionExecutionRequest<'_>,
+) -> ExecutionResult<Value> {
     match execute_image_normalize_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
 
 pub async fn execute_image_normalize_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -1161,7 +1173,7 @@ pub async fn execute_image_normalize_placed(
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ImageNormalize {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err(anyhow!("unsupported fusion kind").into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
@@ -1174,7 +1186,7 @@ pub async fn execute_image_normalize_placed(
     let observer = selection.observer;
     let pattern = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ImageNormalize(p)) => p,
-        _ => return Err(anyhow!("image normalize: missing pattern metadata")),
+        _ => return Err(anyhow!("image normalize: missing pattern metadata").into()),
     };
     if log::log_enabled!(log::Level::Debug) {
         log::debug!(
@@ -1206,7 +1218,8 @@ pub async fn execute_image_normalize_placed(
         return Err(anyhow!(
             "image normalize: expected 3-D input tensor, got shape {:?}",
             shape
-        ));
+        )
+        .into());
     }
     let batch = shape[0];
     let height = shape[1];
@@ -1281,8 +1294,8 @@ mod tests {
             usize,
             &'b [usize],
             u32,
-        ) -> Result<Value> = execute_reduction_with_shape;
-        let _: for<'a> fn(FusionExecutionRequest<'a>, usize, usize, u32) -> Result<Value> =
+        ) -> ExecutionResult<Value> = execute_reduction_with_shape;
+        let _: for<'a> fn(FusionExecutionRequest<'a>, usize, usize, u32) -> ExecutionResult<Value> =
             execute_reduction;
         fn check_elementwise_signature(request: FusionExecutionRequest<'_>) {
             fn require_future(
@@ -1297,7 +1310,7 @@ mod tests {
         }
         let _: for<'a> fn(FusionExecutionRequest<'a>) = check_elementwise_signature;
 
-        fn require_value_future(_: impl std::future::Future<Output = Result<Value>>) {}
+        fn require_value_future(_: impl std::future::Future<Output = ExecutionResult<Value>>) {}
         fn check_async_signatures(request: FusionExecutionRequest<'_>, which: usize) {
             match which {
                 0 => {

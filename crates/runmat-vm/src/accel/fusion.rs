@@ -476,6 +476,14 @@ pub fn write_elementwise_materialized_stores(
     }
 }
 
+fn fusion_execution_error(error: runmat_accelerate_api::ProviderExecutionError) -> RuntimeError {
+    let fallback = mex("FusionExecutionFailed", &error.to_string());
+    runmat_runtime::runtime_error::with_provider_execution_source(fallback, error)
+}
+
+#[cfg(test)]
+mod error_tests;
+
 pub async fn execute_fusion_elementwise(
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
@@ -491,11 +499,7 @@ pub async fn execute_fusion_elementwise(
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
-        Err(err) => {
-            let mut error = mex("FusionExecutionFailed", &err.to_string());
-            error.source = Some(Box::new(err));
-            Err(error)
-        }
+        Err(err) => Err(fusion_execution_error(err)),
     }
 }
 
@@ -514,10 +518,7 @@ pub async fn execute_fusion_special_kind(
             Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
                 Ok(FusionExecutionOutcome::SharedRuntime(observation))
             }
-            Err(err) => {
-                let error = mex("FusionExecutionFailed", &err.to_string());
-                Err(runmat_runtime::runtime_error::with_provider_execution_source(error, err))
-            }
+            Err(err) => Err(fusion_execution_error(err)),
         },
         FusionKind::PowerStepNormalize => {
             match execute_power_step_normalize_placed(request).await {
@@ -528,7 +529,7 @@ pub async fn execute_fusion_special_kind(
                 Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
                     Ok(FusionExecutionOutcome::SharedRuntime(observation))
                 }
-                Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+                Err(err) => Err(fusion_execution_error(err)),
             }
         }
         FusionKind::ExplainedVariance => {
@@ -543,9 +544,7 @@ pub async fn execute_fusion_special_kind(
                 }
                 Err(err) => {
                     log::debug!("explained variance fusion fallback: {}", err);
-                    let mut error = mex("FusionExecutionFailed", &err.to_string());
-                    error.source = Some(Box::new(err));
-                    Err(error)
+                    Err(fusion_execution_error(err))
                 }
             }
         }
@@ -557,7 +556,7 @@ pub async fn execute_fusion_special_kind(
             Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
                 Ok(FusionExecutionOutcome::SharedRuntime(observation))
             }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+            Err(err) => Err(fusion_execution_error(err)),
         },
         FusionKind::ImageNormalize => match execute_image_normalize_placed(request).await {
             Ok(FusionExecutionOutcome::Executed(result)) => {
@@ -567,7 +566,7 @@ pub async fn execute_fusion_special_kind(
             Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
                 Ok(FusionExecutionOutcome::SharedRuntime(observation))
             }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+            Err(err) => Err(fusion_execution_error(err)),
         },
         _ => Err(mex(
             "FusionUnsupportedKind",
@@ -607,7 +606,7 @@ pub fn execute_fusion_reduction(
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
-        Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        Err(err) => Err(fusion_execution_error(err)),
     }
 }
 

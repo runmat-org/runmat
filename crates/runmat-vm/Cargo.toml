@@ -44,3 +44,6 @@ plot-core = ["runmat-runtime/plot-core"]
 [dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 anyhow = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

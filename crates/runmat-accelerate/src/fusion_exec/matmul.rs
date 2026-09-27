@@ -6,18 +6,20 @@ mod plan;
 mod representation;
 pub(super) mod workload;
 
-pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_matmul_epilogue(
+    request: FusionExecutionRequest<'_>,
+) -> ExecutionResult<Value> {
     match execute_matmul_epilogue_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
 
 pub async fn execute_matmul_epilogue_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -106,9 +108,10 @@ pub async fn execute_matmul_epilogue_placed(
         .values()
         .any(|input| input.shares_allocation_with(&output))
     {
-        return Err(
-            reject_outputs(vec![output], "matmul provider returned an operand alias").into(),
-        );
+        return Err(reject_outputs(
+            vec![output],
+            "matmul provider returned an operand alias",
+        ));
     }
     let mut output = allocations.admit(output, provider, &admitted.shape, provider.precision())?;
     if admitted.diagonal {
@@ -127,8 +130,7 @@ pub async fn execute_matmul_epilogue_placed(
             return Err(reject_outputs(
                 vec![diagonal],
                 "diagonal provider returned an operand alias",
-            )
-            .into());
+            ));
         }
         output = allocations.admit(
             diagonal,
