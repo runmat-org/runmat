@@ -1,5 +1,4 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{PRIMES_ERROR_INVALID_INPUT, PRIMES_ERROR_LIMIT};
 use runmat_value::{IntValue, IntegerStorage, NumericDType, Tensor, Value};
 
@@ -99,13 +98,23 @@ fn rejects_invalid_values_shapes_and_limits() {
 
 #[test]
 fn rejects_nonscalar_gpu_handle_before_gather() {
-    let handle = GpuTensorHandle {
-        shape: vec![1, 2],
-        device_id: 0,
-        buffer_id: 999,
-        descriptor: Default::default(),
-    };
-    let error = block_on(primes_builtin(Value::GpuTensor(handle), Vec::new()))
-        .expect_err("nonscalar GPU handle");
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("nonscalar resident bound");
+    let caller_alias = allocation.handle.clone();
+    let error = block_on(primes_builtin(
+        Value::GpuTensor(allocation.handle),
+        Vec::new(),
+    ))
+    .expect_err("nonscalar GPU handle");
     assert_eq!(error.identifier(), PRIMES_ERROR_INVALID_INPUT.identifier);
+    assert_eq!(allocation.probe.retirements(), 0);
+    caller_alias.allocation_lease().validate_live().unwrap();
+    drop(error);
+    drop(caller_alias);
+    assert_eq!(allocation.probe.retirements(), 1);
 }

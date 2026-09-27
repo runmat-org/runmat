@@ -103,13 +103,19 @@ fn rejects_unsupported_values_with_the_catalog_error() {
 fn explicit_gpu_fallback_is_compatibility_gated_before_provider_access() {
     assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES.len(), 1);
     assert_eq!(SWAPBYTES_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 454,
-        descriptor: Default::default(),
-    }
-    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("resident numeric input");
+    let handle = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .expect("explicit resident view");
+    drop(allocation.handle);
+    let caller_alias = handle.clone();
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let error = block_on(swapbytes_builtin(Value::GpuTensor(handle)))
         .expect_err("strict mode rejects explicit fallback before provider access");
@@ -117,4 +123,9 @@ fn explicit_gpu_fallback_is_compatibility_gated_before_provider_access() {
         error.identifier(),
         SWAPBYTES_EXPLICIT_GPU_EXTENSION.error_identifier
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    caller_alias.allocation_lease().validate_live().unwrap();
+    drop(error);
+    drop(caller_alias);
+    assert_eq!(allocation.probe.retirements(), 1);
 }

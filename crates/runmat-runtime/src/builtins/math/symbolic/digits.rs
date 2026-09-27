@@ -354,19 +354,26 @@ mod tests {
     #[test]
     fn digits_rejects_logical_and_resident_controls_without_provider_access() {
         let _guard = lock_digits();
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("resident numeric digits control");
+        let caller_alias = allocation.handle.clone();
         for value in [
             Value::Bool(true),
             Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(allocation.handle),
         ] {
             assert!(block_on(digits_builtin(vec![value])).is_err());
             assert_eq!(current_digits(), DEFAULT_DIGITS);
         }
+        assert_eq!(allocation.probe.retirements(), 0);
+        caller_alias.allocation_lease().validate_live().unwrap();
+        drop(caller_alias);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
