@@ -6,7 +6,7 @@ use runmat_analysis_fea::execution::{
 use runmat_execution::Digest;
 use runmat_execution_artifact::{object::ObjectInventoryLimits, ObjectNamespace};
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnalysisOutputPolicy {
     chunk_bytes: usize,
     inventory_limits: ObjectInventoryLimits,

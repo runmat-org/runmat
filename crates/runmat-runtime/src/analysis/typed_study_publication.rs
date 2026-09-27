@@ -143,7 +143,10 @@ impl StructuralStudyResultManifest {
             workloads: result.workloads().clone(),
             solver_mesh_digest: result.mesh().canonical_digest,
             meshing_evidence: result.meshing_evidence().clone(),
-            numerical_evidence: StructuralStudyNumericalEvidence::from_result(result.numerical()),
+            numerical_evidence: StructuralStudyNumericalEvidence::from_result(
+                result.numerical(),
+                study_definition_digest,
+            )?,
             public_run,
         })
     }
@@ -152,6 +155,12 @@ impl StructuralStudyResultManifest {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum StructuralStudyNumericalEvidence {
+    ThermalPrestress {
+        root: runmat_execution::value::ValueRef,
+        catalog: runmat_execution::value::PublishedObjectCatalog,
+        object_artifact_paths: Vec<String>,
+        structural: Box<StructuralStudyNumericalEvidence>,
+    },
     LinearSequence {
         frozen_project_digest: Option<Digest>,
         steps: Vec<StructuralLinearStepEvidence>,
@@ -263,8 +272,21 @@ struct StructuralModalReductionEvidence {
 }
 
 impl StructuralStudyNumericalEvidence {
-    fn from_result(result: &super::StructuralStudyNumericalResult) -> Self {
-        match result {
+    fn from_result(
+        result: &super::StructuralStudyNumericalResult,
+        study_digest: Digest,
+    ) -> Result<Self, String> {
+        Ok(match result {
+            super::StructuralStudyNumericalResult::ThermalPrestress {
+                thermal,
+                thermal_source,
+                structural,
+            } => Self::ThermalPrestress {
+                object_artifact_paths: thermal_source.persist(thermal, study_digest)?,
+                root: thermal.root.clone(),
+                catalog: thermal.catalog.clone(),
+                structural: Box::new(Self::from_result(structural, study_digest)?),
+            },
             super::StructuralStudyNumericalResult::LinearSequence(result) => Self::LinearSequence {
                 frozen_project_digest: result.frozen_project_digest,
                 steps: result
@@ -387,7 +409,7 @@ impl StructuralStudyNumericalEvidence {
                     publication: result.publication.clone(),
                 }
             }
-        }
+        })
     }
 }
 

@@ -114,9 +114,23 @@ fn heterogeneous_options(
     String,
 > {
     Ok(match workload {
-        StructuralStepWorkload::Thermal { .. } => {
-            return Err("thermal-prefixed publication requires the retained compiled thermal lifecycle and coupled completion root".into());
-        }
+        StructuralStepWorkload::Thermal { workload } => (
+            workload.backend,
+            workload.formulation_requirement,
+            AnalysisSolverOptions::ThermalDiffusion(super::super::AnalysisThermalRunOptions {
+                deterministic_mode: true,
+                precision_mode: PrecisionMode::Fp64,
+                quality_policy: QualityPolicy::Strict,
+                snapshot_count: match workload.procedure {
+                    runmat_analysis_fea::ThermalProcedureControl::Steady => 1,
+                    runmat_analysis_fea::ThermalProcedureControl::BackwardEuler {
+                        snapshot_count,
+                    } => snapshot_count,
+                },
+                residual_warn_threshold: workload.residual_target,
+                solver_mesh_artifact_path: None,
+            }),
+        ),
         StructuralStepWorkload::Linear { workload } => (
             workload.backend,
             workload.formulation_requirement,

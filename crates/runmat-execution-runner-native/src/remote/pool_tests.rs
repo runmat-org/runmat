@@ -27,6 +27,8 @@ use super::{run_remote_worker_quic, QuicRemoteWorkerChannel, RemoteWorkerQuicReq
 use super::{RemoteAttempt, RemoteBundleReceipt, RemotePoolDriver, RemoteWorkerChannel};
 use crate::NativeExecutionResult;
 
+mod input_inventory;
+
 struct FakeWorker {
     node: String,
     spec: WorkerSpec,

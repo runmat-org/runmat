@@ -1,46 +1,7 @@
 use super::*;
 
-fn reduced_setup(order: ElementOrder) -> ThermalStudyPreparation {
-    let mut setup = frequency_setup(order);
-    let model = &mut setup.product.compiled.model;
-    let preload = model.sequence.steps[1].clone();
-    let mut modal =
-        ProcedureStep::structural_prestressed_modal("modes", "preload", "geometric_stiffness");
-    modal.independent_domain = IndependentDomain::Eigenvalue { requested_count: 1 };
-    modal.activations = preload.activations.clone();
-    let consumer = &mut model.sequence.steps[2];
-    consumer.solution_space = SolutionSpace::ModalReduced;
-    consumer.state_inputs.extend(
-        ProcedureStep::structural_modal_harmonic("template", "modes", "modal_basis").state_inputs,
-    );
-    let consumer = consumer.clone();
-    model.sequence.dependencies.push(SequenceDependency {
-        predecessor: preload.step_id.clone(),
-        successor: modal.step_id.clone(),
-        reason: SequenceDependencyReason::StateTransfer,
-    });
-    model.sequence.dependencies.push(SequenceDependency {
-        predecessor: modal.step_id.clone(),
-        successor: consumer.step_id.clone(),
-        reason: SequenceDependencyReason::StateTransfer,
-    });
-    model.sequence.transitions.push(transition(
-        "preload-modes",
-        &preload,
-        &modal,
-        StateId("geometric_stiffness".into()),
-    ));
-    model.sequence.transitions.push(transition(
-        "modes-frequency",
-        &modal,
-        &consumer,
-        StateId("modal_basis".into()),
-    ));
-    model.sequence.steps.insert(2, modal);
-    setup.product.compiled.properties = compile_property_map(model, Some(&setup.mesh)).unwrap();
-    setup.product.workload =
-        plan_thermal_step(&setup.product.compiled, "heat", planning_policy()).unwrap();
-    setup
+pub(crate) fn reduced_setup(order: ElementOrder) -> ThermalStudyPreparation {
+    super::super::fixture::reduced_setup(super::super::super::preparation(order, false))
 }
 
 #[test]

@@ -207,6 +207,7 @@ fn numerical_kind(
 ) -> &'static str {
     use runmat_runtime::analysis::StructuralStudyNumericalResult;
     match result {
+        StructuralStudyNumericalResult::ThermalPrestress { .. } => "thermal_prestress",
         StructuralStudyNumericalResult::LinearSequence(_) => "structural_linear_sequence",
         StructuralStudyNumericalResult::StructuralModal(_) => "structural_modal",
         StructuralStudyNumericalResult::StructuralModalTransient(_) => "structural_modal_transient",

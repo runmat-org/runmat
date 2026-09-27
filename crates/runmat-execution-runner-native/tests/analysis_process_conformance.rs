@@ -66,6 +66,8 @@ mod publication_chain;
 mod signal;
 #[path = "analysis_process_conformance/thermal.rs"]
 mod thermal;
+#[path = "analysis_process_conformance/thermal_prestress.rs"]
+mod thermal_prestress;
 #[path = "analysis_process_conformance/transient.rs"]
 mod transient;
 use publication_chain::{success_response, PublicationChainDriver};
@@ -125,6 +127,7 @@ async fn parent() {
     config.worker_capabilities = capabilities();
     let session = NativeProgramSession::new(config).unwrap();
     thermal::run(&session).await;
+    thermal_prestress::run_local().await;
     let mut store = session.object_store();
     program.write_to(&mut store).unwrap();
     second_program.write_to(&mut store).unwrap();
@@ -943,6 +946,7 @@ async fn remote_conformance(
             pool_id,
         };
         thermal::run_driver(&mut publication_driver, "remote-analysis", revision.clone()).await;
+        thermal_prestress::run_remote(Arc::clone(&pool), revision.clone()).await;
         let publication = publication_chain::execute_publication_chain(
             &mut publication_driver,
             &solve,

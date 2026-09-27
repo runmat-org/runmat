@@ -43,6 +43,9 @@ pub struct NativeStructuralStudyPlacement {
     program_environment: ProgramEnvironment,
 }
 
+mod thermal;
+pub use thermal::thermal_study_completion_from_source;
+
 impl NativeStructuralStudyPlacement {
     pub fn new(config: NativeExecutionConfig, program_environment: ProgramEnvironment) -> Self {
         Self {
@@ -121,6 +124,7 @@ async fn execute_one(
         program_environment: placement.program_environment.clone(),
         study_digest,
         frozen_project_digest: None,
+        compiled: None,
         workloads: prepared.workloads(),
         mesh: prepared.solver_mesh().clone(),
         workers: workers_per_study,
@@ -135,6 +139,8 @@ pub struct StructuralWorkloadLocalExecution<'a> {
     pub program_environment: ProgramEnvironment,
     pub study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
+    /// Original typed compilation product, required for a thermal lifecycle prefix.
+    pub compiled: Option<&'a runmat_analysis_fea::study::CompiledAnalysisStudy>,
     pub workloads: StructuralStudyWorkloads,
     pub mesh: runmat_meshing_core::SolverMeshArtifact,
     pub workers: u32,
@@ -154,6 +160,7 @@ pub async fn execute_structural_workloads_locally(
         program_environment,
         study_digest,
         frozen_project_digest,
+        compiled,
         workloads,
         mesh,
         workers,
@@ -218,6 +225,39 @@ pub async fn execute_structural_workloads_locally(
         priority: 0,
     };
     let access = artifact_access(study_digest);
+    if matches!(&workloads, StructuralStudyWorkloads::HeterogeneousSequence { workloads }
+        if workloads.values().any(|step| matches!(step, runmat_analysis_fea::execution::StructuralStepWorkload::Thermal { .. })))
+    {
+        let compiled = compiled.ok_or_else(|| {
+            crate::NativeExecutionError::Configuration(
+                "thermal prestress execution requires the original compiled study".into(),
+            )
+        })?;
+        return thermal::execute(
+            execution_config,
+            crate::ThermalPrestressStudyPreparation {
+                compiled: compiled.clone(),
+                structural:
+                    runmat_analysis_execution::StructuralPrestressedFrequencyStudyPreparation {
+                        authored_study_digest: compiled.definition_digest().map_err(|error| {
+                            crate::NativeExecutionError::Configuration(error.to_string())
+                        })?,
+                        frozen_project_digest,
+                        workloads,
+                        mesh,
+                        artifact_access: access,
+                        program_revision: revision,
+                        chunk_bytes: DEFAULT_ANALYSIS_CHUNK_BYTES,
+                        inventory_limits: ObjectInventoryLimits::default(),
+                        required_capabilities: BTreeSet::new(),
+                        accelerator_requests,
+                        local_execution,
+                    },
+            },
+            policy,
+        )
+        .await;
+    }
     match workloads {
         StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
             let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };

@@ -53,6 +53,7 @@ impl ThermalStudyResultClosure {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct ThermalStudyReplayContext {
     pub scope: ThermalStudyScope,
     pub mesh: SolverMeshArtifact,

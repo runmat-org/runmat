@@ -363,6 +363,13 @@ impl PreparedStructuralStudyIntent {
                             "heterogeneous structural workload is missing its step".to_string()
                         })?;
                     match (workload, &step.authored_execution.solver_options) {
+                        (runmat_analysis_fea::execution::StructuralStepWorkload::Thermal { workload }, super::AnalysisSolverOptions::ThermalDiffusion(options))
+                            if workload.step_id == step.procedure_step.step_id
+                                && workload.backend == step.authored_execution.backend
+                                && workload.formulation_requirement == step.authored_execution.requirement
+                                && options.residual_warn_threshold == workload.residual_target
+                                && options.snapshot_count == match workload.procedure { runmat_analysis_fea::ThermalProcedureControl::Steady => 1, runmat_analysis_fea::ThermalProcedureControl::BackwardEuler { snapshot_count } => snapshot_count }
+                                && options.solver_mesh_artifact_path.is_none() => {},
                         (
                             runmat_analysis_fea::execution::StructuralStepWorkload::Linear {
                                 workload,
@@ -658,36 +665,8 @@ impl PreparedStructuralStudyIntent {
     }
 }
 
-fn linear_workload_matches_prepared_execution(
-    workload: &runmat_analysis_fea::execution::StructuralLinearWorkload,
-    execution: &AnalysisExecutionStep,
-    options: &super::AnalysisRunOptions,
-) -> bool {
-    let expected_preconditioner = match options.preconditioner_mode {
-        super::PreconditionerMode::Auto | super::PreconditionerMode::Jacobi => {
-            SpdPreconditionerKind::Jacobi
-        }
-        super::PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
-        super::PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
-    };
-    let backend_matches = match execution.backend {
-        runmat_analysis_fea::ComputeBackend::Cpu => {
-            workload.algebra_backend == LinearAlgebraBackendKind::CpuReference
-        }
-        runmat_analysis_fea::ComputeBackend::Gpu => matches!(
-            workload.algebra_backend,
-            LinearAlgebraBackendKind::CpuReference | LinearAlgebraBackendKind::Accelerator
-        ),
-    };
-    workload.backend == execution.backend
-        && workload.formulation_requirement == execution.requirement
-        && workload.preconditioner == expected_preconditioner
-        && backend_matches
-        && workload.observation_execution == ObservationExecutionPolicy::scalable()
-        && workload.require_solver_mesh_for_solid
-        && workload.state_input.is_none()
-        && options.solver_mesh_artifact_path.is_none()
-}
+mod alignment;
+use alignment::linear_workload_matches_prepared_execution;
 
 pub(super) fn resolve_intent_meshing_request(
     source_units: runmat_geometry_core::UnitSystem,

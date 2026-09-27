@@ -396,7 +396,14 @@ impl AnalysisTaskPool for RemoteAnalysisTaskPool {
             self.pool
                 .register_execution_object(object.reference.clone(), object.bytes.clone())?;
         }
-        Ok(())
+        self.pool.register_program_input_inventory(
+            &program.request,
+            program
+                .objects
+                .iter()
+                .map(|object| object.reference.clone())
+                .collect(),
+        )
     }
 
     fn register_result_objects(

@@ -186,48 +186,11 @@ pub(in crate::analysis) fn run_evidence_stage(run_id: &str) -> String {
     format!("run-{}", digest.to_string().trim_start_matches("sha256:"))
 }
 
-pub(in crate::analysis) struct PreparedStudyCompletion {
-    pub(super) context: OperationContext,
-    pub(super) study_id: String,
-    pub(super) study_fingerprint: String,
-    pub(super) authored_study_digest: runmat_execution::Digest,
-    pub(super) model: AnalysisModel,
-    pub(super) steps: Vec<PreparedStudyStep>,
-    pub(super) operation_sequence: Vec<String>,
-    pub(super) solver_mesh_artifact_path: Option<String>,
-    pub(super) meshing_evidence_artifact_path: Option<String>,
-}
-
-pub(in crate::analysis) fn study_completion_from_prepared(
-    prepared: PreparedStudySequence,
-) -> PreparedStudyCompletion {
-    let authored_study_digest = crate::analysis::analysis_study_content_digest(&prepared.spec);
-    PreparedStudyCompletion {
-        context: prepared.context,
-        study_id: prepared.spec.study_id,
-        study_fingerprint: prepared.study_fingerprint,
-        authored_study_digest,
-        model: prepared.model,
-        steps: prepared.steps,
-        operation_sequence: prepared.operation_sequence,
-        solver_mesh_artifact_path: prepared.solver_mesh_artifact_path,
-        meshing_evidence_artifact_path: prepared.meshing_evidence_artifact_path,
-    }
-}
-
-pub(in crate::analysis) struct CompletedStudyStep {
-    pub(in crate::analysis) step_id: ProcedureStepId,
-    pub(in crate::analysis) solver_result_identity: SolverResultIdentity,
-    pub(in crate::analysis) run: CompletedStudyStepRun,
-    pub(in crate::analysis) resolved_solver_options: AnalysisSolverOptions,
-}
-
-pub(in crate::analysis) enum CompletedStudyStepRun {
-    Standard(Box<OperationEnvelope<AnalysisRunResult>>),
-    StructuralFrequency(Box<CompletedStructuralFrequencyStep>),
-    StructuralResponseSpectrum(Box<CompletedStructuralResponseSpectrumStep>),
-    StructuralRandomResponse(Box<CompletedStructuralRandomResponseStep>),
-}
+mod completion_contract;
+pub(in crate::analysis) use completion_contract::{
+    study_completion_from_prepared, CompletedStudyStep, CompletedStudyStepRun,
+    PreparedStudyCompletion, ThermalPrefixCompletion,
+};
 
 pub(in crate::analysis) struct CompletedStructuralResponseSpectrumStep {
     pub identity: runmat_analysis_fea::AnalysisRunIdentity,
@@ -377,12 +340,18 @@ fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
 }
 
 pub(in crate::analysis) fn complete_study_run(
-    prepared: PreparedStudyCompletion,
-    completed_steps: Vec<CompletedStudyStep>,
-    states: Vec<CanonicalSemanticState>,
+    mut prepared: PreparedStudyCompletion,
+    mut completed_steps: Vec<CompletedStudyStep>,
+    mut states: Vec<CanonicalSemanticState>,
     frozen_project_digest: Option<runmat_execution::Digest>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    if let Some(prefix) = prepared.thermal_prefix.take() {
+        prepared.steps.insert(0, prefix.authored);
+        completed_steps.insert(0, prefix.completed);
+        states.splice(0..0, prefix.states);
+    }
     let PreparedStudyCompletion {
+        thermal_prefix: _,
         context,
         study_id,
         study_fingerprint,

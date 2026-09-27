@@ -43,6 +43,7 @@ pub use observations::{CompletedThermalObservations, ThermalObservationTask};
 
 /// Owned terminal artifacts for the declared scope, not necessarily the whole authored study.
 /// Consuming the coordinator does not clone numerical storage.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompletedThermalStudy {
     replay: completion::ThermalStudyReplayContext,
     closures: Vec<ThermalStudyResultClosure>,

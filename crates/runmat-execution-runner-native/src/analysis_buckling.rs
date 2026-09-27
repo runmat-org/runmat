@@ -58,13 +58,39 @@ async fn execute_study_with_pool(
     preparation: StructuralBucklingStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralBucklingSequenceStudy> {
+    execute_with_thermal_source(pool, preparation, policy, None).await
+}
+
+pub(crate) async fn execute_with_thermal_source(
+    pool: &mut impl AnalysisTaskPool,
+    preparation: StructuralBucklingStudyPreparation,
+    policy: StructuralSequenceExecutionPolicy,
+    thermal: Option<crate::analysis_thermal_prestress::BoundThermalExecution>,
+) -> NativeExecutionResult<CompletedStructuralBucklingSequenceStudy> {
     policy.validate()?;
     if preparation.accelerator_requests != policy.resources.accelerators {
         return Err(protocol(
             "buckling preparation and execution policy name different accelerator requests",
         ));
     }
-    let mut coordinator = StructuralBucklingStudyCoordinator::new(preparation).map_err(protocol)?;
+    let (mut coordinator, preload_dependencies) = match thermal {
+        Some(thermal) => {
+            let (source, dependency) = thermal.into_parts(pool)?;
+            (
+                StructuralBucklingStudyCoordinator::new_with_thermal_source(preparation, source)
+                    .map_err(protocol)?,
+                vec![dependency],
+            )
+        }
+        None => (
+            StructuralBucklingStudyCoordinator::new(preparation).map_err(protocol)?,
+            Vec::new(),
+        ),
+    };
+    crate::analysis_thermal_prestress::validate_preload_dependencies(
+        &coordinator.preload_dependencies(),
+        &preload_dependencies,
+    )?;
 
     let preload = coordinator.prepare_preload().map_err(protocol)?;
     let [executed_preload] = execute_analysis_task_batch(
@@ -74,7 +100,7 @@ async fn execute_study_with_pool(
             program: &preload.program,
             resource_plan: Some(&preload.resource_plan),
             fallback_resources: policy.resources.clone(),
-            dependencies: Vec::new(),
+            dependencies: preload_dependencies,
         }],
         task_policy(&policy),
     )

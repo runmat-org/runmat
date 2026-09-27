@@ -32,6 +32,9 @@ use runmat_runtime::operations::OperationEnvelope;
 
 use super::preparation::{artifact_access, authored_meshing_request};
 
+mod thermal;
+use thermal::study_result;
+
 pub(crate) enum MaterializedFeaSweepTerminal {
     Succeeded(Box<MaterializedFeaStudy>),
     Failed(String),
@@ -332,7 +335,7 @@ fn result_expectation(
     Ok(expectation)
 }
 
-fn study_result(
+fn structural_result(
     result: &runmat_execution_runner_native::ExactStructuralStudyResult,
     source: DownloadedResultCache,
 ) -> Result<StructuralStudyNumericalResult> {
@@ -414,6 +417,7 @@ fn study_result(
                 response_result: (*response.response_result).clone(),
                 response_numerical_receipt: response.response_numerical_receipt.clone(),
                 response_accuracy: response.response_accuracy.clone(),
+                response_publication_baseline_usage: response.response_publication_baseline_usage.evidence.clone(),
                 response_resource_usage: response.response_resource_usage.evidence.clone(),
                 response_publication: response.response_publication.result.clone(),
                 field_recovery: response.field_recovery.clone(),
@@ -434,6 +438,7 @@ fn study_result(
                 response_result: (*response.response_result).clone(),
                 response_numerical_receipt: response.response_numerical_receipt.clone(),
                 response_accuracy: response.response_accuracy.clone(),
+                response_publication_baseline_usage: response.response_publication_baseline_usage.evidence.clone(),
                 response_resource_usage: response.response_resource_usage.evidence.clone(),
                 response_publication: response.response_publication.result.clone(),
                 statistics_state: response.statistics_state.clone(),

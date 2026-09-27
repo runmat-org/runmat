@@ -265,6 +265,7 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         program_environment: request.recipe.program_revision.environment(),
         study_digest: decoded.authored_study_digest,
         frozen_project_digest: decoded.frozen_project_digest,
+        compiled: Some(&compiled),
         workloads: workloads.clone(),
         mesh: meshing.artifact.clone(),
         workers,

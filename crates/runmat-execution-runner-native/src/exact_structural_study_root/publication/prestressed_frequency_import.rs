@@ -34,7 +34,9 @@ pub(super) fn import_prestressed_frequency_result<Source: CacheImport>(
     let authored = runmat_analysis_execution::StructuralStudyWorkloads::HeterogeneousSequence {
         workloads: input.workloads,
     };
-    let step_ids = authored.step_ids().map_err(protocol)?;
+    let prefix = authored.prestress_prefix().map_err(protocol)?;
+    let mut step_ids = vec![prefix.preload.step_id.clone()];
+    step_ids.extend(prefix.consumer_step_ids);
     let [preload_step, frequency_step] = step_ids.as_slice() else {
         return Err(protocol(
             "prestressed-frequency result requires exactly two authored steps",

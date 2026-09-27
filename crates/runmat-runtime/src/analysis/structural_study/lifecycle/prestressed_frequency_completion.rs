@@ -396,6 +396,7 @@ pub(super) fn complete_structural_prestressed_frequency(
         completion_identity.local_run_id(intent.authored_study_digest, &step.procedure_step.step_id)
     });
     let prepared = PreparedStudyCompletion {
+        thermal_prefix: None,
         context: intent.context,
         study_id: intent.study_id,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),

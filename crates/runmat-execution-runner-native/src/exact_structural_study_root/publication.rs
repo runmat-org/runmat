@@ -52,6 +52,7 @@ mod source_result_import;
 mod specialized_publication_import;
 #[cfg(test)]
 mod tests;
+mod thermal_prefix;
 
 use inventory::*;
 pub(crate) use packaging::package_exact_structural_study_result;
@@ -74,6 +75,7 @@ struct ExactStructuralStudyPublication {
     region_resolution_objects: Vec<ValueRef>,
     input_roots: Vec<ValueRef>,
     input_objects: Vec<ValueRef>,
+    thermal: Option<thermal_prefix::ThermalPrefixClosure>,
     analysis: ExactStructuralStudyAnalysisClosure,
 }
 
@@ -481,7 +483,7 @@ fn validate_frequency_closure(
 
 impl ExactStructuralStudyPublication {
     fn validate(&self, access: &ArtifactAccess) -> NativeExecutionResult<()> {
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.authored_study_digest.bytes() == &[0; 32]
             || self.unresolved_workloads_digest.bytes() == &[0; 32]
             || self.meshing_request_digest.bytes() == &[0; 32]
@@ -495,6 +497,20 @@ impl ExactStructuralStudyPublication {
                 .any(|root| !self.input_objects.contains(root))
         {
             return Err(protocol("exact structural study publication is invalid"));
+        }
+        if let Some(thermal) = &self.thermal {
+            thermal.validate(access)?;
+            if self.compiled_study.is_none()
+                || !matches!(self.analysis,
+                ExactStructuralStudyAnalysisClosure::StructuralBuckling { .. }
+                | ExactStructuralStudyAnalysisClosure::StructuralPrestressedModal { .. }
+                | ExactStructuralStudyAnalysisClosure::StructuralPrestressedFrequency { .. }
+                | ExactStructuralStudyAnalysisClosure::StructuralPrestressedModalFrequency { .. })
+            {
+                return Err(protocol(
+                    "thermal prefix requires a compiled prestress publication",
+                ));
+            }
         }
         if self.compiled_study.is_some() != self.compiled_geometry_output.is_some() {
             return Err(protocol(
@@ -562,6 +578,7 @@ impl ExactStructuralStudyPublication {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactStructuralStudyResult {
+    pub thermal: Option<Box<runmat_analysis_execution::CompletedThermalStudy>>,
     pub frozen_project_digest: Option<Digest>,
     pub compiled_study: Option<runmat_analysis_fea::study::CompiledAnalysisStudy>,
     pub mesh: ExactMeshingDagRunResult,
@@ -726,6 +743,11 @@ pub struct ExactStructuralFrequencyHistoryResult {
 }
 
 pub(crate) enum ExactStructuralAnalysisPublication<'a> {
+    ThermalPrestress {
+        inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
+        completion: &'a crate::CompletedThermalPrestressStudy,
+        unresolved_workloads_digest: Digest,
+    },
     LinearSequence {
         inputs: &'a [crate::input_materialization::CompletedInputMaterialization],
         sequence: &'a CompletedStructuralSequence,
@@ -786,7 +808,8 @@ pub(crate) enum ExactStructuralAnalysisPublication<'a> {
 impl ExactStructuralAnalysisPublication<'_> {
     fn inputs(&self) -> &[crate::input_materialization::CompletedInputMaterialization] {
         match self {
-            Self::LinearSequence { inputs, .. }
+            Self::ThermalPrestress { inputs, .. }
+            | Self::LinearSequence { inputs, .. }
             | Self::StructuralTransient { inputs, .. }
             | Self::StructuralModal { inputs, .. }
             | Self::StructuralModalTransient { inputs, .. }
@@ -802,7 +825,11 @@ impl ExactStructuralAnalysisPublication<'_> {
 
     fn unresolved_workloads_digest(&self) -> Digest {
         match self {
-            Self::LinearSequence {
+            Self::ThermalPrestress {
+                unresolved_workloads_digest,
+                ..
+            }
+            | Self::LinearSequence {
                 unresolved_workloads_digest,
                 ..
             }

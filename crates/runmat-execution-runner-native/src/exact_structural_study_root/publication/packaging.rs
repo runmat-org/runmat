@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod thermal_tests;
+
 pub(crate) fn package_exact_structural_study_result(
     request: &ProgramExecutionRequest,
     decoded: &DecodedExactStructuralStudyRoot,
@@ -7,6 +10,13 @@ pub(crate) fn package_exact_structural_study_result(
     region_resolution: &runmat_analysis_execution::PreparedAnalysisObjects,
     analysis: ExactStructuralAnalysisPublication<'_>,
 ) -> NativeExecutionResult<(ProgramExecutionResponse, Vec<ProgramExecutionObject>)> {
+    let thermal_root = match &analysis {
+        ExactStructuralAnalysisPublication::ThermalPrestress { completion, .. } => Some(
+            runmat_analysis_execution::prepare_thermal_study_root(&completion.thermal)
+                .map_err(protocol)?,
+        ),
+        _ => None,
+    };
     if let Some(compiled) = &decoded.compiled_study {
         compiled
             .validate_against(&meshing.artifact)
@@ -46,6 +56,23 @@ pub(crate) fn package_exact_structural_study_result(
     let input_objects = unique_references(input_closures.into_iter().flatten())?;
     let unresolved_workloads_digest = analysis.unresolved_workloads_digest();
     let analysis = match analysis {
+        ExactStructuralAnalysisPublication::ThermalPrestress { completion, .. } => {
+            use crate::ThermalPrestressStructuralCompletion;
+            match &completion.structural {
+                ThermalPrestressStructuralCompletion::Buckling(value) => {
+                    buckling_closure(value, &decoded.artifact_access)?
+                }
+                ThermalPrestressStructuralCompletion::Modal(value) => {
+                    prestressed_modal_closure(value, &decoded.artifact_access)?
+                }
+                ThermalPrestressStructuralCompletion::Frequency(value) => {
+                    prestressed_frequency_closure(value, &decoded.artifact_access)?
+                }
+                ThermalPrestressStructuralCompletion::ModalFrequency(value) => {
+                    prestressed_modal_frequency_closure(value, &decoded.artifact_access)?
+                }
+            }
+        }
         ExactStructuralAnalysisPublication::LinearSequence { sequence, .. } => {
             let closures = sequence.result_closures().map_err(protocol)?;
             let mut closure_objects = Vec::new();
@@ -92,7 +119,13 @@ pub(crate) fn package_exact_structural_study_result(
         }
     };
     let publication = ExactStructuralStudyPublication {
-        schema_version: 2,
+        schema_version: 3,
+        thermal: thermal_root
+            .as_ref()
+            .map(|prepared| thermal_prefix::ThermalPrefixClosure {
+                root: prepared.root.clone(),
+                catalog: prepared.catalog.clone(),
+            }),
         program_revision: request.recipe.program_revision.clone(),
         authored_study_digest: decoded.authored_study_digest,
         compiled_study: decoded.compiled_study.clone(),
@@ -137,33 +170,46 @@ pub(crate) fn package_exact_structural_study_result(
             PUBLICATION_VALUE_SCHEMA,
         )
         .map_err(protocol)?;
-    let mut inventory = BTreeMap::new();
-    let mut logical_digests = BTreeSet::new();
-    for reference in meshing
-        .result_objects
-        .iter()
-        .chain(&region_resolution_objects)
-        .chain(&input_objects)
-        .chain(publication.analysis.objects())
-        .chain(std::iter::once(&publication_root))
-    {
-        if inventory.insert(reference.id, reference.clone()).is_some()
-            || !logical_digests.insert(reference.logical_digest)
-        {
-            return Err(protocol(
-                "whole-study result inventory contains duplicate object references",
-            ));
-        }
-    }
+    let inventory = unique_references(
+        meshing
+            .result_objects
+            .iter()
+            .chain(&region_resolution_objects)
+            .chain(&input_objects)
+            .chain(publication.analysis.objects())
+            .chain(
+                publication
+                    .thermal
+                    .iter()
+                    .flat_map(|thermal| thermal.catalog.objects.iter()),
+            )
+            .chain(std::iter::once(&publication_root))
+            .cloned(),
+    )?;
+    reference_inventory(&inventory)?;
     let response = ProgramExecutionResponse::ExternalizedSuccess {
         outputs: vec![ValuePayload::Object(Box::new(publication_root.clone()))],
-        result_objects: inventory.into_values().collect(),
+        result_objects: inventory,
     };
     response.validate_against(request).map_err(protocol)?;
     new_objects.push(ProgramExecutionObject {
         reference: publication_root,
         bytes: publication_object.bytes,
     });
+    if let Some(thermal) = thermal_root {
+        for object in thermal.objects {
+            let reference = thermal
+                .catalog
+                .objects
+                .iter()
+                .find(|reference| reference.logical_digest == object.descriptor.digest)
+                .ok_or_else(|| protocol("thermal prefix object missing from catalog"))?;
+            new_objects.push(ProgramExecutionObject {
+                reference: reference.clone(),
+                bytes: object.bytes,
+            });
+        }
+    }
     for object in &new_objects {
         object.validate().map_err(protocol)?;
     }

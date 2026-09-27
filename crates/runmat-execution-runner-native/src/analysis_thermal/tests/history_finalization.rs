@@ -18,7 +18,7 @@ use runmat_execution::Digest;
 use runmat_execution_artifact::cache::FilesystemObjectStore;
 use runmat_meshing_core::ElementOrder;
 
-pub(super) fn histories(partial_access: PartialAccessPolicy) -> Vec<ObservationRequest> {
+pub(crate) fn histories(partial_access: PartialAccessPolicy) -> Vec<ObservationRequest> {
     [
         (
             "temperature",

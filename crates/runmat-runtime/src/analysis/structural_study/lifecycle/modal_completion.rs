@@ -498,6 +498,7 @@ pub(super) fn prepared_completion(
     persisted_mesh: crate::analysis::meshing::ResolvedStudyMesh,
 ) -> PreparedStudyCompletion {
     PreparedStudyCompletion {
+        thermal_prefix: None,
         context: intent.context,
         study_id: intent.study_id,
         study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),

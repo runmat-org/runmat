@@ -682,6 +682,16 @@ impl PublicationChainDriver for RemoteDriver {
                     .register_execution_object(object.reference.clone(), object.bytes.clone())
                     .unwrap();
             }
+            self.pool
+                .register_program_input_inventory(
+                    &program.request,
+                    program
+                        .objects
+                        .iter()
+                        .map(|object| object.reference.clone())
+                        .collect(),
+                )
+                .unwrap();
             let completion = self
                 .pool
                 .submit_graph(vec![(
@@ -705,7 +715,7 @@ impl PublicationChainDriver for RemoteDriver {
                     Ok(result) => result.unwrap(),
                     Err(_) => panic!(
                         "remote publication-chain completion timeout: {:?}",
-                        self.pool.snapshot()
+                        remote_timeout_summary(&self.pool)
                     ),
                 };
             for reference in &success.result_objects {
@@ -737,6 +747,16 @@ impl PublicationChainDriver for RemoteDriver {
                         .register_execution_object(object.reference.clone(), object.bytes.clone())
                         .unwrap();
                 }
+                self.pool
+                    .register_program_input_inventory(
+                        &program.request,
+                        program
+                            .objects
+                            .iter()
+                            .map(|object| object.reference.clone())
+                            .collect(),
+                    )
+                    .unwrap();
             }
             let completions = self
                 .pool
@@ -768,7 +788,7 @@ impl PublicationChainDriver for RemoteDriver {
                         Ok(result) => result.unwrap(),
                         Err(_) => panic!(
                             "remote publication-chain batch timeout: {:?}",
-                            self.pool.snapshot()
+                            remote_timeout_summary(&self.pool)
                         ),
                     };
                 for reference in &success.result_objects {
@@ -786,4 +806,22 @@ impl PublicationChainDriver for RemoteDriver {
             responses
         })
     }
+}
+
+fn remote_timeout_summary(pool: &RemotePoolDriver) -> String {
+    let snapshot = pool.snapshot();
+    let pending = snapshot
+        .tasks
+        .iter()
+        .filter(|(_, task)| !matches!(task.state, runmat_execution::state::TaskState::Succeeded))
+        .take(8)
+        .map(|(id, task)| (id, task.state))
+        .collect::<Vec<_>>();
+    format!(
+        "tasks={}, attempts={}, events={}, pending(first 8)={pending:?}, last_event_sequence={:?}",
+        snapshot.tasks.len(),
+        snapshot.attempts.len(),
+        snapshot.events.len(),
+        snapshot.events.last().map(|event| event.sequence)
+    )
 }

@@ -124,7 +124,9 @@ pub use study_placement::{
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult,
 };
-pub use study_result::StructuralStudyResult;
+pub use study_result::{
+    StructuralStudyResult, ThermalStudyCompletion, ThermalStudyObjectSource, ThermalStudySource,
+};
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
@@ -260,19 +262,8 @@ pub struct StructuralStudyPrestressedFrequencyNumericalResult {
     pub frequency: StructuralStudyFrequencyNumericalResult,
 }
 
-#[derive(Debug, Clone)]
-pub enum StructuralStudyNumericalResult {
-    LinearSequence(StructuralStudySequenceNumericalResult),
-    StructuralModal(Box<StructuralStudyModalNumericalResult>),
-    StructuralModalTransient(Box<StructuralStudyModalTransientNumericalResult>),
-    StructuralModalResponseSpectrum(Box<StructuralStudyModalResponseSpectrumNumericalResult>),
-    StructuralRandomResponse(Box<StructuralStudyRandomResponseNumericalResult>),
-    StructuralBuckling(Box<StructuralStudyBucklingNumericalResult>),
-    StructuralPrestressedModal(Box<StructuralStudyPrestressedModalNumericalResult>),
-    StructuralPrestressedFrequency(Box<StructuralStudyPrestressedFrequencyNumericalResult>),
-    StructuralTransient(Box<StructuralStudyTransientNumericalResult>),
-    StructuralFrequency(Box<StructuralStudyFrequencyNumericalResult>),
-}
+mod study_numerical_result;
+pub use study_numerical_result::StructuralStudyNumericalResult;
 
 pub use frequency_result::{
     StructuralFrequencyArtifactRoot, StructuralFrequencyArtifactRootIndex,
@@ -1429,6 +1420,15 @@ pub fn analysis_complete_structural_study_op(
     outcome: StructuralStudyExecutionOutcome,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
     let result = match outcome {
+        Ok(StructuralStudyNumericalResult::ThermalPrestress { .. }) => {
+            return Err(structural_study_completion_failure(
+                &prepared,
+                "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                OperationErrorType::Contract,
+                OperationErrorSeverity::Fatal,
+                "thermal prestress requires typed compiled-study publication",
+            ))
+        }
         Ok(StructuralStudyNumericalResult::LinearSequence(result)) => result,
         Ok(StructuralStudyNumericalResult::StructuralTransient(_)) => {
             return Err(structural_study_completion_failure(

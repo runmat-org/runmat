@@ -3,66 +3,8 @@ use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_execution_artifact::ObjectNamespace;
 use runmat_meshing_core::CanonicalMeshingContract;
 
-fn frequency_setup(order: ElementOrder) -> ThermalStudyPreparation {
-    let mut setup = setup(order, false);
-    let model = &mut setup.product.compiled.model;
-    let mut consumer = ProcedureStep::structural_prestressed_harmonic(
-        "consumer",
-        "preload",
-        "geometric_stiffness",
-    );
-    consumer.independent_domain = IndependentDomain::FrequencyHertz(vec![60.0]);
-    model.sequence.steps[2] = consumer;
-    model.materials[0].damping = Some(MechanicalDampingModel::Rayleigh {
-        mass_coefficient: RayleighMassCoefficient::new(0.2),
-        stiffness_coefficient: RayleighStiffnessCoefficient::new(2.0e-4),
-    });
-    let projection =
-        runmat_analysis_fea::topology::AnalysisProjection::derive(&setup.mesh).unwrap();
-    let selection = projection
-        .boundary_faces
-        .iter()
-        .find(|face| {
-            face.node_indices.iter().all(|&index| {
-                (setup.mesh.topology.nodes[index]
-                    .coordinates_m
-                    .iter()
-                    .sum::<f64>()
-                    - 1.0)
-                    .abs()
-                    < 1.0e-12
-            })
-        })
-        .unwrap()
-        .provenance[0]
-        .analysis_selection_id()
-        .unwrap();
-    let fixture = fixture_model(FixtureId::CantileverLinearStatic);
-    model.excitations = fixture.excitations;
-    model.signals = fixture.signals;
-    model.excitation_cases = fixture.excitation_cases;
-    let PhysicalSignal::Force(signal) = &mut model.signals[0] else {
-        unreachable!()
-    };
-    signal.shape = SignalShape::Vector3;
-    signal.representation = SignalRepresentation::Constant(SignalValue::Vector3([
-        Force::new(0.0),
-        Force::new(1000.0),
-        Force::new(0.0),
-    ]));
-    let ExcitationAction::Force(probe) = &mut model.excitations[0] else {
-        unreachable!()
-    };
-    probe.target = ExcitationTarget::Region(RegionTarget::boundary(selection));
-    probe.distribution = ExcitationDistribution::PreserveResultant;
-    probe.direction = None;
-    probe.active_step_ids = vec!["consumer".into()];
-    // Per-action step selection isolates the harmonic probe without unsupported
-    // object-lifecycle controls in the closed structural execution envelope.
-    setup.product.compiled.properties = compile_property_map(model, Some(&setup.mesh)).unwrap();
-    setup.product.workload =
-        plan_thermal_step(&setup.product.compiled, "heat", planning_policy()).unwrap();
-    setup
+pub(crate) fn frequency_setup(order: ElementOrder) -> ThermalStudyPreparation {
+    super::fixture::frequency_setup(super::super::preparation(order, false))
 }
 
 #[test]
@@ -168,4 +110,4 @@ fn execute_frequency(
         .any(|value| value.abs() > 1.0e-18));
 }
 
-mod reduced;
+pub(crate) mod reduced;

@@ -27,6 +27,7 @@ use crate::analysis::{
 
 mod accuracy_completion;
 mod buckling_completion;
+mod errors;
 mod modal_completion;
 mod preparation;
 mod prestressed_frequency_completion;
@@ -36,6 +37,8 @@ mod prestressed_modal_completion;
 mod random_response_completion;
 mod response_spectrum_completion;
 mod statistical_persistence;
+mod thermal_completion;
+use errors::{completion_error, intent_completion_error};
 
 pub(in crate::analysis) use buckling_completion::complete_buckling_study;
 use buckling_completion::complete_structural_buckling;
@@ -59,26 +62,6 @@ pub(in crate::analysis) use random_response_completion::complete_random_response
 use random_response_completion::complete_structural_random_response;
 pub(in crate::analysis) use response_spectrum_completion::complete_response_spectrum_study;
 use response_spectrum_completion::complete_structural_response_spectrum;
-
-fn completion_error(
-    prepared: &PreparedStudyCompletion,
-    error_code: &'static str,
-    message: impl Into<String>,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &prepared.context,
-        OperationErrorSpec {
-            error_code,
-            error_type: OperationErrorType::Contract,
-            retryable: false,
-            severity: OperationErrorSeverity::Fatal,
-        },
-        message,
-        BTreeMap::from([("study_id".to_string(), prepared.study_id.clone())]),
-    )
-}
 
 /// Admits the remotely meshed and solved result of a path-free structural study intent.
 ///
@@ -168,6 +151,26 @@ pub fn analysis_complete_structural_study_intent_op(
         )
     })?;
     match (intent.workloads.clone(), result) {
+        (
+            runmat_analysis_fea::execution::StructuralStudyWorkloads::HeterogeneousSequence {
+                workloads,
+            },
+            StructuralStudyNumericalResult::ThermalPrestress {
+                thermal,
+                thermal_source,
+                structural,
+            },
+        ) => thermal_completion::complete(
+            intent,
+            resolved_model,
+            persisted_mesh,
+            meshing_output.artifact,
+            workloads,
+            *thermal,
+            thermal_source,
+            *structural,
+            completion_identity,
+        ),
         (
             runmat_analysis_fea::execution::StructuralStudyWorkloads::LinearSequence {
                 workloads: authored_workloads,
@@ -340,6 +343,7 @@ fn complete_structural_frequency(
         .local_run_id(intent.authored_study_digest, &step.procedure_step.step_id);
     complete_frequency_study(
         PreparedStudyCompletion {
+            thermal_prefix: None,
             context: intent.context,
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
@@ -616,6 +620,7 @@ fn complete_linear_sequence(
     }
     complete_study_run(
         PreparedStudyCompletion {
+            thermal_prefix: None,
             context: intent.context,
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
@@ -764,6 +769,7 @@ fn complete_direct_transient(
     };
     complete_study_run(
         PreparedStudyCompletion {
+            thermal_prefix: None,
             context: intent.context,
             study_id: intent.study_id,
             study_fingerprint: study_fingerprint_from_digest(intent.authored_study_digest),
@@ -814,26 +820,4 @@ pub fn structural_study_execution_failure(
         ),
     };
     intent_completion_error(intent, error_code, error_type, severity, message)
-}
-
-fn intent_completion_error(
-    intent: &PreparedStructuralStudyIntent,
-    error_code: &'static str,
-    error_type: OperationErrorType,
-    severity: OperationErrorSeverity,
-    message: impl Into<String>,
-) -> OperationErrorEnvelope {
-    operation_error(
-        ANALYSIS_RUN_STUDY_OPERATION,
-        ANALYSIS_RUN_STUDY_OP_VERSION,
-        &intent.context,
-        OperationErrorSpec {
-            error_code,
-            error_type,
-            retryable: error_type == OperationErrorType::Internal,
-            severity,
-        },
-        message,
-        BTreeMap::from([("study_id".to_string(), intent.study_id.clone())]),
-    )
 }

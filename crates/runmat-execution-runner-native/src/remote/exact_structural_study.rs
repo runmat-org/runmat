@@ -22,6 +22,8 @@ use super::RemotePoolDriver;
 use crate::StructuralTransientRecoveryPublisher;
 use crate::{NativeExecutionError, NativeExecutionResult, TopologyRegionResolution};
 
+mod thermal;
+
 #[derive(Clone, Debug)]
 pub(crate) enum RemoteExactStructuralStudyComposition {
     Completed(ProgramExecutionResponse),
@@ -224,6 +226,33 @@ pub(super) async fn execute_with_completed_meshing(
         deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(resources)?),
         priority: 0,
     };
+    if matches!(&workloads, StructuralStudyWorkloads::HeterogeneousSequence { workloads }
+        if workloads.values().any(|step| matches!(step, runmat_analysis_fea::execution::StructuralStepWorkload::Thermal { .. })))
+    {
+        if matches!(
+            &recovery,
+            StructuralTransientRecoveryAdmission::Available {
+                restored: Some(_),
+                ..
+            }
+        ) {
+            return Err(protocol(
+                "thermal prestress cannot consume a structural transient recovery closure",
+            ));
+        }
+        return thermal::execute(thermal::Composition {
+            pool,
+            request,
+            decoded: &decoded,
+            meshing: &completed.result,
+            region_resolution: &region_resolution_objects,
+            inputs: &completed_inputs,
+            workloads,
+            unresolved_workloads_digest,
+            policy,
+        })
+        .await;
+    }
     let (response, objects) = match workloads {
         StructuralStudyWorkloads::HeterogeneousSequence { workloads } => {
             let authored = StructuralStudyWorkloads::HeterogeneousSequence { workloads };

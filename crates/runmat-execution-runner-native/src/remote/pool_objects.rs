@@ -102,19 +102,30 @@ impl RemoteObjectCatalog {
         }
     }
 
-    pub(super) async fn transfer_all(
+    pub(super) async fn transfer(
         &self,
         channel: &dyn RemoteWorkerChannel,
         route: super::pool::WorkerRouteIdentity,
+        inventory: Option<&[ValueRef]>,
     ) -> NativeExecutionResult<()> {
-        let references = self
-            .state
-            .lock()
-            .expect("remote object catalog poisoned")
-            .objects
-            .values()
-            .cloned()
-            .collect::<Vec<_>>();
+        let references = match inventory {
+            Some(references) => {
+                for reference in references {
+                    if !self.contains(reference)? {
+                        return Err(protocol("task input object is absent"));
+                    }
+                }
+                references.to_vec()
+            }
+            None => self
+                .state
+                .lock()
+                .expect("remote object catalog poisoned")
+                .objects
+                .values()
+                .cloned()
+                .collect::<Vec<_>>(),
+        };
         for reference in references {
             let key = (route, reference.id);
             if self.transferred.lock().await.contains(&key) {

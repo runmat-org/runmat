@@ -1,8 +1,8 @@
 //! Bounded native-kernel lifecycle coverage, not scheduler or formulation qualification.
 mod coordinated_observations;
-mod history_finalization;
+pub(crate) mod history_finalization;
 mod observations;
-mod prestress;
+pub(crate) mod prestress;
 
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,

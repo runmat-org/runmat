@@ -20,6 +20,7 @@ mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;
 mod analysis_thermal;
+mod analysis_thermal_prestress;
 mod analysis_transient;
 mod config;
 mod driver;
@@ -81,8 +82,8 @@ pub use analysis_modal_transient::{
     CompletedStructuralModalTransientStudy,
 };
 pub use analysis_placement::{
-    execute_structural_workloads_locally, NativeStructuralStudyPlacement,
-    StructuralWorkloadLocalExecution,
+    execute_structural_workloads_locally, thermal_study_completion_from_source,
+    NativeStructuralStudyPlacement, StructuralWorkloadLocalExecution,
 };
 pub use analysis_prestressed_frequency::{
     execute_structural_prestressed_frequency_study_locally,
@@ -114,6 +115,11 @@ pub use analysis_sequence::{
 };
 pub use analysis_thermal::{
     execute_thermal_study_locally, execute_thermal_study_remotely, ThermalStudyExecutionPolicy,
+};
+pub use analysis_thermal_prestress::{
+    execute_thermal_prestress_study_locally_with_source, execute_thermal_prestress_study_remotely,
+    CompletedThermalPrestressStudy, ThermalPrestressStructuralCompletion,
+    ThermalPrestressStudyPreparation,
 };
 pub use analysis_transient::{
     execute_structural_transient_locally, execute_structural_transient_remotely,

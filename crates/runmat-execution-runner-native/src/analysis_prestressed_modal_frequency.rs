@@ -55,6 +55,15 @@ async fn execute_with_pool(
     preparation: StructuralPrestressedFrequencyStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralPrestressedModalFrequencyStudy> {
+    execute_with_thermal_source(pool, preparation, policy, None).await
+}
+
+pub(crate) async fn execute_with_thermal_source(
+    pool: &mut impl AnalysisTaskPool,
+    preparation: StructuralPrestressedFrequencyStudyPreparation,
+    policy: StructuralSequenceExecutionPolicy,
+    thermal: Option<crate::analysis_thermal_prestress::BoundThermalExecution>,
+) -> NativeExecutionResult<CompletedStructuralPrestressedModalFrequencyStudy> {
     policy.validate()?;
     if preparation.accelerator_requests != policy.resources.accelerators {
         return Err(protocol(
@@ -66,8 +75,28 @@ async fn execute_with_pool(
     let artifact_access = preparation.artifact_access.clone();
     let chunk_bytes = preparation.chunk_bytes;
     let inventory_limits = preparation.inventory_limits;
-    let mut coordinator =
-        StructuralPrestressedModalFrequencyStudyCoordinator::new(preparation).map_err(protocol)?;
+    let (mut coordinator, preload_dependencies) = match thermal {
+        Some(thermal) => {
+            let (source, dependency) = thermal.into_parts(pool)?;
+            (
+                StructuralPrestressedModalFrequencyStudyCoordinator::new_with_thermal_source(
+                    preparation,
+                    source,
+                )
+                .map_err(protocol)?,
+                vec![dependency],
+            )
+        }
+        None => (
+            StructuralPrestressedModalFrequencyStudyCoordinator::new(preparation)
+                .map_err(protocol)?,
+            Vec::new(),
+        ),
+    };
+    crate::analysis_thermal_prestress::validate_preload_dependencies(
+        &coordinator.preload_dependencies(),
+        &preload_dependencies,
+    )?;
 
     let preload = coordinator.prepare_preload().map_err(protocol)?;
     let executed_preload = execute_one(
@@ -76,7 +105,7 @@ async fn execute_with_pool(
         &preload.program,
         &preload.resource_plan,
         &policy,
-        Vec::new(),
+        preload_dependencies,
         "preload",
     )
     .await?;

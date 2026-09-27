@@ -11,124 +11,11 @@ use runmat_analysis_fea::{
     },
 };
 
-fn setup(order: ElementOrder, buckling: bool) -> ThermalStudyPreparation {
-    let mut setup = preparation(order, false);
-    let model = &mut setup.product.compiled.model;
-    model.thermo_mechanical = Some(ThermoMechanicalDomain {
-        reference_temperature: Temperature::new(293.15),
-    });
-    model.materials[0]
-        .thermal
-        .as_mut()
-        .unwrap()
-        .expansion_coefficient_per_k = 1.0e-5;
-    for constraint in &mut model.constraints {
-        if let AnalysisConstraint::Thermal(ThermalConstraint {
-            kind: ThermalConstraintKind::Prescribed { value, .. },
-            ..
-        }) = constraint
-        {
-            *value = PrescribedValue::Constant(Temperature::new(303.15));
-        }
-    }
-    // Restrained x expansion creates uniform compression; y/z remain physically free.
-    for node in &setup.mesh.topology.nodes {
-        let axes: &[usize] = if node.coordinates_m == [0.0, 0.0, 0.0] {
-            &[0, 1, 2]
-        } else if node.coordinates_m == [0.0, 1.0, 0.0] {
-            &[0, 2]
-        } else {
-            &[0]
-        };
-        model
-            .constraints
-            .push(AnalysisConstraint::Structural(StructuralConstraint {
-                constraint_id: format!("axial-{}", node.node_id),
-                frame: CoordinateFrame::Global,
-                kind: StructuralConstraintKind::Prescribed(PrescribedStructuralDofs {
-                    target: RegionTarget::point(format!("node:{}", node.node_id)),
-                    translations: axes
-                        .iter()
-                        .map(|&axis| TranslationDofValue {
-                            dof: [
-                                StructuralTranslationDof::Ux,
-                                StructuralTranslationDof::Uy,
-                                StructuralTranslationDof::Uz,
-                            ][axis],
-                            value: PrescribedValue::Constant(Displacement::new(0.0)),
-                        })
-                        .collect(),
-                    rotations: Vec::new(),
-                }),
-            }));
-    }
-    let heat = model.sequence.steps[0].clone();
-    let mut preload = ProcedureStep::coupled(
-        "preload",
-        CoupledPhysicsFamily::Thermomechanical,
-        AnalysisProcedure::Static,
-    );
-    preload.state_outputs = ProcedureStep::structural_preload("template").state_outputs;
-    preload.state_inputs.push(StateInput {
-        input_id: "named-temperature".into(),
-        required_kind: StateKind::Thermal,
-        source: StateSource::Upstream {
-            producer_step: heat.step_id.clone(),
-            state_id: heat.state_outputs[1].state_id.clone(),
-        },
-        use_as: StateUse::Prestress,
-        conflict: InitialStateConflictPolicy::Reject,
-    });
-    let mut consumer = if buckling {
-        ProcedureStep::structural_buckling("consumer", "preload", "geometric_stiffness")
-    } else {
-        ProcedureStep::structural_prestressed_modal("consumer", "preload", "geometric_stiffness")
-    };
-    consumer.independent_domain = IndependentDomain::Eigenvalue { requested_count: 1 };
-    model.sequence = AnalysisSequence::from_steps(
-        "thermal-prestress-consumer",
-        vec![heat.clone(), preload.clone(), consumer.clone()],
-    );
-    for dependency in &mut model.sequence.dependencies {
-        dependency.reason = SequenceDependencyReason::StateTransfer;
-    }
-    model.sequence.transitions = vec![
-        transition(
-            "heat-preload",
-            &heat,
-            &preload,
-            heat.state_outputs[1].state_id.clone(),
-        ),
-        transition(
-            "preload-consumer",
-            &preload,
-            &consumer,
-            StateId("geometric_stiffness".into()),
-        ),
-    ];
-    setup.product.compiled.properties = compile_property_map(model, Some(&setup.mesh)).unwrap();
-    setup.product.workload =
-        plan_thermal_step(&setup.product.compiled, "heat", planning_policy()).unwrap();
-    setup.scope = ThermalStudyScope::SelectedStep;
-    setup
+pub(crate) fn setup(order: ElementOrder, buckling: bool) -> ThermalStudyPreparation {
+    fixture::setup(preparation(order, false), buckling)
 }
 
-fn transition(
-    id: &str,
-    producer: &ProcedureStep,
-    consumer: &ProcedureStep,
-    state_id: StateId,
-) -> StateTransition {
-    StateTransition {
-        transition_id: TransitionId(id.into()),
-        producer_step: producer.step_id.clone(),
-        consumer_step: consumer.step_id.clone(),
-        state_id,
-        method: StateTransitionMethod::Reuse,
-        topology: TopologyTransitionPolicy::RequireIdentical,
-        reference: ReferenceStatePolicy::Preserve,
-    }
-}
+pub(crate) mod fixture;
 
 fn solve_heat(
     store: &mut FilesystemObjectStore,
@@ -259,7 +146,7 @@ macro_rules! preload {
     }};
 }
 
-mod frequency;
+pub(crate) mod frequency;
 
 #[test]
 fn replayed_named_thermal_publication_drives_real_modal_and_buckling_workers() {

@@ -1,7 +1,9 @@
 //! Whole-study thermal placement through the shared admitted analysis task pool.
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
+use runmat_analysis_core::StateId;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use runmat_analysis_execution::{
@@ -50,6 +52,7 @@ pub async fn execute_thermal_study_locally(
         policy,
     )
     .await
+    .map(|executed| executed.completed)
 }
 
 pub async fn execute_thermal_study_remotely(
@@ -57,17 +60,34 @@ pub async fn execute_thermal_study_remotely(
     preparation: ThermalStudyPreparation,
     policy: ThermalStudyExecutionPolicy,
 ) -> NativeExecutionResult<CompletedThermalStudy> {
-    execute_with_pool(&mut RemoteAnalysisTaskPool::new(pool), preparation, policy).await
+    execute_with_pool(&mut RemoteAnalysisTaskPool::new(pool), preparation, policy)
+        .await
+        .map(|executed| executed.completed)
 }
 
-async fn execute_with_pool(
+pub(crate) struct ExecutedThermalStudy {
+    pub completed: CompletedThermalStudy,
+    pub state_publications: BTreeMap<StateId, AnalysisTaskDependency>,
+    pub scope_id: runmat_execution::ExecutionScopeId,
+    pub pool_id: runmat_execution::PoolId,
+}
+
+pub(crate) async fn execute_with_pool(
     pool: &mut impl AnalysisTaskPool,
     preparation: ThermalStudyPreparation,
     policy: ThermalStudyExecutionPolicy,
-) -> NativeExecutionResult<CompletedThermalStudy> {
+) -> NativeExecutionResult<ExecutedThermalStudy> {
     policy.validate()?;
+    let scope_id = pool.scope_id();
+    let pool_id = pool.pool_id();
     let mut coordinator = ThermalStudyCoordinator::new(preparation).map_err(protocol)?;
-    let state_count = coordinator.selected_step().state_outputs.len();
+    let state_ids: Vec<_> = coordinator
+        .selected_step()
+        .state_outputs
+        .iter()
+        .map(|declaration| declaration.state_id.clone())
+        .collect();
+    let mut state_publications = BTreeMap::new();
     let solve = coordinator.prepare_solve().map_err(protocol)?;
     let (executed, accounting) = execute_one(
         pool,
@@ -121,7 +141,7 @@ async fn execute_with_pool(
         .complete_accuracy(pool, executed.response, accounting)
         .map_err(protocol)?;
 
-    for _ in 0..state_count {
+    for state_id in state_ids {
         let state = coordinator.prepare_next_state().map_err(protocol)?;
         let (executed, accounting) = execute_one(
             pool,
@@ -136,6 +156,11 @@ async fn execute_with_pool(
         coordinator
             .complete_next_state(pool, executed.response, accounting)
             .map_err(protocol)?;
+        if state_publications.insert(state_id, preceding).is_some() {
+            return Err(protocol(
+                "thermal lifecycle published a duplicate named state",
+            ));
+        }
     }
 
     coordinator.freeze_baseline().map_err(protocol)?;
@@ -152,7 +177,17 @@ async fn execute_with_pool(
     coordinator
         .complete_publication(pool, executed.response, accounting)
         .map_err(protocol)?;
-    coordinator.into_completed().map_err(protocol)
+    if pool.scope_id() != scope_id || pool.pool_id() != pool_id {
+        return Err(protocol(
+            "thermal lifecycle execution pool or scope changed between phases",
+        ));
+    }
+    Ok(ExecutedThermalStudy {
+        completed: coordinator.into_completed().map_err(protocol)?,
+        state_publications,
+        scope_id,
+        pool_id,
+    })
 }
 
 async fn execute_one(

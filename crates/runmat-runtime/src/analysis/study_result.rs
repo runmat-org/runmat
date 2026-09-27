@@ -4,6 +4,12 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 
 use super::StructuralStudyNumericalResult;
 
+pub(super) mod thermal;
+mod thermal_completion;
+mod thermal_source;
+pub use thermal_completion::ThermalStudyCompletion;
+pub use thermal_source::{ThermalStudyObjectSource, ThermalStudySource};
+
 /// Placement-neutral completed structural study.
 ///
 /// The compiled analysis definition, canonical mesh, governed meshing evidence, and numerical
@@ -41,6 +47,15 @@ impl StructuralStudyResult {
             return Err("structural study workloads differ from the compiled model".into());
         }
         validate_numerical_kind_and_steps(&workloads, &numerical)?;
+        if let StructuralStudyNumericalResult::ThermalPrestress {
+            thermal,
+            thermal_source,
+            structural,
+        } = &numerical
+        {
+            thermal_source.authenticate(thermal)?;
+            self::thermal::validate(&compiled, &mesh, &workloads, thermal, structural)?;
+        }
         validate_numerical_evidence(&numerical)?;
         Ok(Self {
             compiled,
@@ -98,6 +113,9 @@ impl StructuralStudyResult {
 
 fn validate_numerical_evidence(numerical: &StructuralStudyNumericalResult) -> Result<(), String> {
     match numerical {
+        StructuralStudyNumericalResult::ThermalPrestress { structural, .. } => {
+            validate_numerical_evidence(structural)?
+        }
         StructuralStudyNumericalResult::LinearSequence(result) => {
             for step in &result.steps {
                 step.numerical_receipt
@@ -265,6 +283,25 @@ fn validate_numerical_kind_and_steps(
 ) -> Result<(), String> {
     let expected = workloads.step_ids().map_err(|error| error.to_string())?;
     let actual = match numerical {
+        StructuralStudyNumericalResult::ThermalPrestress {
+            thermal,
+            structural,
+            ..
+        } => {
+            let prefix = workloads
+                .prestress_prefix()
+                .map_err(|error| error.to_string())?;
+            let mut steps = vec![thermal.workload.step_id.clone()];
+            let (preload, consumers) = thermal::structural_steps(structural)?;
+            if preload != prefix.preload.step_id || consumers != prefix.consumer_step_ids {
+                return Err(
+                    "thermal prestress structural child differs from authored suffix".into(),
+                );
+            }
+            steps.push(preload);
+            steps.extend(consumers);
+            steps
+        }
         StructuralStudyNumericalResult::LinearSequence(result) => result
             .steps
             .iter()
@@ -339,6 +376,7 @@ fn validate_numerical_kind_and_steps(
                 | StructuralStudyNumericalResult::StructuralBuckling(_)
                 | StructuralStudyNumericalResult::StructuralPrestressedModal(_)
                 | StructuralStudyNumericalResult::StructuralPrestressedFrequency(_)
+                | StructuralStudyNumericalResult::ThermalPrestress { .. }
         )
     );
     if !compatible {

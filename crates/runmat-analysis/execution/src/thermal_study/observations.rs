@@ -34,7 +34,7 @@ mod task;
 use task::PendingObservationTask;
 pub use task::ThermalObservationTask;
 
-#[derive(Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompletedThermalObservations {
     pub catalog: Option<ObservationPublicationCatalog>,
     pub samples: Vec<ImportedObservations>,

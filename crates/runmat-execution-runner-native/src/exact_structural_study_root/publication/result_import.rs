@@ -50,15 +50,22 @@ pub fn import_exact_structural_study_result(
     if publication.meshing_request_digest != expected_meshing_request_digest {
         return Err(protocol("whole-study meshing request identity changed"));
     }
-    let expected_inventory = publication
-        .meshing_objects
-        .iter()
-        .chain(&publication.region_resolution_objects)
-        .chain(&publication.input_objects)
-        .chain(publication.analysis.objects())
-        .cloned()
-        .chain(std::iter::once((**root).clone()))
-        .collect::<Vec<_>>();
+    let expected_inventory = unique_references(
+        publication
+            .meshing_objects
+            .iter()
+            .chain(&publication.region_resolution_objects)
+            .chain(&publication.input_objects)
+            .chain(publication.analysis.objects())
+            .chain(
+                publication
+                    .thermal
+                    .iter()
+                    .flat_map(|thermal| thermal.catalog.objects.iter()),
+            )
+            .cloned()
+            .chain(std::iter::once((**root).clone())),
+    )?;
     if reference_inventory(&expected_inventory)? != reference_inventory(&result_objects)? {
         return Err(protocol(
             "whole-study result inventory differs from its canonical closure",
@@ -323,6 +330,16 @@ pub fn import_exact_structural_study_result(
         .replace_model(resolved_model)
         .map_err(protocol)?;
     let retained_workloads = resolved_workloads.clone();
+    let thermal = super::thermal_prefix::import(super::thermal_prefix::ImportContext {
+        source,
+        compiled: publication.compiled_study.as_ref(),
+        analysis: &publication.analysis,
+        thermal: publication.thermal.as_ref(),
+        expected,
+        workloads: &resolved_workloads,
+        mesh: &mesh.artifact,
+        limits,
+    })?;
     let analysis = match (resolved_workloads, publication.analysis) {
         (
             StructuralStudyWorkloads::LinearSequence { workloads },
@@ -668,6 +685,7 @@ pub fn import_exact_structural_study_result(
         region_resolution,
         resolved_workloads: retained_workloads,
         analysis,
+        thermal,
     })
 }
 

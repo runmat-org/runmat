@@ -24,6 +24,8 @@ use crate::{NativeExecutionError, NativeExecutionResult};
 type CompletionResult = Result<AttemptSuccess, String>;
 
 mod completion;
+mod input_inventory;
+mod object_registration;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) struct WorkerRouteIdentity {
@@ -67,6 +69,7 @@ pub struct RemotePoolDriver {
     values: super::pool_values::RemoteValueCatalog,
     execution_objects: super::pool_objects::RemoteObjectCatalog,
     programs: Mutex<HashMap<TaskId, ProgramExecutionRequest>>,
+    input_inventories: Mutex<input_inventory::InputInventories>,
     completions: Mutex<HashMap<TaskId, oneshot::Sender<CompletionResult>>>,
     progress: Mutex<HashMap<TaskId, Arc<super::pool_progress::RemoteProgressBuffer>>>,
 }
@@ -132,6 +135,7 @@ impl RemotePoolDriver {
             values: super::pool_values::RemoteValueCatalog::default(),
             execution_objects: super::pool_objects::RemoteObjectCatalog::new()?,
             programs: Mutex::new(HashMap::new()),
+            input_inventories: Mutex::new(input_inventory::InputInventories::default()),
             completions: Mutex::new(HashMap::new()),
             progress: Mutex::new(HashMap::new()),
         }))
@@ -151,30 +155,6 @@ impl RemotePoolDriver {
         reference: &runmat_execution::value::ValueRef,
     ) -> NativeExecutionResult<runmat_execution::value::ValuePayload> {
         self.values.resolve(reference, &self.value_scope)
-    }
-
-    pub fn register_execution_object(
-        &self,
-        reference: runmat_execution::value::ValueRef,
-        encoded: impl Into<Arc<[u8]>>,
-    ) -> NativeExecutionResult<()> {
-        let encoded = encoded.into();
-        self.execution_objects
-            .register(reference, encoded, &self.value_scope)
-    }
-
-    pub fn execution_object(
-        &self,
-        reference: &runmat_execution::value::ValueRef,
-    ) -> NativeExecutionResult<Option<Arc<[u8]>>> {
-        self.execution_objects.get(reference)
-    }
-
-    pub fn execution_object_by_digest(
-        &self,
-        digest: Digest,
-    ) -> NativeExecutionResult<Option<Arc<[u8]>>> {
-        self.execution_objects.get_by_digest(digest)
     }
 
     pub const fn scope_id(&self) -> ExecutionScopeId {
@@ -325,6 +305,10 @@ impl RemotePoolDriver {
         submission: &TaskSubmission,
         program: &ProgramExecutionRequest,
     ) -> NativeExecutionResult<Option<RemoteTaskCompletion>> {
+        self.input_inventories
+            .lock()
+            .expect("input inventory registry poisoned")
+            .validate(submission.request.id, program)?;
         program.validate().map_err(|error| {
             NativeExecutionError::Protocol(format!("remote program request is invalid: {error}"))
         })?;
@@ -486,6 +470,14 @@ impl RemotePoolDriver {
             });
             completion_senders.push((task_id, sender));
         }
+        let mut inventories = self
+            .input_inventories
+            .lock()
+            .expect("input inventory registry poisoned");
+        let mut admitted_inventories = inventories.clone();
+        for registration in &registrations {
+            admitted_inventories.bind(registration.task_id, &registration.program)?;
+        }
         let mut programs = self
             .programs
             .lock()
@@ -541,6 +533,8 @@ impl RemotePoolDriver {
         drop(progress_registry);
         drop(completions);
         drop(programs);
+        *inventories = admitted_inventories;
+        drop(inventories);
         self.dispatch(actions);
         self.resolve_non_success_terminals();
         Ok(registrations
@@ -741,9 +735,14 @@ impl RemotePoolDriver {
                     let route_identity = route.identity;
                     let channel = route.channel;
                     program.arguments = request.task.inputs.clone();
+                    let inventory = this
+                        .input_inventories
+                        .lock()
+                        .expect("input inventory registry poisoned")
+                        .get(request.task_id);
                     let transfer = this
                         .execution_objects
-                        .transfer_all(channel.as_ref(), route_identity)
+                        .transfer(channel.as_ref(), route_identity, inventory.as_deref())
                         .await;
                     let transfer = match transfer {
                         Ok(()) => {
