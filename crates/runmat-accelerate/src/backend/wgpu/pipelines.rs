@@ -231,7 +231,7 @@ pub struct PipelineBundle {
 }
 
 impl PipelineBundle {
-    #[cfg(test)]
+    #[cfg(all(test, not(target_arch = "wasm32")))]
     pub(crate) fn is_initialized(&self) -> bool {
         self.compiled.get().is_some()
     }
