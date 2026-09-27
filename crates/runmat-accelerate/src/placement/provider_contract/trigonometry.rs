@@ -5,6 +5,8 @@
 use super::*;
 use runmat_builtins::*;
 
+mod atan2;
+
 #[cfg(test)]
 mod tests;
 
@@ -53,6 +55,7 @@ const OPERATIONS: &[DirectUnary] = &[
 ];
 
 pub(super) fn append(snapshot: &mut ProviderCapabilitySnapshot) {
+    snapshot.operations.push(atan2::operation());
     snapshot.operations.extend(
         OPERATIONS
             .iter()
@@ -68,6 +71,9 @@ pub(super) fn validate(
     wgpu: bool,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
+    if let Some(result) = atan2::validate(provider, wgpu, query) {
+        return Some(result);
+    }
     let operation = OPERATIONS
         .iter()
         .find(|operation| operation.entry().identity.name == query.operation.0)?;

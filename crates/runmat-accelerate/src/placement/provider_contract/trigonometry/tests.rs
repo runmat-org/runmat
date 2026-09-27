@@ -22,6 +22,67 @@ fn query(operation: DirectUnary) -> ProviderFeasibilityQuery {
 }
 
 #[test]
+fn exact_atan2_capability_matches_real_hook_and_rejects_unsupported_broadcast() {
+    let provider = InProcessProvider::new();
+    let mut query = query(DirectUnary::Atan);
+    query.operation = atan2::operation().identity;
+    query.inputs.push(query.inputs[0].clone());
+    assert_eq!(builtin_id_by_name("atan2").unwrap().0, query.operation.0);
+    assert!(matches!(
+        provider.query_feasibility(&query),
+        ProviderFeasibility::Supported { .. }
+    ));
+    let y = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[0.0, -0.0, 1.0, -1.0]),
+            shape: &[1, 2, 1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let x = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[-0.0, 0.0, -1.0, 1.0]),
+            shape: &[1, 2, 1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let output = block_on(provider.elem_atan2(&y, &x)).unwrap();
+    let actual = block_on(provider.download(&output)).unwrap();
+    let expected = [0.0_f64, -0.0, 1.0_f64.atan2(-1.0), (-1.0_f64).atan2(1.0)];
+    assert_eq!(actual.shape, y.shape);
+    for (actual, expected) in actual.data.iter().zip(expected) {
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+    for handle in [&y, &x, &output] {
+        provider.free(handle).unwrap();
+    }
+    let valid = query.clone();
+    query.inputs[1].shape = vec![1, 1];
+    assert!(matches!(
+        provider.query_feasibility(&query),
+        ProviderFeasibility::Rejected { .. }
+    ));
+    query = valid.clone();
+    query.inputs[1].element_type = ProviderElementType::F32;
+    assert!(matches!(
+        provider.query_feasibility(&query),
+        ProviderFeasibility::Rejected { .. }
+    ));
+    query = valid.clone();
+    query.inputs[1].storage = ProviderStorage::DenseComplexInterleaved;
+    assert!(matches!(
+        provider.query_feasibility(&query),
+        ProviderFeasibility::Rejected { .. }
+    ));
+    query = valid;
+    query.inputs[1].layout = ProviderLayout::Strided;
+    assert!(matches!(
+        provider.query_feasibility(&query),
+        ProviderFeasibility::Rejected { .. }
+    ));
+}
+
+#[test]
 fn exact_trigonometric_capabilities_match_real_inprocess_hooks() {
     let provider = InProcessProvider::new();
     let values: [f64; 4] = [-0.5, 0.0, 0.25, 1.0];
