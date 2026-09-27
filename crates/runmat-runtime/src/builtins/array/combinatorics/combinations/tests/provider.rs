@@ -5,12 +5,16 @@ use runmat_value::{IntegerStorage, Tensor};
 #[test]
 fn strict_mode_rejects_resident_input_before_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 99,
-        buffer_id: 77,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle,
+    );
     let error = call(resident, Vec::new()).unwrap_err();
     assert_eq!(
         error.identifier(),

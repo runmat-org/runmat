@@ -235,12 +235,16 @@ fn false_resident_integer_size_is_structural_and_returns_host_logical() {
 #[test]
 fn false_strict_mode_rejects_resident_size_before_provider_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let invalid = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let invalid = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle,
+    );
     let error = block_on(false_builtin(vec![invalid])).unwrap_err();
     assert_eq!(
         error.identifier(),

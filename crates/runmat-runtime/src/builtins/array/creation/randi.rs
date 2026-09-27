@@ -1551,20 +1551,18 @@ pub(crate) mod tests {
             );
         }
 
-        for (offset, element_type) in [
+        for (_offset, element_type) in [
             (0, runmat_accelerate_api::IntegerElementType::I64),
             (1, runmat_accelerate_api::IntegerElementType::U64),
         ] {
-            let handle = GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 10 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered allocation")
+                .handle;
             let error = block_on(randi_builtin(vec![
                 Value::Num(5.0),
                 Value::from("like"),

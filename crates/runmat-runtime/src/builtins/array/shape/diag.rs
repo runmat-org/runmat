@@ -2960,23 +2960,31 @@ mod tests {
             trailing_err.identifier.as_deref(),
             Some("RunMat:compatibility:DiagTrailingSingletonDimensionsExtension")
         );
-        let resident_control = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident_control = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered allocation")
+                .handle,
+        );
         let control_err = run_diag(vector(), vec![resident_control]).unwrap_err();
         assert_eq!(
             control_err.identifier(),
             MESSAGE_ID_INVALID_INPUT.identifier
         );
-        let resident_like = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 1,
-            descriptor: Default::default(),
-        });
+        let resident_like = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("genuine unregistered allocation")
+                .handle,
+        );
         let like_err = run_diag(vector(), vec![Value::from("like"), resident_like]).unwrap_err();
         assert_eq!(like_err.identifier(), DIAG_LIKE_EXTENSION.error_identifier);
     }

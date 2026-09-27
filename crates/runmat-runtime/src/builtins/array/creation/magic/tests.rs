@@ -4,9 +4,11 @@ use super::*;
 fn automatic_complex_control_materializes_without_losing_its_real_component() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let input = runmat_value::ComplexTensor::new(vec![(3.9, 8.0)], vec![1, 1]).unwrap();
-        let mut handle =
+        let handle =
             crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &input).unwrap();
-        runmat_accelerate_api::mark_handle_automatic(&mut handle);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
         let result = magic_builtin(vec![Value::GpuTensor(handle)]).unwrap();
         let Value::Tensor(result) = result else {
             panic!("expected host square");
@@ -18,13 +20,17 @@ fn automatic_complex_control_materializes_without_losing_its_real_component() {
 
 #[test]
 fn explicit_device_control_rejects_without_provider_access() {
-    let mut handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    };
-    runmat_accelerate_api::mark_handle_explicit(&mut handle);
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("genuine unregistered allocation")
+        .handle;
+    let handle = handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
     let error = magic_builtin(vec![Value::GpuTensor(handle)]).unwrap_err();
     assert!(error.message().contains("gpuArray input is not supported"));
 }

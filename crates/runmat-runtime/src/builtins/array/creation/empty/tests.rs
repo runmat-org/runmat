@@ -61,12 +61,16 @@ fn resident_integer_size_controls_preserve_host_receiver_class() {
 #[test]
 fn requested_outputs_reject_before_size_or_provider_access() {
     let _outputs = crate::output_count::push_output_count(Some(2));
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 2],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle,
+    );
     let error = futures::executor::block_on(uint64_empty_builtin(vec![resident])).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:empty:TooManyOutputs"));
 }
@@ -81,12 +85,16 @@ fn discarded_output_still_validates_empty_shape() {
 #[test]
 fn global_compatibility_rejects_before_resident_controls() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 2],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle,
+    );
     let error = futures::executor::block_on(empty_builtin(vec![resident])).unwrap_err();
     assert_eq!(
         error.identifier(),
@@ -189,12 +197,16 @@ fn global_shorthand_is_gated_in_matlab_mode() {
 #[test]
 fn resident_size_control_rejects_before_provider_access_in_matlab_mode() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 2],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle,
+    );
     let err = futures::executor::block_on(parse_shape(&[resident])).unwrap_err();
     assert_eq!(
         err.identifier(),

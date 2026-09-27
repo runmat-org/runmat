@@ -726,23 +726,21 @@ pub(crate) mod tests {
             RANDN_COLUMN_SIZE_VECTOR_EXTENSION.error_identifier
         );
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX - 18,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U8,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::U8,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation")
+            .handle;
         let error = block_on(randn_builtin(vec![Value::GpuTensor(handle.clone())]))
             .expect_err("strict resident size");
         assert_eq!(
             error.identifier(),
             RANDN_RESIDENT_SIZE_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop(handle);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
