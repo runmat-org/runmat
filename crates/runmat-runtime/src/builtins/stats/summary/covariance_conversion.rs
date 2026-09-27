@@ -592,86 +592,11 @@ fn output_values(
     }
 }
 
-struct CovarianceGpuEval {
-    provider: &'static dyn AccelProvider,
-    correlation: GpuTensorHandle,
-    sigma: GpuTensorHandle,
-}
-
-impl CovarianceGpuEval {
-    fn from_provider(
-        provider: &'static dyn AccelProvider,
-        result: ProviderCovarianceToCorrelationResult,
-    ) -> Self {
-        Self {
-            provider,
-            correlation: result.correlation,
-            sigma: result.sigma,
-        }
-    }
-
-    fn output(self, kind: ConversionKind, name: &'static str) -> BuiltinResult<Value> {
-        let (first, second) = match kind {
-            ConversionKind::Corrcov => (self.correlation, self.sigma),
-            ConversionKind::Cov2corr => {
-                let len = if self.sigma.shape().contains(&0) {
-                    0
-                } else {
-                    self.sigma
-                        .shape()
-                        .iter()
-                        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                        .ok_or_else(|| {
-                            conversion_error(name, format!("{name}: sigma shape overflow"))
-                        })?
-                };
-                let sigma = self
-                    .provider
-                    .reshape(&self.sigma, &[1, len])
-                    .map_err(|error| {
-                        let message = format!("{name}: {error}");
-                        crate::runtime_error::with_provider_execution_source(
-                            conversion_error(name, message),
-                            runmat_accelerate_api::ProviderExecutionError::from(error),
-                        )
-                    })?;
-                if sigma.shape() != [1, len]
-                    || sigma.physical().element_type() != self.sigma.physical().element_type()
-                    || sigma.physical().storage() != self.sigma.physical().storage()
-                    || runmat_accelerate_api::handle_is_logical(&sigma)
-                    || sigma.shares_allocation_with(&self.correlation)
-                    || !gpu_helpers::exact_provider_for_handle(&sigma)
-                        .is_some_and(|owner| std::ptr::eq(owner, self.provider))
-                {
-                    return Err(gpu_helpers::reject_gpu_output(
-                        sigma,
-                        conversion_error(name, format!("{name}: invalid sigma reshape result")),
-                    ));
-                }
-                (sigma, self.correlation)
-            }
-        };
-        match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
-                first,
-            )?])),
-            Some(2) => Ok(Value::OutputList(vec![
-                gpu_helpers::resident_gpu_value(first)?,
-                gpu_helpers::resident_gpu_value(second)?,
-            ])),
-            Some(_) => Err(conversion_error(
-                name,
-                format!("{name}: too many output arguments; maximum is 2"),
-            )),
-            None => gpu_helpers::resident_gpu_value(first),
-        }
-    }
-}
+mod resident;
+use resident::CovarianceGpuEval;
 
 fn provider_is_unsupported(err: &anyhow::Error) -> bool {
-    let message = err.to_string();
-    message.contains("not supported") || message.contains("unsupported")
+    runmat_accelerate_api::is_unsupported_provider_operation(err)
 }
 
 fn try_covariance_gpu(
@@ -692,13 +617,16 @@ fn try_covariance_gpu(
     {
         return Ok(None);
     }
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) else {
         return Ok(None);
     };
     match provider.covariance_to_correlation(handle) {
-        Ok(result) => Ok(Some(CovarianceGpuEval::from_provider(provider, result))),
+        Ok(result) => CovarianceGpuEval::from_provider(name, provider, handle, result).map(Some),
         Err(err) if provider_is_unsupported(&err) => Ok(None),
-        Err(err) => Err(conversion_error(name, format!("{name}: {err}"))),
+        Err(err) => Err(crate::runtime_error::with_provider_execution_source(
+            conversion_error(name, format!("{name}: {err}")),
+            runmat_accelerate_api::ProviderExecutionError::from(err),
+        )),
     }
 }
 
@@ -846,6 +774,47 @@ mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_value::IntegerStorage;
+
+    #[test]
+    fn provider_fallback_requires_typed_unsupported_not_error_wording() {
+        assert!(!provider_is_unsupported(&anyhow::anyhow!(
+            "device failed while processing an unsupported request"
+        )));
+        assert!(provider_is_unsupported(
+            &runmat_accelerate_api::unsupported_provider_operation("fixture unavailable")
+        ));
+    }
+
+    #[test]
+    fn provider_output_alias_rejection_keeps_borrowed_input_alive() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[4.0, 0.0, 0.0, 9.0],
+                    shape: &[2, 2],
+                })
+                .unwrap();
+            let correlation = input
+                .with_view(runmat_accelerate_api::GpuTensorView::contiguous(vec![2, 2]))
+                .unwrap();
+            let sigma = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[2.0, 3.0],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let sigma_weak = sigma.downgrade();
+            let result = CovarianceGpuEval::from_provider(
+                "corrcov",
+                provider,
+                &input,
+                ProviderCovarianceToCorrelationResult { correlation, sigma },
+            );
+            assert!(result.is_err());
+            assert!(input.allocation_lease().validate_live().is_ok());
+            assert!(sigma_weak.acquire().is_err());
+        });
+    }
 
     #[test]
     fn resident_output_arity_keeps_only_returned_allocation_leases() {
