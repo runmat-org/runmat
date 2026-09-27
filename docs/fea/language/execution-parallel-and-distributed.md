@@ -121,3 +121,12 @@ same payload does not change its producing workload identity. This source valida
 establish convergence, validate a formulation, or prove measured memory bounds. In particular,
 constraint compilation and observation reprojection still need independently bounded workspace
 admission; the current workspace multiplier is not a proof for multiplicative expansion.
+
+Constraint-rank classification now borrows the canonical equations and label strings. Its
+workspace profile bounds coefficient fill and provenance by connected DOF components, with
+checked slot arithmetic and fallible exact reservations. A count-only graph bound supports
+admitting connectivity derivation before the tighter numerical workspace profile is available.
+The same classifier serves compilation and classification validation; validation does not clone
+the complete rows merely to recompute rank. The profile covers requested Rust heap slots, not
+allocator overhead, process RSS, diagnostic strings, authored constraint expansion or observation
+resolution. Whole-task admission must compose those remaining costs before claiming closure.

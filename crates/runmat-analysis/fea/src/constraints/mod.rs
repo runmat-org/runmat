@@ -35,6 +35,11 @@ pub use contract::{
     ConstraintPlanError, ConstraintPlanEvidence, ConstraintResidualQuantity, ReactionRecovery,
     ResolvedConstraintTarget,
 };
+pub use rank::{
+    classify_constraint_rows, constraint_rank_graph_workspace_bytes,
+    constraint_rank_workspace_profile, ConstraintRankClassification,
+    ConstraintRankWorkspaceProfile,
+};
 pub use result::{
     CanonicalStructuralConstraintResult, ConstraintGroupResult, ConstraintReferencePointResult,
     ConstraintResultError, ConstraintRowReaction, ConstraintViolation,

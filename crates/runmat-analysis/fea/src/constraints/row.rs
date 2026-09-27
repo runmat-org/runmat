@@ -149,34 +149,23 @@ pub(super) fn classify(
     rows: &mut [CanonicalStructuralConstraintRow],
 ) -> Result<(usize, usize), ConstraintPlanError> {
     let result = rank::classify(rows)?;
-    for row in rows {
+    for (row, recovery) in rows.iter_mut().zip(result.classifications) {
+        row.reaction_recovery = recovery;
         row.identity = row_identity(row)?;
     }
-    Ok(result)
+    Ok((result.active_row_count, result.redundant_row_count))
 }
 
 pub(super) fn validate_row_classification(
     rows: &[CanonicalStructuralConstraintRow],
 ) -> Result<(usize, usize), ConstraintPlanError> {
-    let mut expected = rows
-        .iter()
-        .map(|row| {
-            let mut row = row.clone();
-            row.reaction_recovery = if row.terms.len() == 1 {
-                ReactionRecovery::UnconstrainedEquilibriumResidual
-            } else {
-                ReactionRecovery::ConstraintMultiplier
-            };
-            row
-        })
-        .collect::<Vec<_>>();
-    let result = rank::classify(&mut expected)?;
-    for (actual, expected) in rows.iter().zip(expected) {
-        if actual.reaction_recovery != expected.reaction_recovery {
+    let result = rank::classify(rows)?;
+    for (actual, expected) in rows.iter().zip(result.classifications) {
+        if actual.reaction_recovery != expected {
             return Err(ConstraintPlanError::Invalid(
                 "constraint row rank classification is inconsistent".into(),
             ));
         }
     }
-    Ok(result)
+    Ok((result.active_row_count, result.redundant_row_count))
 }
