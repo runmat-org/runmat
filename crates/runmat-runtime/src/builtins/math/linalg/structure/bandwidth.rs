@@ -386,7 +386,7 @@ impl MatrixData {
 }
 
 async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
-    let (rows, cols) = ensure_matrix_shape(&handle.shape)?;
+    let (rows, cols) = ensure_matrix_shape(handle.shape())?;
     if rows == 0 || cols == 0 {
         return Ok((0, 0));
     }
@@ -396,15 +396,22 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
         let tensor = gpu_helpers::gather_tensor_async(handle).await?;
         return bandwidth_host_real_tensor(&tensor);
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
         match provider.bandwidth(handle) {
             Ok(result) => {
                 let lower = result.lower as usize;
                 let upper = result.upper as usize;
                 return Ok((lower, upper));
             }
-            Err(err) => {
+            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
                 debug!("bandwidth: provider bandwidth fallback: {err}");
+            }
+            Err(err) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    bandwidth_error_with_detail(&BANDWIDTH_ERROR_INTERNAL, &err),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
             }
         }
     }
@@ -942,7 +949,7 @@ pub(crate) mod tests {
         let result =
             bandwidth_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("bandwidth");
         assert_eq!(result, Value::Num(cpu.0 as f64));
-        let _ = provider.free(&handle);
+        drop(handle);
     }
 
     #[test]

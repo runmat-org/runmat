@@ -403,19 +403,25 @@ async fn gpu_structure_predicate(
     ctx: BuiltinContext,
 ) -> BuiltinResult<bool> {
     if runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::ComplexInterleaved {
-        let Some((_rows, _cols)) = matrix_dims_or_false(&handle.shape) else {
+        let Some((_rows, _cols)) = matrix_dims_or_false(handle.shape()) else {
             return Ok(false);
         };
         if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-            let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+            let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             match provider.bandwidth(&handle) {
                 Ok(bandwidth) => {
-                    gpu_helpers::restore_handle_metadata(&handle, &metadata);
                     return Ok(bandwidth_satisfies(bandwidth, predicate));
                 }
-                Err(err) => debug!("{}: provider bandwidth fallback: {err}", ctx.name),
+                Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
+                    debug!("{}: provider bandwidth fallback: {err}", ctx.name);
+                }
+                Err(err) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        runtime_error_with_detail(ctx, ctx.internal, &err),
+                        runmat_accelerate_api::ProviderExecutionError::from(err),
+                    ))
+                }
             }
-            gpu_helpers::restore_handle_metadata(&handle, &metadata);
         }
     }
 
@@ -1045,29 +1051,27 @@ mod tests {
         assert!(!expect_bool(call_istriu(Value::Tensor(tensor)).unwrap()));
     }
 
-    #[derive(Clone, Copy)]
     struct FixedBandwidthProvider {
         lower: u32,
         upper: u32,
-        device_id: u32,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        fail: bool,
     }
 
     impl AccelProvider for FixedBandwidthProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id,
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            Ok(self
+                .owner
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move { Err(anyhow::anyhow!("download should not be called")) })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -1075,10 +1079,13 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            self.device_id
+            self.owner.device_id()
         }
 
         fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
+            if self.fail {
+                return Err(anyhow::anyhow!("bandwidth execution failed"));
+            }
             Ok(ProviderBandwidth {
                 lower: self.lower,
                 upper: self.upper,
@@ -1086,56 +1093,66 @@ mod tests {
         }
     }
 
-    static DIAGONAL_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 0,
-        upper: 0,
-        device_id: 92_001,
-    };
-    static LOWER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 2,
-        upper: 0,
-        device_id: 92_002,
-    };
-    static UPPER_PROVIDER: FixedBandwidthProvider = FixedBandwidthProvider {
-        lower: 0,
-        upper: 2,
-        device_id: 92_003,
-    };
+    static DIAGONAL_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 0,
+            upper: 0,
+            owner: Default::default(),
+            fail: false,
+        });
+    static LOWER_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 2,
+            upper: 0,
+            owner: Default::default(),
+            fail: false,
+        });
+    static UPPER_PROVIDER: std::sync::LazyLock<FixedBandwidthProvider> =
+        std::sync::LazyLock::new(|| FixedBandwidthProvider {
+            lower: 0,
+            upper: 2,
+            owner: Default::default(),
+            fail: false,
+        });
 
     fn fixed_gpu_handle(provider: &FixedBandwidthProvider) -> Value {
-        Value::GpuTensor(GpuTensorHandle {
-            shape: vec![3, 3],
-            device_id: provider.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        })
+        Value::GpuTensor(
+            provider
+                .owner
+                .allocate_zeroed(
+                    vec![3, 3],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        )
     }
 
-    #[derive(Clone, Copy)]
-    struct FallbackDownloadProvider;
+    struct FallbackDownloadProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    }
 
     impl AccelProvider for FallbackDownloadProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            Ok(self
+                .owner
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
                 Ok(HostTensorOwned {
                     data: vec![1.0, 3.0, 0.0, 2.0],
-                    shape: h.shape.clone(),
+                    shape: h.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 })
             })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -1143,21 +1160,26 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            92_004
+            self.owner.device_id()
         }
 
         fn bandwidth(&self, _matrix: &GpuTensorHandle) -> anyhow::Result<ProviderBandwidth> {
-            Err(anyhow::anyhow!("bandwidth intentionally unavailable"))
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "bandwidth intentionally unavailable",
+            ))
         }
     }
 
-    static FALLBACK_PROVIDER: FallbackDownloadProvider = FallbackDownloadProvider;
+    static FALLBACK_PROVIDER: std::sync::LazyLock<FallbackDownloadProvider> =
+        std::sync::LazyLock::new(|| FallbackDownloadProvider {
+            owner: Default::default(),
+        });
 
     #[test]
     fn gpu_inputs_use_provider_bandwidth_without_gathering() {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&DIAGONAL_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*DIAGONAL_PROVIDER));
         assert!(expect_bool(
             call_isdiag(fixed_gpu_handle(&DIAGONAL_PROVIDER)).unwrap()
         ));
@@ -1169,7 +1191,7 @@ mod tests {
         ));
 
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&LOWER_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*LOWER_PROVIDER));
         assert!(!expect_bool(
             call_isdiag(fixed_gpu_handle(&LOWER_PROVIDER)).unwrap()
         ));
@@ -1181,7 +1203,7 @@ mod tests {
         ));
 
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&UPPER_PROVIDER));
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*UPPER_PROVIDER));
         assert!(!expect_bool(
             call_isdiag(fixed_gpu_handle(&UPPER_PROVIDER)).unwrap()
         ));
@@ -1194,20 +1216,41 @@ mod tests {
     }
 
     #[test]
+    fn failed_bandwidth_does_not_download_or_retire_borrowed_input() {
+        let _guard = test_support::accel_test_lock();
+        let provider = Box::leak(Box::new(FixedBandwidthProvider {
+            lower: 0,
+            upper: 0,
+            owner: Default::default(),
+            fail: true,
+        }));
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let allocation = provider
+            .owner
+            .allocate_zeroed(
+                vec![2, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let error = call_isdiag(Value::GpuTensor(allocation.handle.clone())).unwrap_err();
+        assert!(error.to_string().contains("bandwidth execution failed"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
+
+    #[test]
     fn gpu_inputs_fall_back_to_download_when_bandwidth_is_unavailable() {
         let _guard = test_support::accel_test_lock();
         let _thread_provider =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&FALLBACK_PROVIDER));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: FALLBACK_PROVIDER.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::Real,
-        );
+            runmat_accelerate_api::ThreadProviderGuard::set(Some(&*FALLBACK_PROVIDER));
+        let handle = FALLBACK_PROVIDER
+            .upload(&HostTensorView {
+                data: &[1.0, 3.0, 0.0, 2.0],
+                shape: &[2, 2],
+            })
+            .unwrap();
         let handle = Value::GpuTensor(handle);
         assert!(!expect_bool(call_isdiag(handle.clone()).unwrap()));
         assert!(expect_bool(call_istril(handle.clone()).unwrap()));

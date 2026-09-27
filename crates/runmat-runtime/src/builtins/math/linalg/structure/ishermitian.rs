@@ -305,21 +305,25 @@ async fn ishermitian_gpu(
     tol: f64,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let provider_mode = match mode {
             HermitianMode::Hermitian => ProviderHermitianKind::Hermitian,
             HermitianMode::Skew => ProviderHermitianKind::Skew,
         };
         match provider.ishermitian(&handle, provider_mode, tol).await {
             Ok(result) => {
-                gpu_helpers::restore_handle_metadata(&handle, &metadata);
                 return Ok(Value::Bool(result));
             }
-            Err(err) => {
+            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
                 log::debug!("ishermitian: provider hook unavailable, falling back to host: {err}");
             }
+            Err(err) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, &err),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
+            }
         }
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
     }
     let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         ishermitian_error_with_detail(

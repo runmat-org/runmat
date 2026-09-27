@@ -216,11 +216,18 @@ fn logical_to_tensor(logical: &LogicalArray) -> BuiltinResult<Tensor> {
 }
 
 async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         match provider.sym_rcm(&handle).await {
             Ok(ordering) => return permutation_to_value(&ordering),
-            Err(err) => {
+            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
                 debug!("symrcm: provider hook unavailable, falling back to host: {err}");
+            }
+            Err(err) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    symrcm_error_with_detail(&SYMRCM_ERROR_INTERNAL, &err),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
             }
         }
     }

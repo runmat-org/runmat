@@ -301,21 +301,25 @@ async fn issymmetric_gpu(
     tol: f64,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let kind = match mode {
             SymmetryMode::Symmetric => ProviderSymmetryKind::Symmetric,
             SymmetryMode::Skew => ProviderSymmetryKind::Skew,
         };
         match provider.issymmetric(&handle, kind, tol) {
             Ok(flag) => {
-                gpu_helpers::restore_handle_metadata(&handle, &metadata);
                 return Ok(Value::Bool(flag));
             }
-            Err(err) => {
+            Err(err) if runmat_accelerate_api::is_unsupported_provider_operation(&err) => {
                 log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
             }
+            Err(err) => {
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, &err),
+                    runmat_accelerate_api::ProviderExecutionError::from(err),
+                ))
+            }
         }
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
     }
     let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         issymmetric_error_with_detail(
@@ -1166,8 +1170,7 @@ pub(crate) mod tests {
         .unwrap();
         assert_eq!(cpu_skew, gpu_skew);
 
-        let _ = provider.free(&handle);
-        let _ = provider.free(&handle_skew);
+        drop((handle, handle_skew));
     }
 
     fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
