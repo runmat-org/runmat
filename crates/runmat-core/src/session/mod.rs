@@ -52,6 +52,7 @@ mod cancellation;
 mod config;
 mod dynamic;
 mod executable;
+mod host_services;
 mod init;
 mod project;
 mod run;
