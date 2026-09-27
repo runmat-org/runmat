@@ -1,4 +1,6 @@
 use futures::executor::block_on;
+#[path = "support/retirement.rs"]
+mod retirement;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
@@ -18,21 +20,30 @@ fn inprocess_single_typed_f32_is_shape_preserving_and_independently_owned() {
             })
             .unwrap();
         let output = block_on(provider.unary_single(&input)).unwrap();
-        assert_eq!(output.shape, shape);
-        assert_ne!(input.buffer_id, output.buffer_id);
+        assert_eq!(output.shape(), shape);
+        assert_ne!(input.view_identity(), output.view_identity());
+        assert!(input.shares_allocation_with(&output));
         assert_eq!(
-            output.descriptor.element_type,
+            output.descriptor().element_type,
             Some(NumericElementType::F32)
         );
-        provider.free(&input).unwrap();
+        let weak = input.allocation_lease().downgrade();
+        assert_eq!(
+            input.release().unwrap(),
+            runmat_accelerate_api::allocation::AllocationReleaseOutcome::ReferenceReleased
+        );
+        assert!(weak.acquire().is_some());
         assert_eq!(
             block_on(provider.download_numeric(&output)).unwrap().data,
             HostNumericDataOwned::F32(data)
         );
         let second = block_on(provider.unary_single(&output)).unwrap();
-        provider.free(&second).unwrap();
+        assert!(second.shares_allocation_with(&output));
+        assert_ne!(second.view_identity(), output.view_identity());
+        second.release().unwrap();
         assert!(block_on(provider.download_numeric(&output)).is_ok());
-        provider.free(&output).unwrap();
+        retirement::release_all([output]);
+        assert!(weak.acquire().is_none());
     }
 }
 
@@ -48,15 +59,16 @@ fn inprocess_single_f64_conversion_rounds_into_genuine_f32_storage() {
         })
         .unwrap();
     let output = block_on(provider.unary_single(&input)).unwrap();
-    assert_eq!(output.shape, vec![1, 1, 2]);
+    assert_eq!(output.shape(), [1, 1, 2]);
+    assert!(!output.shares_allocation_with(&input));
     assert_eq!(
         block_on(provider.download_numeric(&output)).unwrap().data,
         HostNumericDataOwned::F32(vec![16_777_216.0, -2.5])
     );
-    provider.free(&output).unwrap();
+    retirement::release_all([output]);
     assert_eq!(
         block_on(provider.download_numeric(&input)).unwrap().data,
         HostNumericDataOwned::F64(data.to_vec())
     );
-    provider.free(&input).unwrap();
+    retirement::release_all([input]);
 }

@@ -1,4 +1,6 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/retirement.rs"]
+mod retirement;
 use runmat_accelerate_api::{AccelProvider, GpuTensorStorage, HostTensorView, ProviderPrecision};
 
 #[tokio::test]
@@ -18,7 +20,7 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
                 shape: &[2, 2, 2],
             })
             .unwrap();
-        let before = input.descriptor.clone();
+        let before = input.wire_descriptor();
         let output = match operation {
             0 => provider.unary_log2(&input).await,
             1 => provider.unary_log10(&input).await,
@@ -26,15 +28,15 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
             _ => provider.unary_log(&input).await,
         }
         .unwrap();
-        assert_ne!(input.buffer_id, output.buffer_id);
-        assert_eq!(input.descriptor, before);
-        assert_eq!(output.device_id, input.device_id);
-        assert_eq!(output.shape, input.shape);
+        assert_ne!(input.buffer_id(), output.buffer_id());
+        assert_eq!(input.wire_descriptor(), before);
+        assert_eq!(output.device_id(), input.device_id());
+        assert_eq!(output.shape(), input.shape());
         assert_eq!(
-            output.descriptor.element_type,
-            input.descriptor.element_type
+            output.descriptor().element_type,
+            input.descriptor().element_type
         );
-        assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+        assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
         for (actual, original) in provider
             .download(&output)
             .await
@@ -68,7 +70,7 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
             }
         }
         provider.download(&input).await.unwrap();
-        provider.free(&output).unwrap();
-        provider.free(&input).unwrap();
+        retirement::release_all([output]);
+        retirement::release_all([input]);
     }
 }

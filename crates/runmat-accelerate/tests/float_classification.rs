@@ -1,5 +1,7 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{register_wgpu_provider, WgpuProviderOptions};
 use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
@@ -44,18 +46,18 @@ fn actual_wgpu_classifies_nonfinite_payloads_and_maximum_finite_values() {
             values.map(f64::is_finite),
         ),
     ] {
-        assert_eq!(output.shape, vec![2, 1, 5]);
-        assert_ne!(output.buffer_id, input.buffer_id);
+        assert_eq!(output.shape(), vec![2, 1, 5]);
+        assert_ne!(output.buffer_id(), input.buffer_id());
         let downloaded = block_on(provider.download(&output)).unwrap();
         assert_eq!(
             downloaded.data,
             expected.map(|value| if value { 1.0 } else { 0.0 })
         );
-        provider.free(&output).unwrap();
+        retirement::release_all([output]);
     }
     let unchanged = block_on(provider.download(&input)).unwrap();
     for (actual, expected) in unchanged.data.iter().zip(values) {
         assert!(actual.to_bits() == expected.to_bits() || (actual.is_nan() && expected.is_nan()));
     }
-    provider.free(&input).unwrap();
+    retirement::release_all([input]);
 }
