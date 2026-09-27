@@ -186,8 +186,11 @@ pub fn restore_class_preserving_value_protecting(
                         NumericDType::F32 => ProviderPrecision::F32,
                         _ => ProviderPrecision::F64,
                     });
-            let data = interleaved_complex_data(tensor)
-                .map_err(|error| build_runtime_error(format!("{builtin}: {error}")).build())?;
+            let data = interleaved_complex_data(tensor).map_err(|error| {
+                build_runtime_error(format!("{builtin}: {error}"))
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build()
+            })?;
             let transfer = HostNumericTensorView {
                 data: data.as_view(),
                 shape: &tensor.shape,
@@ -271,7 +274,11 @@ pub fn restore_class_preserving_value_protecting(
             "{builtin}: cannot preserve restored result intent: {error}"
         ))
         .with_source(error)
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    resident_gpu_value(output)
+    resident_gpu_value(output).map_err(|mut error| {
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        error
+    })
 }

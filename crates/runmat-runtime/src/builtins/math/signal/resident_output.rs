@@ -65,7 +65,6 @@ impl OutputContext<'_> {
             builtin,
             &protected,
         )
-        .map_err(terminal)
     }
 
     pub(super) fn admit(
@@ -124,8 +123,7 @@ pub(super) fn restore(
     let Value::OutputList(values) = value else {
         return gpu_helpers::restore_class_preserving_value_protecting(
             input, value, builtin, protected,
-        )
-        .map_err(terminal);
+        );
     };
     let mut outputs = Vec::with_capacity(values.len());
     for value in values {
@@ -142,8 +140,7 @@ pub(super) fn restore(
             .collect::<Vec<_>>();
         let output = gpu_helpers::restore_class_preserving_value_protecting(
             input, value, builtin, &borrowed,
-        )
-        .map_err(terminal)?;
+        )?;
         outputs.push(output);
     }
     Ok(Value::OutputList(outputs))
