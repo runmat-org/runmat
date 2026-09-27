@@ -3,16 +3,26 @@ use super::*;
 #[test]
 fn invalid_cell_option_precedes_unavailable_size_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let input = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle::new(
-        vec![1, 2],
-        u32::MAX - 31,
-        91821,
-    ));
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 2],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let input = Value::GpuTensor(allocation.handle.clone());
     let error = run(vec![input, Value::from("bad-option")]).unwrap_err();
     assert_eq!(
         error.identifier(),
         runmat_builtins::CELL_ERROR_INVALID_INPUT.identifier
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -43,7 +53,9 @@ fn runtime_owned_cell_sink_invalidates_only_successful_resident_controls() {
         ])
         .is_err());
         assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-        provider.free(&handle).unwrap();
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().unwrap();
+        assert!(physical.acquire().is_none());
     });
 }
 use crate::builtins::common::test_support;

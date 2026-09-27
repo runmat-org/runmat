@@ -1,5 +1,4 @@
 use super::*;
-use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::{CharArray, IntValue};
 
 #[test]
@@ -35,12 +34,18 @@ fn cell_contents_must_be_character_vectors_or_string_scalars() {
 
 #[test]
 fn resident_values_reject_without_provider_lookup() {
-    let resident = Value::GpuTensor(GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let top_level = call(resident.clone()).expect_err("resident input");
     assert_eq!(top_level.identifier(), Some("RunMat:cellstr:InvalidInput"));
 
@@ -49,4 +54,7 @@ fn resident_values_reject_without_provider_lookup() {
     let nested = call(nested).expect_err("nested resident input");
     assert_eq!(nested.identifier(), Some("RunMat:cellstr:InvalidContents"));
     assert!(!nested.message().contains("provider"));
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
