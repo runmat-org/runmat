@@ -216,3 +216,41 @@ async fn fft_stage_families_match_dft_and_preserve_source_ownership() {
         assert!(source_weak.acquire().is_none());
     }
 }
+
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(
+    not(target_arch = "wasm32"),
+    ignore = "requires an actual WGPU adapter; run explicitly with --ignored"
+)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
+async fn fft_forward_and_inverse_scalar_shape_matches_canonical_host_contract() {
+    let provider = provider().await;
+    for shape in [vec![], vec![1], vec![1, 1]] {
+        let input = provider
+            .upload_exec(&HostTensorView {
+                data: &[3.25],
+                shape: &shape,
+            })
+            .unwrap();
+        for inverse in [false, true] {
+            let output = if inverse {
+                provider.ifft_dim_exec(&input, None, 0).await
+            } else {
+                provider.fft_dim_exec(&input, None, 0).await
+            }
+            .unwrap();
+            assert_eq!(
+                output.shape(),
+                &[1, 1],
+                "inverse={inverse}, input={shape:?}"
+            );
+            let data = provider.download_exec(&output).await.unwrap();
+            assert_eq!(data.data, vec![3.25, 0.0]);
+            assert!(!output.shares_allocation_with(&input));
+        }
+        assert_eq!(
+            provider.download_exec(&input).await.unwrap().data,
+            vec![3.25]
+        );
+    }
+}
