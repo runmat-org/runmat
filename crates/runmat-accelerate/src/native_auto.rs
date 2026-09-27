@@ -283,6 +283,8 @@ static DECISION_LOG: Lazy<Mutex<DecisionLog>> = Lazy::new(|| Mutex::new(Decision
 static AUTO_STATE: OnceCell<Mutex<AutoOffloadState>> = OnceCell::new();
 
 fn record_decision(entry: AutoOffloadDecisionEntry) -> PlacementTraceContext {
+    #[cfg(test)]
+    tests::capture_decision(&entry);
     let trace = crate::placement::begin_trace(&entry.operation, None);
     let attributes = decision_attributes(&entry);
     trace.event(
@@ -1674,7 +1676,40 @@ mod tests {
         GpuTensorHandle, HostNumericDataOwned, NumericElementType, ProviderCostEstimate,
         ProviderCostQuery, ProviderFeasibility, ProviderFeasibilityQuery, ProviderResourceEstimate,
     };
+    use std::cell::RefCell;
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+    thread_local! {
+        // These promotion APIs execute synchronously. Capture only the caller's
+        // invocation; the public diagnostic log remains process-wide.
+        static CAPTURED_DECISIONS: RefCell<Option<Vec<AutoOffloadDecisionEntry>>> = const { RefCell::new(None) };
+    }
+
+    pub(super) fn capture_decision(entry: &AutoOffloadDecisionEntry) {
+        CAPTURED_DECISIONS.with(|captured| {
+            if let Some(entries) = captured.borrow_mut().as_mut() {
+                entries.push(entry.clone());
+            }
+        });
+    }
+
+    fn capture_promotion<T>(body: impl FnOnce() -> T) -> (T, Vec<AutoOffloadDecisionEntry>) {
+        struct CaptureGuard;
+        impl Drop for CaptureGuard {
+            fn drop(&mut self) {
+                CAPTURED_DECISIONS.with(|captured| *captured.borrow_mut() = None);
+            }
+        }
+        CAPTURED_DECISIONS.with(|captured| {
+            let mut captured = captured.borrow_mut();
+            assert!(captured.is_none(), "promotion capture must not be nested");
+            *captured = Some(Vec::new());
+        });
+        let _guard = CaptureGuard;
+        let result = body();
+        let entries = CAPTURED_DECISIONS.with(|captured| captured.borrow_mut().take().unwrap());
+        (result, entries)
+    }
 
     struct RejectingProvider {
         uploads: AtomicUsize,
@@ -1832,23 +1867,33 @@ mod tests {
 
     #[test]
     fn complete_cost_keeps_transfer_dominated_work_on_cpu() {
-        clear_decisions();
         COSTED_PROVIDER.uploads.store(0, Ordering::Relaxed);
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
         let tensor = Value::Tensor(Tensor::new(vec![1.0; 128], vec![1, 128]).unwrap());
-        let _ = auto
-            .promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
-            .unwrap();
+        let ((left, right), decisions) = capture_promotion(|| {
+            auto.promote_binary(BinaryOp::Elementwise, &tensor, &tensor)
+                .unwrap()
+        });
+        assert!(matches!(left, Value::Tensor(_)) && matches!(right, Value::Tensor(_)));
         assert_eq!(COSTED_PROVIDER.uploads.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            snapshot_decisions().last().map(|entry| entry.decision),
-            Some(AutoOffloadDisposition::Cpu)
-        );
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].operation, "elementwise");
+        assert_eq!(decisions[0].decision, AutoOffloadDisposition::Cpu);
+        assert_eq!(decisions[0].reason, DecisionReason::CostModel);
+    }
+
+    #[test]
+    fn decision_capture_unwinds_without_leaking_into_the_next_invocation() {
+        assert!(std::panic::catch_unwind(|| {
+            capture_promotion(|| panic!("interrupted test invocation"));
+        })
+        .is_err());
+        let ((), decisions) = capture_promotion(|| ());
+        assert!(decisions.is_empty());
     }
 
     #[test]
     fn complete_cost_keeps_a_profitable_resident_chain_on_provider() {
-        clear_decisions();
         let left = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_001)
             .with_numeric_descriptor(
                 NumericElementType::F64,
@@ -1860,17 +1905,20 @@ mod tests {
                 runmat_accelerate_api::GpuTensorStorage::Real,
             );
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
-        let _ = auto
-            .promote_binary(
+        let ((left, right), decisions) = capture_promotion(|| {
+            auto.promote_binary(
                 BinaryOp::Elementwise,
                 &Value::GpuTensor(left),
                 &Value::GpuTensor(right),
             )
-            .unwrap();
-        assert_eq!(
-            snapshot_decisions().last().map(|entry| entry.decision),
-            Some(AutoOffloadDisposition::Gpu)
-        );
+            .unwrap()
+        });
+        assert!(matches!(left, Value::GpuTensor(ref handle) if handle.buffer_id == 10_001));
+        assert!(matches!(right, Value::GpuTensor(ref handle) if handle.buffer_id == 10_002));
+        assert_eq!(decisions.len(), 1);
+        assert_eq!(decisions[0].operation, "elementwise");
+        assert_eq!(decisions[0].decision, AutoOffloadDisposition::Gpu);
+        assert_eq!(decisions[0].reason, DecisionReason::CostModel);
     }
 
     #[test]
