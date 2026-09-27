@@ -57,6 +57,19 @@ pub(crate) fn wgpu_cost_estimate(
         .as_ref()
         .and_then(|work| work.dispatches)
         .unwrap_or(dispatches);
+    let coordinate_work = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::provider_contract::trigonometry::pol2cart::wgpu_work(
+                provider.precision(),
+                &query.operation,
+            )
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<super::provider_contract::trigonometry::pol2cart::CoordinateWork>
+        }
+    };
     let mut readbacks = u32::from(readback_bytes > 0);
     let mut queue_submissions = dispatches;
     if let Some(work) = &unary_work {
@@ -66,6 +79,14 @@ pub(crate) fn wgpu_cost_estimate(
         dispatches = work.dispatches;
         readbacks = work.readbacks;
         queue_submissions = work.queue_submissions;
+    }
+    let mut allocations = dispatches;
+    let mut upload_bytes = query.required_upload_bytes;
+    if let Some(work) = &coordinate_work {
+        probe_bytes = work.scratch_bytes;
+        queue_submissions = work.queue_submissions;
+        allocations = work.allocations;
+        upload_bytes = upload_bytes.saturating_add(work.extra_upload_bytes);
     }
     let download_bytes = query.required_download_bytes.saturating_add(readback_bytes);
     let synchronization_events = if unary_work.is_some() {
@@ -89,20 +110,25 @@ pub(crate) fn wgpu_cost_estimate(
     // classification/reduction/readback/kernel route. Keep its prior explicit
     // until the existing invocation feedback supplies a matching observation.
     let observed_execution_ns =
-        if power_work.is_some() || unary_work.is_some() || fusion_work.is_some() {
+        if power_work.is_some() || unary_work.is_some() || fusion_work.is_some() || coordinate_work.is_some() {
             None
         } else {
             average_ns(stats)
         };
-    let execution_ns = observed_execution_ns
+    let execution_ns = coordinate_work
+        .as_ref()
+        .map(|work| work.execution_elements.saturating_mul(2).max(5_000))
         .unwrap_or_else(|| {
-            operation_prior_ns(query).saturating_mul(if fusion_work.is_some() {
-                u64::from(dispatches)
-            } else {
-                1
-            })
-        })
-        .saturating_add(probe_elements.saturating_mul(3));
+            observed_execution_ns
+                .unwrap_or_else(|| {
+                    operation_prior_ns(query).saturating_mul(if fusion_work.is_some() {
+                        u64::from(dispatches)
+                    } else {
+                        1
+                    })
+                })
+                .saturating_add(probe_elements.saturating_mul(3))
+        });
     let compile_or_prepare_ns = match query.preparation {
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
@@ -112,8 +138,8 @@ pub(crate) fn wgpu_cost_estimate(
         cost: ExecutionCostEstimate {
             components: ExecutionCostComponents {
                 compile_or_prepare_ns,
-                upload_ns: transfer_prior_ns(query.required_upload_bytes),
-                allocation_ns: 5_000u64.saturating_mul(u64::from(dispatches)),
+                upload_ns: transfer_prior_ns(upload_bytes),
+                allocation_ns: 5_000u64.saturating_mul(u64::from(allocations)),
                 queue_ns: 10_000u64.saturating_mul(u64::from(queue_submissions)),
                 execution_ns,
                 synchronization_ns: 5_000u64.saturating_mul(synchronization_events),
