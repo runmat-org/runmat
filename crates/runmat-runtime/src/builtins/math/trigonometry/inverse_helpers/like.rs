@@ -97,7 +97,7 @@ pub(crate) async fn evaluate<C, CF, A, AF>(
     error: impl FnOnce(String) -> RuntimeError,
 ) -> BuiltinResult<Value>
 where
-    C: FnOnce(Value) -> CF,
+    C: FnOnce(Value, Vec<GpuTensorHandle>) -> CF,
     CF: Future<Output = BuiltinResult<Value>>,
     A: FnOnce(Value, Vec<GpuTensorHandle>) -> AF,
     AF: Future<Output = BuiltinResult<Value>>,
@@ -112,7 +112,7 @@ where
         .chain(template.resident())
         .cloned()
         .collect();
-    let result = compute(value).await?;
+    let result = compute(value, protected.clone()).await?;
     let mut adaptation_protected = protected.clone();
     if let Value::GpuTensor(handle) = &result {
         adaptation_protected.push(handle.clone());

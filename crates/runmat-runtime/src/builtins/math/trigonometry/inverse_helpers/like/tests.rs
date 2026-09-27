@@ -151,12 +151,29 @@ struct State {
     freed: Vec<u64>,
     downloads: usize,
     hooks: usize,
+    hook_alias: Option<GpuTensorHandle>,
+    restore_alias: Option<GpuTensorHandle>,
+    unsupported_hook: bool,
 }
 struct Provider {
     inner: InProcessProvider,
     state: Mutex<State>,
 }
 impl Provider {
+    fn hook_override(&self) -> Option<anyhow::Result<GpuTensorHandle>> {
+        let mut state = self.state.lock().unwrap();
+        if let Some(handle) = state.hook_alias.clone() {
+            state.hooks += 1;
+            return Some(Ok(handle));
+        }
+        if state.unsupported_hook {
+            state.hooks += 1;
+            return Some(Err(runmat_accelerate_api::unsupported_provider_operation(
+                "like test",
+            )));
+        }
+        None
+    }
     fn track(&self, output: GpuTensorHandle) -> GpuTensorHandle {
         let mut state = self.state.lock().unwrap();
         state.hooks += 1;
@@ -165,7 +182,19 @@ impl Provider {
     }
 }
 impl AccelProvider for Provider {
+    fn upload_numeric(
+        &self,
+        host: &runmat_accelerate_api::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        if let Some(handle) = self.state.lock().unwrap().restore_alias.clone() {
+            return Ok(handle);
+        }
+        Ok(self.track(self.inner.upload_numeric(host)?))
+    }
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        if let Some(handle) = self.state.lock().unwrap().restore_alias.clone() {
+            return Ok(handle);
+        }
         Ok(self.track(self.inner.upload(host)?))
     }
     fn device_id(&self) -> u32 {
@@ -199,25 +228,45 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Ok(self.track(self.inner.unary_sin(input).await?)) })
+        Box::pin(async move {
+            if let Some(result) = self.hook_override() {
+                return result;
+            }
+            Ok(self.track(self.inner.unary_sin(input).await?))
+        })
     }
     fn unary_cos<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Ok(self.track(self.inner.unary_cos(input).await?)) })
+        Box::pin(async move {
+            if let Some(result) = self.hook_override() {
+                return result;
+            }
+            Ok(self.track(self.inner.unary_cos(input).await?))
+        })
     }
     fn unary_tan<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Ok(self.track(self.inner.unary_tan(input).await?)) })
+        Box::pin(async move {
+            if let Some(result) = self.hook_override() {
+                return result;
+            }
+            Ok(self.track(self.inner.unary_tan(input).await?))
+        })
     }
     fn unary_atan<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Ok(self.track(self.inner.unary_atan(input).await?)) })
+        Box::pin(async move {
+            if let Some(result) = self.hook_override() {
+                return result;
+            }
+            Ok(self.track(self.inner.unary_atan(input).await?))
+        })
     }
 }
 fn fixture(mode: Download) -> (&'static Provider, GpuTensorHandle, GpuTensorHandle) {
@@ -263,6 +312,83 @@ fn borrowed_live(provider: &Provider, source: &GpuTensorHandle, prototype: &GpuT
             .contains(&input.buffer_id));
         assert!(block_on(provider.inner.download(input)).is_ok());
         provider.inner.free(input).unwrap();
+    }
+}
+
+#[test]
+fn trigonometric_like_math_and_restore_never_adopt_or_free_borrowed_prototypes() {
+    let _serial = test_support::accel_test_lock();
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for name in ["sin", "cos", "tan", "atan"] {
+        for restoration in [false, true] {
+            for malformed in [false, true] {
+                let (provider, source, old_prototype) = fixture(Download::Ready);
+                provider.inner.free(&old_prototype).unwrap();
+                let prototype = provider
+                    .inner
+                    .upload(&HostTensorView {
+                        data: &[1.0, 2.0],
+                        shape: &[1, 2],
+                    })
+                    .unwrap();
+                let mut alias = prototype.clone();
+                if malformed {
+                    alias.shape = vec![9, 9];
+                }
+                {
+                    let mut state = provider.state.lock().unwrap();
+                    if restoration {
+                        state.unsupported_hook = true;
+                        state.restore_alias = Some(alias);
+                    } else {
+                        state.hook_alias = Some(alias);
+                    }
+                }
+                let _selected = ThreadProviderGuard::set(Some(provider));
+                let error = block_on(crate::dispatcher::call_builtin_async(
+                    name,
+                    &args(&source, Value::GpuTensor(prototype.clone())),
+                ))
+                .expect_err("borrowed output must be rejected");
+                assert!(error.to_string().contains(name), "{error}");
+                let state = provider.state.lock().unwrap();
+                assert_eq!(state.hooks, 1);
+                assert_eq!(state.downloads, usize::from(restoration));
+                assert!(state.outputs.is_empty());
+                assert!(state.freed.is_empty());
+                drop(state);
+                borrowed_live(provider, &source, &prototype);
+                provider.inner.free(&source).unwrap();
+                provider.inner.free(&prototype).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn trigonometric_like_fallback_abandonment_preserves_all_borrowed_handles() {
+    let _serial = test_support::accel_test_lock();
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    for name in ["sin", "cos", "tan", "atan"] {
+        let (provider, source, prototype) = fixture(Download::Pending);
+        provider.state.lock().unwrap().unsupported_hook = true;
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let inputs = args(&source, Value::GpuTensor(prototype.clone()));
+        let mut call = Box::pin(crate::dispatcher::call_builtin_async(name, &inputs));
+        assert!(matches!(
+            call.as_mut().poll(&mut Context::from_waker(&noop_waker())),
+            Poll::Pending
+        ));
+        drop(call);
+        let state = provider.state.lock().unwrap();
+        assert_eq!(state.hooks, 1);
+        assert_eq!(state.downloads, 1);
+        assert!(state.outputs.is_empty());
+        assert!(state.freed.is_empty());
+        drop(state);
+        borrowed_live(provider, &source, &prototype);
+        provider.inner.free(&source).unwrap();
+        provider.inner.free(&prototype).unwrap();
     }
 }
 

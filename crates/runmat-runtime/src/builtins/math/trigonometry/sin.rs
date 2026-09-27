@@ -129,9 +129,9 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     .await
 }
 
-async fn sin_admitted(value: Value) -> BuiltinResult<Value> {
+async fn sin_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinResult<Value> {
     let base = match value {
-        Value::GpuTensor(handle) => sin_gpu(handle).await?,
+        Value::GpuTensor(handle) => sin_gpu(handle, &protected).await?,
         Value::Complex(re, im) => Value::Complex(sin_complex_re(re, im), sin_complex_im(re, im)),
         Value::ComplexTensor(ct) => sin_complex_tensor(ct)?,
         Value::CharArray(ca) => sin_char_array(ca)?,
@@ -177,7 +177,8 @@ async fn ensure_sin_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<(
     Ok(())
 }
 
-async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn sin_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
+    let borrowed: Vec<_> = std::iter::once(&handle).chain(protected.iter()).collect();
     let provider = gpu_helpers::exact_provider_for_handle(&handle);
     let requires_host_path = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
@@ -185,7 +186,10 @@ async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if let Some(provider) = provider {
             match provider.unary_sin(&handle).await {
                 Ok(output)
-                    if gpu_helpers::unary_gpu_output_matches(
+                    if !protected.iter().any(|input| {
+                        gpu_helpers::same_gpu_handle(input, &output)
+                            && !gpu_helpers::same_gpu_handle(input, &handle)
+                    }) && gpu_helpers::unary_gpu_output_matches(
                         &output,
                         &handle,
                         provider,
@@ -201,7 +205,7 @@ async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     return Ok(gpu_helpers::resident_gpu_value(output));
                 }
                 Ok(output) => {
-                    gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                    gpu_helpers::free_rejected_provider_output(&output, &borrowed, provider);
                     return Err(sin_error_with_detail(
                         &SIN_ERROR_INTERNAL,
                         "provider returned an invalid unary sine result",
@@ -234,7 +238,8 @@ async fn sin_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             format!("unsupported gathered gpuArray value {other:?}"),
         )),
     }?;
-    gpu_helpers::restore_class_preserving_value(&source, host, BUILTIN_NAME)
+    let protected: Vec<_> = protected.iter().collect();
+    gpu_helpers::restore_class_preserving_value_protecting(&source, host, BUILTIN_NAME, &protected)
 }
 
 fn sin_real(value: Value) -> BuiltinResult<Value> {
@@ -809,7 +814,7 @@ pub(crate) mod tests {
             shape: &t.shape,
         };
         let h = provider.upload(&view).unwrap();
-        let gpu = block_on(sin_gpu(h)).unwrap();
+        let gpu = block_on(sin_gpu(h, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

@@ -129,9 +129,9 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     .await
 }
 
-async fn atan_admitted(value: Value) -> BuiltinResult<Value> {
+async fn atan_admitted(value: Value, protected: Vec<GpuTensorHandle>) -> BuiltinResult<Value> {
     let base = match value {
-        Value::GpuTensor(handle) => atan_gpu(handle).await?,
+        Value::GpuTensor(handle) => atan_gpu(handle, &protected).await?,
         Value::Complex(re, im) => {
             let (out_re, out_im) = atan_complex_components(re, im);
             Value::Complex(out_re, out_im)
@@ -149,40 +149,45 @@ async fn atan_admitted(value: Value) -> BuiltinResult<Value> {
     Ok(base)
 }
 
-async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn atan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_storage(&handle)
         == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
     {
-        return super::inverse_helpers::resident_complex::compute(handle, BUILTIN_NAME, |value| {
-            match value {
+        return super::inverse_helpers::resident_complex::compute_protecting(
+            handle,
+            BUILTIN_NAME,
+            protected,
+            |value| match value {
                 Value::Complex(re, im) => {
                     let (re, im) = atan_complex_components(re, im);
                     Ok(Value::Complex(re, im))
                 }
                 Value::ComplexTensor(tensor) => atan_complex_tensor(tensor),
                 other => atan_real(other),
-            }
-        })
+            },
+        )
         .await;
     }
     if runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle)
     {
-        return crate::builtins::common::provider_restore::gather_compute_restore(
+        return crate::builtins::common::provider_restore::gather_compute_restore_protecting(
             handle,
             BUILTIN_NAME,
+            protected,
             |tensor| atan_tensor(tensor).map(tensor::tensor_into_value),
         )
         .await;
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
         match provider.unary_atan(&handle).await {
             Ok(output) => {
-                return crate::builtins::common::provider_restore::validate_real_unary_provider_output(
+                return crate::builtins::common::provider_restore::validate_real_unary_provider_output_protecting(
                     provider,
                     &handle,
                     output,
                     BUILTIN_NAME,
+                    protected,
                 )
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
@@ -194,9 +199,10 @@ async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             }
         }
     }
-    crate::builtins::common::provider_restore::gather_compute_restore(
+    crate::builtins::common::provider_restore::gather_compute_restore_protecting(
         handle,
         BUILTIN_NAME,
+        protected,
         |tensor| atan_tensor(tensor).map(tensor::tensor_into_value),
     )
     .await
@@ -707,7 +713,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).unwrap();
-        let gpu = block_on(atan_gpu(handle)).unwrap();
+        let gpu = block_on(atan_gpu(handle, &[])).unwrap();
         let gathered = test_support::gather(gpu).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {

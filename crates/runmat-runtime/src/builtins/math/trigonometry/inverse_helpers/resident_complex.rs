@@ -12,6 +12,15 @@ pub(crate) async fn compute(
     builtin: &str,
     evaluate: impl FnOnce(Value) -> BuiltinResult<Value>,
 ) -> BuiltinResult<Value> {
+    compute_protecting(input, builtin, &[], evaluate).await
+}
+
+pub(crate) async fn compute_protecting(
+    input: GpuTensorHandle,
+    builtin: &str,
+    protected: &[GpuTensorHandle],
+    evaluate: impl FnOnce(Value) -> BuiltinResult<Value>,
+) -> BuiltinResult<Value> {
     if gpu_helpers::exact_provider_for_handle(&input).is_none()
         || !gpu_helpers::expected_handle_numeric_element_type(&input).is_ok_and(|element| {
             gpu_helpers::numeric_descriptor_matches(
@@ -28,5 +37,6 @@ pub(crate) async fn compute(
         .with_identifier(format!("RunMat:{builtin}:Internal"))
         .build());
     }
-    provider_restore::gather_value_compute_restore(input, builtin, evaluate).await
+    provider_restore::gather_value_compute_restore_protecting(input, builtin, protected, evaluate)
+        .await
 }
