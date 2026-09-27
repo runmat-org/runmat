@@ -11,6 +11,12 @@ pub(crate) struct ManagedRoots(Option<RootId>);
 
 impl ManagedRoots {
     pub(crate) fn new(values: &[Value]) -> Result<Self, String> {
+        Self::from_values(values.iter())
+    }
+
+    pub(crate) fn from_values<'a>(
+        values: impl IntoIterator<Item = &'a Value>,
+    ) -> Result<Self, String> {
         struct Handles(HashSet<GcHandle>);
         impl Tracer for Handles {
             fn mark(&mut self, handle: GcHandle) {

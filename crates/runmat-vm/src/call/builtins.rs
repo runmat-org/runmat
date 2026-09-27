@@ -415,6 +415,7 @@ pub async fn vm_dynamic_workspace_builtin(
         ));
     };
     let args = collect_call_args(stack, arg_count)?;
+    let _roots = crate::call::root_values(&args)?;
     match builtin {
         VmDynamicWorkspaceBuiltin::Eval => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
@@ -1162,8 +1163,7 @@ pub async fn resolve_imported_builtin(
                 continue;
             };
             let result =
-                runmat_runtime::call_builtin_async_with_outputs(&qual, args, requested_outputs)
-                    .await;
+                crate::call::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
             if let Ok(value) = result {
                 specific_matches.push((qual, value));
             }
@@ -1193,7 +1193,7 @@ pub async fn resolve_imported_builtin(
             continue;
         };
         let result =
-            runmat_runtime::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
+            crate::call::call_builtin_async_with_outputs(&qual, args, requested_outputs).await;
         if let Ok(value) = result {
             wildcard_matches.push((qual, value));
         }

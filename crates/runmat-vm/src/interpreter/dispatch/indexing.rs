@@ -241,6 +241,7 @@ async fn assign_object_scalar_indices(
     rhs: Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
+    let _roots = crate::call::root_values([&base, &rhs])?;
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
     if let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution {
         let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(
@@ -262,6 +263,7 @@ async fn invoke_object_brace_read(
     indices: Vec<Value>,
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
+    let _roots = crate::call::root_values(indices.iter().chain(std::iter::once(&base)))?;
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
     let path =
         ObjectSubscriptPath::single(ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
@@ -278,6 +280,7 @@ async fn invoke_object_brace_assignment(
     indices: Vec<Value>,
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
+    let _roots = crate::call::root_values(indices.iter().chain([&base, &rhs]))?;
     let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsasgn, None)?;
     let runmat_runtime::object::protocol::ProtocolResolution::Method(method) = resolution else {
         return Err(crate::interpreter::errors::mex(
@@ -404,6 +407,11 @@ async fn execute_brace_operation(
     operation: BraceIndexOperation,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<BraceIndexOutcome, RuntimeError> {
+    let _roots = crate::call::root_values(raw_indices.iter().chain(std::iter::once(&base)))?;
+    let _rhs_roots = match &operation {
+        BraceIndexOperation::Store { rhs } => Some(crate::call::root_values([rhs])?),
+        _ => None,
+    };
     if matches!(
         &base,
         Value::FunctionHandle(_)
@@ -685,6 +693,7 @@ pub async fn paren_index_sequence(
     requested_outputs: usize,
     function_registry: &crate::bytecode::FunctionRegistry,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
+    let _roots = crate::call::root_values(raw_indices.iter().chain(std::iter::once(&base)))?;
     if matches!(
         &base,
         Value::ObjectArray(_) | Value::Object(_) | Value::HandleObject(_)

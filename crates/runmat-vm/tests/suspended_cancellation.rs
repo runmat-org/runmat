@@ -1,6 +1,9 @@
 #[path = "support/mod.rs"]
 mod support;
 
+#[path = "suspended_cancellation/managed_arguments.rs"]
+mod managed_arguments;
+
 use runmat_execution::cancellation::CancellationSource;
 use runmat_execution::CancellationReason;
 use runmat_runtime::builtin::RuntimeBuiltinBinding;

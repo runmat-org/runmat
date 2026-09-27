@@ -318,7 +318,7 @@ async fn collective_response(
                     .collect::<Result<Vec<_>, _>>()
                     .map_err(value_codec_error)?,
             );
-            runmat_runtime::call::descriptor::execute_callable_descriptor(
+            crate::call::execute_callable_descriptor(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
                     runmat_hir::CallableIdentity::Builtin(runmat_types::BuiltinId("cat".into())),
                     arguments,
@@ -353,7 +353,7 @@ async fn collective_response(
                         function_registry,
                     );
                 let mut outputs =
-                    runmat_runtime::call::descriptor::execute_callable_descriptor(descriptor)
+                    crate::call::execute_callable_descriptor(descriptor)
                         .await?
                         .resolve(
                             runmat_types::SequenceUse::RequireSingle,

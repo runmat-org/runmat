@@ -107,12 +107,11 @@ pub async fn invoke_semantic_function_value(
     function_registry: &FunctionRegistry,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let runtime = active_or_standalone_runtime_context();
-    let (value, _) = invoke_semantic_function_value_with_input_residency(
+    let (value, _) = invoke_semantic_function_with_captures(
         function,
         args,
         requested_outputs,
         function_registry,
-        InputResidency::Transferred,
         runtime,
     )
     .await?;
@@ -126,12 +125,11 @@ pub async fn invoke_semantic_function_value_in_context(
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
-    let (value, _) = invoke_semantic_function_value_with_input_residency(
+    let (value, _) = invoke_semantic_function_with_captures(
         function,
         args,
         requested_outputs,
         function_registry,
-        InputResidency::Transferred,
         runtime,
     )
     .await?;
@@ -145,62 +143,43 @@ pub(crate) async fn invoke_semantic_function_value_with_capture_updates(
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
-    invoke_semantic_function_value_with_input_residency(
+    invoke_semantic_function_with_captures(
         function,
         args,
         requested_outputs,
         function_registry,
-        InputResidency::Borrowed,
         runtime,
     )
     .await
 }
 
-#[derive(Clone, Copy)]
-enum InputResidency {
-    /// The caller retains the argument values as live workspace roots.
-    Borrowed,
-    /// The invocation owns the argument values and may release inputs the
-    /// function neither returns nor stores in another live root.
-    Transferred,
-}
-
-async fn invoke_semantic_function_value_with_input_residency(
+async fn invoke_semantic_function_with_captures(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-    input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
     let runtime = with_default_acceleration_service(runtime);
     runtime
-        .scope(invoke_semantic_function_value_with_input_residency_inner(
+        .scope(invoke_semantic_function_with_captures_inner(
             function,
             args,
             requested_outputs,
             function_registry,
-            input_residency,
             runtime.clone(),
         ))
         .await
 }
 
-async fn invoke_semantic_function_value_with_input_residency_inner(
+async fn invoke_semantic_function_with_captures_inner(
     function: usize,
     args: &[Value],
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
-    input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
-    #[cfg(not(feature = "native-accel"))]
-    let _ = input_residency;
-    #[cfg(feature = "native-accel")]
-    let _borrowed_arguments = matches!(input_residency, InputResidency::Borrowed)
-        .then(|| crate::runtime::gc::ManagedRoots::new(args))
-        .transpose()
-        .map_err(RuntimeError::new)?;
+    let _arguments = crate::call::root_values(args)?;
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
@@ -573,7 +552,6 @@ async fn interpret_with_vars_inner(
         bytecode_frame_span(bytecode),
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-    #[cfg(feature = "native-accel")]
     let _borrowed_inputs =
         crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
     let state = Box::new(InterpreterState::new_in_context(
@@ -815,8 +793,8 @@ async fn run_interpreter_inner(
                         &[],
                     );
                     if !has_barrier {
-                        let _consumed_fusion =
-                            crate::runtime::gc::ManagedRoots::new(&stack).map_err(RuntimeError::new)?;
+                        let _consumed_fusion = crate::runtime::gc::ManagedRoots::new(&stack)
+                            .map_err(RuntimeError::new)?;
                         match accel_fusion::try_execute_fusion_group(
                         &plan,
                         graph,
@@ -924,21 +902,6 @@ async fn run_interpreter_inner(
                 };
             #[cfg(feature = "native-accel")]
             let executed_pc = pc;
-            #[cfg(feature = "native-accel")]
-            let _consumed_call = match &bytecode.instructions[pc] {
-                Instr::CallBuiltinMulti(_, count, _)
-                | Instr::CallBuiltinMultiUsingOutputSlot(_, count, _) => {
-                    Some(crate::runtime::gc::ManagedRoots::new(
-                        &stack[stack.len().saturating_sub(*count)..],
-                    ).map_err(RuntimeError::new)?)
-                }
-                // Expanded arguments can reference sequence registers within
-                // the stack; retain the full represented range, never guess.
-                Instr::CallBuiltinExpandMultiOutput(..) => {
-                    Some(crate::runtime::gc::ManagedRoots::new(&stack).map_err(RuntimeError::new)?)
-                }
-                _ => None,
-            };
             let dispatch_result = interp_dispatch::dispatch_instruction(
                 interp_dispatch::DispatchMeta {
                     instr: &bytecode.instructions[pc],

@@ -190,6 +190,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let value = obj_resolve::load_member_with_context(
                 Some(runtime),
                 base,
@@ -206,6 +207,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let value = obj_resolve::load_member_with_context(
                 Some(runtime),
                 base,
@@ -226,6 +228,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
             let value = obj_resolve::load_member_dynamic_with_context(
                 Some(runtime),
@@ -247,6 +250,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
             let value = obj_resolve::load_member_dynamic_with_context(
                 Some(runtime),
@@ -264,6 +268,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let values = obj_resolve::read_member_sequence_with_context(
                 Some(runtime),
                 base,
@@ -286,6 +291,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let values = obj_resolve::read_member_sequence_with_context(
                 Some(runtime),
                 base,
@@ -303,6 +309,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let count = obj_resolve::member_sequence_cardinality(&base)?;
             stack.push(Value::Num(count as f64));
             Ok(true)
@@ -315,6 +322,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let count = super::requested_outputs_from_slot(vars, *output_count_slot)?;
             let sequence = obj_resolve::read_member_sequence_with_context(
                 Some(runtime),
@@ -341,6 +349,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let count = super::requested_outputs_from_slot(vars, *output_count_slot)?;
             let sequence = obj_resolve::read_member_sequence_with_context(
                 Some(runtime),
@@ -366,6 +375,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _value_roots = crate::call::root_values([&value])?;
             write_sequence_register(stack, sequence_register, vec![value])?;
             Ok(true)
         }
@@ -377,6 +387,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let values = runmat_runtime::call::arguments::materialize_expansion(
                 runtime,
                 runmat_runtime::call::arguments::MaterializedExpansionSource::Member {
@@ -394,10 +405,12 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _member_roots = crate::call::root_values([&member])?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let values = runmat_runtime::call::arguments::materialize_expansion(
                 runtime,
                 runmat_runtime::call::arguments::MaterializedExpansionSource::DynamicMember {
@@ -423,10 +436,12 @@ pub async fn dispatch_object(
                 ))?);
             }
             indices.reverse();
+            let _indices_roots = crate::call::root_values(&indices)?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let values = runmat_runtime::call::arguments::materialize_expansion(
                 runtime,
                 runmat_runtime::call::arguments::MaterializedExpansionSource::CellContents {
@@ -445,6 +460,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _value_roots = crate::call::root_values([&value])?;
             let values = runmat_runtime::call::arguments::materialize_expansion(
                 runtime,
                 runmat_runtime::call::arguments::MaterializedExpansionSource::ReturnedOutputs(
@@ -461,10 +477,12 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _rhs_roots = crate::call::root_values([&rhs])?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let value = obj_resolve::store_member_traced(
                 base,
                 field.0.clone(),
@@ -481,10 +499,12 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _rhs_roots = crate::call::root_values([&rhs])?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let value = obj_resolve::store_member_traced(
                 base,
                 field.0.clone(),
@@ -501,6 +521,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _rhs_roots = crate::call::root_values([&rhs])?;
             let name_val = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -509,6 +530,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
             let value = obj_resolve::store_member_dynamic_traced(
                 base,
@@ -526,6 +548,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _rhs_roots = crate::call::root_values([&rhs])?;
             let name_val = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -534,6 +557,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let name: String = (&name_val).try_into()?;
             let value = obj_resolve::store_member_dynamic_traced(
                 base,
@@ -552,6 +576,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let updated = obj_resolve::store_member_sequence_traced(
                 base,
                 field.0.clone(),
@@ -573,6 +598,7 @@ pub async fn dispatch_object(
                 "StackUnderflow",
                 "stack underflow",
             ))?;
+            let _base_roots = crate::call::root_values([&base])?;
             let updated =
                 obj_resolve::store_member_sequence_traced(base, name, values, caller_function_name)
                     .await?;
@@ -611,7 +637,9 @@ async fn execute_subscript_path(
     let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
         crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
     })?;
-    let (root, path) = materialize_subscript_path(stack.split_off(start), steps)?;
+    let operands = stack.split_off(start);
+    let _roots = crate::call::root_values(&operands)?;
+    let (root, path) = materialize_subscript_path(operands, steps)?;
     let path = path.ok_or_else(|| {
         crate::interpreter::errors::mex(
             "RunMat:InvalidObjectSubscriptPath",

@@ -1106,7 +1106,7 @@ pub async fn dispatch_instruction(
         }
         Instr::CreateRange(has_step) => {
             create_range(stack, *has_step, |args| async move {
-                runmat_runtime::call_builtin_async("colon", &args).await
+                crate::call::call_builtin_async("colon", &args).await
             })
             .await?;
             Ok(Some(DispatchHandled::Generic(
@@ -1258,6 +1258,7 @@ pub async fn dispatch_instruction(
         } => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _roots = crate::call::root_values(&args)?;
             let result = runmat_runtime::call_super_constructor(
                 current_class.clone(),
                 super_class.clone(),
@@ -1282,6 +1283,7 @@ pub async fn dispatch_instruction(
         } => {
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _roots = crate::call::root_values(&args)?;
             let result = runmat_runtime::call_super_method(
                 current_class.clone(),
                 super_class.clone(),
@@ -1728,7 +1730,7 @@ pub async fn dispatch_instruction(
                     .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result =
-                runmat_runtime::call_builtin_async_with_outputs(name, &args, *out_count).await?;
+                crate::call::call_builtin_async_with_outputs(name, &args, *out_count).await?;
             calls::publish_fixed_outputs(
                 stack,
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result(result)?,
@@ -1752,6 +1754,7 @@ pub async fn dispatch_instruction(
             )
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _roots = crate::call::root_values(&args)?;
             let result = runmat_runtime::call_super_constructor(
                 current_class.clone(),
                 super_class.clone(),
@@ -1782,6 +1785,7 @@ pub async fn dispatch_instruction(
             )
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _roots = crate::call::root_values(&args)?;
             let result = runmat_runtime::call_super_method(
                 current_class.clone(),
                 super_class.clone(),

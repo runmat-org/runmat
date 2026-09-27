@@ -3,14 +3,13 @@ use crate::call::builtins as call_builtins;
 use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::shared::build_expanded_args_from_specs;
+use crate::call::{execute_callable_descriptor, root_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::call::arguments::ArgumentSpec;
-use runmat_runtime::call::descriptor::{
-    execute_callable_descriptor, CallableCallKind, CallableDescriptor,
-};
+use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
 use runmat_types::MemberAccess;
@@ -293,6 +292,7 @@ async fn handle_builtin_call_inner(
         );
     }
     let args = call_builtins::collect_call_args(stack, arg_count)?;
+    let _roots = root_values(&args)?;
 
     let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
@@ -301,8 +301,8 @@ async fn handle_builtin_call_inner(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
 
-    let result =
-        runmat_runtime::call_builtin_async_with_outputs(name, &args, requested_outputs).await;
+    let result = crate::call::call_builtin_async_with_outputs(name, &args, requested_outputs).await;
+    let _result_roots = root_values(result.as_ref().ok())?;
     let imported =
         call_builtins::resolve_imported_builtin(name, imports, &args, requested_outputs).await?;
     if result.is_err() {
@@ -330,6 +330,7 @@ pub async fn handle_prepared_user_function_call(
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
+    let _roots = root_values(&args)?;
     let UserCallContext {
         stack: _,
         identity,
@@ -594,6 +595,7 @@ pub async fn handle_workspace_first_prepared_call(
     args: Vec<Value>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
+    let _roots = root_values(&args)?;
     let WorkspaceFirstCallContext {
         stack,
         workspace_name,
@@ -732,6 +734,7 @@ async fn handle_method_or_member_index_call_inner(
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
+    let _roots = root_values(args.iter().chain(std::iter::once(&base)))?;
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
@@ -770,6 +773,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
         ));
     }
     let base = args.remove(0);
+    let _roots = root_values(args.iter().chain(std::iter::once(&base)))?;
     let _output_guard =
         runmat_runtime::output_context::push_output_count(context.requested_outputs);
     let current_class_context =
