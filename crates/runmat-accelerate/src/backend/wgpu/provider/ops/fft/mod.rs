@@ -83,6 +83,7 @@ fn fft_factor_smooth_235(mut len: usize) -> Option<Vec<u32>> {
     }
 }
 
+mod emission;
 mod fallback;
 mod helpers;
 mod kernels;

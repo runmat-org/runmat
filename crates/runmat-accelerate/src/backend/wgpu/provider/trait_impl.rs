@@ -1357,7 +1357,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.fft_extract_real_exec(handle) })
+        Box::pin(async move { self.fft_extract_real_exec(handle).await })
     }
 
     fn unique<'a>(
