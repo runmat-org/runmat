@@ -1,5 +1,9 @@
 use super::*;
 
+#[cfg(test)]
+#[path = "matmul/ownership_tests.rs"]
+mod ownership_tests;
+
 impl WgpuProvider {
     pub(crate) fn take_matmul_sources_exec(
         &self,
@@ -651,13 +655,14 @@ impl WgpuProvider {
             .checked_mul(cols)
             .ok_or_else(|| anyhow!("syrk: output size overflow"))?;
 
-        let out_bytes = (len as u64) * (self.element_size as u64);
         let out_buffer = self.with_emission(|emission, _| {
-            self.kernel_resources.scratch_storage_buffer(
+            // This buffer escapes as a live result. Reusable kernel scratch
+            // cannot be its physical owner while earlier results remain live.
+            self.create_storage_buffer_checked_with_usage(
                 emission,
-                crate::backend::wgpu::resources::ScratchBufferKind::SyrkOut,
-                out_bytes,
-                "runmat-syrk-out-scratch",
+                len,
+                "runmat-syrk-out",
+                BufferUsageClass::SyrkOut,
             )
         })??;
         if len == 0 {
@@ -880,7 +885,22 @@ impl WgpuProvider {
             while k_off < k {
                 let k_sub = std::cmp::min(K_CHUNK, k - k_off);
                 // Create partial output buffer and bind group
-                let partial_buffer = partial_storage.clone();
+                // The first partial becomes the accumulator itself. It must
+                // not alias reusable storage overwritten by the next chunk.
+                // Subsequent partials are consumed by a distinct binary sum
+                // before this same-queue scratch is reused.
+                let partial_buffer = if k_off == 0 {
+                    self.with_emission(|emission, _| {
+                        self.create_storage_buffer_checked_with_usage(
+                            emission,
+                            len,
+                            "runmat-matmul-first-partial",
+                            BufferUsageClass::MatmulPartial,
+                        )
+                    })??
+                } else {
+                    partial_storage.clone()
+                };
                 let offset_a_elems = k_off
                     .checked_mul(view_a.rows)
                     .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
