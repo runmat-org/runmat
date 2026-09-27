@@ -11,9 +11,7 @@ use crate::builtins::introspection::type_resolvers::{
     is_underlying_type_type, underlying_type_type,
 };
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{
-    handle_integer_type, handle_is_logical, handle_precision, handle_storage, GpuTensorStorage,
-};
+use runmat_accelerate_api::{handle_integer_type, handle_is_logical, handle_precision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
@@ -263,30 +261,18 @@ pub(crate) fn underlying_class_identity_for_value_checked(
 fn gpu_underlying_class_identity(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<runmat_types::ClassIdentity> {
-    let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+    crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
         .ok_or_else(|| metadata_error("no acceleration provider owns the input handle"))?;
+    // Preferred execution precision is not the class of an owned allocation.
+    // The owner has already admitted its immutable physical type and view.
+    crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle)
+        .map_err(|detail| metadata_error(&detail))?;
     let integer = handle_integer_type(handle);
     let logical = handle_is_logical(handle);
     let precision = handle_precision(handle);
-    let storage = handle_storage(handle);
-    let structurally_valid = if logical {
-        integer.is_none()
-            && precision == Some(owner.precision())
-            && storage == GpuTensorStorage::Real
-    } else if integer.is_some() {
-        precision.is_none() && storage == GpuTensorStorage::Real
-    } else {
-        precision == Some(owner.precision())
-            && matches!(
-                storage,
-                GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
-            )
-    };
-    if !structurally_valid
-        || !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
-            handle, precision, integer, logical,
-        )
-    {
+    if !crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
+        handle, precision, integer, logical,
+    ) {
         return Err(metadata_error(
             "resident class metadata contradicts physical storage metadata",
         ));
