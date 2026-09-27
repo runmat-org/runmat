@@ -157,13 +157,10 @@ mod tests {
 
     #[tokio::test]
     async fn actual_wgpu_power_classification_and_execution_preserve_semantics() {
-        let provider = match crate::backend::wgpu::provider::register_wgpu_provider(
+        let provider = crate::backend::wgpu::provider::register_wgpu_provider(
             crate::backend::wgpu::provider::WgpuProviderOptions::default(),
-        ) {
-            Ok(provider) => provider,
-            Err(error) if error.to_string() == "wgpu: no compatible adapter found" => return,
-            Err(error) => panic!("WGPU setup failed: {error}"),
-        };
+        )
+        .expect("power execution qualification requires a compatible WGPU adapter");
         let tolerance = if provider.precision() == ProviderPrecision::F32 {
             2e-4
         } else {
