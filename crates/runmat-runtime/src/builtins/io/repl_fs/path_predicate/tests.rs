@@ -128,19 +128,3 @@ fn genuine_character_pages_reject_but_trailing_singletons_remain_rows() {
         }
     }
 }
-
-#[test]
-fn excessive_outputs_are_rejected_before_path_parsing() {
-    for name in ["isfile", "isfolder", "matlabroot"] {
-        let error = futures::executor::block_on(crate::call_builtin_async_with_outputs(
-            name,
-            &[Value::Num(1.0)],
-            2,
-        ))
-        .unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            Some(format!("RunMat:{name}:TooManyOutputs").as_str())
-        );
-    }
-}

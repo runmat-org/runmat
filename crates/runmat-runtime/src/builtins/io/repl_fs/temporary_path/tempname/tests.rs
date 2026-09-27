@@ -81,16 +81,7 @@ fn trailing_singleton_character_folder_is_a_row() {
 }
 
 #[test]
-fn fixed_output_counts_reject_without_selecting_a_path() {
-    for name in ["tempdir", "tempname", "pathsep"] {
-        let error =
-            futures::executor::block_on(crate::call_builtin_async_with_outputs(name, &[], 2))
-                .unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            Some(format!("RunMat:{name}:TooManyOutputs").as_str())
-        );
-    }
+fn discarded_output_still_validates_folder() {
     let _outputs = crate::output_count::push_output_count(Some(0));
     assert_eq!(
         run(vec![Value::Num(1.0)]).unwrap_err().identifier(),

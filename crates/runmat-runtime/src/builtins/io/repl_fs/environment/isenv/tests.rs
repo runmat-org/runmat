@@ -7,6 +7,15 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 #[test]
+fn direct_requested_output_boundary_rejects_before_name_parsing() {
+    let _outputs = crate::output_count::push_output_count(Some(2));
+    assert_eq!(
+        run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
+        Some("RunMat:isenv:TooManyOutputs")
+    );
+}
+
+#[test]
 fn scalar_and_string_array_queries_follow_environment_state() {
     let _guard = REPL_FS_TEST_LOCK.lock().unwrap();
     crate::builtins::common::env::set_var("RUNMAT_ISENV_TEST_A", "");

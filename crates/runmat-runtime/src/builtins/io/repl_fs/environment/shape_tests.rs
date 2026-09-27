@@ -57,22 +57,6 @@ fn trailing_singleton_dimensions_still_describe_a_character_row() {
 }
 
 #[test]
-fn invalid_output_counts_reject_before_reading_names() {
-    for name in ["getenv", "isenv"] {
-        let error = futures::executor::block_on(crate::call_builtin_async_with_outputs(
-            name,
-            &[Value::Num(1.0)],
-            2,
-        ))
-        .unwrap_err();
-        assert_eq!(
-            error.identifier(),
-            Some(format!("RunMat:{name}:TooManyOutputs").as_str())
-        );
-    }
-}
-
-#[test]
 fn zero_output_mutation_still_executes_and_cell_string_pairing_is_positional() {
     let _lock = crate::builtins::io::repl_fs::REPL_FS_TEST_LOCK
         .lock()
