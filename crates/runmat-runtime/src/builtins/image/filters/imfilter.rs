@@ -2,10 +2,12 @@
 //! convolution with configurable padding strategies.
 
 #[cfg(test)]
-use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, AccelProviderFuture};
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, ImfilterMode, ImfilterOptions,
-    ImfilterPadding, ImfilterShape, IntegerElementType, ProviderPrecision,
+    AccelDownloadFuture, AccelProvider, AccelProviderFuture, HostTensorView,
+};
+use runmat_accelerate_api::{
+    GpuTensorHandle, GpuTensorStorage, ImfilterMode, ImfilterOptions, ImfilterPadding,
+    ImfilterShape, IntegerElementType, ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -25,7 +27,6 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::image::filters::type_resolvers::imfilter_type;
-use crate::builtins::math::fft::common::{gpu_metadata_snapshot, restore_gpu_metadata};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::image::filters::imfilter")]
@@ -280,17 +281,6 @@ enum ImageOutputClass {
     Logical,
 }
 
-type ProtectedGpuMetadata = crate::builtins::math::fft::common::GpuMetadataSnapshot;
-
-fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
-    gpu_metadata_snapshot(handle)
-}
-
-fn restore_protected_gpu_metadata(handle: &GpuTensorHandle, metadata: ProtectedGpuMetadata) {
-    restore_gpu_metadata(handle, metadata);
-    runmat_accelerate_api::mark_residency(handle);
-}
-
 impl ImageOutputClass {
     fn from_host_value(value: &Value) -> BuiltinResult<Self> {
         let class = match value {
@@ -520,59 +510,58 @@ async fn imfilter_gpu(
     // logical images take an exact owner-aware host path, then explicit inputs
     // are restored to their owner with their original class metadata.
     let Some(expected_precision) = output_class.provider_precision() else {
-        return imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await;
+        return imfilter_gpu_host_fallback(
+            provider,
+            &image_handle,
+            &kernel_tensor,
+            &options,
+            resident_kernel.as_ref(),
+        )
+        .await;
     };
     if expected_precision != provider.precision() {
-        return imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await;
+        return imfilter_gpu_host_fallback(
+            provider,
+            &image_handle,
+            &kernel_tensor,
+            &options,
+            resident_kernel.as_ref(),
+        )
+        .await;
     }
-    let mut uploaded_kernel = None;
-    let kernel_handle = if let Some(handle) = resident_kernel {
-        let same_owner = gpu_helpers::exact_provider_for_handle(&handle)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider));
-        if same_owner {
-            handle
-        } else {
-            let uploaded =
-                match upload_kernel(provider, &kernel_tensor, &image_handle, Some(&handle)) {
-                    Ok(uploaded) => uploaded,
-                    Err(_) => {
-                        return imfilter_gpu_host_fallback(
-                            provider,
-                            &image_handle,
-                            &kernel_tensor,
-                            &options,
-                        )
-                        .await
-                    }
-                };
-            uploaded_kernel = Some(uploaded.clone());
-            uploaded
-        }
-    } else {
-        let uploaded = match upload_kernel(provider, &kernel_tensor, &image_handle, None) {
-            Ok(uploaded) => uploaded,
-            Err(_) => {
+    // Retain both originals through upload, execution, fallback and suspension.
+    let _image_residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&image_handle);
+    let _kernel_residency = resident_kernel
+        .as_ref()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new);
+    let same_owner_kernel = resident_kernel.as_ref().filter(|handle| {
+        gpu_helpers::exact_provider_for_handle(handle)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+    });
+    let kernel_handle = match same_owner_kernel {
+        Some(handle) => handle.clone(),
+        None => match upload_kernel(
+            provider,
+            &kernel_tensor,
+            &image_handle,
+            resident_kernel.as_ref(),
+        )? {
+            Some(uploaded) => uploaded,
+            None => {
                 return imfilter_gpu_host_fallback(
                     provider,
                     &image_handle,
                     &kernel_tensor,
                     &options,
+                    resident_kernel.as_ref(),
                 )
                 .await
             }
-        };
-        uploaded_kernel = Some(uploaded.clone());
-        uploaded
+        },
     };
-
-    let image_metadata = protected_gpu_metadata(&image_handle);
-    let kernel_metadata = protected_gpu_metadata(&kernel_handle);
     let provider_result = provider
         .imfilter(&image_handle, &kernel_handle, &options)
         .await;
-    restore_protected_gpu_metadata(&image_handle, image_metadata);
-    restore_protected_gpu_metadata(&kernel_handle, kernel_metadata);
-    drop(uploaded_kernel);
 
     match provider_result {
         Ok(mut output) => {
@@ -583,22 +572,37 @@ async fn imfilter_gpu(
                 &expected_shape,
                 expected_precision,
                 provider,
-            ) {
-                return Err(gpu_helpers::reject_gpu_output(
-                    output,
-                    imfilter_error_with_detail(
-                        &IMFILTER_ERROR_INTERNAL,
-                        "provider returned an invalid imfilter result",
-                    ),
-                ));
+            ) || resident_kernel
+                .as_ref()
+                .is_some_and(|original| output.shares_allocation_with(original))
+            {
+                let mut error = imfilter_error_with_detail(
+                    &IMFILTER_ERROR_INTERNAL,
+                    "provider returned an invalid imfilter result",
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
             }
             gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])?;
             gpu_helpers::resident_gpu_value(output)
         }
-        Err(error) => {
-            log::trace!("imfilter: provider path unavailable, using host fallback: {error}");
-            imfilter_gpu_host_fallback(provider, &image_handle, &kernel_tensor, &options).await
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+            imfilter_gpu_host_fallback(
+                provider,
+                &image_handle,
+                &kernel_tensor,
+                &options,
+                resident_kernel.as_ref(),
+            )
+            .await
         }
+        Err(error) => Err(kernel_error::with_provider_source(
+            imfilter_error_with_detail(
+                &IMFILTER_ERROR_INTERNAL,
+                format!("provider execution failed: {error}"),
+            ),
+            error.into(),
+        )),
     }
 }
 
@@ -607,55 +611,46 @@ fn upload_kernel(
     tensor: &Tensor,
     image: &GpuTensorHandle,
     resident_kernel: Option<&GpuTensorHandle>,
-) -> BuiltinResult<GpuTensorHandle> {
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView, NumericUploadError};
     let values = tensor.as_f64_slice().ok_or_else(|| {
         imfilter_error_with_detail(&IMFILTER_ERROR_INVALID_INPUT, "H must be double")
     })?;
-    let image_metadata = protected_gpu_metadata(image);
-    let resident_kernel_metadata = resident_kernel.map(protected_gpu_metadata);
-    let upload_result = provider.upload(&HostTensorView {
-        data: values,
-        shape: &tensor.shape,
-    });
-    restore_protected_gpu_metadata(image, image_metadata);
-    if let (Some(kernel), Some(metadata)) = (resident_kernel, resident_kernel_metadata) {
-        restore_protected_gpu_metadata(kernel, metadata);
-    }
-    let output = upload_result.map_err(|error| {
-        imfilter_error_with_detail(
-            &IMFILTER_ERROR_INTERNAL,
-            format!("failed to upload H to A's provider: {error}"),
-        )
-    })?;
-    let aliases_image = same_handle(&output, image);
-    let aliases_resident_kernel =
-        resident_kernel.is_some_and(|kernel| same_handle(&output, kernel));
-    let valid = output.shape() == tensor.shape
-        && output.device_id() == provider.device_id()
-        && !aliases_image
-        && !aliases_resident_kernel
-        && runmat_accelerate_api::provider_for_handle(&output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(&output) == Some(provider.precision())
-        && runmat_accelerate_api::handle_integer_type(&output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(&output)
-        && gpu_helpers::gpu_class_metadata_matches(
-            &output,
-            Some(provider.precision()),
-            None,
-            false,
-        );
-    if !valid {
-        return Err(gpu_helpers::reject_gpu_output(
-            output,
+    // Preserve the existing kernel adaptation to the admitted execution
+    // precision, but declare the actual upload payload instead of relabeling.
+    let single;
+    let data = if provider.precision() == ProviderPrecision::F32 {
+        single = values.iter().map(|value| *value as f32).collect::<Vec<_>>();
+        HostNumericDataView::F32(&single)
+    } else {
+        HostNumericDataView::F64(values)
+    };
+    let protected = std::iter::once(image)
+        .chain(resident_kernel)
+        .collect::<Vec<_>>();
+    match runmat_accelerate_api::upload_numeric_protecting(
+        provider,
+        &HostNumericTensorView {
+            data,
+            shape: &tensor.shape,
+            storage: GpuTensorStorage::Real,
+        },
+        &protected,
+    ) {
+        Ok(output) => Ok(Some(output)),
+        Err(NumericUploadError::Provider(error))
+            if gpu_helpers::provider_hook_is_unsupported(&error) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(crate::runtime_error::with_provider_execution_source(
             imfilter_error_with_detail(
                 &IMFILTER_ERROR_INTERNAL,
-                "provider returned an invalid uploaded H handle",
+                format!("failed to upload H to A's provider: {error}"),
             ),
-        ));
+            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+        )),
     }
-    Ok(output)
 }
 
 fn same_handle(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
@@ -667,6 +662,7 @@ async fn imfilter_gpu_host_fallback(
     image_handle: &GpuTensorHandle,
     kernel: &Tensor,
     options: &ImfilterOptions,
+    resident_kernel: Option<&GpuTensorHandle>,
 ) -> BuiltinResult<Value> {
     let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(image_handle);
     let download =
@@ -691,8 +687,13 @@ async fn imfilter_gpu_host_fallback(
     if !runmat_accelerate_api::handle_is_explicit(image_handle) {
         return Ok(result);
     }
-    let restored =
-        gpu_helpers::restore_class_preserving_value(image_handle, result, IMFILTER_BUILTIN)?;
+    let protected = resident_kernel.into_iter().collect::<Vec<_>>();
+    let restored = gpu_helpers::restore_class_preserving_value_protecting(
+        image_handle,
+        result,
+        IMFILTER_BUILTIN,
+        &protected,
+    )?;
     if matches!(restored, Value::GpuTensor(_)) {
         Ok(restored)
     } else {
