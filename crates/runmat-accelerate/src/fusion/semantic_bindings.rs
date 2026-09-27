@@ -42,9 +42,10 @@ impl SemanticBinding {
 }
 pub(crate) fn matches(operation: &FusionOp, snapshot: Option<SemanticBinding>) -> bool {
     match (operation, snapshot) {
-        (FusionOp::Builtin { name, .. }, Some(binding)) => {
-            name == binding.declaration.binding.builtin.name
-        }
+        // Selection already resolved spelling/case/aliases through the owning
+        // registry. The caller maps this snapshot by original operation index;
+        // a second textual equality test would create a conflicting authority.
+        (FusionOp::Builtin { .. }, Some(_)) => true,
         (
             FusionOp::Primitive {
                 op: PrimitiveOp::ElemPow,

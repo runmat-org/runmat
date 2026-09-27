@@ -59,7 +59,7 @@ impl ResolvedProgram {
         Self::resolve_captured(plan, inputs, provider_precision, correlation, &bindings).await
     }
 
-    pub async fn resolve_captured(
+    pub(crate) async fn resolve_captured(
         plan: &FusionGroupPlan,
         inputs: &[&Value],
         provider_precision: ProviderPrecision,

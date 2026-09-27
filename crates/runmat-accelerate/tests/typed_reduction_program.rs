@@ -463,3 +463,57 @@ fn input_only_root_is_borrowed_and_buffer_contents_do_not_change_recipe_identity
         .unwrap();
     assert_eq!(first_receipt.identity(), second_receipt.identity());
 }
+
+#[test]
+fn captured_bindings_preserve_real_catalog_spelling_resolution() {
+    use runmat_runtime::builtins::common::spec::{selected_fusion_binding, SelectedFusionIdentity};
+    let canonical = runmat_builtins::builtin_catalog_entry_by_name("sin").unwrap();
+    let mut spellings = vec!["sin", "SiN"];
+    // Exercise actual aliases if this catalog declares any. Never invent an
+    // alias registry merely to make a positive fixture, or grant an alias that
+    // the selected implementation registry does not admit.
+    spellings.extend(
+        runmat_builtins::builtin_catalog_aliases()
+            .iter()
+            .filter(|alias| alias.canonical == canonical.identity)
+            .map(|alias| alias.alias.name),
+    );
+    let mut identity = None;
+    for name in spellings {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
+        assert_eq!(entry.identity, canonical.identity);
+        let selected = selected_fusion_binding(name, None, None);
+        if name == "sin" || name == "SiN" {
+            assert!(selected.is_some(), "compiled selected binding for {name}");
+        }
+        let plan = reduction(
+            fixture::plan(
+                vec![builtin(name, vec![0], 10), builtin("sum", vec![10], 11)],
+                11,
+            ),
+            vec![0],
+            10,
+        );
+        let request = request(&plan, vec![tensor(false, vec![2, 2])]);
+        let receipt =
+            block_on(resolve_reduction_program(&request, ProviderPrecision::F64)).unwrap();
+        let Some(selected) = selected else {
+            assert!(
+                receipt.is_none(),
+                "catalog aliases cannot bypass selected dispatch"
+            );
+            continue;
+        };
+        let SelectedFusionIdentity::Canonical(binding) = selected.identity else {
+            panic!("canonical sin binding");
+        };
+        assert_eq!(binding.builtin, canonical.identity);
+        let receipt = receipt.expect("selected spelling uses the captured canonical emitter");
+        assert!(receipt.producer_body().contains("sin("));
+        if let Some(expected) = identity {
+            assert_eq!(receipt.identity(), expected);
+        } else {
+            identity = Some(receipt.identity());
+        }
+    }
+}
