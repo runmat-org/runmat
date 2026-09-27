@@ -159,7 +159,7 @@ fn fused_single_pass_sum_mul_no_alias() {
     let out = execute_reduction(req, rows, cols, 0).expect("fused single-pass reduction");
     match out {
         Value::GpuTensor(h) => {
-            assert_eq!(h.shape, vec![cols], "output shape should be [cols]");
+            assert_eq!(h.shape(), vec![cols], "output shape should be [cols]");
         }
         _ => panic!("expected GPU tensor"),
     }
