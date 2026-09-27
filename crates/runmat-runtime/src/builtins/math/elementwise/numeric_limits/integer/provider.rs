@@ -40,15 +40,12 @@ pub(super) fn like(
     let dtype = NumericDType::from(runmat_types::IntegerClass::from(element_type));
     let storage = IntegerStorage::from_scalar(super::value::scalar(dtype, kind));
     let shape = vec![1usize, 1usize];
-    let provenance = runmat_accelerate_api::handle_provenance(prototype)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    let metadata = gpu_helpers::snapshot_handle_metadata(prototype);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(prototype);
     let output = match storage_kind {
         GpuTensorStorage::Real => {
             let tensor = Tensor::new_integer(storage, shape.clone())
                 .map_err(|error| super::super::errors::internal(builtin, error))?;
             gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])
-                .map_err(|error| error.to_string())
         }
         GpuTensorStorage::ComplexInterleaved => {
             let imaginary = storage.zeros_like(1);
@@ -59,13 +56,8 @@ pub(super) fn like(
             )
             .map_err(|error| super::super::errors::internal(builtin, error))?;
             gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[prototype])
-                .map_err(|error| error.message().to_string())
         }
-    };
-    gpu_helpers::restore_handle_metadata(prototype, &metadata);
-    let output = output.map_err(|error| {
-        super::super::errors::class(builtin, format!("GPU limit creation failed: {error}"))
-    })?;
+    }?;
     validate(
         provider,
         prototype,
@@ -74,7 +66,6 @@ pub(super) fn like(
             shape: &shape,
             storage: storage_kind,
             element_type,
-            provenance,
             builtin,
         },
     )
@@ -84,7 +75,6 @@ struct ExpectedOutput<'a> {
     shape: &'a [usize],
     storage: GpuTensorStorage,
     element_type: runmat_accelerate_api::IntegerElementType,
-    provenance: runmat_accelerate_api::GpuHandleProvenance,
     builtin: &'static str,
 }
 
@@ -96,7 +86,7 @@ fn validate(
 ) -> BuiltinResult<Value> {
     let valid = output.shape() == expected.shape
         && output.device_id() == prototype.device_id()
-        && !gpu_helpers::same_gpu_handle(prototype, &output)
+        && !prototype.shares_allocation_with(&output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && output.descriptor().storage == Some(expected.storage)
@@ -110,13 +100,15 @@ fn validate(
             false,
         );
     if !valid {
-        gpu_helpers::free_rejected_provider_output(&output, &[prototype], provider);
-        return Err(super::super::errors::class(
-            expected.builtin,
-            "GPU limit creation returned an invalid provider result",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            super::super::errors::class(
+                expected.builtin,
+                "GPU limit creation returned an invalid provider result",
+            ),
         ));
     }
     let mut output = output;
-    runmat_accelerate_api::set_handle_provenance(&mut output, expected.provenance);
+    gpu_helpers::propagate_output_provenance(&mut output, &[prototype])?;
     gpu_helpers::resident_gpu_value(output)
 }

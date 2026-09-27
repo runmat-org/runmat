@@ -9,18 +9,13 @@ use std::sync::{
 };
 
 struct AliasProvider {
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
     output: Mutex<Option<GpuTensorHandle>>,
     uploads: AtomicUsize,
-    frees: AtomicUsize,
 }
-static PROVIDER: AliasProvider = AliasProvider {
-    output: Mutex::new(None),
-    uploads: AtomicUsize::new(0),
-    frees: AtomicUsize::new(0),
-};
 impl AccelProvider for AliasProvider {
     fn device_id(&self) -> u32 {
-        u32::MAX - 236
+        self.owner.device_id()
     }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -30,7 +25,9 @@ impl AccelProvider for AliasProvider {
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        Ok(self.output.lock().unwrap().as_ref().unwrap().clone())
+        let output = self.output.lock().unwrap();
+        let output = output.as_ref().unwrap();
+        Ok(output.with_view(output.view().clone())?)
     }
     fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.upload(&HostTensorView {
@@ -41,18 +38,16 @@ impl AccelProvider for AliasProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("limit creation must not download its prototype")
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::Relaxed);
-        Ok(())
-    }
 }
 
 #[test]
 fn limit_uploads_reject_borrowed_aliases_without_freeing_prototypes() {
-    let _lock = crate::builtins::common::test_support::accel_test_lock();
-    let _provider = ThreadProviderGuard::set(Some(&PROVIDER));
-    PROVIDER.frees.store(0, Ordering::Relaxed);
-    PROVIDER.uploads.store(0, Ordering::Relaxed);
+    let provider = Box::leak(Box::new(AliasProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        output: Mutex::new(None),
+        uploads: AtomicUsize::new(0),
+    }));
+    let _provider = ThreadProviderGuard::set(Some(provider));
     for (builtin, element) in [
         (
             intmax as fn(Vec<Value>) -> BuiltinResult<Value>,
@@ -63,20 +58,25 @@ fn limit_uploads_reject_borrowed_aliases_without_freeing_prototypes() {
         (realmin, NumericElementType::F32),
         (flintmax, NumericElementType::F64),
     ] {
-        let prototype = GpuTensorHandle::new(vec![1, 1], PROVIDER.device_id(), 1)
-            .with_numeric_descriptor(element, GpuTensorStorage::Real);
-        let metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&prototype);
-        *PROVIDER.output.lock().unwrap() = Some(prototype.clone());
+        let allocation = provider
+            .owner
+            .allocate_zeroed(vec![1, 1], element, GpuTensorStorage::Real)
+            .unwrap();
+        let prototype = allocation.handle;
+        let descriptor = prototype.descriptor();
+        *provider.output.lock().unwrap() = Some(prototype.clone());
         assert!(builtin(vec![
             Value::from("like"),
             Value::GpuTensor(prototype.clone())
         ])
         .is_err());
-        assert_eq!(PROVIDER.frees.load(Ordering::Relaxed), 0);
-        assert_eq!(
-            crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&prototype),
-            metadata
-        );
+        assert_eq!(allocation.probe.retirements(), 0);
+        assert_eq!(prototype.descriptor(), descriptor);
+        prototype.allocation_lease().validate_live().unwrap();
+        let retained = provider.output.lock().unwrap().take();
+        drop(retained);
+        drop(prototype);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
-    assert_eq!(PROVIDER.uploads.load(Ordering::Relaxed), 5);
+    assert_eq!(provider.uploads.load(Ordering::Relaxed), 5);
 }

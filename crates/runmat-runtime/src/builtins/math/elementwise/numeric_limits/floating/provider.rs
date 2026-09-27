@@ -56,7 +56,6 @@ pub(super) fn like(
                     .map_err(|error| super::super::errors::internal(builtin, error))?,
                 &[prototype],
             )
-            .map_err(|error| error.message().to_string())
         }
         (ProviderPrecision::F32, GpuTensorStorage::ComplexInterleaved) => {
             gpu_helpers::upload_complex_tensor_protecting(
@@ -65,12 +64,8 @@ pub(super) fn like(
                     .map_err(|error| super::super::errors::internal(builtin, error))?,
                 &[prototype],
             )
-            .map_err(|error| error.message().to_string())
         }
-    }
-    .map_err(|error| {
-        super::super::errors::internal(builtin, format!("GPU limit creation failed: {error}"))
-    })?;
+    }?;
     drop(metadata_guard);
     validate(
         provider, prototype, output, &shape, storage, precision, builtin,
@@ -88,22 +83,22 @@ fn validate(
 ) -> BuiltinResult<Value> {
     let valid = output.shape() == shape
         && output.device_id() == prototype.device_id()
-        && !gpu_helpers::same_gpu_handle(prototype, &output)
+        && !prototype.shares_allocation_with(&output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && output.descriptor().storage == Some(storage)
         && runmat_accelerate_api::handle_precision(&output) == Some(precision)
         && gpu_helpers::gpu_class_metadata_matches(&output, Some(precision), None, false);
     if !valid {
-        gpu_helpers::free_rejected_provider_output(&output, &[prototype], provider);
-        return Err(super::super::errors::internal(
-            builtin,
-            "GPU limit creation returned an invalid provider result",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            super::super::errors::internal(
+                builtin,
+                "GPU limit creation returned an invalid provider result",
+            ),
         ));
     }
     let mut output = output;
-    let provenance = runmat_accelerate_api::handle_provenance(prototype)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+    gpu_helpers::propagate_output_provenance(&mut output, &[prototype])?;
     gpu_helpers::resident_gpu_value(output)
 }
