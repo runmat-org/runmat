@@ -30,29 +30,27 @@ pub(crate) fn validate_real_unary_provider_output_protecting(
             precision: runmat_accelerate_api::handle_precision(input),
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     );
     let borrowed: Vec<_> = std::iter::once(input).chain(protected.iter()).collect();
     if !valid
         || borrowed
             .iter()
-            .any(|handle| gpu_helpers::same_gpu_handle(handle, &output))
+            .any(|handle| handle.shares_allocation_with(&output))
     {
-        gpu_helpers::free_rejected_provider_output(&output, &borrowed, provider);
-        return Err(build_runtime_error(format!(
-            "{builtin}: provider returned malformed unary output"
-        ))
-        .with_builtin(builtin)
-        .with_identifier(format!("RunMat:{builtin}:Internal"))
-        .build());
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            build_runtime_error(format!(
+                "{builtin}: provider returned malformed unary output"
+            ))
+            .with_builtin(builtin)
+            .with_identifier(format!("RunMat:{builtin}:Internal"))
+            .build(),
+        ));
     }
     let mut output = output;
-    runmat_accelerate_api::set_handle_provenance(
-        &mut output,
-        runmat_accelerate_api::handle_provenance(input)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-    );
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 

@@ -1,6 +1,9 @@
 use crate::builtins::common::tensor;
 use runmat_value::{ComplexTensor, IntValue, NumericScalar, Value};
 
+#[cfg(test)]
+mod owned_constructor_tests;
+
 pub(crate) fn validate_constructor_gpu_output(
     label: &str,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
@@ -10,7 +13,7 @@ pub(crate) fn validate_constructor_gpu_output(
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
-) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
     validate_constructor_gpu_output_protecting(
         label,
         provider,
@@ -29,17 +32,15 @@ pub(crate) fn validate_constructor_gpu_output(
 pub(crate) fn validate_constructor_gpu_output_protecting(
     label: &str,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    mut output: runmat_accelerate_api::GpuTensorHandle,
+    output: runmat_accelerate_api::GpuTensorHandle,
     expected_shape: &[usize],
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
-) -> Result<runmat_accelerate_api::GpuTensorHandle, String> {
-    use crate::builtins::common::gpu_helpers::{
-        exact_provider_for_handle, free_rejected_provider_output, same_gpu_handle,
-    };
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    use crate::builtins::common::gpu_helpers::{exact_provider_for_handle, reject_gpu_output};
     let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
         expected_precision,
         expected_integer,
@@ -61,27 +62,46 @@ pub(crate) fn validate_constructor_gpu_output_protecting(
     let valid = expected_class.is_some()
         && !protected
             .iter()
-            .any(|input| same_gpu_handle(&output, input))
-        && output.device_id == provider.device_id()
-        && output.shape == expected_shape
+            .any(|input| output.shares_allocation_with(input))
+        && output.device_id() == provider.device_id()
+        && output.shape() == expected_shape
         && exact_provider_for_handle(&output).is_some_and(|owner| std::ptr::eq(owner, provider))
-        && output.descriptor.storage == Some(expected_storage)
-        && output.descriptor.element_type == expected_element
-        && (!runmat_accelerate_api::handle_is_logical(&output) || expected_logical)
+        && output.descriptor().storage == Some(expected_storage)
+        && (if expected_logical {
+            expected_storage == runmat_accelerate_api::GpuTensorStorage::Real
+                && matches!(
+                    output.physical().element_type(),
+                    runmat_accelerate_api::NumericElementType::U8
+                        | runmat_accelerate_api::NumericElementType::F32
+                        | runmat_accelerate_api::NumericElementType::F64
+                )
+        } else {
+            output.descriptor().element_type == expected_element
+        })
+        && runmat_accelerate_api::handle_is_logical(&output) == expected_logical
         && existing_class
             .as_ref()
-            .is_none_or(|class_identity| Some(class_identity) == expected_class.as_ref());
+            .is_some_and(|class_identity| Some(class_identity) == expected_class.as_ref());
     if !valid {
-        free_rejected_provider_output(&output, protected, provider);
-        return Err(format!(
-            "{label}: provider returned an invalid constructor result"
+        return Err(reject_gpu_output(
+            output,
+            crate::build_runtime_error(format!(
+                "{label}: provider returned an invalid constructor result"
+            ))
+            .with_builtin(label)
+            .build(),
         ));
     }
-    runmat_accelerate_api::set_handle_logical(&output, expected_logical);
-    let expected_class = expected_class.expect("validated expected numeric class metadata");
-    runmat_accelerate_api::set_handle_class_identity(&output, expected_class);
-    runmat_accelerate_api::mark_handle_explicit(&mut output);
-    Ok(output)
+    output
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .map_err(|source| {
+            crate::build_runtime_error(format!(
+                "{label}: cannot adopt constructor result: {source}"
+            ))
+            .with_builtin(label)
+            .with_source(source)
+            .build()
+        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

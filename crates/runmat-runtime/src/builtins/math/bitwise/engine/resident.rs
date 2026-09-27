@@ -69,5 +69,9 @@ pub(super) fn restore_binary_bitwise_gpu_result(
     crate::builtins::common::resident_output::restore_to_source_provider_protecting(
         value, source, &protected,
     )
-    .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))
+    .map_err(|source| {
+        let mut error = error_with_detail(name, &ERROR_INVALID_INPUT, source.to_string());
+        error.source = Some(Box::new(source));
+        error
+    })
 }

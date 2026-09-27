@@ -94,7 +94,11 @@ pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
         output_source.as_ref(),
         &protected,
     )
-    .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))
+    .map_err(|source| {
+        let mut error = error(&ERROR_INVALID_INPUT, &source);
+        error.source = Some(Box::new(source));
+        error
+    })
 }
 
 fn error(
