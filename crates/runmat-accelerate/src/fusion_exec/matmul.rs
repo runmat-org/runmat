@@ -20,7 +20,8 @@ pub async fn execute_matmul_epilogue_placed(
     crate::ensure_residency_hooks();
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     // Admission reads typed operations and represented operands only. No
-    // upload, metadata mutation, allocation or provider query precedes it.
+    // upload, metadata mutation, allocation or placement selection precedes it.
+    // Provider precision/ownership metadata is read to validate representation.
     let Some(admitted) = plan::AdmittedMatmul::new(&request, provider) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -68,7 +69,39 @@ pub async fn execute_matmul_epilogue_placed(
         selection.observer.kernel_unmeasured();
         output
     };
+    // Provider-produced results cannot alias a borrowed operand or a temporary
+    // upload owned by this request. Metadata restoration is not an alias proof.
+    if handles
+        .values()
+        .any(|input| runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(input, &output))
+    {
+        allocations.reject(&output, provider);
+        return Err(anyhow!("matmul provider returned an operand alias"));
+    }
     let mut output = allocations.admit(output, provider, &admitted.shape, provider.precision())?;
+    if admitted.diagonal {
+        let diagonal = {
+            let _metadata = allocations.protect_metadata();
+            selection.observer.queue_unmeasured();
+            let diagonal = provider.diag_extract(&output, 0)?;
+            selection.observer.kernel_unmeasured();
+            diagonal
+        };
+        if runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(&output, &diagonal)
+            || handles.values().any(|input| {
+                runmat_runtime::builtins::common::gpu_helpers::same_gpu_handle(input, &diagonal)
+            })
+        {
+            allocations.reject(&diagonal, provider);
+            return Err(anyhow!("diagonal provider returned an operand alias"));
+        }
+        output = allocations.admit(
+            diagonal,
+            provider,
+            &[admitted.shape[0].min(admitted.shape[1]), 1],
+            provider.precision(),
+        )?;
+    }
     mark_fusion_output(&mut output, &request.inputs);
     allocations.publish(&[&output]);
     selection.submitted();

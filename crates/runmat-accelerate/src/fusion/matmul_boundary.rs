@@ -2,6 +2,15 @@
 //! discard branches. Keep those regions in their original bytecode execution.
 use super::{AccelGraph, FusionGroup};
 
+pub(super) fn is_declared_epilogue(node: &crate::graph::AccelNode) -> bool {
+    let crate::graph::AccelNodeLabel::Builtin { name } = &node.label else {
+        return false;
+    };
+    runmat_runtime::builtins::common::spec::fusion_epilogue_operation(name, None).is_some_and(
+        |operation| node.inputs.len() == operation.input_arity() && node.outputs.len() == 1,
+    )
+}
+
 pub(super) fn preserves_observable_values(graph: &AccelGraph, group: &FusionGroup) -> bool {
     let Some(last) = group.nodes.last().and_then(|id| graph.node(*id)) else {
         return false;

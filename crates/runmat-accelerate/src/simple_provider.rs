@@ -9854,13 +9854,51 @@ impl AccelProvider for InProcessProvider {
                         };
                     }
                     if let Some(min_v) = ep.clamp_min {
-                        v = v.max(min_v);
+                        v = if matches!(
+                            ep.affine,
+                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
+                        ) {
+                            if v.is_nan() {
+                                v
+                            } else if min_v > v
+                                || (min_v == 0.0 && v == 0.0 && min_v.is_sign_positive())
+                            {
+                                min_v
+                            } else {
+                                v
+                            }
+                        } else {
+                            v.max(min_v)
+                        };
                     }
                     if let Some(max_v) = ep.clamp_max {
-                        v = v.min(max_v);
+                        v = if matches!(
+                            ep.affine,
+                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
+                        ) {
+                            if v.is_nan() {
+                                v
+                            } else if max_v < v
+                                || (max_v == 0.0 && v == 0.0 && max_v.is_sign_negative())
+                            {
+                                max_v
+                            } else {
+                                v
+                            }
+                        } else {
+                            v.min(max_v)
+                        };
                     }
                     if let Some(pow_v) = ep.pow_exponent {
-                        v = v.powf(pow_v);
+                        v = if matches!(
+                            ep.affine,
+                            runmat_accelerate_api::MatmulAffine::Ordered { .. }
+                        ) && (v.is_nan() || pow_v.is_nan())
+                        {
+                            f64::NAN
+                        } else {
+                            v.powf(pow_v)
+                        };
                     }
                     if let Some(ref mut diag) = diag_output {
                         if i == j && i < diag.len() {

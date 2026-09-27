@@ -81,10 +81,6 @@ const MATMUL_SHADER_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SH
 const MATMUL_SHADER_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_F32;
 const MATMUL_SHADER_VEC4_F64: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F64;
 const MATMUL_SHADER_VEC4_F32: &str = crate::backend::wgpu::shaders::matmul::MATMUL_SHADER_VEC4_F32;
-const MATMUL_EPILOGUE_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64;
-const MATMUL_EPILOGUE_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32;
 const MATMUL_SMALLK_SHADER_F64: &str =
     crate::backend::wgpu::shaders::matmul_smallk::MATMUL_SMALLK_SHADER_F64;
 const MATMUL_SMALLK_SHADER_F32: &str =
@@ -1104,10 +1100,10 @@ impl WgpuPipelines {
                 storage_read_entry(5),
                 uniform_entry(6),
             ],
-            match precision {
-                NumericPrecision::F64 => MATMUL_EPILOGUE_SHADER_F64,
-                NumericPrecision::F32 => MATMUL_EPILOGUE_SHADER_F32,
-            },
+            &crate::backend::wgpu::shaders::matmul::epilogue_shader(match precision {
+                NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+            }),
         );
 
         let centered_gram = create_pipeline(

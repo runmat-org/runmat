@@ -231,17 +231,18 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             }
             let Some(next_id) = next_id_opt else { break };
             let next = graph.node(next_id).unwrap();
-            if !next.is_elementwise() {
+            if !next.is_elementwise() && !matmul_boundary::is_declared_epilogue(next) {
                 break;
             }
             // Allow only primitive elementwise ops we can fold: add/sub/mul and elementwise divide
-            let allowed = matches!(
+            let allowed = matmul_boundary::is_declared_epilogue(next) || matches!(
                 next.label,
                 AccelNodeLabel::Primitive(PrimitiveOp::Add)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemPow)
             );
             if !allowed {
                 break;
@@ -832,6 +833,7 @@ fn node_matches_runtime_group_kind(
             node.category == AccelOpCategory::MatMul
                 || node.is_elementwise()
                 || node.category == AccelOpCategory::Transpose
+                || matmul_boundary::is_declared_epilogue(node)
         }
         FusionKind::CenteredGram
         | FusionKind::ImageNormalize

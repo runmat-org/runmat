@@ -490,7 +490,7 @@ impl WgpuProvider {
                     &self.pipelines.matmul_epilogue.layout,
                 );
                 (
-                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F64,
+                    crate::backend::wgpu::shaders::matmul::epilogue_shader(ProviderPrecision::F64),
                     ep_buf,
                     pl,
                 )
@@ -515,7 +515,7 @@ impl WgpuProvider {
                     &self.pipelines.matmul_epilogue.layout,
                 );
                 (
-                    crate::backend::wgpu::shaders::matmul::MATMUL_EPILOGUE_SHADER_F32,
+                    crate::backend::wgpu::shaders::matmul::epilogue_shader(ProviderPrecision::F32),
                     ep_buf,
                     pl,
                 )
@@ -525,7 +525,7 @@ impl WgpuProvider {
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-matmul-epilogue-module",
-            shader_src,
+            &shader_src,
         );
         let key = self.compute_pipeline_hash_bytes(shader_src.as_bytes(), &layout_tag, Some(tile));
         let pipeline = self.get_or_create_pipeline(

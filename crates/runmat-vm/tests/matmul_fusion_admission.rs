@@ -1,5 +1,4 @@
 #![cfg(feature = "native-accel")]
-#![allow(clippy::result_large_err)]
 
 #[path = "support/mod.rs"]
 mod test_helpers;
@@ -16,6 +15,10 @@ use runmat_accelerate_api::{AccelProvider, ThreadProviderGuard};
 use runmat_value::{Tensor, Value};
 
 static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+#[path = "matmul_fusion_admission/fixture.rs"]
+mod fixture;
+#[path = "matmul_fusion_admission/no_upload.rs"]
+mod no_upload;
 
 fn tensor(data: &[f64], shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())
@@ -26,49 +29,9 @@ fn direct(expression: &str) -> FusionExecutionOutcome<Value> {
 }
 
 fn direct_with_left(expression: &str, left: Option<Value>) -> FusionExecutionOutcome<Value> {
-    let bytecode = test_helpers::compile_source(&format!(
-        "A=rand(2,2); B=rand(2,2); C=rand(2,2); r=rand(2,1); c=rand(1,2); y={expression};"
-    ))
-    .unwrap();
-    let windows = bytecode.runtime_fusion_groups();
-    let graph = bytecode
-        .runtime_accel_graph_for_fusion(&windows)
-        .expect("matrix graph");
-    let groups = bytecode.runtime_fusion_groups_for_graph(&graph);
-    let plan = prepare_fusion_plan(
-        Some(&graph),
-        &groups,
-        bytecode.fusion_metadata.mir_fusion_candidate_group_count,
-    )
-    .expect("matrix plan");
-    let group = plan
-        .groups
-        .iter()
-        .find(|group| group.group.kind == FusionKind::MatmulEpilogue)
-        .expect("actual matrix group");
-    let inputs = group
-        .inputs
-        .iter()
-        .enumerate()
-        .map(|(index, id)| {
-            if let Some(value) = group.constants.get(&index) {
-                return value.clone();
-            }
-            let binding = graph.var_binding(*id).expect("fixture variable input");
-            match bytecode.var_names[&binding.index].as_str() {
-                "A" => left
-                    .clone()
-                    .unwrap_or_else(|| tensor(&[1., 3., 2., 4.], &[2, 2])),
-                "B" => tensor(&[2., 0., 0., 2.], &[2, 2]),
-                "C" => tensor(&[1., 1., 1., 1.], &[2, 2]),
-                "r" => tensor(&[2., 4.], &[2, 1]),
-                "c" => tensor(&[2., 4.], &[1, 2]),
-                name => panic!("unexpected fixture input {name}"),
-            }
-        })
-        .collect();
+    let (group, inputs) = fixture::requested(expression, left);
     block_on(execute_matmul_epilogue_placed(FusionExecutionRequest {
-        plan: group,
+        plan: &group,
         inputs,
         placement: None,
         runtime: None,
@@ -86,6 +49,8 @@ fn actual_provider_keeps_ordered_affine_and_scale_orientations() {
             ("(A*B)-2", [0., 4., 2., 6.]),
             ("(A*B)*3+2", [8., 20., 14., 26.]),
             ("((A*B).*r)./c", [2., 12., 2., 8.]),
+            ("min(max(A*B,3),7)", [3., 6., 4., 7.]),
+            ("(A*B).^2", [4., 36., 16., 64.]),
         ] {
             let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) = direct(expression)
             else {
@@ -96,6 +61,68 @@ fn actual_provider_keeps_ordered_affine_and_scale_orientations() {
             assert_eq!(result.data, expected, "{expression}");
             PROVIDER.free(&handle).unwrap();
         }
+    });
+}
+
+#[test]
+fn admitted_diagonal_remains_on_provider_and_publishes_column() {
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+        let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) = direct("diag(A*B)") else {
+            panic!("diagonal provider route");
+        };
+        let result = block_on(PROVIDER.download(&handle)).unwrap();
+        assert_eq!(result.shape, [2, 1]);
+        assert_eq!(result.data, [2., 8.]);
+        PROVIDER.free(&handle).unwrap();
+    });
+}
+
+#[test]
+fn power_proof_preserves_negative_integral_and_clamped_fractional_domains() {
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+        for (expression, expected) in [
+            ("(A*B).^2", [4., 36., 16., 64.]),
+            ("max(A*B,0).^0.5", [0., 0., 2., 8.0f64.sqrt()]),
+        ] {
+            let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) =
+                direct_with_left(expression, Some(tensor(&[-1., -3., 2., 4.], &[2, 2])))
+            else {
+                panic!("proved real domain");
+            };
+            let result = block_on(PROVIDER.download(&handle)).unwrap();
+            assert_eq!(result.data, expected);
+            PROVIDER.free(&handle).unwrap();
+        }
+    });
+}
+
+#[test]
+fn actual_epilogue_keeps_nan_override_and_reverse_subtraction_zero_sign() {
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+        let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) =
+            direct_with_left("(A*B).^0", Some(tensor(&[f64::NAN, 1., 1., 1.], &[2, 2])))
+        else {
+            panic!("integral power route");
+        };
+        let result = block_on(PROVIDER.download(&handle)).unwrap();
+        assert!(result.data[0].is_nan() && result.data[2].is_nan());
+        assert_eq!(result.data[1], 1.);
+        assert_eq!(result.data[3], 1.);
+        PROVIDER.free(&handle).unwrap();
+        let FusionExecutionOutcome::Executed(Value::GpuTensor(handle)) =
+            direct_with_left("-0-(A*B)", Some(tensor(&[0.; 4], &[2, 2])))
+        else {
+            panic!("reverse subtract route");
+        };
+        let result = block_on(PROVIDER.download(&handle)).unwrap();
+        assert!(result
+            .data
+            .iter()
+            .all(|v| v.to_bits() == (-0.0f64).to_bits()));
+        PROVIDER.free(&handle).unwrap();
     });
 }
 

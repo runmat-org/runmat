@@ -1,3 +1,33 @@
+/// Both eager and lazy pipeline construction share the owning power policy.
+pub(crate) fn epilogue_shader(precision: runmat_accelerate_api::ProviderPrecision) -> String {
+    use runmat_accelerate_api::ProviderPrecision;
+    let (source, ty) = match precision {
+        ProviderPrecision::F32 => (MATMUL_EPILOGUE_SHADER_F32, "f32"),
+        ProviderPrecision::F64 => (MATMUL_EPILOGUE_SHADER_F64, "f64"),
+    };
+    let power = crate::kernel_math::power::entrypoint(precision);
+    let clamps = format!(
+        r#"
+fn rm_matmul_max(a: {ty}, b: {ty}) -> {ty} {{
+    if {power}_nan(a) || {power}_nan(b) {{ return a + b; }}
+    if a == {ty}(0.0) && b == {ty}(0.0) {{ return select(a, b, !{power}_negative(b)); }}
+    return select(a, b, b > a);
+}}
+fn rm_matmul_min(a: {ty}, b: {ty}) -> {ty} {{
+    if {power}_nan(a) || {power}_nan(b) {{ return a + b; }}
+    if a == {ty}(0.0) && b == {ty}(0.0) {{ return select(a, b, {power}_negative(b)); }}
+    return select(a, b, b < a);
+}}
+"#
+    );
+    format!(
+        "{}\n{}\n{}",
+        crate::kernel_math::power::functions(precision),
+        clamps,
+        source.replace("@REAL_POWER@", power)
+    )
+}
+
 pub const MATMUL_SHADER_F64: &str = r#"
 struct Tensor { data: array<f64>, };
 struct Params {
@@ -336,13 +366,16 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        val = max(val, ep.clamp_min);
+        if ((flags & 256u) != 0u) { val = rm_matmul_max(val, ep.clamp_min); }
+        else { val = max(val, ep.clamp_min); }
     }
     if ((flags & 32u) != 0u) {
-        val = min(val, ep.clamp_max);
+        if ((flags & 256u) != 0u) { val = rm_matmul_min(val, ep.clamp_max); }
+        else { val = min(val, ep.clamp_max); }
     }
     if ((flags & 64u) != 0u) {
-        val = pow(val, ep.pow_exponent);
+        if ((flags & 256u) != 0u) { val = @REAL_POWER@(val, ep.pow_exponent); }
+        else { val = pow(val, ep.pow_exponent); }
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;
@@ -431,13 +464,16 @@ fn main(
         if ((flags & 8u) != 0u) { val = val / s; } else { val = val * s; }
     }
     if ((flags & 16u) != 0u) {
-        val = max(val, ep.clamp_min);
+        if ((flags & 256u) != 0u) { val = rm_matmul_max(val, ep.clamp_min); }
+        else { val = max(val, ep.clamp_min); }
     }
     if ((flags & 32u) != 0u) {
-        val = min(val, ep.clamp_max);
+        if ((flags & 256u) != 0u) { val = rm_matmul_min(val, ep.clamp_max); }
+        else { val = min(val, ep.clamp_max); }
     }
     if ((flags & 64u) != 0u) {
-        val = pow(val, ep.pow_exponent);
+        if ((flags & 256u) != 0u) { val = @REAL_POWER@(val, ep.pow_exponent); }
+        else { val = pow(val, ep.pow_exponent); }
     }
     let out_idx = base_out + row + col * ldc;
     Out.data[out_idx] = val;

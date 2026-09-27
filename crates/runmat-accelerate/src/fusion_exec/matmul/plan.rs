@@ -3,7 +3,8 @@ use crate::fusion::FusionOp;
 use crate::graph::PrimitiveOp;
 use runmat_accelerate_api::{MatmulAffine, MatmulEpilogue, MatmulOffset, ScaleOp};
 use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_declaration, FusionStructuralOperation,
+    canonical_fusion_declaration, fusion_binding_is_selected, fusion_epilogue_operation,
+    FusionEpilogueOperation, FusionStructuralOperation,
 };
 
 pub(super) struct AdmittedMatmul {
@@ -14,6 +15,10 @@ pub(super) struct AdmittedMatmul {
     offset: Option<MatmulOffset>,
     row: Option<(ValueId, ScaleOp)>,
     column: Option<(ValueId, ScaleOp)>,
+    clamp_min: Option<f64>,
+    clamp_max: Option<f64>,
+    exponent: Option<f64>,
+    pub diagonal: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,9 +28,16 @@ enum Phase {
     Bias,
     Row,
     Column,
+    LowerClamp,
+    UpperClamp,
+    Power,
+    Diagonal,
 }
 
-fn matrix_root(operation: &FusionOp) -> Option<(ValueId, ValueId, ValueId)> {
+fn matrix_root(
+    operation: &FusionOp,
+    context: Option<&runmat_runtime::context::RuntimeContext>,
+) -> Option<(ValueId, ValueId, ValueId)> {
     let FusionOp::Builtin {
         name,
         inputs,
@@ -34,6 +46,9 @@ fn matrix_root(operation: &FusionOp) -> Option<(ValueId, ValueId, ValueId)> {
     else {
         return None;
     };
+    if !fusion_binding_is_selected(name, context) {
+        return None;
+    }
     let entry = runmat_builtins::builtin_catalog_entry_by_name(name)?;
     let [binding] = entry.bindings else {
         return None;
@@ -73,7 +88,7 @@ impl AdmittedMatmul {
             return None;
         }
         let (root, operations) = request.plan.operations.split_first()?;
-        let (left, right, mut current) = matrix_root(root)?;
+        let (left, right, mut current) = matrix_root(root, request.runtime.as_ref())?;
         let mut result = Self {
             left,
             right,
@@ -82,6 +97,10 @@ impl AdmittedMatmul {
             offset: None,
             row: None,
             column: None,
+            clamp_min: None,
+            clamp_max: None,
+            exponent: None,
+            diagonal: false,
         };
         let a = representation::shape(result.value(request, left)?, provider)?;
         let b = representation::shape(result.value(request, right)?, provider)?;
@@ -94,6 +113,82 @@ impl AdmittedMatmul {
         // fold source operations across them, including floating-point rounds.
         let mut phase = Phase::Product;
         for operation in operations {
+            let epilogue = match operation {
+                FusionOp::Builtin {
+                    name,
+                    inputs,
+                    output: Some(output),
+                } => Some((
+                    fusion_epilogue_operation(name, request.runtime.as_ref())?,
+                    inputs,
+                    output,
+                )),
+                FusionOp::Primitive {
+                    op: PrimitiveOp::ElemPow,
+                    inputs,
+                    output: Some(output),
+                } => Some((
+                    fusion_epilogue_operation(
+                        runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
+                        request.runtime.as_ref(),
+                    )?,
+                    inputs,
+                    output,
+                )),
+                _ => None,
+            };
+            if let Some((kind, inputs, output)) = epilogue {
+                if inputs.len() != kind.input_arity() {
+                    return None;
+                }
+                if kind == FusionEpilogueOperation::Diagonal {
+                    if inputs != &[current] || phase >= Phase::Diagonal || result.shape.contains(&1)
+                    {
+                        return None;
+                    }
+                    result.diagonal = true;
+                    phase = Phase::Diagonal;
+                } else {
+                    let (other, current_left) = if inputs[0] == current && inputs[1] != current {
+                        (inputs[1], true)
+                    } else if inputs[1] == current && inputs[0] != current {
+                        (inputs[0], false)
+                    } else {
+                        return None;
+                    };
+                    let scalar = representation::scalar(
+                        result.value(request, other)?,
+                        provider.precision(),
+                    )?;
+                    match kind {
+                        FusionEpilogueOperation::Maximum if phase <= Phase::Column => {
+                            result.clamp_min = Some(scalar);
+                            phase = Phase::LowerClamp;
+                        }
+                        FusionEpilogueOperation::Minimum if phase <= Phase::LowerClamp => {
+                            result.clamp_max = Some(scalar);
+                            phase = Phase::UpperClamp;
+                        }
+                        FusionEpilogueOperation::RealPower
+                            if current_left && phase <= Phase::UpperClamp =>
+                        {
+                            // Every possible finite base remains real for an integral
+                            // exponent. Otherwise the ordered clamps must establish
+                            // a nonnegative base; real storage alone proves nothing.
+                            let nonnegative = result.clamp_min.is_some_and(|x| x >= 0.0)
+                                && result.clamp_max.is_none_or(|x| x >= 0.0);
+                            if scalar.fract() != 0.0 && !nonnegative {
+                                return None;
+                            }
+                            result.exponent = Some(scalar);
+                            phase = Phase::Power;
+                        }
+                        _ => return None,
+                    }
+                }
+                current = *output;
+                continue;
+            }
             let FusionOp::Primitive {
                 op,
                 inputs,
@@ -172,6 +267,9 @@ impl AdmittedMatmul {
             scale: self.scale,
             offset: self.offset,
         };
+        descriptor.clamp_min = self.clamp_min;
+        descriptor.clamp_max = self.clamp_max;
+        descriptor.pow_exponent = self.exponent;
         if let Some((id, operation)) = self.row {
             descriptor.row_scale = Some(handles[&id].clone());
             descriptor.row_op = operation;
