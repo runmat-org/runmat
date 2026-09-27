@@ -894,7 +894,7 @@ mod tests {
                 .expect_err("resident figure alias must reject");
             assert!(error.message().contains("numeric scalar"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 

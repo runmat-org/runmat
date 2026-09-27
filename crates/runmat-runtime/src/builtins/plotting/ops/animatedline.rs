@@ -130,7 +130,7 @@ async fn split_leading_axes_handle_allow_empty(
     let Some(mut first) = iter.next() else {
         return Ok((None, Vec::new()));
     };
-    if matches!(&first, Value::GpuTensor(handle) if handle.shape.iter().try_fold(1usize, |n, d| n.checked_mul(*d)) == Some(1))
+    if matches!(&first, Value::GpuTensor(handle) if handle.shape().iter().try_fold(1usize, |n, d| n.checked_mul(*d)) == Some(1))
     {
         // A scalar may be an axes identity; resolving it needs its value, not
         // a shape-derived guess. Nonscalar coordinates retain their own path.

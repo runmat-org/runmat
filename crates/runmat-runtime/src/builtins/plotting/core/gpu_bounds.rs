@@ -21,14 +21,6 @@ struct Temporaries<'a> {
     handles: Vec<GpuTensorHandle>,
 }
 
-impl Drop for Temporaries<'_> {
-    fn drop(&mut self) {
-        for handle in &self.handles {
-            gpu::free_rejected_provider_output(handle, self.protected, self.provider);
-        }
-    }
-}
-
 impl Temporaries<'_> {
     fn admit(
         &mut self,
@@ -47,11 +39,11 @@ impl Temporaries<'_> {
         let valid = !protected_alias
             && !prior_alias
             && output
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |n, d| n.checked_mul(*d))
                 == Some(1)
-            && output.device_id == self.provider.device_id()
+            && output.device_id() == self.provider.device_id()
             && gpu::exact_provider_for_handle(&output)
                 .is_some_and(|owner| std::ptr::eq(owner, self.provider))
             && gpu::numeric_descriptor_matches(&output, expected.element, GpuTensorStorage::Real)
@@ -61,17 +53,16 @@ impl Temporaries<'_> {
                 expected.integer,
                 false,
             );
-        // Own every fresh result immediately, including malformed metadata.
-        // Aliases are never adopted and never freed.
-        if !protected_alias && !prior_alias {
-            self.handles.push(output.clone());
-        }
         if valid {
+            self.handles.push(output.clone());
             Ok(output)
         } else {
-            Err(plotting_error(
-                context,
-                format!("{context}: invalid provider bounds result"),
+            Err(gpu::reject_gpu_output(
+                output,
+                plotting_error(
+                    context,
+                    format!("{context}: invalid provider bounds result"),
+                ),
             ))
         }
     }
@@ -105,7 +96,10 @@ pub(super) async fn axis_bounds_protecting(
         guard.restore();
     }
     let minimum = minimum.map_err(|error| {
-        plotting_error(context, format!("{context}: reduce_min failed: {error}"))
+        crate::runtime_error::with_provider_execution_source(
+            plotting_error(context, format!("{context}: reduce_min failed: {error}")),
+            error.into(),
+        )
     })?;
     let minimum = owned.admit(minimum, &expected, context)?;
     let maximum = provider.reduce_max(input).await;
@@ -113,7 +107,10 @@ pub(super) async fn axis_bounds_protecting(
         guard.restore();
     }
     let maximum = maximum.map_err(|error| {
-        plotting_error(context, format!("{context}: reduce_max failed: {error}"))
+        crate::runtime_error::with_provider_execution_source(
+            plotting_error(context, format!("{context}: reduce_max failed: {error}")),
+            error.into(),
+        )
     })?;
     let maximum = owned.admit(maximum, &expected, context)?;
     let minimum = value_to_scalar_async(Value::GpuTensor(minimum), context).await?;

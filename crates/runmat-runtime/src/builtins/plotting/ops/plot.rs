@@ -526,7 +526,7 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         let gpu_pair = data.gpu_handles().map(|(x, y)| {
             format!(
                 "x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?})",
-                x.device_id, x.buffer_id, x.shape, y.device_id, y.buffer_id, y.shape
+                x.device_id(), x.buffer_id(), x.shape(), y.device_id(), y.buffer_id(), y.shape()
             )
         });
         trace!(
@@ -769,7 +769,7 @@ fn is_numeric_value(value: &Value) -> bool {
 
 fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
     let len = match y {
-        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>().max(1),
+        Value::GpuTensor(handle) => handle.shape().iter().copied().product::<usize>().max(1),
         other => {
             let tensor = Tensor::try_from(other)
                 .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
@@ -851,12 +851,12 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
     let shared_ctx_present = runmat_plot::shared_wgpu_context().is_some();
     trace!(
         "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
-        x.device_id,
-        x.buffer_id,
-        x.shape,
-        y.device_id,
-        y.buffer_id,
-        y.shape,
+        x.device_id(),
+        x.buffer_id(),
+        x.shape(),
+        y.device_id(),
+        y.buffer_id(),
+        y.shape(),
         shared_ctx_present,
         api_provider_present,
         api_provider_for_x_present,
@@ -877,7 +877,7 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
         None => {
             trace!(
                 "plot-gpu: export_wgpu_buffer(X) FAILED (api_provider_present={} api_provider_for_x_present={} x_device_id={})",
-                api_provider_present, api_provider_for_x_present, x.device_id
+                api_provider_present, api_provider_for_x_present, x.device_id()
             );
             return Err(plotting_error(
                 builtin,
@@ -898,7 +898,7 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
         None => {
             trace!(
                 "plot-gpu: export_wgpu_buffer(Y) FAILED (api_provider_present={} api_provider_for_y_present={} y_device_id={})",
-                api_provider_present, api_provider_for_y_present, y.device_id
+                api_provider_present, api_provider_for_y_present, y.device_id()
             );
             return Err(plotting_error(
                 builtin,

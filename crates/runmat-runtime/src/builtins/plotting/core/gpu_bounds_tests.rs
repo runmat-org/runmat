@@ -5,7 +5,7 @@ use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProviderFuture, HostTensorView, ProviderPrecision,
     ThreadProviderGuard,
 };
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 
 #[derive(Clone)]
@@ -16,12 +16,12 @@ enum Mode {
     Alias(GpuTensorHandle),
     PendingDownload,
     ErrorDownload,
-    MutateInput,
+    RejectLogicalView,
 }
 struct Provider {
     inner: InProcessProvider,
     mode: Mutex<Mode>,
-    freed: Mutex<Vec<u64>>,
+    produced: Mutex<Vec<runmat_accelerate_api::GpuTensorWireDescriptor>>,
 }
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
@@ -54,13 +54,20 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             match mode {
                 Mode::Alias(handle) => Ok(handle),
-                Mode::MutateInput => {
+                Mode::RejectLogicalView => {
                     let output = self.inner.reduce_min(input).await?;
-                    runmat_accelerate_api::set_handle_logical(input, true);
-                    runmat_accelerate_api::record_handle_transpose(input, 99, 88);
+                    assert!(input
+                        .with_view(input.view().clone().with_logical(true))
+                        .is_err());
+
+                    self.produced.lock().unwrap().push(output.wire_descriptor());
                     Ok(output)
                 }
-                _ => self.inner.reduce_min(input).await,
+                _ => {
+                    let output = self.inner.reduce_min(input).await?;
+                    self.produced.lock().unwrap().push(output.wire_descriptor());
+                    Ok(output)
+                }
             }
         })
     }
@@ -72,34 +79,36 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             match mode {
                 Mode::PendingMax => {
-                    runmat_accelerate_api::set_handle_logical(input, true);
+                    assert!(input
+                        .with_view(input.view().clone().with_logical(true))
+                        .is_err());
                     futures::future::pending().await
                 }
                 Mode::ErrorMax => anyhow::bail!("injected max failure"),
-                Mode::MutateInput => {
+                Mode::RejectLogicalView => {
                     assert!(!runmat_accelerate_api::handle_is_logical(input));
                     assert!(runmat_accelerate_api::handle_transpose_info(input).is_none());
-                    self.inner.reduce_max(input).await
+                    {
+                        let output = self.inner.reduce_max(input).await?;
+                        self.produced.lock().unwrap().push(output.wire_descriptor());
+                        Ok(output)
+                    }
                 }
-                _ => self.inner.reduce_max(input).await,
+                _ => {
+                    let output = self.inner.reduce_max(input).await?;
+                    self.produced.lock().unwrap().push(output.wire_descriptor());
+                    Ok(output)
+                }
             }
         })
     }
-    fn free(&self, input: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.lock().unwrap().push(input.buffer_id);
-        self.inner.free(input)
-    }
 }
 fn provider(mode: Mode) -> &'static Provider {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    Box::leak(Box::new(Provider {
         inner: InProcessProvider::new(),
-        mode: Mutex::new(Mode::Ready),
-        freed: Mutex::new(Vec::new()),
-    });
-    *provider.mode.lock().unwrap() = mode;
-    provider.freed.lock().unwrap().clear();
-    provider
+        mode: Mutex::new(mode),
+        produced: Mutex::new(Vec::new()),
+    }))
 }
 fn upload(provider: &Provider) -> GpuTensorHandle {
     provider
@@ -111,9 +120,9 @@ fn upload(provider: &Provider) -> GpuTensorHandle {
 }
 
 #[test]
-fn bounds_restore_input_metadata_before_next_hook_and_keep_admitted_output_type() {
+fn bounds_reject_logical_reinterpretation_and_keep_admitted_output_type() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
-    let provider = provider(Mode::MutateInput);
+    let provider = provider(Mode::RejectLogicalView);
     let _current = ThreadProviderGuard::set(Some(provider));
     let input = upload(provider);
     assert_eq!(
@@ -121,9 +130,13 @@ fn bounds_restore_input_metadata_before_next_hook_and_keep_admitted_output_type(
         (1.0, 2.0)
     );
     assert!(!runmat_accelerate_api::handle_is_logical(&input));
-    assert_eq!(provider.freed.lock().unwrap().len(), 2);
+    let produced = provider.produced.lock().unwrap().clone();
+    assert_eq!(produced.len(), 2);
+    assert!(produced
+        .iter()
+        .all(|wire| provider.inner.acquire_live(wire).is_err()));
     assert!(block_on(provider.inner.download(&input)).is_ok());
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[test]
@@ -135,7 +148,7 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
     let y = upload(provider);
     for mode in [Mode::PendingMax, Mode::ErrorMax, Mode::Alias(y.clone())] {
         *provider.mode.lock().unwrap() = mode.clone();
-        provider.freed.lock().unwrap().clear();
+        provider.produced.lock().unwrap().clear();
         let protected = [&x, &y];
         let mut future = Box::pin(axis_bounds_protecting(&x, &protected, "stem"));
         if matches!(mode, Mode::PendingMax) {
@@ -147,15 +160,17 @@ fn bounds_drop_error_and_cross_coordinate_alias_preserve_borrowed_inputs() {
         } else {
             assert!(block_on(future).is_err());
         }
-        let freed = provider.freed.lock().unwrap().clone();
-        assert_eq!(freed.len(), usize::from(!matches!(mode, Mode::Alias(_))));
-        assert!(!freed.contains(&x.buffer_id) && !freed.contains(&y.buffer_id));
+        let retired = provider.produced.lock().unwrap().clone();
+        assert_eq!(retired.len(), usize::from(!matches!(mode, Mode::Alias(_))));
+        assert!(retired
+            .iter()
+            .all(|wire| provider.inner.acquire_live(wire).is_err()));
         assert!(!runmat_accelerate_api::handle_is_logical(&x));
         assert!(block_on(provider.inner.download(&x)).is_ok());
         assert!(block_on(provider.inner.download(&y)).is_ok());
     }
-    provider.free(&x).unwrap();
-    provider.free(&y).unwrap();
+    x.release().unwrap();
+    y.release().unwrap();
 }
 
 #[test]
@@ -186,7 +201,7 @@ fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
     assert_eq!(count(), initial);
     drop(future);
     assert_eq!(count(), initial);
-    assert!(provider.freed.lock().unwrap().is_empty());
+    assert!(provider.produced.lock().unwrap().is_empty());
     *provider.mode.lock().unwrap() = Mode::ErrorDownload;
     assert!(block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).is_err());
     assert_eq!(count(), initial);
@@ -194,6 +209,6 @@ fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
     block_on(crate::builtins::plotting::stem::stem_builtin(args.to_vec())).unwrap();
     assert_eq!(count(), initial + 1);
     assert!(block_on(provider.inner.download(&input)).is_ok());
-    assert!(provider.freed.lock().unwrap().is_empty());
-    provider.free(&input).unwrap();
+    assert!(provider.produced.lock().unwrap().is_empty());
+    input.release().unwrap();
 }

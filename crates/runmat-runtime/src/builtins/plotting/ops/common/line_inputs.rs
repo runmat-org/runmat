@@ -40,7 +40,7 @@ impl NumericInput {
     pub fn len(&self) -> usize {
         match self {
             Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
-            Self::Gpu(handle) => handle.shape.iter().product(),
+            Self::Gpu(handle) => handle.shape().iter().product(),
         }
     }
 

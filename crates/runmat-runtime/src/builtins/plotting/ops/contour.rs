@@ -1597,8 +1597,14 @@ fn parse_line_color_option(
 
 fn is_implicit_level_style_value(value: &Value, context: &str) -> bool {
     if let Value::GpuTensor(handle) = value {
-        return handle.shape.is_empty()
-            || handle.shape.iter().copied().filter(|dim| *dim > 1).count() <= 1;
+        return handle.shape().is_empty()
+            || handle
+                .shape()
+                .iter()
+                .copied()
+                .filter(|dim| *dim > 1)
+                .count()
+                <= 1;
     }
     matches!(
         value,

@@ -1244,16 +1244,14 @@ mod tests {
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |_function, _args, _requested_outputs| {
                 crate::sequence::single_value_future(async {
-                    let handle = runmat_accelerate_api::GpuTensorHandle {
-                        shape: vec![1, 1],
-                        device_id: 999_992,
-                        buffer_id: 999_992,
-                        descriptor: Default::default(),
-                    }
-                    .with_numeric_descriptor(
-                        runmat_accelerate_api::NumericElementType::U64,
-                        runmat_accelerate_api::GpuTensorStorage::Real,
-                    );
+                    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                        .allocate_zeroed(
+                            vec![1, 1],
+                            runmat_accelerate_api::NumericElementType::U64,
+                            runmat_accelerate_api::GpuTensorStorage::Real,
+                        )
+                        .unwrap()
+                        .handle;
                     Ok(Value::GpuTensor(handle))
                 })
             },

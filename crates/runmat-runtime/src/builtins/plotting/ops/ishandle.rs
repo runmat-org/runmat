@@ -76,7 +76,7 @@ pub fn ishandle_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 fn handle_predicate_value(value: &Value, builtin: &'static str) -> Value {
     match value {
-        Value::GpuTensor(handle) => false_value(handle.shape.clone()),
+        Value::GpuTensor(handle) => false_value(handle.shape().to_vec()),
         Value::Int(integer) => {
             if !crate::compatibility::runmat_extensions_enabled() {
                 return Value::Bool(false);

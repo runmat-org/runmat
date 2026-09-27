@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn copyobj_rejects_all_resident_integer_classes_without_provider_dispatch() {
-        for (offset, element_type) in [
+        for (_offset, element_type) in [
             (0, runmat_accelerate_api::IntegerElementType::I8),
             (1, runmat_accelerate_api::IntegerElementType::I16),
             (2, runmat_accelerate_api::IntegerElementType::I32),
@@ -599,16 +599,14 @@ mod tests {
             (6, runmat_accelerate_api::IntegerElementType::U32),
             (7, runmat_accelerate_api::IntegerElementType::U64),
         ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 510 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle;
             let result = copyobj_builtin(vec![Value::GpuTensor(handle.clone()), Value::Num(1.0)]);
             let error = result.expect_err("resident numeric handles must reject");
             assert_eq!(
@@ -623,7 +621,7 @@ mod tests {
         let _guard = lock_plot_test_context();
         reset_plot_state();
         let source = line_handle(&[1.0, 2.0]);
-        for (offset, element_type) in [
+        for (_offset, element_type) in [
             (0, runmat_accelerate_api::IntegerElementType::I8),
             (1, runmat_accelerate_api::IntegerElementType::I16),
             (2, runmat_accelerate_api::IntegerElementType::I32),
@@ -633,16 +631,14 @@ mod tests {
             (6, runmat_accelerate_api::IntegerElementType::U32),
             (7, runmat_accelerate_api::IntegerElementType::U64),
         ] {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 610 - offset,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                element_type.into(),
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    element_type.into(),
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle;
             let result =
                 copyobj_builtin(vec![Value::Num(source), Value::GpuTensor(handle.clone())]);
             let error = result.expect_err("resident integer parent must reject");

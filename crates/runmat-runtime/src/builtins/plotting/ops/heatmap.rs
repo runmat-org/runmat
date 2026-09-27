@@ -543,9 +543,13 @@ async fn parse_heatmap_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedHeat
 async fn cdata_tensor(value: Value) -> crate::BuiltinResult<Tensor> {
     let tensor = match value {
         Value::GpuTensor(handle) => {
-            if handle.shape.first().copied().unwrap_or(0) == 0
-                || handle.shape.get(1).copied().unwrap_or(0) == 0
-                || handle.shape.iter().skip(2).any(|&dimension| dimension != 1)
+            if handle.shape().first().copied().unwrap_or(0) == 0
+                || handle.shape().get(1).copied().unwrap_or(0) == 0
+                || handle
+                    .shape()
+                    .iter()
+                    .skip(2)
+                    .any(|&dimension| dimension != 1)
             {
                 return Err(heatmap_invalid(
                     "CData must be a nonempty 2-D numeric matrix",
@@ -1165,12 +1169,16 @@ mod tests {
 
     #[test]
     fn heatmap_gpu_cdata_extension_is_gated_before_provider_access() {
-        let gpu = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let gpu = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![2, 2],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(heatmap_builtin(vec![gpu]))
             .expect_err("strict mode must reject GPU CData");
@@ -1206,7 +1214,7 @@ mod tests {
             runmat_accelerate_api::handle_integer_type(&handle),
             Some(runmat_accelerate_api::IntegerElementType::U64)
         );
-        provider.free(&handle).ok();
+        handle.release().ok();
         runmat_accelerate_api::clear_residency(&handle);
     }
 
@@ -1302,12 +1310,16 @@ mod tests {
     fn heatmap_rejects_resident_nd_cdata_before_provider_lookup() {
         let _guard = setup();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![2, 2, 2],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = futures::executor::block_on(heatmap_builtin(vec![resident]))
             .expect_err("N-D resident CData must reject from handle metadata");
         assert_eq!(

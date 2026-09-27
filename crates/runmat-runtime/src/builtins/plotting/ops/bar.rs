@@ -1004,22 +1004,22 @@ impl BarMatrixShape {
         x_count: Option<usize>,
         config: BarRenderConfig,
     ) -> BuiltinResult<Self> {
-        if handle.shape.is_empty() {
+        if handle.shape().is_empty() {
             return Err(config.invalid("input cannot be empty"));
         }
-        if handle.shape.len() == 1 {
+        if handle.shape().len() == 1 {
             return Ok(Self {
-                rows: handle.shape[0],
+                rows: handle.shape()[0],
                 cols: 1,
-                source_rows: handle.shape[0],
+                source_rows: handle.shape()[0],
                 transposed: false,
             });
         }
-        if handle.shape.len() != 2 {
+        if handle.shape().len() != 2 {
             return Err(config.invalid("matrix inputs must be 2-D"));
         }
-        let rows = handle.shape[0];
-        let cols = handle.shape[1];
+        let rows = handle.shape()[0];
+        let cols = handle.shape()[1];
         if rows == 0 || cols == 0 {
             return Err(config.invalid("input cannot be empty"));
         }
@@ -1540,12 +1540,14 @@ pub(crate) mod tests {
     }
 
     fn gpu_handle_with_shape(shape: &[usize]) -> GpuTensorHandle {
-        GpuTensorHandle {
-            shape: shape.to_vec(),
-            device_id: 0,
-            buffer_id: 0,
-            descriptor: Default::default(),
-        }
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                shape.to_vec(),
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle
     }
 
     #[test]

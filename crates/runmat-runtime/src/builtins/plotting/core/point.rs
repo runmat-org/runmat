@@ -147,9 +147,9 @@ impl PointColorArg {
                 }
             }
             Value::GpuTensor(handle) => {
-                if total_len(handle.shape.as_slice()) == 1 {
+                if total_len(handle.shape()) == 1 {
                     Ok(Self::ScalarValues(value))
-                } else if matches!(handle.shape.last().copied().unwrap_or_default(), 3 | 4) {
+                } else if matches!(handle.shape().last().copied().unwrap_or_default(), 3 | 4) {
                     Ok(Self::RgbMatrix(value))
                 } else {
                     Ok(Self::ScalarValues(value))
@@ -217,7 +217,7 @@ fn is_filled_token(value: &Value) -> bool {
 fn value_is_empty(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor::tensor_element_len(tensor) == 0,
-        Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 0,
+        Value::GpuTensor(handle) => total_len(handle.shape()) == 0,
         Value::CharArray(chars) => chars.data.is_empty(),
         Value::String(s) => s.trim().is_empty(),
         _ => false,
@@ -228,7 +228,7 @@ fn is_scalar_numeric(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-        Value::GpuTensor(handle) => total_len(handle.shape.as_slice()) == 1,
+        Value::GpuTensor(handle) => total_len(handle.shape()) == 1,
         _ => false,
     }
 }
@@ -504,7 +504,7 @@ pub fn validate_gpu_vector_length(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<()> {
-    let len = total_len(handle.shape.as_slice());
+    let len = total_len(handle.shape());
     if len != point_count {
         return Err(plotting_error(
             context,
@@ -521,13 +521,13 @@ pub fn validate_gpu_color_matrix(
     point_count: usize,
     context: &'static str,
 ) -> BuiltinResult<PointColorComponents> {
-    if handle.shape.len() < 2 {
+    if handle.shape().len() < 2 {
         return Err(plotting_error(
             context,
             format!("{context}: color gpuArray inputs must be at least 2-D"),
         ));
     }
-    let cols = handle.shape.last().copied().unwrap_or_default();
+    let cols = handle.shape().last().copied().unwrap_or_default();
     let components = match cols {
         3 => PointColorComponents::Rgb,
         4 => PointColorComponents::Rgba,
@@ -540,7 +540,7 @@ pub fn validate_gpu_color_matrix(
             ))
         }
     };
-    let rows = handle.shape[..handle.shape.len() - 1]
+    let rows = handle.shape()[..handle.shape().len() - 1]
         .iter()
         .product::<usize>();
     if rows != point_count {

@@ -510,7 +510,7 @@ impl HistWeightsInput {
                     }
                     _ => false,
                 };
-                handle.device_id == samples.device_id
+                handle.device_id() == samples.device_id()
                     && same_provider
                     && runmat_accelerate_api::handle_integer_type(handle).is_none()
                     && !runmat_accelerate_api::handle_is_logical(handle)
@@ -521,7 +521,7 @@ impl HistWeightsInput {
     fn from_value(value: Value, expected_len: usize) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => {
-                let len: usize = handle.shape.iter().product();
+                let len: usize = handle.shape().iter().product();
                 if len != expected_len {
                     return Err(hist_err(format!(
                         "hist: Weights must contain {expected_len} elements (got {len})"
@@ -1827,7 +1827,7 @@ impl HistInput {
     fn vector_gpu_handle(&self) -> Option<&GpuTensorHandle> {
         match self {
             Self::Gpu(handle)
-                if handle.shape.iter().filter(|&&dim| dim > 1).count() <= 1
+                if handle.shape().iter().filter(|&&dim| dim > 1).count() <= 1
                     && runmat_accelerate_api::handle_integer_type(handle).is_none()
                     && !runmat_accelerate_api::handle_is_logical(handle) =>
             {
@@ -1841,7 +1841,7 @@ impl HistInput {
     fn len(&self) -> usize {
         match self {
             Self::Host(tensor) => tensor_utils::tensor_element_len(tensor),
-            Self::Gpu(handle) => handle.shape.iter().product(),
+            Self::Gpu(handle) => handle.shape().iter().product(),
         }
     }
 }
@@ -2045,19 +2045,17 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             ensure_plot_test_env();
             let data = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[0.0, 1.0, 1.0, 0.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1, 0],
                     shape: &[1, 4],
                 })
                 .expect("resident logical data");
-            runmat_accelerate_api::set_handle_logical(&data, true);
             let weights = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &[1.0, 0.0, 1.0, 0.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1, 0],
                     shape: &[1, 4],
                 })
                 .expect("resident logical weights");
-            runmat_accelerate_api::set_handle_logical(&weights, true);
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
             let output = block_on(hist_builtin(
                 Value::GpuTensor(data),

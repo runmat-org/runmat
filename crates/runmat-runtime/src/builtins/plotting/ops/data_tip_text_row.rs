@@ -342,7 +342,7 @@ fn validate_value_source(value: &Value) -> BuiltinResult<()> {
                 &DATA_TIP_RESIDENT_VALUE_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            if !vector_shape(&handle.shape) {
+            if !vector_shape(&handle.shape()) {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &DATA_TIP_NONVECTOR_VALUE_EXTENSION,
                     BUILTIN_NAME,
@@ -370,7 +370,6 @@ fn validate_host_vector_shape(shape: &[usize]) -> BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::{IntegerStorage, StringArray, Tensor};
 
     fn handle_payload(value: Value) -> ObjectInstance {
@@ -446,12 +445,14 @@ mod tests {
     #[test]
     fn stores_gpu_value_without_gathering_or_replacing_handle() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 7,
-            buffer_id: 42,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let row = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),
@@ -461,7 +462,7 @@ mod tests {
         assert!(matches!(
             object.properties.get("Value"),
             Some(Value::GpuTensor(stored))
-                if stored.device_id == handle.device_id && stored.buffer_id == handle.buffer_id
+                if stored.shares_allocation_with(&handle)
         ));
     }
 
@@ -488,7 +489,7 @@ mod tests {
                 Some(Value::GpuTensor(stored)) if stored == &handle
             ));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -539,12 +540,14 @@ mod tests {
             error.identifier(),
             DATA_TIP_NONVECTOR_VALUE_EXTENSION.error_identifier
         );
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 397,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let error = data_tip_text_row_builtin(vec![
             Value::String("GPU".into()),
             Value::GpuTensor(handle.clone()),

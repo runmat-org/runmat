@@ -195,17 +195,17 @@ impl SurfaceDataInput {
                 }
             }
             Self::Gpu(handle) => {
-                if handle.shape.len() < 2 {
+                if handle.shape().len() < 2 {
                     return Err(plotting_error(
                         context,
                         format!(
                             "{context}: gpuArray inputs must be 2-D (got shape {:?})",
-                            handle.shape
+                            handle.shape()
                         ),
                     ));
                 }
-                let rows = handle.shape[0];
-                let cols = handle.shape[1];
+                let rows = handle.shape()[0];
+                let cols = handle.shape()[1];
                 if rows == 0 || cols == 0 {
                     Err(plotting_error(
                         context,

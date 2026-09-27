@@ -404,7 +404,7 @@ pub(crate) fn extract_cdata_mapping(
 
 pub(crate) fn image_channel_count(value: &Value) -> Option<usize> {
     match value {
-        Value::GpuTensor(handle) => handle.shape.get(2).copied(),
+        Value::GpuTensor(handle) => handle.shape().get(2).copied(),
         other => Tensor::try_from(other)
             .ok()
             .and_then(|tensor| tensor.shape.get(2).copied()),
@@ -423,7 +423,7 @@ pub(crate) async fn classify_image_input(
 ) -> crate::BuiltinResult<(usize, usize, ImageInputKind, Tensor)> {
     match value {
         Value::GpuTensor(handle)
-            if handle.shape.len() >= 3
+            if handle.shape().len() >= 3
                 && runmat_accelerate_api::handle_integer_type(handle).is_none()
                 && !runmat_accelerate_api::handle_is_logical(handle) =>
         {
@@ -589,10 +589,10 @@ fn truecolor_gpu_shape(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     builtin: &'static str,
 ) -> crate::BuiltinResult<(usize, usize, u32)> {
-    let rows = handle.shape.first().copied().unwrap_or(0);
-    let cols = handle.shape.get(1).copied().unwrap_or(0);
-    let channels = handle.shape.get(2).copied().unwrap_or(1);
-    let trailing_singleton = handle.shape.iter().skip(3).all(|&dim| dim == 1);
+    let rows = handle.shape().first().copied().unwrap_or(0);
+    let cols = handle.shape().get(1).copied().unwrap_or(0);
+    let channels = handle.shape().get(2).copied().unwrap_or(1);
+    let trailing_singleton = handle.shape().iter().skip(3).all(|&dim| dim == 1);
     if rows == 0 || cols == 0 || !matches!(channels, 3 | 4) || !trailing_singleton {
         return Err(crate::builtins::plotting::plotting_error(
             builtin,
@@ -609,7 +609,7 @@ fn truecolor_gpu_shape(
             )
         })?;
     let actual = handle
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim));
     if actual != Some(expected) {

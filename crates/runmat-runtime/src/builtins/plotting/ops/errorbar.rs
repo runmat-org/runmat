@@ -602,7 +602,7 @@ fn errorbar_gpu_inputs_eligible(
                 && !runmat_accelerate_api::handle_is_logical(handle)
                 && runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::Real
-                && handle.shape.iter().filter(|extent| **extent > 1).count() <= 1
+                && handle.shape().iter().filter(|extent| **extent > 1).count() <= 1
         }
         None => false,
     };
@@ -1124,12 +1124,12 @@ fn infer_errorbar_x_from_y(y: &Value) -> crate::BuiltinResult<Value> {
             }
         }
         Value::GpuTensor(handle) => {
-            if handle.shape.first().copied().unwrap_or(1) > 1
-                && handle.shape.get(1).copied().unwrap_or(1) > 1
+            if handle.shape().first().copied().unwrap_or(1) > 1
+                && handle.shape().get(1).copied().unwrap_or(1) > 1
             {
-                handle.shape[0]
+                handle.shape()[0]
             } else {
-                handle.shape.iter().product()
+                handle.shape().iter().product()
             }
         }
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => 1,
@@ -1630,22 +1630,23 @@ mod tests {
 
     #[test]
     fn errorbar_resident_integer_never_enters_floating_gpu_geometry() {
-        let make = |buffer_id| {
-            NumericInput::Gpu(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 2],
-                device_id: 0,
-                buffer_id,
-                descriptor: Default::default(),
-            })
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let make = |element| {
+            NumericInput::Gpu(
+                owner
+                    .allocate_zeroed(
+                        vec![1, 2],
+                        element,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
+            )
         };
-        let x = make(9_401_001);
-        let mut y = make(9_401_002);
-        let yn = make(9_401_003);
-        let yp = make(9_401_004);
-        let NumericInput::Gpu(handle) = &mut y else {
-            unreachable!()
-        };
-        handle.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
+        let x = make(runmat_accelerate_api::NumericElementType::F64);
+        let y = make(runmat_accelerate_api::NumericElementType::U64);
+        let yn = make(runmat_accelerate_api::NumericElementType::F64);
+        let yp = make(runmat_accelerate_api::NumericElementType::F64);
         assert!(!errorbar_gpu_inputs_eligible(&x, &y, None, None, &yn, &yp));
     }
 }

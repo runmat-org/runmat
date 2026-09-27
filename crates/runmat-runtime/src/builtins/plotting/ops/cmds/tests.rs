@@ -67,12 +67,16 @@ fn graphics_commands_accept_zero_outputs_in_strict_mode() {
 #[test]
 fn graphics_commands_reject_resident_controls_without_creating_graphics() {
     let _guard = test_support::setup();
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        buffer_id: 918_771,
-        shape: vec![1, 1],
-        device_id: 8_181,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle,
+    );
     for (command, _) in command_cases() {
         crate::builtins::plotting::state::reset_plot_state();
         assert!(command(vec![resident.clone()]).is_err());

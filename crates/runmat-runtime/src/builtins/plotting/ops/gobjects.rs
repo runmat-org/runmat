@@ -375,12 +375,16 @@ mod tests {
             Value::LogicalArray(
                 runmat_value::LogicalArray::new(vec![1], vec![1, 1]).expect("logical"),
             ),
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 999_991,
-                buffer_id: 999_991,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .unwrap()
+                    .handle,
+            ),
         ] {
             let error = block_on(gobjects_builtin(vec![value])).unwrap_err();
             assert_eq!(error.identifier(), GOBJECTS_ERROR_INVALID_SIZE.identifier);

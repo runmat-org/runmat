@@ -508,7 +508,7 @@ fn build_stairs_plot(
 
 fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
     let len = match y {
-        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>().max(1),
+        Value::GpuTensor(handle) => handle.shape().iter().copied().product::<usize>().max(1),
         other => {
             let tensor = Tensor::try_from(other)
                 .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;

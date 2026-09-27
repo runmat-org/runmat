@@ -776,9 +776,9 @@ fn default_quiver3_grid_from_value(value: &Value) -> crate::BuiltinResult<(Tenso
 fn tensor_shape_from_value(value: &Value) -> crate::BuiltinResult<(usize, usize, usize)> {
     match value {
         Value::GpuTensor(handle) => {
-            let rows = handle.shape.first().copied().unwrap_or(1).max(1);
-            let cols = handle.shape.get(1).copied().unwrap_or(1).max(1);
-            let len = handle.shape.iter().product::<usize>().max(1);
+            let rows = handle.shape().first().copied().unwrap_or(1).max(1);
+            let cols = handle.shape().get(1).copied().unwrap_or(1).max(1);
+            let len = handle.shape().iter().product::<usize>().max(1);
             Ok((rows, cols, len))
         }
         _ => {

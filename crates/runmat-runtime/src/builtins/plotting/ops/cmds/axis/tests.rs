@@ -267,12 +267,14 @@ fn axis_visibility_accepts_logical_and_all_integer_scalar_classes() {
 #[test]
 fn axis_rejects_resident_limits_before_provider_access() {
     let _guard = setup();
-    let resident = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 4],
-        device_id: 0,
-        buffer_id: 9_361_001,
-        descriptor: Default::default(),
-    };
+    let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 4],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap()
+        .handle;
     let error = axis_builtin(vec![Value::GpuTensor(resident)])
         .expect_err("resident graphics limits must reject");
     assert_eq!(error.identifier(), Some("RunMat:axis:InvalidArgument"));

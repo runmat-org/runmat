@@ -1611,20 +1611,24 @@ mod tests {
                 y.integer_storage(),
                 Some(&runmat_value::IntegerStorage::U64(vec![wide, wide + 1]))
             );
-            provider.free(&handle).ok();
+            handle.release().ok();
         });
     }
 
     #[test]
     fn stackedplot_explicit_gpu_input_is_gated_before_provider_access() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 0,
-            buffer_id: 9_451_001,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = stackedplot_builtin(vec![Value::GpuTensor(handle)])
             .expect_err("explicit GPU intent must be gated");
         assert_eq!(

@@ -995,8 +995,8 @@ fn implicit_area_x(y: &Value) -> crate::BuiltinResult<Tensor> {
                     "Y must be real numeric data",
                 ));
             }
-            let len = handle.shape.iter().product();
-            area_shape_from_gpu_shape(&handle.shape, len).0
+            let len = handle.shape().iter().product();
+            area_shape_from_gpu_shape(&handle.shape(), len).0
         }
         _ => {
             return Err(area_error_with_detail(
@@ -1014,7 +1014,7 @@ fn area_value_len(value: &Value) -> Option<usize> {
         Value::Num(_) | Value::Int(_) => Some(1),
         Value::Tensor(tensor) => Some(tensor.len()),
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .iter()
             .try_fold(1usize, |size, &dim| size.checked_mul(dim)),
         _ => None,
@@ -1027,7 +1027,7 @@ fn is_area_numeric_scalar(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor.len() == 1,
         Value::GpuTensor(handle) => {
             handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |size, &dim| size.checked_mul(dim))
                 == Some(1)
@@ -1040,7 +1040,7 @@ fn validate_area_scalar(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::GpuTensor(handle)
             if handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |size, &dim| size.checked_mul(dim))
                 == Some(1)

@@ -1389,24 +1389,32 @@ mod tests {
 
     #[test]
     fn hgload_and_hgsave_reject_resident_numeric_arguments_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         assert!(block_on(hgload_builtin(vec![resident.clone()])).is_err());
         assert!(block_on(hgsave_builtin(vec![resident, Value::from("unused.fig")])).is_err());
     }
 
     #[test]
     fn openfig_rejects_resident_filename_without_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = block_on(openfig_builtin(vec![resident])).expect_err("resident filename");
 
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);

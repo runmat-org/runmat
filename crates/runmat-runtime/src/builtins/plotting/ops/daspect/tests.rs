@@ -180,12 +180,16 @@ fn daspect_rejects_nonvector_logical_complex_and_resident_ratio_inputs() {
             .unwrap(),
     );
     assert!(set_daspect(vec![complex]).is_err());
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 3],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 396,
-        descriptor: Default::default(),
-    });
+    let resident = Value::GpuTensor(
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle,
+    );
     assert!(set_daspect(vec![resident]).is_err());
 }
 
@@ -203,7 +207,7 @@ fn daspect_rejects_registered_resident_ratio_without_provider_access() {
             .expect_err("resident ratio must reject");
         assert!(error.message().contains("host row or column"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-        let _ = provider.free(&handle);
+        let _ = handle.release();
     });
 }
 

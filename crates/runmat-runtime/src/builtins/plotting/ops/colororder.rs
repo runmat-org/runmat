@@ -447,7 +447,6 @@ mod tests {
     use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::{IntegerStorage, StringArray};
 
     fn setup_plot_tests() -> crate::builtins::plotting::state::PlotTestLockGuard {
@@ -619,12 +618,14 @@ mod tests {
     #[test]
     fn colororder_rejects_gpu_color_arrays_without_gathering() {
         let _guard = setup_plot_tests();
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 7,
-            buffer_id: 42,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
         let err = colororder_builtin(vec![Value::GpuTensor(handle)])
             .expect_err("gpu color arrays must stay unsupported at the API boundary");
         assert!(err

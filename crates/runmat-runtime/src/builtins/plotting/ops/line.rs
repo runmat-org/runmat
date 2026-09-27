@@ -473,8 +473,8 @@ async fn build_2d_objects(
     if let (Some(x_gpu), Some(y_gpu)) = (x.gpu_handle(), y.gpu_handle()) {
         if x.len() == y.len()
             && x.len() >= 2
-            && is_gpu_vector_shape(&x_gpu.shape)
-            && is_gpu_vector_shape(&y_gpu.shape)
+            && is_gpu_vector_shape(&x_gpu.shape())
+            && is_gpu_vector_shape(&y_gpu.shape())
         {
             if let Ok(mut plot) = super::plot::build_line_gpu_plot_async_for_builtin(
                 BUILTIN_NAME,
