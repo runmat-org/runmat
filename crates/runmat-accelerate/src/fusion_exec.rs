@@ -34,6 +34,8 @@ mod provider_observation;
 use provider_observation::FusionPlacementSelection;
 mod admission;
 use admission::AdmittedBindings;
+mod reduction_program;
+pub use reduction_program::{resolve_reduction_program, ReductionDataInput, ResolvedReductionProgram};
 mod outputs;
 mod explained_input;
 mod explained_output;

@@ -26,6 +26,7 @@ struct Operation {
     identity: Identity,
     structural: Option<FusionStructuralOperation>,
     epilogue: Option<FusionEpilogueOperation>,
+    reduction: Option<&'static runmat_runtime::builtins::common::spec::FusionReductionDeclaration>,
 }
 pub(super) struct AdmittedBindings {
     operations: Vec<Operation>,
@@ -62,6 +63,7 @@ impl AdmittedBindings {
                             identity: Identity::Primitive(*op),
                             structural: None,
                             epilogue,
+                            reduction: None,
                         });
                     }
                     FusionOp::Builtin { name, origin, .. } => (name, *origin),
@@ -84,6 +86,7 @@ impl AdmittedBindings {
                         },
                         structural: declaration.structural,
                         epilogue: declaration.epilogue,
+                        reduction: declaration.reduction,
                     });
                 }
                 let expected = match origin {
@@ -98,6 +101,7 @@ impl AdmittedBindings {
                     },
                     structural: selected.structural,
                     epilogue: selected.epilogue,
+                    reduction: selected.reduction,
                 })
             })
             .collect::<Option<Vec<_>>>()?;
@@ -110,14 +114,25 @@ impl AdmittedBindings {
     pub fn epilogue(&self, index: usize) -> Option<FusionEpilogueOperation> {
         self.operations.get(index)?.epilogue
     }
+    pub fn reduction(
+        &self,
+        index: usize,
+    ) -> Option<&'static runmat_runtime::builtins::common::spec::FusionReductionDeclaration> {
+        self.operations.get(index)?.reduction
+    }
     pub fn identity(&self, semantic: Option<Digest>) -> anyhow::Result<Digest> {
         let identities: Vec<_> = self
             .operations
             .iter()
-            .map(|operation| &operation.identity)
+            .map(|operation| {
+                (
+                    &operation.identity,
+                    operation.reduction.map(|declaration| declaration.revision),
+                )
+            })
             .collect();
         Ok(Digest::sha256(serde_json::to_vec(&(
-            "selected-fusion-bindings-v1",
+            "selected-fusion-bindings-v2",
             identities,
             semantic,
         ))?))

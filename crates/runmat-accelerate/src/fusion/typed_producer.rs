@@ -9,7 +9,7 @@ use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
 use std::collections::{HashMap, HashSet};
 
-pub(super) struct TypedProducer {
+pub(crate) struct TypedProducer {
     pub body: String,
     expressions: HashMap<ValueId, String>,
     helpers: Vec<(FusionMathHelper, ScalarType)>,
@@ -157,7 +157,7 @@ impl TypedProducer {
         Ok(format!("// {identity}\n{math}\n"))
     }
 }
-fn producer_indices(
+pub(crate) fn producer_indices(
     plan: &FusionGroupPlan,
     leaves: &HashMap<ValueId, String>,
     roots: &[ValueId],

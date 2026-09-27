@@ -46,6 +46,16 @@ impl ResolvedProgram {
         provider_precision: ProviderPrecision,
         correlation: Option<crate::placement::PlacementCorrelationId>,
     ) -> Result<Self> {
+        let inputs: Vec<_> = inputs.iter().collect();
+        Self::resolve_borrowed(plan, &inputs, provider_precision, correlation).await
+    }
+
+    pub async fn resolve_borrowed(
+        plan: &FusionGroupPlan,
+        inputs: &[&Value],
+        provider_precision: ProviderPrecision,
+        correlation: Option<crate::placement::PlacementCorrelationId>,
+    ) -> Result<Self> {
         Self::resolve_observed(
             plan,
             inputs,
@@ -63,12 +73,13 @@ impl ResolvedProgram {
         provider_precision: ProviderPrecision,
         precision_policy: PrecisionPolicy,
     ) -> Result<Self> {
-        Self::resolve_observed(plan, inputs, provider_precision, precision_policy, None).await
+        let inputs: Vec<_> = inputs.iter().collect();
+        Self::resolve_observed(plan, &inputs, provider_precision, precision_policy, None).await
     }
 
     async fn resolve_observed(
         plan: &FusionGroupPlan,
-        inputs: &[Value],
+        inputs: &[&Value],
         provider_precision: ProviderPrecision,
         precision_policy: PrecisionPolicy,
         correlation: Option<crate::placement::PlacementCorrelationId>,
@@ -76,7 +87,7 @@ impl ResolvedProgram {
         if inputs.len() != plan.inputs.len() {
             return Err(anyhow!("fusion operand count does not match the plan"));
         }
-        let source_inputs: Vec<_> = inputs.iter().map(value_fact).collect();
+        let source_inputs: Vec<_> = inputs.iter().map(|value| value_fact(value)).collect();
         let effective_input = |mut fact: ValueFact| {
             if precision_policy.permits_double_to_single()
                 && provider_precision == ProviderPrecision::F32
@@ -157,7 +168,7 @@ impl ResolvedProgram {
                                 plan.inputs
                                     .iter()
                                     .position(|input| input == id)
-                                    .and_then(|index| inputs.get(index))
+                                    .and_then(|index| inputs.get(index).copied())
                                     .or_else(|| plan.const_values.get(id))
                             })
                             .collect();
