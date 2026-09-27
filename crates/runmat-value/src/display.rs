@@ -254,7 +254,7 @@ impl fmt::Display for Value {
             Value::GpuTensor(h) => write!(
                 f,
                 "GpuTensor(shape={:?}, device={}, buffer={})",
-                h.shape, h.device_id, h.buffer_id
+                h.shape(), h.device_id(), h.buffer_id()
             ),
             Value::Object(obj) => write!(f, "{}(props={})", obj.class_name, obj.properties.len()),
             Value::ObjectArray(array) => write!(f, "{array}"),
