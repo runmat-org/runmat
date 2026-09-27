@@ -8,8 +8,10 @@ use runmat_accelerate_api::{
 use runmat_value::{NumericDType, Value};
 
 mod arithmetic;
+mod complex_components;
 mod integer_conversion;
 mod logical;
+mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
     ("transfer.upload", ProviderOperationFamily::Upload),
@@ -160,6 +162,8 @@ pub(crate) fn in_process_capability_snapshot(
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
+    complex_components::append(&mut snapshot);
+    trigonometry::append(&mut snapshot);
     snapshot
 }
 
@@ -171,6 +175,8 @@ pub(crate) fn wgpu_capability_snapshot(
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
+    complex_components::append(&mut snapshot);
+    trigonometry::append(&mut snapshot);
     snapshot
 }
 
@@ -179,6 +185,9 @@ pub(crate) fn in_process_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = integer_conversion::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = trigonometry::validate(provider, false, query) {
         return result;
     }
     if let Some(result) =
@@ -193,6 +202,14 @@ pub(crate) fn in_process_feasibility(
         &snapshot,
         query,
     )
+    .or_else(|| {
+        complex_components::feasibility(
+            complex_components::HookProfile::InProcess,
+            provider.precision(),
+            &snapshot,
+            query,
+        )
+    })
     .unwrap_or_else(|| dense_feasibility(&snapshot, query))
 }
 
@@ -202,6 +219,9 @@ pub(crate) fn wgpu_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = integer_conversion::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = trigonometry::validate(provider, true, query) {
         return result;
     }
     if let Some(result) = logical::validate(logical::HookProfile::Wgpu, provider.precision(), query)
@@ -215,6 +235,14 @@ pub(crate) fn wgpu_feasibility(
         &snapshot,
         query,
     )
+    .or_else(|| {
+        complex_components::feasibility(
+            complex_components::HookProfile::Wgpu,
+            provider.precision(),
+            &snapshot,
+            query,
+        )
+    })
     .unwrap_or_else(|| dense_feasibility(&snapshot, query))
 }
 
