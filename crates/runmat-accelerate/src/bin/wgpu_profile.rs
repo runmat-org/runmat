@@ -379,9 +379,9 @@ async fn run_fused_elementwise_reduction_case(
         let compute_time = compute_start.elapsed();
 
         let (_out_matrix, download_time) = download_matrix(provider, &reduced_handle).await?;
-        provider.free(&handle_a)?;
-        provider.free(&sin_handle)?;
-        provider.free(&reduced_handle)?;
+        handle_a.release()?;
+        sin_handle.release()?;
+        reduced_handle.release()?;
 
         if !warmup {
             upload_stats.record(upload_time);
@@ -567,7 +567,7 @@ async fn run_fused_wgsl_case(
         )?;
         let compute_time = compute_start.elapsed();
         let (_out_matrix, download_time) = download_matrix(provider, &handle_matrix).await?;
-        provider.free(&handle_matrix)?;
+        handle_matrix.release()?;
 
         if !warmup {
             upload_stats.record(upload_time);
@@ -843,7 +843,7 @@ async fn run_reduction_sweep_case(
             compute_time.as_secs_f64() * 1000.0
         );
         let (_, download_time) = download_matrix(provider, &handle_matrix).await?; // just to measure path; not used
-        provider.free(&handle_matrix)?;
+        handle_matrix.release()?;
         info!(
             "    download done: {:.3} ms",
             download_time.as_secs_f64() * 1000.0
@@ -975,9 +975,9 @@ async fn run_minmax_case(
         let (values_matrix, download_values) = download_matrix(provider, &result.values).await?;
         let (indices_matrix, download_indices) = download_matrix(provider, &result.indices).await?;
 
-        provider.free(&handle_matrix)?;
-        provider.free(&result.values)?;
-        provider.free(&result.indices)?;
+        handle_matrix.release()?;
+        result.values.release()?;
+        result.indices.release()?;
 
         verify_matrix(&cpu_values, &values_matrix, VALUE_TOLERANCE)?;
         verify_indices(&cpu_indices, &indices_matrix)?;
@@ -1052,11 +1052,11 @@ async fn run_composite_atda_case(
 
         let (result_matrix, download_time) = download_matrix(provider, &result_handle).await?;
 
-        provider.free(&handle_a)?;
-        provider.free(&handle_d)?;
-        provider.free(&scaled_handle)?;
-        provider.free(&a_t_handle)?;
-        provider.free(&result_handle)?;
+        handle_a.release()?;
+        handle_d.release()?;
+        scaled_handle.release()?;
+        a_t_handle.release()?;
+        result_handle.release()?;
 
         verify_matrix(&cpu_report.result, &result_matrix, VALUE_TOLERANCE)?;
 
@@ -1141,10 +1141,10 @@ where
 
         let (result_matrix, download_time) = download_matrix(provider, &result_handle).await?;
 
-        for handle in &handles {
-            provider.free(handle)?;
+        for handle in handles {
+            handle.release()?;
         }
-        provider.free(&result_handle)?;
+        result_handle.release()?;
 
         verify_matrix(&cpu_result, &result_matrix, tolerance)?;
 
