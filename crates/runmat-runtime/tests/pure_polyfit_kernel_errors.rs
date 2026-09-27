@@ -169,8 +169,8 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
     }
     x.allocation_lease().validate_live().unwrap();
     y.allocation_lease().validate_live().unwrap();
-    // Existing structural and weight diagnostics retain precedence in the
-    // pure adapter; geometry only precedes numerical sample validation.
+    // Structural length checks precede geometry; numerical weight and sample
+    // values are checked only after the requested workspace is addressable.
     let mismatch = polyfit_host_real_for_provider(&[0., 1.], &[1.], usize::MAX, None)
         .err()
         .unwrap();
@@ -182,7 +182,64 @@ fn impossible_degree_rejects_before_workspace_or_provider_work() {
         polyfit_host_real_for_provider(&[0., 1.], &[1., 3.], usize::MAX, Some(&[-1., 1.]))
             .err()
             .unwrap();
-    assert_eq!(weights.to_string(), "polyfit: weights must be non-negative");
+    assert_eq!(weights.to_string(), combined.message());
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn impossible_geometry_precedes_weight_values_on_all_routes_without_resident_gather() {
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+    }));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    for weights in [[-1., 1.], [f64::NAN, 1.]] {
+        let data = [[0., 1.], [1., 3.], weights];
+        let expected: runmat_runtime::RuntimeError =
+            polyfit_host_real_for_provider(&data[0], &data[1], usize::MAX, Some(&weights))
+                .err()
+                .unwrap()
+                .into();
+        let inputs = data
+            .iter()
+            .map(|values| {
+                provider
+                    .inner
+                    .upload(&runmat_accelerate_api::HostTensorView {
+                        data: values,
+                        shape: &[2, 1],
+                    })
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        for resident in [false, true] {
+            let mut args = if resident {
+                inputs
+                    .iter()
+                    .cloned()
+                    .map(Value::GpuTensor)
+                    .collect::<Vec<_>>()
+            } else {
+                data.iter()
+                    .map(|values| Value::Tensor(Tensor::new(values.to_vec(), vec![2, 1]).unwrap()))
+                    .collect::<Vec<_>>()
+            };
+            args.insert(
+                2,
+                Value::Int(runmat_value::IntValue::U64(usize::MAX as u64)),
+            );
+            let error =
+                futures::executor::block_on(runmat_runtime::call_builtin_async("polyfit", &args))
+                    .unwrap_err();
+            assert_eq!(error.identifier(), expected.identifier());
+            assert_eq!(error.message(), expected.message());
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+        }
+        for input in &inputs {
+            input.allocation_lease().validate_live().unwrap();
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

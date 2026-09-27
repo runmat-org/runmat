@@ -461,7 +461,7 @@ pub async fn evaluate(
         );
     }
 
-    let weights = parse_weights(rest, x_data.len()).await?;
+    let weights = parse_weights(rest, x_data.len(), deg).await?;
     let mut solution = solve_polyfit(&x_data, &y_data, deg, weights.as_deref())?;
     if is_complex_input {
         solution.is_complex = true;
@@ -778,7 +778,11 @@ async fn complex_vector(
     }
 }
 
-async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f64>>> {
+async fn parse_weights(
+    rest: &[Value],
+    len: usize,
+    degree: usize,
+) -> BuiltinResult<Option<Vec<f64>>> {
     match rest.len() {
         0 => Ok(None),
         1 => {
@@ -789,6 +793,7 @@ async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f
                     "polyfit: weight vector must match the size of X",
                 ));
             }
+            SolverGeometry::new(len, degree)?;
             validate_weights(&data)?;
             Ok(Some(data))
         }
@@ -835,12 +840,14 @@ fn solve_polyfit(
                 "polyfit: weight vector must match the size of X",
             ));
         }
-        validate_weights(w)?;
     }
 
     // Structural geometry is checked before numerical payload validation,
     // matching resident preflight and the provider's real-data adapter.
     let geometry = SolverGeometry::new(x_data.len(), degree)?;
+    if let Some(w) = weights {
+        validate_weights(w)?;
+    }
     let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
     if !mean.is_finite() {
         return Err(PolyfitKernelError::input(
@@ -1188,12 +1195,14 @@ pub fn polyfit_host_real_for_provider(
                 "polyfit: weight vector must match the size of X",
             ));
         }
-        validate_weights(w)?;
     }
     // Check the complex RHS conversion as well as the downstream matrix
     // allocations before allocating any provider-fallback workspace.
     if !x.is_empty() {
         SolverGeometry::new(x.len(), degree)?;
+    }
+    if let Some(w) = weights {
+        validate_weights(w)?;
     }
     let complex_y: Vec<Complex64> = y.iter().copied().map(|v| Complex64::new(v, 0.0)).collect();
     let solution = solve_polyfit(x, &complex_y, degree, weights)?;
