@@ -507,6 +507,7 @@ struct InputMeta {
     class: InputClass,
     device: DevicePreference,
     numeric_dtype: Option<NumericDType>,
+    source: Option<GpuTensorHandle>,
 }
 
 impl InputMeta {
@@ -547,6 +548,10 @@ impl InputMeta {
             class,
             device,
             numeric_dtype,
+            source: match value {
+                Value::GpuTensor(handle) => Some(handle.clone()),
+                _ => None,
+            },
         }
     }
 }
@@ -1731,6 +1736,13 @@ fn coerce_complex_tensor_dtype(
 
 fn mean_host(value: Value, args: &ParsedArguments) -> BuiltinResult<Value> {
     let tensor = tensor::value_into_tensor_for("mean", value).map_err(mean_invalid_input)?;
+    // Native integer mean has its own widened arithmetic path above. Default
+    // and double means need a fractional carrier even for identity dimensions.
+    let tensor = if tensor.integer_storage().is_some() {
+        tensor::coerce_tensor_dtype(tensor, NumericDType::F64)
+    } else {
+        tensor
+    };
     let reduced = if let Some(weights) = args.weights.as_ref() {
         let dim = weighted_dimension(&tensor.shape, &args.axes)?;
         let dtype = weighted_computation_dtype(tensor.numeric_dtype(), &args.output);
@@ -1766,6 +1778,19 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
+    }
+    if args.weights.is_none()
+        && (runmat_accelerate_api::handle_integer_type(&handle).is_some()
+            || runmat_accelerate_api::handle_is_logical(&handle))
+    {
+        // Real floating reduction hooks do not promise fractional results for
+        // integer/logical storage. Reuse the host default-class authority; the
+        // caller's retained source restores through this exact allocation owner.
+        let owner = gpu_helpers::exact_provider_for_handle(&handle)
+            .ok_or_else(|| mean_internal_error("mean: GPU input has no owning provider"))?;
+        let gathered =
+            gpu_helpers::download_value_preserving_residency_async(owner, &handle).await?;
+        return mean_host(gathered, args);
     }
     if let Some(weights) = args.weights.as_ref() {
         let provider = gpu_helpers::exact_provider_for_handle(&handle)
@@ -1835,6 +1860,10 @@ async fn mean_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinRes
 
 #[path = "mean/provider_execution.rs"]
 mod provider_execution;
+
+#[cfg(test)]
+#[path = "mean/default_class_tests.rs"]
+mod default_class_tests;
 
 #[cfg(test)]
 #[path = "mean/owning_tests.rs"]
@@ -2207,15 +2236,15 @@ async fn apply_output_template(
             } else {
                 value
             };
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
         OutputTemplate::Double => {
             let value = coerce_value_to_dtype(value, NumericDType::F64).await?;
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
         OutputTemplate::Native => {
             let value = apply_native_template(value, meta).await?;
-            ensure_device(value, meta.device).await
+            ensure_device(value, meta).await
         }
     }
 }
@@ -2293,64 +2322,37 @@ fn coerce_host_value_to_dtype(value: Value, dtype: NumericDType) -> BuiltinResul
     }
 }
 
-async fn ensure_device(value: Value, device: DevicePreference) -> BuiltinResult<Value> {
-    match device {
+async fn ensure_device(value: Value, meta: &InputMeta) -> BuiltinResult<Value> {
+    match meta.device {
         DevicePreference::Host => match value {
             Value::GpuTensor(handle) => {
-                dispatcher::gather_if_needed_async(&Value::GpuTensor(handle))
-                    .await
-                    .map_err(|error| mean_internal_error(format!("mean: {error}")))
+                dispatcher::gather_if_needed_async(&Value::GpuTensor(handle)).await
             }
-            _ => Ok(value),
+            value => Ok(value),
         },
-        DevicePreference::Gpu => match value {
-            Value::GpuTensor(_) => Ok(value),
-            Value::Tensor(t) => upload_tensor(t),
-            Value::Num(n) => {
-                let tensor = Tensor::new(vec![n], vec![1, 1])
-                    .map_err(|e| mean_internal_error(format!("mean: {e}")))?;
-                upload_tensor(tensor)
+        DevicePreference::Gpu => {
+            let source = meta.source.as_ref().ok_or_else(|| {
+                mean_internal_error("mean: resident result has no retained input owner")
+            })?;
+            match value {
+                Value::GpuTensor(output) => {
+                    let expected = gpu_helpers::exact_provider_for_handle(source);
+                    let actual = gpu_helpers::exact_provider_for_handle(&output);
+                    if !expected
+                        .zip(actual)
+                        .is_some_and(|(expected, actual)| std::ptr::eq(expected, actual))
+                    {
+                        return Err(gpu_helpers::reject_gpu_output(
+                            output,
+                            mean_internal_error("mean: result belongs to a different provider"),
+                        ));
+                    }
+                    gpu_helpers::resident_gpu_value(output)
+                }
+                value => gpu_helpers::restore_class_preserving_value(source, value, "mean"),
             }
-            Value::LogicalArray(logical) => {
-                let tensor = tensor::logical_to_tensor(&logical).map_err(mean_invalid_input)?;
-                upload_tensor(tensor)
-            }
-            Value::ComplexTensor(tensor) => upload_complex_tensor(tensor),
-            Value::Complex(real, imag) => {
-                let tensor = ComplexTensor::new(vec![(real, imag)], canonical_scalar_shape())
-                    .map_err(mean_internal_error)?;
-                upload_complex_tensor(tensor)
-            }
-            other => Err(mean_invalid_input(format!(
-                "mean: cannot place value {other:?} on the GPU"
-            ))),
-        },
+        }
     }
-}
-
-fn upload_tensor(tensor: Tensor) -> BuiltinResult<Value> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_internal_error(
-            "mean: no acceleration provider available to honour GPU output",
-        ));
-    };
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|e| mean_internal_error(format!("mean: failed to upload GPU result: {e}")))?;
-    Ok(Value::GpuTensor(handle))
-}
-
-fn upload_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Err(mean_internal_error(
-            "mean: no acceleration provider available to honour complex GPU output",
-        ));
-    };
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
-        mean_internal_error(format!(
-            "mean: failed to upload complex GPU result: {error}"
-        ))
-    })?;
-    Ok(Value::GpuTensor(handle))
 }
 
 #[cfg(test)]
@@ -2804,6 +2806,7 @@ pub(crate) mod tests {
             class: InputClass::Integer(IntClass::U16),
             device: DevicePreference::Host,
             numeric_dtype: None,
+            source: None,
         };
 
         let result =
