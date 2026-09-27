@@ -9,7 +9,7 @@ use runmat_value::Value;
 /// The caller validates the result's class, shape and storage before capture,
 /// and supplies every borrowed operand/prototype. Container results require the
 /// separate recursive alias protocol and must not use this numeric-only guard.
-pub(crate) struct ResidentResultGuard<'a> {
+pub struct ResidentResultGuard<'a> {
     resident: Option<OwnedResident>,
     protected: &'a [&'a GpuTensorHandle],
 }
@@ -20,7 +20,7 @@ struct OwnedResident {
 }
 
 impl<'a> ResidentResultGuard<'a> {
-    pub(crate) fn new(value: &Value, protected: &'a [&'a GpuTensorHandle]) -> Result<Self, String> {
+    pub fn new(value: &Value, protected: &'a [&'a GpuTensorHandle]) -> Result<Self, String> {
         let resident = match value {
             Value::GpuTensor(handle) => {
                 let owner = gpu_helpers::exact_provider_for_handle(handle)
@@ -40,7 +40,7 @@ impl<'a> ResidentResultGuard<'a> {
 
     /// Transfer the original allocation only when the final result retains it.
     /// A different result leaves this guard responsible for the intermediate.
-    pub(crate) fn publish(mut self, output: &Value) {
+    pub fn publish(mut self, output: &Value) {
         if let (Some(intermediate), Value::GpuTensor(output)) = (&self.resident, output) {
             if gpu_helpers::same_gpu_handle(&intermediate.handle, output) {
                 self.resident = None;
