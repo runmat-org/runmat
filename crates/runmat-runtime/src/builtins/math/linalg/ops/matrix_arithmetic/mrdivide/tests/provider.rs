@@ -36,7 +36,7 @@ fn gpu_round_trip_matches_cpu() {
         hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
-        assert_eq!(gathered.numel(), cpu_tensor.numel());
+        assert_eq!(gathered.len(), cpu_tensor.len());
         for (gpu, cpu) in gathered
             .materialize_f64()
             .iter()

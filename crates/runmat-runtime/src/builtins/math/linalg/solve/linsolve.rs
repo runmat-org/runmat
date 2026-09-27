@@ -2146,7 +2146,7 @@ pub(crate) mod tests {
             assert!(weak_b.acquire().is_err());
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
-            assert_eq!(gathered.numel(), cpu_tensor.numel());
+            assert_eq!(gathered.len(), cpu_tensor.len());
             for (gpu, cpu) in gathered
                 .materialize_f64()
                 .iter()
