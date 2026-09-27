@@ -137,7 +137,7 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
             unary_calls: AtomicUsize::new(0),
         }));
         let _selected = ThreadProviderGuard::set(Some(provider));
-        for name in ["exp", "expm1"] {
+        for (name, mapped) in [("exp", false), ("expm1", false), ("exp", true)] {
             for class in [
                 NumericElementType::F32,
                 NumericElementType::F64,
@@ -167,29 +167,53 @@ fn exponential_language_class_uses_typed_capability_not_preferred_precision() {
                             GpuHandleProvenance::Automatic
                         })
                         .unwrap();
+                    let mut arguments = vec![Value::GpuTensor(input.clone())];
+                    let invoked_name = if mapped {
+                        arguments.insert(0, Value::FunctionHandle(name.into()));
+                        "arrayfun"
+                    } else {
+                        name
+                    };
                     {
                         let _strict =
                             runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
                         let before = provider.downloads.load(Ordering::Relaxed);
-                        block_on(runmat_runtime::call_builtin_async(
-                            name,
-                            &[Value::GpuTensor(input.clone())],
+                        block_on(runmat_runtime::call_builtin_async_with_outputs(
+                            invoked_name,
+                            &arguments,
+                            1,
                         ))
                         .unwrap_err();
                         assert_eq!(provider.downloads.load(Ordering::Relaxed), before);
                     }
                     let _extensions =
                         runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-                    let result = block_on(runmat_runtime::call_builtin_async(
-                        name,
-                        &[Value::GpuTensor(input.clone())],
+                    let result = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                        invoked_name,
+                        &arguments,
+                        1,
                     ));
                     if explicit && !supports_double {
                         let error = result.unwrap_err();
-                        assert_eq!(
-                            error.gpu_gather_retry,
-                            runmat_runtime::GpuGatherRetry::Never
-                        );
+                        if mapped {
+                            assert!(error.message().starts_with("arrayfun:"));
+                            let cause = error
+                                .source
+                                .as_ref()
+                                .and_then(|source| {
+                                    source.downcast_ref::<runmat_runtime::RuntimeError>()
+                                })
+                                .expect("arrayfun retains canonical callback failure");
+                            assert_eq!(
+                                cause.gpu_gather_retry,
+                                runmat_runtime::GpuGatherRetry::Never
+                            );
+                        } else {
+                            assert_eq!(
+                                error.gpu_gather_retry,
+                                runmat_runtime::GpuGatherRetry::Never
+                            );
+                        }
                         assert!(error.source.is_some());
                     } else {
                         let expected = if name == "exp" { 1.0 } else { 0.0 };
