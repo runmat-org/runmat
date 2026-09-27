@@ -658,10 +658,18 @@ async fn build_quiver_gpu_plot(
     let cols_u32 = u32::try_from(cols).map_err(|_| {
         plotting_error(BUILTIN_NAME, "quiver: column count exceeds supported range")
     })?;
-    let (min_x, max_x) = x_axis.bounds(BUILTIN_NAME).await?;
-    let (min_y, max_y) = y_axis.bounds(BUILTIN_NAME).await?;
-    let (min_u, max_u) = super::gpu_helpers::axis_bounds_async(u, BUILTIN_NAME).await?;
-    let (min_v, max_v) = super::gpu_helpers::axis_bounds_async(v, BUILTIN_NAME).await?;
+    let mut protected = vec![u, v];
+    for axis in [&x_axis, &y_axis] {
+        if let QuiverAxisSource::Gpu { handle, .. } = axis {
+            protected.push(handle);
+        }
+    }
+    let (min_x, max_x) = x_axis.bounds(BUILTIN_NAME, &protected).await?;
+    let (min_y, max_y) = y_axis.bounds(BUILTIN_NAME, &protected).await?;
+    let (min_u, max_u) =
+        super::gpu_helpers::axis_bounds_protecting(u, &protected, BUILTIN_NAME).await?;
+    let (min_v, max_v) =
+        super::gpu_helpers::axis_bounds_protecting(v, &protected, BUILTIN_NAME).await?;
     let bounds = runmat_plot::core::BoundingBox::new(
         glam::Vec3::new(
             min_x + min_u.min(0.0) * parsed.scale,
@@ -788,11 +796,17 @@ impl QuiverAxisSource {
         }
     }
 
-    async fn bounds(&self, name: &'static str) -> crate::BuiltinResult<(f32, f32)> {
+    async fn bounds(
+        &self,
+        name: &'static str,
+        protected: &[&runmat_accelerate_api::GpuTensorHandle],
+    ) -> crate::BuiltinResult<(f32, f32)> {
         match self {
             Self::HostF32(values) => Ok(host_bounds(values.iter().map(|value| f64::from(*value)))),
             Self::HostF64(values) => Ok(host_bounds(values.iter().copied())),
-            Self::Gpu { handle, .. } => super::gpu_helpers::axis_bounds_async(handle, name).await,
+            Self::Gpu { handle, .. } => {
+                super::gpu_helpers::axis_bounds_protecting(handle, protected, name).await
+            }
         }
     }
 }
@@ -1171,7 +1185,7 @@ mod tests {
             _ => panic!("expected f32 axis data for f32 shader"),
         }
         assert_eq!(
-            futures::executor::block_on(f32_axis.bounds(BUILTIN_NAME)).unwrap(),
+            futures::executor::block_on(f32_axis.bounds(BUILTIN_NAME, &[])).unwrap(),
             (1.0, 2.5)
         );
 
@@ -1186,7 +1200,7 @@ mod tests {
             _ => panic!("expected f64 axis data for f64 shader"),
         }
         assert_eq!(
-            futures::executor::block_on(f64_axis.bounds(BUILTIN_NAME)).unwrap(),
+            futures::executor::block_on(f64_axis.bounds(BUILTIN_NAME, &[])).unwrap(),
             (1.0, 2.5)
         );
     }
