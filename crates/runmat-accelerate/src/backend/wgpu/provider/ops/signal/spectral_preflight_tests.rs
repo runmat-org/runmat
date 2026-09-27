@@ -180,7 +180,16 @@ fn spectral_invalid_request_and_foreign_owner_have_zero_upload_or_dispatch() {
         input_rows: 8,
         frames_per_column: 2,
     };
-    for request in [malformed, overflow, cross_column, request(&foreign.handle)] {
+    let mut folded_cross_column = request(&input);
+    folded_cross_column.frame_count = 2;
+    folded_cross_column.frame_mode = ProviderSpectralFrameMode::FoldedColumns { input_rows: 2 };
+    for request in [
+        malformed,
+        overflow,
+        cross_column,
+        folded_cross_column,
+        request(&foreign.handle),
+    ] {
         let before = provider.telemetry_snapshot();
         let bytes = provider.allocations.retained_bytes();
         let mut receipt = ProviderOperationReceipt::new();

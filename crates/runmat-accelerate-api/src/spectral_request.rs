@@ -74,7 +74,8 @@ pub fn validate_uniform_spectral_request(
                 .and_then(|offset| offset.checked_add(request.window.len()))
         }
         ProviderSpectralFrameMode::FoldedColumns { input_rows } => {
-            if input_rows == 0 {
+            // Folding changes the DFT length, not the source column boundary.
+            if input_rows == 0 || request.window.len() > input_rows {
                 return Err(invalid());
             }
             input_rows.checked_mul(request.frame_count)

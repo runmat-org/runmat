@@ -72,6 +72,26 @@ fn column_frames_cannot_read_across_column_boundary() {
 }
 
 #[test]
+fn folded_windows_cannot_read_samples_from_the_next_column() {
+    let owner = TestAllocationOwner::new();
+    let input = owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let mut request = request(&input.handle);
+    request.input_len = 4;
+    request.nfft = 2;
+    request.frame_count = 2;
+    request.window = &[1.; 3];
+    request.frame_mode = ProviderSpectralFrameMode::FoldedColumns { input_rows: 2 };
+    assert!(validate_uniform_spectral_request(&request).is_err());
+    request.window = &[1.; 2];
+    assert!(validate_uniform_spectral_request(&request).is_ok());
+    // A shorter transform folds within each column, and remains supported.
+    request.nfft = 1;
+    assert!(validate_uniform_spectral_request(&request).is_ok());
+}
+
+#[test]
 fn request_metadata_must_match_actual_typed_view() {
     let owner = TestAllocationOwner::new();
     for storage in [GpuTensorStorage::Real, GpuTensorStorage::ComplexInterleaved] {
