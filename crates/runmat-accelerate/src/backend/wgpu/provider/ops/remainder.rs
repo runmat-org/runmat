@@ -13,6 +13,19 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         for handle in [a, b] {
             let entry = self.get_entry(handle)?;
+            let physical = match self.precision {
+                runmat_accelerate_api::ProviderPrecision::F32 => {
+                    runmat_accelerate_api::NumericElementType::F32
+                }
+                runmat_accelerate_api::ProviderPrecision::F64 => {
+                    runmat_accelerate_api::NumericElementType::F64
+                }
+            };
+            if entry.element_type != physical {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "floating remainder requires the provider's native physical precision",
+                ));
+            }
             ensure!(
                 entry.integer_type().is_none() && !runmat_accelerate_api::handle_is_logical(handle),
                 "floating remainder requires floating operands"

@@ -10,6 +10,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Definition and signs",
         paragraphs: &[
+            "The quotient formula describes the mathematical result, not the floating-point implementation. RunMat reduces represented operands without forming a large rounded quotient, so cases such as `mod(1e17, 11)` retain the exact remainder 10.",
+            "Floating roundoff near integer multiples is compensated using a bounded normalized equality check: the nearest integer quotient must reproduce the normalized dividend exactly when multiplied by the aligned divisor. This makes `mod(3 * 0.7, 0.7)` zero. Two whole-number floating operands bypass this correction. The public MATLAB documentation describes roundoff compensation; this specific rule is RunMat's independently implemented policy.",
             "`mod(A, B)` computes `A - B .* floor(A ./ B)` element by element. The result is zero or has the divisor's sign. This differs from `rem` whenever a nonzero result combines operands with different signs.",
             "A zero divisor returns the corresponding dividend: `mod(A, 0)` is `A`. A finite dividend and infinite divisor follow the floor-based definition; `NaN` inputs and an infinite dividend with a finite divisor produce `NaN`.",
         ],
@@ -32,6 +34,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "large-quotient-and-roundoff",
+        title: "Preserve large remainders and compensate a near multiple",
+        program: "large = mod(1e17, 11);\nnear = mod(3 * 0.7, 0.7);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(large == 10); assert(near == 0);",
+        },
+    },
     BuiltinExample {
         id: "single-pages",
         title: "Preserve single precision across pages",
@@ -177,6 +192,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
 ];
 
 const LINKS: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink { label: "Public floating roundoff semantics", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/double.mod.html") },
     BuiltinDocumentationLink { label: "rem", target: BuiltinDocumentationLinkTarget::Builtin("rem") },
     BuiltinDocumentationLink { label: "floor", target: BuiltinDocumentationLinkTarget::Builtin("floor") },
     BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },

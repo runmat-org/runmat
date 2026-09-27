@@ -18,6 +18,8 @@ pub(crate) fn wgpu_cost_estimate(
 ) -> ProviderCostEstimate {
     let fusion_work =
         super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
+    let remainder_work: Option<super::provider_contract::remainder::RemainderWork> =
+        super::provider_contract::remainder::wgpu_work(provider.precision(), &query.operation);
     let digit_work = {
         #[cfg(feature = "wgpu")]
         {
@@ -129,6 +131,7 @@ pub(crate) fn wgpu_cost_estimate(
         || fusion_work.is_some()
         || coordinate_work.is_some()
         || digit_work.is_some()
+        || remainder_work.is_some()
     {
         None
     } else {
@@ -172,12 +175,41 @@ pub(crate) fn wgpu_cost_estimate(
             .as_ref()
             .map_or(0, |work| work.extra_upload_bytes),
     );
+    let execution_ns = remainder_work.as_ref().map_or(execution_ns, |work| {
+        if work.dispatches == 0 {
+            0
+        } else {
+            work.execution_units.saturating_mul(2).max(5_000)
+        }
+    });
+    let allocations = remainder_work
+        .as_ref()
+        .map_or(allocations, |work| work.allocations);
+    let queue_submissions = remainder_work
+        .as_ref()
+        .map_or(queue_submissions, |work| work.queue_submissions);
+    let scratch_bytes = remainder_work
+        .as_ref()
+        .map_or(scratch_bytes, |work| work.scratch_bytes);
+    let upload_bytes = upload_bytes.saturating_add(
+        remainder_work
+            .as_ref()
+            .map_or(0, |work| work.extra_upload_bytes),
+    );
     let compile_or_prepare_ns = match query.preparation {
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
         CandidatePreparationState::Preparing => 50_000,
     };
     let compile_or_prepare_ns = if digit_work.as_ref().is_some_and(|work| work.dispatches == 0) {
+        0
+    } else {
+        compile_or_prepare_ns
+    };
+    let compile_or_prepare_ns = if remainder_work
+        .as_ref()
+        .is_some_and(|work| work.dispatches == 0)
+    {
         0
     } else {
         compile_or_prepare_ns

@@ -10,6 +10,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Definition and signs",
         paragraphs: &[
+            "The quotient formula describes the mathematical result, not the floating-point implementation. RunMat reduces represented operands without forming a large rounded quotient, so cases such as `rem(1e17, 11)` retain the exact remainder 10.",
+            "Floating roundoff near integer multiples is compensated using a bounded normalized equality check: the nearest integer quotient must reproduce the normalized dividend exactly when multiplied by the aligned divisor. This makes `rem(3 * 0.7, 0.7)` zero. Two whole-number floating operands bypass this correction. The public MATLAB documentation describes roundoff compensation; this specific rule is RunMat's independently implemented policy.",
             "`rem(A, B)` computes `A - B .* fix(A ./ B)` element by element. The result is zero or has the dividend's sign. This differs from `mod` whenever a nonzero result combines operands with different signs.",
             "For floating operands, a zero divisor produces `NaN`. A finite dividend and infinite divisor return the dividend; an infinite dividend with a finite divisor and `NaN` inputs produce `NaN`. Fixed-width integer storage cannot represent `NaN`, so an integer zero-divisor element returns integer zero.",
         ],
@@ -32,6 +34,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "large-quotient-and-roundoff",
+        title: "Preserve large remainders and compensate a near multiple",
+        program: "large = rem(1e17, 11);\nnear = rem(3 * 0.7, 0.7);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(large == 10); assert(near == 0);",
+        },
+    },
     BuiltinExample {
         id: "single-pages",
         title: "Preserve single precision across pages",
@@ -190,6 +205,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
 ];
 
 const LINKS: &[BuiltinDocumentationLink] = &[
+    BuiltinDocumentationLink { label: "Public floating roundoff semantics", target: BuiltinDocumentationLinkTarget::External("https://www.mathworks.com/help/matlab/ref/double.rem.html") },
     BuiltinDocumentationLink { label: "mod", target: BuiltinDocumentationLinkTarget::Builtin("mod") },
     BuiltinDocumentationLink { label: "fix", target: BuiltinDocumentationLinkTarget::Builtin("fix") },
     BuiltinDocumentationLink { label: "gpuArray", target: BuiltinDocumentationLinkTarget::Builtin("gpuArray") },

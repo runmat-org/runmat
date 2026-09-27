@@ -4,6 +4,17 @@ use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 
 mod format;
 
+/// Static work bound for one represented pair, including normalization,
+/// whole-number checks, compensation, reduction/alignment, and packing.
+/// The reduction and opposite-sign alignment paths are mutually exclusive.
+pub(crate) fn scalar_work_units(precision: ProviderPrecision) -> u64 {
+    let (fraction_bits, max_gap) = match precision {
+        ProviderPrecision::F32 => (23_u64, 276_u64),
+        ProviderPrecision::F64 => (52_u64, 2097_u64),
+    };
+    64 + (max_gap + 7 * fraction_bits) * 8
+}
+
 pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
     FusionMathHelper::FloatingRemainder
         .entrypoint(match precision {
