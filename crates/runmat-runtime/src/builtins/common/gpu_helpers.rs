@@ -420,10 +420,11 @@ pub async fn download_value_preserving_residency_async(
             .build()
     })?;
     let host = provider.download_numeric(handle).await.map_err(|error| {
-        build_runtime_error(format!("gpu download: {error}"))
+        let fallback = build_runtime_error(format!("gpu download: {error}"))
             .with_identifier("RunMat:gpu:DownloadFailed")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build()
+            .build();
+        crate::runtime_error::with_provider_execution_source(fallback, error.into())
     })?;
     if host.shape != handle.shape()
         || Some(host.storage) != handle.descriptor().storage
@@ -558,10 +559,11 @@ pub async fn download_floating_projection_async(
             .build()
     })?;
     let host = provider.download_numeric(handle).await.map_err(|error| {
-        build_runtime_error(format!("floating projection: {error}"))
+        let fallback = build_runtime_error(format!("floating projection: {error}"))
             .with_identifier("RunMat:gpu:DownloadFailed")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build()
+            .build();
+        crate::runtime_error::with_provider_execution_source(fallback, error.into())
     })?;
     host.validate().map_err(|error| {
         build_runtime_error(format!("floating projection: {error}"))

@@ -22,7 +22,7 @@ struct Provider {
     nested: bool,
 }
 impl Provider {
-    fn fail(&self) -> anyhow::Result<GpuTensorHandle> {
+    fn fail<T>(&self) -> anyhow::Result<T> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let cause = if self.nested {
             anyhow::Error::new(
@@ -62,6 +62,9 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("failure may not gather")
     }
+    fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move { self.fail() })
+    }
     dimension_hook!(reduce_sum_dim);
     dimension_hook!(reduce_mean_dim);
     dimension_hook!(reduce_integer_mean_native_dim);
@@ -92,6 +95,52 @@ impl AccelProvider for Provider {
         _: ProviderTrapezoidSpacing<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
         self.fail()
+    }
+}
+
+#[test]
+fn native_download_boundaries_preserve_typed_failures_and_borrowed_inputs() {
+    use runmat_runtime::builtins::common::gpu_helpers::{
+        download_floating_projection_async, download_value_preserving_residency_async,
+    };
+    for nested in [false, true] {
+        let provider = Provider {
+            owner: TestAllocationOwner::new(),
+            calls: AtomicUsize::new(0),
+            nested,
+        };
+        let input = provider
+            .owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let original = input.handle.wire_descriptor();
+        let errors = [
+            block_on(download_value_preserving_residency_async(
+                &provider,
+                &input.handle,
+            ))
+            .unwrap_err(),
+            block_on(download_floating_projection_async(&provider, &input.handle)).unwrap_err(),
+        ];
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        for error in errors {
+            assert_eq!(error.gpu_gather_retry(), GpuGatherRetry::Never);
+            let mut cursor: &(dyn std::error::Error + 'static) = &error;
+            while !cursor.is::<DeviceFailure>() {
+                cursor = cursor.source().expect("typed download cause preserved");
+            }
+            if nested {
+                assert_eq!(error.identifier(), Some("RunMat:test:ProviderContract"));
+                assert_eq!(error.context.builtin.as_deref(), Some("provider-origin"));
+                assert_eq!(error.message(), "authoritative provider contract");
+            } else {
+                assert_eq!(error.identifier(), Some("RunMat:gpu:DownloadFailed"));
+            }
+            assert_eq!(input.handle.wire_descriptor(), original);
+            assert_eq!(input.probe.retirements(), 0);
+        }
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
     }
 }
 
