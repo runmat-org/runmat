@@ -27,6 +27,15 @@ impl StructureKernelError {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    fn language_error(&self) -> crate::RuntimeError {
+        let mut builder =
+            crate::build_runtime_error(self.message.clone()).with_builtin(self.builtin);
+        if let Some(identifier) = self.descriptor.identifier {
+            builder = builder.with_identifier(identifier);
+        }
+        builder.build()
+    }
 }
 
 impl std::fmt::Display for StructureKernelError {
@@ -38,13 +47,28 @@ impl std::error::Error for StructureKernelError {}
 
 impl From<StructureKernelError> for crate::RuntimeError {
     fn from(error: StructureKernelError) -> Self {
-        let mut builder =
-            crate::build_runtime_error(error.message.clone()).with_builtin(error.builtin);
-        if let Some(identifier) = error.descriptor.identifier {
-            builder = builder.with_identifier(identifier);
-        }
-        builder.with_source(error).build()
+        let mut result = error.language_error();
+        result.source = Some(Box::new(error));
+        result
     }
 }
 
 pub type StructureKernelResult<T> = Result<T, StructureKernelError>;
+
+/// Recover this domain's language diagnostic after a provider round trip,
+/// retaining the entire owning provider cause, not only the discovered leaf.
+pub(super) fn with_provider_source(
+    mut fallback: crate::RuntimeError,
+    source: runmat_accelerate_api::ProviderExecutionError,
+) -> crate::RuntimeError {
+    let mut cursor: &(dyn std::error::Error + 'static) = &source;
+    loop {
+        if let Some(kernel) = cursor.downcast_ref::<StructureKernelError>() {
+            fallback = kernel.language_error();
+            break;
+        }
+        let Some(next) = cursor.source() else { break };
+        cursor = next;
+    }
+    crate::runtime_error::with_provider_execution_source(fallback, source)
+}

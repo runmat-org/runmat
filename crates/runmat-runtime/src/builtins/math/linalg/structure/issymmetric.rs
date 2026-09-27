@@ -315,7 +315,7 @@ async fn issymmetric_gpu(
                 log::debug!("issymmetric: provider hook unavailable, falling back to host: {err}");
             }
             Err(err) => {
-                return Err(crate::runtime_error::with_provider_execution_source(
+                return Err(super::kernel_error::with_provider_source(
                     issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))

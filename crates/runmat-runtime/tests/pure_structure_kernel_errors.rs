@@ -7,6 +7,49 @@ use runmat_runtime::builtins::math::linalg::structure::{
 };
 use std::error::Error;
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn rectangular_symrcm_public_host_and_provider_errors_match_without_retry() {
+    let provider = Box::leak(Box::new(
+        runmat_accelerate::simple_provider::InProcessProvider::new(),
+    ));
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let tensor = runmat_value::Tensor::new(vec![1.; 6], vec![2, 3]).unwrap();
+    let host = futures::executor::block_on(runmat_runtime::call_builtin_async(
+        "symrcm",
+        &[runmat_value::Value::Tensor(tensor)],
+    ))
+    .unwrap_err();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.; 6]),
+            shape: &[2, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let resident = futures::executor::block_on(runmat_runtime::call_builtin_async(
+        "symrcm",
+        &[runmat_value::Value::GpuTensor(input.clone())],
+    ))
+    .unwrap_err();
+    assert_eq!(host.identifier(), Some("RunMat:symrcm:InvalidInput"));
+    assert_eq!(resident.identifier(), host.identifier());
+    assert_eq!(resident.message(), host.message());
+    assert_eq!(resident.context.builtin, host.context.builtin);
+    assert_eq!(
+        resident.gpu_gather_retry,
+        runmat_runtime::GpuGatherRetry::Never
+    );
+    let mut cursor: &(dyn Error + 'static) = &resident;
+    let mut found_provider = false;
+    while !cursor.is::<StructureKernelError>() {
+        found_provider |= cursor.is::<runmat_accelerate_api::ProviderExecutionError>();
+        cursor = cursor.source().expect("exact kernel cause retained");
+    }
+    assert!(found_provider);
+    input.allocation_lease().validate_live().unwrap();
+}
+
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 

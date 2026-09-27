@@ -319,7 +319,7 @@ async fn ishermitian_gpu(
                 log::debug!("ishermitian: provider hook unavailable, falling back to host: {err}");
             }
             Err(err) => {
-                return Err(crate::runtime_error::with_provider_execution_source(
+                return Err(super::kernel_error::with_provider_source(
                     ishermitian_error_with_detail(&ISHERMITIAN_ERROR_INTERNAL, err.to_string()),
                     runmat_accelerate_api::ProviderExecutionError::from(err),
                 ))
