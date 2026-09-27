@@ -31,7 +31,12 @@ pub(in super::super) fn try_direct(
             };
             binary::validate_resident_output(provider, significand, exponent, output, &contract)
                 .map(Some)
-                .map_err(errors::internal)
+                .map_err(|source| {
+                    let mut error = errors::internal(source.message());
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error.source = Some(Box::new(source));
+                    error
+                })
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(errors::internal(format!(

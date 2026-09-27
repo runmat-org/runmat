@@ -196,7 +196,13 @@ async fn atan2_gpu_pair(
                     alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
                 };
                 return common_binary::validate_resident_output(owner, &y, &x, output, &contract)
-                    .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, error));
+                    .map_err(|source| {
+                        let mut error =
+                            atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, source.message());
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        error.source = Some(Box::new(source));
+                        error
+                    });
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {

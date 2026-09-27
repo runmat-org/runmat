@@ -222,7 +222,12 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                 return common_binary::validate_resident_output(
                     provider, &a, &b, output, &contract,
                 )
-                .map_err(|error| rem_error_with_detail(&REM_ERROR_INTERNAL, error));
+                .map_err(|source| {
+                    let mut error = rem_error_with_detail(&REM_ERROR_INTERNAL, source.message());
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error.source = Some(Box::new(source));
+                    error
+                });
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {

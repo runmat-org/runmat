@@ -110,9 +110,8 @@ fn finish_binary_output(
     shape: Vec<usize>,
 ) -> BuiltinResult<Value> {
     let contract = output_contract(shape, provider);
-    binary::validate_resident_output(provider, lhs, rhs, output, &contract).map_err(|_| {
-        super::errors::internal("mtimes: provider returned invalid matrix-product output metadata")
-    })
+    binary::validate_resident_output(provider, lhs, rhs, output, &contract)
+        .map_err(super::errors::map_control_flow)
 }
 
 fn output_contract(

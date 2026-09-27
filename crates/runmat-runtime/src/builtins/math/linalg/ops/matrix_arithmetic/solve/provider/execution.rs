@@ -42,13 +42,16 @@ pub(super) async fn invoke(
     };
     binary::validate_resident_output(provider, lhs, rhs, output, &contract)
         .map(Some)
-        .map_err(|_| {
-            errors::internal(
+        .map_err(|source| {
+            let mut error = errors::internal(
                 orientation,
                 format!(
                     "{}: provider returned invalid solve output metadata",
                     orientation.name()
                 ),
-            )
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(Box::new(source));
+            error
         })
 }

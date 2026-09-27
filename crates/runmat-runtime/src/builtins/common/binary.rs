@@ -1,13 +1,17 @@
 use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
 use runmat_value::Value;
 
+#[cfg(test)]
+#[path = "binary/owning_tests.rs"]
+mod owning_tests;
+
 pub(crate) enum BinaryInputPlan<T> {
     Values(Box<(Value, Value)>),
     Structured(T),
 }
 
 pub(crate) fn matching_physical_inputs(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.shape == right.shape
+    left.shape() == right.shape()
         && runmat_accelerate_api::handle_storage(left)
             == runmat_accelerate_api::handle_storage(right)
         && runmat_accelerate_api::handle_precision(left)
@@ -24,12 +28,13 @@ pub(crate) fn validate_resident_output(
     right: &GpuTensorHandle,
     output: GpuTensorHandle,
     contract: &super::gpu_helpers::BinaryGpuOutputContract,
-) -> Result<Value, String> {
+) -> crate::BuiltinResult<Value> {
     if !super::gpu_helpers::binary_gpu_output_matches(&output, left, right, provider, contract) {
-        super::gpu_helpers::free_rejected_provider_output(&output, &[left, right], provider);
-        return Err("provider returned a malformed binary output".to_string());
+        let mut error = crate::RuntimeError::new("provider returned a malformed binary output");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(super::gpu_helpers::reject_gpu_output(output, error));
     }
     let mut output = output;
-    super::gpu_helpers::propagate_output_provenance(&mut output, [left, right]);
-    Ok(super::gpu_helpers::resident_gpu_value(output))
+    super::gpu_helpers::propagate_output_provenance(&mut output, [left, right])?;
+    super::gpu_helpers::resident_gpu_value(output)
 }
