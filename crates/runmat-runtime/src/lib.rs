@@ -408,6 +408,8 @@ pub async fn call_feval_async_with_outputs(
     args: &[Value],
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
+    runmat_value::validate_output_count(requested_outputs)
+        .map_err(crate::sequence::sequence_error_to_runtime)?;
     let _guard = crate::output_count::push_output_count(Some(requested_outputs));
     feval_builtin(func_value, args.to_vec()).await
 }

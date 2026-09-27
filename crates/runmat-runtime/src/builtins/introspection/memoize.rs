@@ -630,6 +630,20 @@ async fn call_memoized(handle: &HandleRef, payload: Value) -> BuiltinResult<Valu
     }
 
     let output = crate::call_feval_async_with_outputs(function, &args, requested_outputs).await?;
+    // Validate the requested prefix before publishing a cache entry. The
+    // callable has already run exactly once; an output shortage is not cached.
+    use crate::sequence::ResolveValueSequence;
+    let mut outputs = crate::call::arguments::adapt_legacy_builtin_result(output)?.resolve(
+        runmat_types::SequenceUse::SelectPrefix {
+            count: requested_outputs,
+        },
+        crate::sequence::SequenceResolutionContext::default(),
+    )?;
+    let output = if requested_outputs == 1 {
+        outputs.remove(0)
+    } else {
+        Value::OutputList(outputs)
+    };
     if enabled {
         store_cache_miss(handle, args, requested_outputs, output.clone(), cache_size)?;
     }
@@ -1654,6 +1668,7 @@ mod tests {
             counting_invoker(Arc::clone(&counter)),
         ));
         let f = memoized();
+        let _caller = crate::output_count::push_output_count(Some(7));
 
         for _ in 0..2 {
             for (count, expected) in [
@@ -1668,8 +1683,59 @@ mod tests {
                 ))
                 .expect("requested outputs");
                 assert_eq!(output, expected, "requested {count} outputs");
+                assert_eq!(crate::output_count::current_output_count(), Some(7));
             }
             assert_eq!(*counter.lock().unwrap(), 3);
+        }
+    }
+
+    #[test]
+    fn feval_invalid_count_has_no_effect_and_shortage_is_not_cached_or_replayed() {
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
+        let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
+        reset_memoize_registry_for_test();
+        let counter = Arc::new(Mutex::new(0usize));
+        let _guard = crate::user_functions::install_semantic_function_invoker(Some(
+            counting_invoker(Arc::clone(&counter)),
+        ));
+        let f = memoized();
+        let _caller = crate::output_count::push_output_count(Some(7));
+        let invalid = block_on(crate::call_feval_async_with_outputs(
+            f.clone(),
+            &[Value::Num(2.0)],
+            runmat_value::MAX_VALUE_SEQUENCE_OUTPUTS + 1,
+        ))
+        .unwrap_err();
+        assert_eq!(invalid.identifier(), Some("RunMat:OutputSequenceLimitExceeded"));
+        assert_eq!(*counter.lock().unwrap(), 0);
+        assert_eq!(crate::output_count::current_output_count(), Some(7));
+        for expected_calls in 1..=2 {
+            let error = block_on(crate::call_feval_async_with_outputs(
+                f.clone(),
+                &[Value::Num(2.0)],
+                3,
+            ))
+            .unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:CommaSeparatedListOutputShortage")
+            );
+            assert_eq!(*counter.lock().unwrap(), expected_calls);
+            assert_eq!(crate::output_count::current_output_count(), Some(7));
+            let Value::HandleObject(handle) = &f else {
+                panic!("memoized handle")
+            };
+            let cached = runmat_gc::gc_with_value(&handle.target, |target| {
+                let Value::Object(object) = target else {
+                    panic!("memoized target")
+                };
+                object_cache(object).unwrap().len()
+            })
+            .unwrap();
+            assert_eq!(
+                cached, 0,
+                "failed output selection must not publish a cache entry"
+            );
         }
     }
 
