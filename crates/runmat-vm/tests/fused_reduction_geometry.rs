@@ -407,7 +407,12 @@ fn interpreter_keeps_empty_nd_broadcast_and_dimension_error_semantics() {
                 "required reduction candidate: {source}"
             );
             let result = test_helpers::interpret(&bytecode).unwrap();
-            let value = result.last().expect("last assignment");
+            let output_slot = bytecode
+                .var_names
+                .iter()
+                .find_map(|(slot, name)| (name == "y").then_some(*slot))
+                .expect("named output binding");
+            let value = result.get(output_slot).expect("published y output");
             match value {
                 Value::Num(number) => {
                     assert_eq!(expected_shape, [1, 1]);
@@ -420,10 +425,16 @@ fn interpreter_keeps_empty_nd_broadcast_and_dimension_error_semantics() {
                 _ => panic!("numeric interpreter result: {value:?}"),
             }
         }
-        let result = test_helpers::execute_source("A=zeros(0,3); y=mean(A,'all');").unwrap();
+        let bytecode = test_helpers::compile_source("A=zeros(0,3); y=mean(A,'all');").unwrap();
+        let output_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "y").then_some(*slot))
+            .expect("named output binding");
+        let result = test_helpers::interpret(&bytecode).unwrap();
         assert!(
-            matches!(result.last(), Some(Value::Num(number)) if number.is_nan())
-                || matches!(result.last(), Some(Value::Tensor(tensor)) if tensor.len() == 1 && tensor.materialize_f64()[0].is_nan())
+            matches!(result.get(output_slot), Some(Value::Num(number)) if number.is_nan())
+                || matches!(result.get(output_slot), Some(Value::Tensor(tensor)) if tensor.len() == 1 && tensor.materialize_f64()[0].is_nan())
         );
         assert!(test_helpers::execute_source("A=ones(2,3); y=sum(A,1.5);").is_err());
     });
