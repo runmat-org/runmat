@@ -1,4 +1,5 @@
 use super::super::error::arrayfun_flow;
+use super::super::input::normalized_shape;
 use crate::builtins::common::broadcast::broadcast_shapes;
 use crate::builtins::math::elementwise::integer_arithmetic::validate_integer_binary_inputs;
 use crate::BuiltinResult;
@@ -17,7 +18,11 @@ fn operand_shape(value: &Value) -> Option<&[usize]> {
 }
 
 pub(super) fn shape(inputs: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {
-    let Some(shapes) = inputs.iter().map(operand_shape).collect::<Option<Vec<_>>>() else {
+    let Some(shapes) = inputs
+        .iter()
+        .map(|value| operand_shape(value).map(normalized_shape))
+        .collect::<Option<Vec<_>>>()
+    else {
         return Ok(None);
     };
     let Some((first, rest)) = shapes.split_first() else {

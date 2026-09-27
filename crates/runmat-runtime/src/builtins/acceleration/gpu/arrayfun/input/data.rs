@@ -77,7 +77,9 @@ impl ArrayData {
     }
 }
 
-fn normalized_shape(shape: &[usize]) -> Vec<usize> {
+pub(in crate::builtins::acceleration::gpu::arrayfun) fn normalized_shape(
+    shape: &[usize],
+) -> Vec<usize> {
     if shape.is_empty() {
         vec![1, 1]
     } else {

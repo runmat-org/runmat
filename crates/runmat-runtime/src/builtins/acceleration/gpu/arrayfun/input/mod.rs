@@ -5,7 +5,7 @@ use crate::builtins::common::broadcast;
 use crate::BuiltinResult;
 use runmat_value::Value;
 
-pub(super) use data::ArrayData;
+pub(super) use data::{normalized_shape, ArrayData};
 
 pub(super) struct ArrayInput {
     pub(super) data: ArrayData,

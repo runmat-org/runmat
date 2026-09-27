@@ -301,3 +301,28 @@ fn empty_mapping_does_not_select_or_execute_the_callback() {
         source.allocation_lease().validate_live().unwrap();
     });
 }
+
+#[test]
+fn rank_zero_owned_singleton_maps_to_the_same_uniform_shape_as_host() {
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(provider()));
+        let source = upload(&Value::Tensor(Tensor::new(vec![0.25], vec![1, 1]).unwrap()));
+        let scalar_view = source
+            .with_view(source.view().clone().with_shape(vec![]))
+            .unwrap();
+        assert_eq!(scalar_view.shape(), &[] as &[usize]);
+        assert!(scalar_view.shares_allocation_with(&source));
+        let expected = mapped(
+            "sin",
+            vec![Value::Tensor(Tensor::new(vec![0.25], vec![1, 1]).unwrap())],
+        )
+        .unwrap();
+        let actual = mapped("sin", vec![Value::GpuTensor(scalar_view)]).unwrap();
+        same_result(
+            actual,
+            expected,
+            "rank-zero singleton is not an empty mapping",
+        );
+        source.allocation_lease().validate_live().unwrap();
+    });
+}
