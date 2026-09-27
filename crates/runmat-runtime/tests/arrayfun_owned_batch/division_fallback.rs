@@ -1,9 +1,10 @@
 use super::*;
 use runmat_accelerate_api::{
+    allocation::WeakGpuTensorHandle,
     test_support::{RetirementProbe, TestAllocationOwner},
     AccelDownloadFuture, AccelNumericDownloadFuture, GpuHandleProvenance, GpuTensorStorage,
     HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView,
-    HostTensorView, WeakGpuTensorHandle,
+    HostTensorView,
 };
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
