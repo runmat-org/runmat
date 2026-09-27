@@ -129,3 +129,68 @@ fn both_identities_diagnose_invalid_arity_and_non_numeric_signals() {
         assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
     }
 }
+
+#[test]
+fn rejected_literal_grids_never_infer_a_success_cardinality() {
+    for (entry, spectrum, controls) in [
+        (
+            &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+            Spectrum::Periodogram,
+            vec![LiteralValue::Empty, LiteralValue::Number(0.0)],
+        ),
+        (
+            &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+            Spectrum::Periodogram,
+            vec![LiteralValue::Empty, LiteralValue::Vector(vec![])],
+        ),
+        (
+            &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+            Spectrum::Spectrogram,
+            vec![
+                LiteralValue::Empty,
+                LiteralValue::Empty,
+                LiteralValue::Number(0.0),
+            ],
+        ),
+        (
+            &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+            Spectrum::Spectrogram,
+            vec![
+                LiteralValue::Empty,
+                LiteralValue::Empty,
+                LiteralValue::Vector(vec![LiteralValue::Number(1.0)]),
+            ],
+        ),
+    ] {
+        let request = request([8, 1], controls);
+        let result = infer(&request, entry, spectrum);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![None, Some(1)])
+        );
+    }
+    let too_large = request(
+        [8, 1],
+        vec![
+            LiteralValue::Empty,
+            LiteralValue::Number(((1 << 22) + 1) as f64),
+        ],
+    );
+    let result = infer(
+        &too_large,
+        &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+        Spectrum::Periodogram,
+    );
+    assert!(result
+        .diagnostics
+        .iter()
+        .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
+    assert_eq!(
+        result.outputs[0].shape,
+        ShapeFact::from(vec![None, Some(1)])
+    );
+}

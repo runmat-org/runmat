@@ -1,6 +1,48 @@
 //! Conditional successful-result geometry, not a second argument validator.
 use super::Spectrum;
+use crate::catalog::inference::argument_error;
 use runmat_types::*;
+
+const MAX_NFFT: usize = 1 << 22;
+
+/// Diagnose only a source-known grid in its proven positional slot. Dynamic
+/// earlier controls may shift the slot, so they remain runtime-owned.
+pub(super) fn invalid_grid(
+    request: &CallRequest,
+    spectrum: Spectrum,
+) -> Option<InferenceDiagnostic> {
+    let args = request
+        .literals
+        .literal_args
+        .get(1..request.arguments.len())?;
+    let mut index = 0;
+    positional(args, &mut index)?;
+    if matches!(spectrum, Spectrum::Spectrogram) {
+        positional(args, &mut index)?;
+    }
+    let argument = index + 1;
+    let grid = positional(args, &mut index)??;
+    let invalid = match grid {
+        LiteralValue::Empty => false,
+        LiteralValue::Vector(v) => {
+            v.len()
+                < if matches!(spectrum, Spectrum::Periodogram) {
+                    1
+                } else {
+                    2
+                }
+                || v.len() > MAX_NFFT
+        }
+        v => integer(v).is_some_and(|n| n == 0 || n > MAX_NFFT),
+    };
+    invalid.then(|| {
+        argument_error(
+            "RM-CATALOG-SPECTRAL-GRID",
+            "frequency grid must have an admitted nonzero length",
+            argument,
+        )
+    })
+}
 
 pub(super) fn output_shape(request: &CallRequest, spectrum: Spectrum, slot: usize) -> ShapeFact {
     let dims = request.arguments.first().and_then(|v| v.shape.known_dims());
@@ -96,9 +138,15 @@ fn known_geometry(
     let grid = positional(args, &mut index)?;
     let (nfft, explicit) = match grid {
         None | Some(LiteralValue::Empty) => (window.checked_next_power_of_two()?.max(256), false),
-        Some(LiteralValue::Vector(v)) if v.len() != 1 => (v.len(), true),
+        Some(LiteralValue::Vector(v)) => (v.len(), true),
         Some(v) => (integer(v)?, false),
     };
+    if nfft == 0
+        || nfft > MAX_NFFT
+        || (explicit && matches!(spectrum, Spectrum::Spectrogram) && nfft < 2)
+    {
+        return None;
+    }
     positional(args, &mut index)?; // Sampling rate changes coordinates, not cardinality.
     let mut onesided = match &request.arguments.first()?.kind {
         ValueKindFact::Numeric(n) => n.domain == NumericDomain::Real,

@@ -23,6 +23,9 @@ pub(super) fn infer(
         Spectrum::Spectrogram => (4, 10),
     };
     let mut diagnostics = Vec::new();
+    if let Some(diagnostic) = geometry::invalid_grid(request, spectrum) {
+        diagnostics.push(diagnostic);
+    }
     if request.arguments.is_empty() || request.arguments.len() > max_args {
         diagnostics.push(argument_error(
             "RM-CATALOG-SPECTRAL-ARITY",
