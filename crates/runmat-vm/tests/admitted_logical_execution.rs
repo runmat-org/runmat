@@ -2,6 +2,8 @@
 
 #[path = "support/mod.rs"]
 mod support;
+#[path = "support/admitted_logarithms.rs"]
+mod admitted_logarithms;
 
 use futures::executor::block_on;
 use runmat_accelerate::placement::{PlacementEventKind, PlacementVariant};
@@ -224,6 +226,7 @@ fn canonical_logical_forms_execute_through_vm_with_real_provider_feasibility() {
         assert_invalid_calls_before_preparation();
         assert_direct_call(provider);
         assert_power_execution(provider);
+        admitted_logarithms::run(provider);
     });
 }
 

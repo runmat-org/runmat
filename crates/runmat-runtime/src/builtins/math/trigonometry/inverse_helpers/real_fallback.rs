@@ -5,7 +5,7 @@ use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle};
 use runmat_builtins::BuiltinExtensionDescriptor;
 use runmat_value::{Tensor, Value};
 
-pub(super) async fn compute(
+pub(in crate::builtins::math::trigonometry) async fn compute(
     handle: GpuTensorHandle,
     builtin: &str,
     extension: &'static BuiltinExtensionDescriptor,
