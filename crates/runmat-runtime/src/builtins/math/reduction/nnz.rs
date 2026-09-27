@@ -322,7 +322,7 @@ async fn nnz_gpu(handle: GpuTensorHandle, dim: Option<usize>) -> BuiltinResult<V
                 if zero_based < handle.shape().len() {
                     match p.reduce_nnz_dim(&handle, zero_based).await {
                         Ok(result) => {
-                            let mut expected_shape = normalize_scalar_shape(&handle.shape);
+                            let mut expected_shape = normalize_scalar_shape(handle.shape());
                             expected_shape[zero_based] = 1;
                             validate_provider_result(p, &handle, &result, &expected_shape)?;
                             let host =

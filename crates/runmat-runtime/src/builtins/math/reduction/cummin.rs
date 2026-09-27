@@ -634,7 +634,7 @@ async fn cummin_gpu(
         }
     }
 
-    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
     if target_dim == 0 {
         return Err(cummin_error_with_detail(
             &CUMMIN_ERROR_INVALID_ARGUMENT,
@@ -643,7 +643,7 @@ async fn cummin_gpu(
     }
 
     if target_dim > handle.shape().len() {
-        let indices = ones_indices(&handle.shape)?;
+        let indices = ones_indices(handle.shape())?;
         return Ok(CumminEvaluation {
             values: Value::GpuTensor(handle),
             indices: tensor::tensor_into_value(indices),

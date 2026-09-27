@@ -634,7 +634,7 @@ async fn cummax_gpu(
         }
     }
 
-    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+    let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
     if target_dim == 0 {
         return Err(cummax_error_with_detail(
             &CUMMAX_ERROR_INVALID_ARGUMENT,
@@ -643,7 +643,7 @@ async fn cummax_gpu(
     }
 
     if target_dim > handle.shape().len() {
-        let indices = ones_indices(&handle.shape)?;
+        let indices = ones_indices(handle.shape())?;
         return Ok(CummaxEvaluation {
             values: Value::GpuTensor(handle),
             indices: tensor::tensor_into_value(indices),

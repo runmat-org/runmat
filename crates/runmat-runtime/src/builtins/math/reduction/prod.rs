@@ -726,7 +726,7 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
         }
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
-        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
+        Value::GpuTensor(handle) => parse_dimension_tensor(value, handle.shape()).await,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
@@ -812,14 +812,14 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return prod_gpu_fallback(&handle, parsed).await;
     };
 
-    let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
+    let resolved = resolve_dims(handle.shape(), &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
-        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape)
+        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape())
         {
             return provider
                 .reduce_integer_prod_native(&handle)
@@ -845,7 +845,7 @@ async fn prod_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinR
         return Ok(Value::GpuTensor(current));
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape) {
+    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape()) {
         if let Ok(reduced) = provider.reduce_prod(&handle).await {
             return Ok(Value::GpuTensor(reduced));
         }

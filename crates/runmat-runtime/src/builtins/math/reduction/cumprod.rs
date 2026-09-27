@@ -606,7 +606,7 @@ async fn cumprod_gpu(
                 return Ok(Value::GpuTensor(handle));
             }
         }
-        let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+        let target_dim = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
         if target_dim == 0 {
             return Err(cumprod_error_with_detail(
                 &CUMPROD_ERROR_INVALID_ARGUMENT,
@@ -643,7 +643,7 @@ async fn cumprod_gpu(
         }
     }
 
-    let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(&handle.shape));
+    let fallback_dim = dim.unwrap_or_else(|| default_dimension_from_shape(handle.shape()));
     if fallback_dim == 0 {
         return Err(cumprod_error_with_detail(
             &CUMPROD_ERROR_INVALID_ARGUMENT,

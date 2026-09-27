@@ -744,7 +744,7 @@ async fn median_gpu_try(
             if handle.shape().is_empty() {
                 Some(handle.clone())
             } else {
-                let dim = default_dimension_from_shape(&handle.shape);
+                let dim = default_dimension_from_shape(handle.shape());
                 reduce_median_dim_gpu(provider, handle.clone(), dim).await
             }
         }
@@ -763,7 +763,7 @@ async fn median_gpu_try(
             Some(result)
         }
         MedianAxes::All => {
-            if handle.shape.is_empty() {
+            if handle.shape().is_empty() {
                 Some(handle.clone())
             } else {
                 provider
@@ -879,7 +879,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MedianAxes>> {
         Value::Tensor(t) => (tensor::is_scalar_tensor(t), tensor_len(t) == 0),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let count = tensor::element_count(&handle.shape);
+            let count = tensor::element_count(handle.shape());
             (handle.shape().is_empty() || count == 1, count == 0)
         }
         _ => (false, false),
