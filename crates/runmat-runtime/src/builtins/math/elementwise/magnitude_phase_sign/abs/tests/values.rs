@@ -15,21 +15,37 @@ fn abs_logical_extension_returns_double_and_gates_resident_input_before_dispatch
     }
 
     test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0],
+                shape: &[1, 2],
+            })
+            .expect("logical producer upload");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = abs_builtin(Value::GpuTensor(handle))
+        let weak = handle.downgrade();
+        provider.reset_telemetry();
+        let error = abs_builtin(Value::GpuTensor(handle.clone()))
             .expect_err("resident logical input must gate before provider dispatch");
         assert_eq!(
             error.identifier(),
             ABS_LOGICAL_INPUT_EXTENSION.error_identifier
         );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("caller remains live after rejection");
+        drop(error);
+        handle.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
     test_support::with_test_provider(|provider| {
-        let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0],
+                shape: &[1, 2],
+            })
+            .expect("logical producer upload");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let result = abs_builtin(Value::GpuTensor(handle)).expect("resident logical extension");
         let Value::GpuTensor(ref output) = result else {

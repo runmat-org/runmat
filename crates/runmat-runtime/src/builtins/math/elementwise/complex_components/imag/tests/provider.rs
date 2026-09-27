@@ -18,13 +18,41 @@ fn imag_gpu_provider_roundtrip() {
 }
 
 #[test]
-fn imag_rejects_contradictory_resident_class_before_provider_dispatch() {
+fn imag_class_is_immutable_and_contradictory_wire_class_rejects_before_dispatch() {
     test_support::with_test_provider(|provider| {
         let tensor = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        runmat_accelerate_api::set_handle_class_identity(&handle, "single");
-        let err = block_on(imag_gpu(handle)).expect_err("contradictory class metadata must reject");
-        assert!(err.message().contains("class metadata contradicts"));
+        let original = handle.wire_descriptor();
+        let acquired = provider
+            .acquire_live(&original)
+            .expect("exact live acquisition");
+        assert!(acquired.shares_allocation_with(&handle));
+        drop(acquired);
+        let mut contradictory = original.clone();
+        contradictory.physical = runmat_accelerate_api::GpuPhysicalDescriptor::new(
+            runmat_accelerate_api::NumericElementType::F32,
+            original.physical.storage(),
+            original.physical.element_capacity(),
+            original.physical.payload_bytes(),
+            original.physical.requested_bytes(),
+        )
+        .unwrap();
+        provider.reset_telemetry();
+        let error = provider
+            .acquire_live(&contradictory)
+            .expect_err("changed native class");
+        assert_eq!(
+            error,
+            runmat_accelerate_api::allocation::AllocationAcquisitionError::PhysicalMismatch
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(handle.wire_descriptor(), original);
+        let weak = handle.downgrade();
+        let result = block_on(imag_gpu(handle.clone())).expect("original valid input");
+        let gathered = test_support::gather(result).expect("gather imag");
+        assert_eq!(gathered.materialize_f64(), vec![0.0]);
+        handle.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
 }
 

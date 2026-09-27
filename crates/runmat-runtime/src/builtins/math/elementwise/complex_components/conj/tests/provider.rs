@@ -26,12 +26,12 @@ fn conj_resident_integer_is_exact_identity() {
         )
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
-        let buffer_id = handle.buffer_id;
-        let result = conj_builtin(Value::GpuTensor(handle)).expect("conj");
+        let weak = handle.downgrade();
+        let result = conj_builtin(Value::GpuTensor(handle.clone())).expect("conj");
         let Value::GpuTensor(output) = result else {
             panic!("expected resident integer");
         };
-        assert_eq!(output.buffer_id, buffer_id);
+        assert!(output.shares_allocation_with(&handle));
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -42,6 +42,12 @@ fn conj_resident_integer_is_exact_identity() {
             panic!("integer tensor");
         };
         assert_eq!(gathered.integer_storage(), tensor.integer_storage());
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("caller alias survives output consumption");
+        handle.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
 }
 

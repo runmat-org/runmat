@@ -247,8 +247,11 @@ fn gammaln_gpu_provider_roundtrip() {
             data: tensor.as_f64_slice().expect("double input"),
             shape: &tensor.shape,
         };
-        let mut handle = provider.upload(&view).expect("upload");
-        runmat_accelerate_api::set_handle_provenance(&mut handle, GpuHandleProvenance::Explicit);
+        let handle = provider
+            .upload(&view)
+            .expect("upload")
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .expect("explicit view");
         let result = call(Value::GpuTensor(handle)).expect("gammaln");
         let Value::GpuTensor(output) = &result else {
             panic!("expected resident gammaln output, got {result:?}");

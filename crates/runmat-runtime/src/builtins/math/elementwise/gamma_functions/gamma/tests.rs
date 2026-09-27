@@ -147,8 +147,10 @@ fn extra_like_and_other_arguments_are_rejected() {
 fn gpu_provider_roundtrip_preserves_residency() {
     test_support::with_test_provider(|provider| {
         let input = Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let mut handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-        runmat_accelerate_api::set_handle_provenance(&mut handle, GpuHandleProvenance::Explicit);
+        let handle = gpu_helpers::upload_tensor(provider, &input)
+            .unwrap()
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .expect("explicit view");
         let output = call(Value::GpuTensor(handle), Vec::new()).unwrap();
         let Value::GpuTensor(resident) = &output else {
             panic!("expected resident gamma output, got {output:?}");
@@ -185,13 +187,25 @@ fn integer_gpu_input_is_rejected_before_provider_gamma() {
 #[test]
 fn logical_gpu_input_is_rejected_before_provider_gamma() {
     test_support::with_test_provider(|provider| {
-        let input = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &input).unwrap();
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let handle = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0],
+                shape: &[1, 2],
+            })
+            .expect("logical producer");
+        let weak = handle.downgrade();
         let error = call(Value::GpuTensor(handle.clone()), Vec::new()).unwrap_err();
         assert_eq!(error.identifier(), GAMMA_ERROR_INVALID_INPUT.identifier);
         assert!(runmat_accelerate_api::provider_for_handle(&handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider)));
+        assert!(runmat_accelerate_api::handle_is_logical(&handle));
+        handle
+            .allocation_lease()
+            .validate_live()
+            .expect("caller input survives rejection");
+        drop(error);
+        handle.release().expect("release caller");
+        assert!(weak.acquire().is_err());
     });
 }
 

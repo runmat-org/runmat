@@ -32,13 +32,13 @@ fn integer_like_preserves_class_and_wide_value() {
         let downloaded = block_on(provider.download_integer(&output)).expect("download");
         assert_eq!(downloaded.data, HostIntegerDataOwned::U64(vec![u64::MAX]));
         assert_eq!(downloaded.shape, vec![1, 1]);
-        provider.free(&prototype).ok();
-        provider.free(&output).ok();
+        prototype.release().expect("release prototype");
+        output.release().expect("release output");
     });
 }
 
 #[test]
-fn integer_like_rejects_contradictory_class_metadata() {
+fn integer_like_class_is_immutable_and_contradictory_wire_class_rejects() {
     test_support::with_test_provider(|provider| {
         let prototype = provider
             .upload_integer(&HostIntegerTensorView {
@@ -46,14 +46,40 @@ fn integer_like_rejects_contradictory_class_metadata() {
                 shape: &[1, 1],
             })
             .expect("integer prototype upload");
-        runmat_accelerate_api::set_handle_class_identity(&prototype, "double");
-        let error = intmax(vec![
+        let original = prototype.wire_descriptor();
+        let acquired = provider
+            .acquire_live(&original)
+            .expect("exact native acquisition");
+        assert!(acquired.shares_allocation_with(&prototype));
+        drop(acquired);
+        let mut contradictory = original.clone();
+        contradictory.physical = runmat_accelerate_api::GpuPhysicalDescriptor::new(
+            runmat_accelerate_api::NumericElementType::F64,
+            original.physical.storage(),
+            original.physical.element_capacity(),
+            original.physical.payload_bytes(),
+            original.physical.requested_bytes(),
+        )
+        .unwrap();
+        provider.reset_telemetry();
+        let error = provider
+            .acquire_live(&contradictory)
+            .expect_err("changed native class");
+        assert_eq!(
+            error,
+            runmat_accelerate_api::allocation::AllocationAcquisitionError::PhysicalMismatch
+        );
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert_eq!(prototype.wire_descriptor(), original);
+        let output = intmax(vec![
             Value::from("like"),
             Value::GpuTensor(prototype.clone()),
         ])
-        .expect_err("contradictory resident prototype must reject");
-        assert!(error.message().contains("contradictory class metadata"));
-        provider.free(&prototype).ok();
+        .expect("original native prototype remains valid");
+        drop(output);
+        let weak = prototype.downgrade();
+        prototype.release().expect("release prototype");
+        assert!(weak.acquire().is_err());
     });
 }
 
@@ -61,19 +87,18 @@ fn integer_like_rejects_contradictory_class_metadata() {
 fn floating_like_preserves_single_representation_and_intent() {
     test_support::with_f32_test_provider(|provider| {
         let prototype = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).expect("prototype");
-        let mut handle = gpu_helpers::upload_tensor(provider, &prototype).expect("upload");
-        runmat_accelerate_api::set_handle_provenance(
-            &mut handle,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let handle = gpu_helpers::upload_tensor(provider, &prototype)
+            .expect("upload")
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit prototype view");
 
         let output = realmax(vec![Value::from("like"), Value::GpuTensor(handle.clone())])
             .expect("resident realmax like");
         let Value::GpuTensor(output) = output else {
             panic!("expected resident single output")
         };
-        assert_eq!(output.shape, vec![1, 1]);
-        assert_eq!(output.device_id, handle.device_id);
+        assert_eq!(output.shape(), &[1, 1]);
+        assert_eq!(output.device_id(), handle.device_id());
         assert_eq!(
             runmat_accelerate_api::handle_storage(&output),
             runmat_accelerate_api::GpuTensorStorage::Real
@@ -91,8 +116,8 @@ fn floating_like_preserves_single_representation_and_intent() {
             panic!("expected gathered single tensor")
         };
         assert_eq!(gathered.as_f32_slice(), Some([f32::MAX].as_slice()));
-        provider.free(&handle).ok();
-        provider.free(&output).ok();
+        handle.release().expect("release handle");
+        output.release().expect("release output");
     });
 
     test_support::with_f32_test_provider(|provider| {
@@ -123,8 +148,8 @@ fn floating_like_preserves_single_representation_and_intent() {
             gathered.as_f32_slice(),
             Some([runmat_value::ComplexElement(2f32.powi(24), 0.0)].as_slice())
         );
-        provider.free(&handle).ok();
-        provider.free(&output).ok();
+        handle.release().expect("release handle");
+        output.release().expect("release output");
     });
 }
 
@@ -157,8 +182,8 @@ fn integer_like_preserves_wgpu_class_and_wide_value() {
     );
     let downloaded = block_on(provider.download_integer(&output)).expect("download");
     assert_eq!(downloaded.data, HostIntegerDataOwned::I64(vec![i64::MIN]));
-    provider.free(&prototype).ok();
-    provider.free(&output).ok();
+    prototype.release().expect("release prototype");
+    output.release().expect("release output");
 }
 
 #[test]
@@ -183,6 +208,6 @@ fn floating_like_preserves_wgpu_single_class_and_value() {
     let gathered = block_on(provider.download(&output)).expect("download");
     assert_eq!(gathered.data, vec![f64::from(f32::MIN_POSITIVE)]);
     assert_eq!(gathered.shape, vec![1, 1]);
-    provider.free(&handle).ok();
-    provider.free(&output).ok();
+    handle.release().expect("release handle");
+    output.release().expect("release output");
 }

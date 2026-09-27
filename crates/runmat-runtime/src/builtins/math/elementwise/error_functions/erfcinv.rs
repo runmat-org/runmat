@@ -384,11 +384,11 @@ mod tests {
                 data: host.as_f64_slice().expect("double host"),
                 shape: &host.shape,
             };
-            let mut handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_provenance(
-                &mut handle,
-                GpuHandleProvenance::Explicit,
-            );
+            let handle = provider
+                .upload(&view)
+                .expect("upload")
+                .with_provenance(GpuHandleProvenance::Explicit)
+                .expect("explicit view");
             let resident = erfcinv_builtin(Value::GpuTensor(handle)).unwrap();
             let Value::GpuTensor(output) = &resident else {
                 panic!("expected gpu tensor, got {resident:?}");
@@ -424,21 +424,29 @@ mod tests {
                 ERFCINV_ERROR_INVALID_INPUT.identifier
             );
 
-            let logical_source = Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap();
             let logical_handle = provider
-                .upload(&HostTensorView {
-                    data: logical_source
-                        .as_f64_slice()
-                        .expect("double logical source"),
-                    shape: &logical_source.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[1, 2],
                 })
                 .expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
-            let logical_error = erfcinv_builtin(Value::GpuTensor(logical_handle)).unwrap_err();
+            let weak = logical_handle.downgrade();
+            provider.reset_telemetry();
+            let logical_error = erfcinv_builtin(Value::GpuTensor(logical_handle.clone()))
+                .expect_err("logical GPU input");
             assert_eq!(
                 logical_error.identifier(),
                 ERFCINV_ERROR_INVALID_INPUT.identifier
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
+            logical_handle
+                .allocation_lease()
+                .validate_live()
+                .expect("caller input survives rejection");
+            drop(logical_error);
+            logical_handle.release().expect("release logical caller");
+            assert!(weak.acquire().is_err());
         });
     }
 
