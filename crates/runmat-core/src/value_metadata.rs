@@ -68,7 +68,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::StructArray(array) => Some(array.shape().to_vec()),
-        Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         Value::Distributed(handle) => handle
             .global_shape
             .iter()

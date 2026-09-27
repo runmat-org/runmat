@@ -138,9 +138,9 @@ pub(crate) fn format_type_info(value: &Value) -> String {
                 .join("x")
         ),
         Value::GpuTensor(h) => {
-            if h.shape.len() == 2 {
-                let r = h.shape[0];
-                let c = h.shape[1];
+            if h.shape().len() == 2 {
+                let r = h.shape()[0];
+                let c = h.shape()[1];
                 if r == 1 && c == 1 {
                     "scalar (gpu)".to_string()
                 } else if r == 1 || c == 1 {
@@ -149,7 +149,7 @@ pub(crate) fn format_type_info(value: &Value) -> String {
                     format!("{r}x{c} matrix (gpu)")
                 }
             } else {
-                format!("Tensor{:?} (gpu)", h.shape)
+                format!("Tensor{:?} (gpu)", h.shape())
             }
         }
         _ => "value".to_string(),

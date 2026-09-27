@@ -1,6 +1,7 @@
 //! Native-to-VM completion projection with actual owned provider allocations.
 use futures::executor::block_on;
 use runmat_accelerate::simple_provider::InProcessProvider;
+use runmat_accelerate_api::allocation::WeakGpuTensorHandle;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
     HostTensorView, ThreadProviderGuard,
@@ -11,8 +12,12 @@ use std::sync::{LazyLock, Mutex};
 
 struct TrackingProvider {
     inner: InProcessProvider,
-    outputs: Mutex<Vec<GpuTensorHandle>>,
-    freed: Mutex<Vec<u64>>,
+    outputs: Mutex<
+        Vec<(
+            WeakGpuTensorHandle,
+            runmat_accelerate_api::allocation::GpuTensorWireDescriptor,
+        )>,
+    >,
 }
 impl AccelProvider for TrackingProvider {
     fn upload(&self, value: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -20,11 +25,6 @@ impl AccelProvider for TrackingProvider {
     }
     fn download<'a>(&'a self, value: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         self.inner.download(value)
-    }
-    fn free(&self, value: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(value)?;
-        self.freed.lock().unwrap().push(value.buffer_id);
-        Ok(())
     }
     fn device_info(&self) -> String {
         self.inner.device_info()
@@ -41,7 +41,10 @@ impl AccelProvider for TrackingProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let output = self.inner.unary_sin(input).await?;
-            self.outputs.lock().unwrap().push(output.clone());
+            self.outputs
+                .lock()
+                .unwrap()
+                .push((output.downgrade(), output.wire_descriptor()));
             Ok(output)
         })
     }
@@ -50,7 +53,6 @@ impl AccelProvider for TrackingProvider {
 static PROVIDER: LazyLock<TrackingProvider> = LazyLock::new(|| TrackingProvider {
     inner: InProcessProvider::new(),
     outputs: Mutex::new(Vec::new()),
-    freed: Mutex::new(Vec::new()),
 });
 static LOCK: Mutex<()> = Mutex::new(());
 
@@ -118,7 +120,7 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                     let Value::GpuTensor(value) = value else {
                         panic!("native-deopt resident alias")
                     };
-                    assert_eq!(value.buffer_id, input.buffer_id);
+                    assert!(value.shares_allocation_with(&input));
                 }
             }
             let discarded = PROVIDER.outputs.lock().unwrap()[first..].to_vec();
@@ -126,25 +128,16 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                 !discarded.is_empty(),
                 "resumed body must execute the actual sine provider hook"
             );
-            for value in discarded {
-                assert!(block_on(PROVIDER.download(&value)).is_err());
-                assert_eq!(
-                    PROVIDER
-                        .freed
-                        .lock()
-                        .unwrap()
-                        .iter()
-                        .filter(|id| **id == value.buffer_id)
-                        .count(),
-                    1
-                );
+            for (weak, descriptor) in discarded {
+                assert!(weak.acquire().is_err(), "discarded view must be released");
+                assert!(PROVIDER.inner.acquire_live(&descriptor).is_err(), "retired allocation must not be reacquired");
             }
             assert_eq!(
                 block_on(PROVIDER.download(&input)).unwrap().data,
                 vec![0.25, 0.5]
             );
             runmat_gc::gc_unregister_root(caller).unwrap();
-            PROVIDER.free(&input).unwrap();
+            drop(input);
         }
     });
 }
