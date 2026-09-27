@@ -147,10 +147,6 @@ mod tests {
             Box::pin(async { anyhow::bail!("not used") })
         }
 
-        fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             self.id.into()
         }

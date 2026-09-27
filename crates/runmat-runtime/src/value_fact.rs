@@ -475,9 +475,8 @@ fn gpu_kind(handle: &runmat_accelerate_api::GpuTensorHandle) -> Option<ValueKind
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_accelerate_api::{
-        clear_handle_metadata, GpuTensorHandle, GpuTensorStorage, NumericElementType,
-    };
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
+    use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
     use runmat_value::{CellArray, ForeignRef, ForeignResourceKey, Tensor};
 
     #[test]
@@ -510,10 +509,14 @@ mod tests {
 
     #[test]
     fn preserves_device_integer_class_domain_shape_and_residency() {
-        let handle = GpuTensorHandle::new(vec![2, 3], 71, 9).with_numeric_descriptor(
-            NumericElementType::U64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 3],
+                NumericElementType::U64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let handle = allocation.handle;
         let fact = value_fact(&Value::GpuTensor(handle.clone()));
         assert_eq!(
             fact.kind,
@@ -526,23 +529,35 @@ mod tests {
         assert_eq!(
             fact.residency,
             ResidencyFact::Device {
-                provider: Some("device:71".into())
+                provider: Some(format!("device:{}", handle.device_id()))
             }
         );
         assert_eq!(fact.certainty, CertaintyFact::Proven);
-        clear_handle_metadata(&handle);
+        drop(handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
-    fn unknown_device_element_type_is_an_explicit_dynamic_boundary() {
-        let handle = GpuTensorHandle::new(vec![1, 4], 73, 11);
-        clear_handle_metadata(&handle);
-        let fact = value_fact(&Value::GpuTensor(handle));
-        assert_eq!(fact.kind, ValueKindFact::Unknown);
+    fn device_class_remains_authoritative_when_another_view_is_released() {
+        // Owning handles cannot represent missing physical type metadata.
+        // Releasing one view must not erase the surviving view's type facts.
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![1, 4], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let alias = allocation.handle.clone();
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 0);
+        let fact = value_fact(&Value::GpuTensor(alias));
         assert_eq!(
-            fact.certainty,
-            CertaintyFact::Dynamic(DynamicReason::UnsupportedRepresentation)
+            fact.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: NumericDomain::Real,
+            })
         );
+        assert_eq!(fact.shape, shape(&[1, 4]));
+        assert_eq!(fact.certainty, CertaintyFact::Proven);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]

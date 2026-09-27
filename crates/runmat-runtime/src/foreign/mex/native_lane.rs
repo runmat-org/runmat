@@ -1322,7 +1322,7 @@ mod tests {
                 Rc::new(NoopServices),
             ))
             .map(|invocation| invocation.outputs)
-            .map_err(|message| lane_diagnostic(&message))
+            .map_err(|error| lane_diagnostic(&error.to_string()))
         }
 
         fn get_variable(&self, _: &str, _: &str) -> Result<Option<MxArray>, MexDiagnostic> {
