@@ -4485,6 +4485,25 @@ impl AccelProvider for InProcessProvider {
             "black_scholes_price: output length does not match shape"
         );
 
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("black_scholes_price: allocation owner is poisoned"))?;
+            for input in request.inputs {
+                ensure!(
+                    guard.get(input.handle).is_some(),
+                    "black_scholes_price: unknown buffer"
+                );
+            }
+            if request.inputs.iter().any(|input| {
+                input.handle.physical().storage() != GpuTensorStorage::Real
+                    || input.handle.physical().element_type() != NumericElementType::F64
+            }) {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "black_scholes_price: kernel requires real F64 storage",
+                ));
+            }
+        }
         let input_data = {
             let guard = registry(self.device_id)
                 .lock()

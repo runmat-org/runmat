@@ -39,6 +39,17 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
+        let raw_values = self.get_entry_raw(values)?;
+        if raw_matrix.integer_type().is_none()
+            && (raw_matrix.precision != NumericPrecision::F32
+                || raw_values.precision != NumericPrecision::F32
+                || raw_matrix.storage != GpuTensorStorage::Real
+                || raw_values.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "scatter_column: floating kernel requires real F32 storage",
+            ));
+        }
         if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,
@@ -580,6 +591,17 @@ impl WgpuProvider {
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
+        let raw_values = self.get_entry_raw(values)?;
+        if raw_matrix.integer_type().is_none()
+            && (raw_matrix.precision != NumericPrecision::F32
+                || raw_values.precision != NumericPrecision::F32
+                || raw_matrix.storage != GpuTensorStorage::Real
+                || raw_values.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "scatter_row: floating kernel requires real F32 storage",
+            ));
+        }
         if raw_matrix.integer_type().is_some() {
             ensure!(
                 raw_matrix.shape.len() == 2,

@@ -13,10 +13,7 @@ impl WgpuProvider {
             !request.output_shape.is_empty(),
             "black_scholes_price: missing output shape"
         );
-        ensure!(
-            request.output_shape.len() <= 8,
-            "black_scholes_price: rank exceeds GPU kernel limit"
-        );
+
         let total_len = request
             .output_shape
             .iter()
@@ -60,11 +57,14 @@ impl WgpuProvider {
                     idx + 1
                 );
                 let entry = self.get_entry(input.handle)?;
-                ensure!(
-                    entry.storage != GpuTensorStorage::ComplexInterleaved,
-                    "black_scholes_price: complex input {} is not supported",
-                    idx + 1
-                );
+                if entry.storage != GpuTensorStorage::Real {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        format!(
+                            "black_scholes_price: complex input {} is not supported",
+                            idx + 1
+                        ),
+                    ));
+                }
                 ensure!(
                     entry.len == input_len,
                     "black_scholes_price: input {} shape does not match buffer length",
@@ -73,6 +73,12 @@ impl WgpuProvider {
                 Ok(entry)
             })
             .collect::<Result<Vec<_>>>()?;
+
+        if request.output_shape.len() > 8 {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "black_scholes_price: rank exceeds GPU kernel limit",
+            ));
+        }
 
         let call_buffer =
             self.create_storage_buffer_checked(total_len, "runmat-black-scholes-call-out")?;

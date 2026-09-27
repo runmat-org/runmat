@@ -2064,8 +2064,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _request: &ProviderBlackScholesPriceRequest<'_>,
     ) -> anyhow::Result<ProviderBlackScholesPriceResult> {
-        Err(anyhow::anyhow!(
-            "black_scholes_price not supported by provider"
+        Err(unsupported_provider_operation(
+            "black_scholes_price not supported by provider",
         ))
     }
 
@@ -3756,7 +3756,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _col_index: usize,
         _values: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scatter_column not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scatter_column not supported by provider",
+        ))
     }
 
     /// Fast-path: write a GPU row in a matrix from a GPU vector, returning a new handle.
@@ -3767,7 +3769,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _row_index: usize,
         _values: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("scatter_row not supported by provider"))
+        Err(unsupported_provider_operation(
+            "scatter_row not supported by provider",
+        ))
     }
 
     fn sub2ind(
