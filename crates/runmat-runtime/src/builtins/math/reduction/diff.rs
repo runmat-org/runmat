@@ -30,6 +30,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "diff";
 
+#[cfg(test)]
+#[path = "diff/owning_tests.rs"]
+mod owning_tests;
+
 const DIFF_CHARACTER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "diff-character-input",
     mode: BuiltinExtensionMode::RunMatOnly,
@@ -533,7 +537,7 @@ async fn diff_gpu(
     order: usize,
     dim: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let working_dim = dim.unwrap_or_else(|| default_dimension(&handle.shape));
+    let working_dim = dim.unwrap_or_else(|| default_dimension(handle.shape()));
     if working_dim == 0 {
         return Err(diff_invalid_argument("diff: dimension must be >= 1"));
     }
@@ -545,9 +549,7 @@ async fn diff_gpu(
         || runmat_accelerate_api::handle_storage(&handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
     if exact_or_nonreal {
-        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
-            .await
-            .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await?;
         let gathered = crate::builtins::common::provider_restore::align_floating_value_precision(
             gathered, &handle, NAME,
         )?;
@@ -583,7 +585,8 @@ async fn diff_gpu(
         );
     }
 
-    if let Ok(device_result) = provider.diff_dim(&handle, order, working_dim.saturating_sub(1)) {
+    let result = provider.diff_dim(&handle, order, working_dim.saturating_sub(1));
+    if let Ok(mut device_result) = result {
         let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() < working_dim {
             expected_shape.resize(working_dim, 1);
@@ -597,18 +600,28 @@ async fn diff_gpu(
                 == runmat_accelerate_api::handle_precision(&handle)
             && runmat_accelerate_api::handle_integer_type(&device_result).is_none()
             && !runmat_accelerate_api::handle_is_logical(&device_result)
+            && (order == 0 || !device_result.shares_allocation_with(&handle))
             && runmat_accelerate_api::provider_for_handle(&device_result)
                 .is_some_and(|owner| std::ptr::eq(owner, provider));
         if valid {
+            gpu_helpers::propagate_output_provenance(&mut device_result, &[&handle])?;
             return gpu_helpers::resident_gpu_value(device_result);
         }
-        let owner = runmat_accelerate_api::provider_for_handle(&device_result).unwrap_or(provider);
-        let _ = owner.free(&device_result);
+        let mut error =
+            diff_internal_error("diff: provider returned a malformed or aliased result");
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(device_result, error));
+    } else if let Err(source) = result {
+        if !gpu_helpers::provider_hook_is_unsupported(&source) {
+            let mut error =
+                diff_internal_error(format!("diff: provider execution failed: {source}"));
+            error.source = Some(source.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
-        .await
-        .map_err(|e| diff_internal_error(format!("diff: {e}")))?;
+    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let Value::Tensor(tensor) =
         crate::builtins::common::provider_restore::align_floating_value_precision(
             Value::Tensor(tensor),

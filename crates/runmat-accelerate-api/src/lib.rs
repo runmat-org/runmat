@@ -3161,7 +3161,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _order: usize,
         _dim: usize,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("diff_dim not supported by provider"))
+        Err(unsupported_provider_operation(
+            "diff_dim not supported by provider",
+        ))
     }
     fn gradient_dim(
         &self,
