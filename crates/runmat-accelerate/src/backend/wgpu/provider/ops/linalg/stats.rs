@@ -780,7 +780,9 @@ impl WgpuProvider {
         }
 
         if cols == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-cov-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-cov-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, vec![0, 0], 0);
         }
 
@@ -861,7 +863,9 @@ impl WgpuProvider {
         };
 
         if cols == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-corrcoef-empty");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-corrcoef-empty")
+            })??;
             return self.register_existing_buffer(out_buffer, vec![0, 0], 0);
         }
 
