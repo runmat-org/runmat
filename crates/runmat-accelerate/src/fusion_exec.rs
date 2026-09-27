@@ -4,7 +4,6 @@ use crate::fusion::{
     FusionGroupPlan, FusionKind, FusionPattern, FusionStoreMaterialization, ImageScalar,
 };
 use crate::fusion_residency;
-use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
 use crate::placement::{
     dense_output_representation, fusion_operation_token, plan_local, FusionPlacementObserver,
