@@ -30,9 +30,11 @@ impl AccelProvider for Provider {
     fn transpose(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         let mut shape = input.shape().to_vec();
         shape.swap(0, 1);
-        let allocation =
-            self.owner
-                .allocate_zeroed(shape, NumericElementType::F64, input.storage())?;
+        let allocation = self.owner.allocate_zeroed(
+            shape,
+            NumericElementType::F64,
+            runmat_accelerate_api::handle_storage(input),
+        )?;
         *self.intermediate.lock().unwrap() = Some(allocation.probe);
         Ok(allocation.handle)
     }
