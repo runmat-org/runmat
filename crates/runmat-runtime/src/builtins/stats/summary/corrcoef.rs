@@ -2,7 +2,7 @@
 
 use num_complex::Complex64;
 use runmat_accelerate_api::{
-    CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorHandle, GpuTensorStorage,
+    CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, GpuTensorStorage,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -509,7 +509,7 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
         Value::GpuTensor(handle) => handle,
         _ => return Ok(None),
     };
-    if first_handle.shape.len() > 2 {
+    if first_handle.shape().len() > 2 {
         return Err(corrcoef_error_with_detail(
             &CORRCOEF_ERROR_INVALID_ARGUMENT,
             "A must be a matrix",
@@ -522,15 +522,13 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     {
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(first_handle)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    let provider = match runmat_accelerate_api::provider_for_handle(first_handle) {
         Some(provider) => provider,
         None => return Ok(None),
     };
     let maybe_second_handle = match &args.second {
         Some(Value::GpuTensor(handle)) => {
-            if !same_size(&first_handle.shape, &handle.shape) {
+            if !same_size(first_handle.shape(), handle.shape()) {
                 return Err(corrcoef_error(&CORRCOEF_ERROR_SIZE_MISMATCH));
             }
             if runmat_accelerate_api::handle_integer_type(handle).is_some()
@@ -540,9 +538,7 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
             {
                 return Ok(None);
             }
-            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle)
-                .or_else(runmat_accelerate_api::provider)
-            else {
+            let Some(second_provider) = runmat_accelerate_api::provider_for_handle(handle) else {
                 return Ok(None);
             };
             if !std::ptr::eq(provider, second_provider) {
@@ -554,29 +550,38 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
         None => None,
     };
 
-    let mut owned_concat: Option<GpuTensorHandle> = None;
+    let _first_residency =
+        crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(first_handle);
+    let _second_residency =
+        maybe_second_handle.map(crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new);
     let matrix_handle = if let Some(second) = maybe_second_handle {
-        let rows = first_handle.shape.iter().copied().product::<usize>();
+        let rows = first_handle.shape().iter().copied().product::<usize>();
         let left = match provider.reshape(first_handle, &[rows, 1]) {
             Ok(handle) => handle,
-            Err(_) => return Ok(None),
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&error) =>
+            {
+                return Ok(None)
+            }
+            Err(error) => return Err(corrcoef_provider_error(error.into())),
         };
         let right = match provider.reshape(second, &[rows, 1]) {
             Ok(handle) => handle,
-            Err(_) => {
-                release_gpu_reshape(provider, first_handle, &left);
-                return Ok(None);
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&error) =>
+            {
+                return Ok(None)
             }
+            Err(error) => return Err(corrcoef_provider_error(error.into())),
         };
-        let result = provider.cat(2, &[left.clone(), right.clone()]);
-        release_gpu_reshape(provider, first_handle, &left);
-        release_gpu_reshape(provider, second, &right);
-        match result {
-            Ok(concat) => {
-                owned_concat = Some(concat.clone());
-                concat
+        match provider.cat(2, &[left, right]) {
+            Ok(concat) => concat,
+            Err(error)
+                if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&error) =>
+            {
+                return Ok(None)
             }
-            Err(_) => return Ok(None),
+            Err(error) => return Err(corrcoef_provider_error(error.into())),
         }
     } else {
         first_handle.clone()
@@ -588,34 +593,14 @@ async fn corrcoef_try_gpu(args: &CorrcoefArgs) -> BuiltinResult<Option<Value>> {
     };
 
     match provider.corrcoef(&matrix_handle, &options).await {
-        Ok(result) => {
-            if let Some(temp) = owned_concat {
-                let _ = provider.free(&temp);
-            }
-            Ok(Some(Value::GpuTensor(result)))
-        }
+        Ok(result) => Ok(Some(Value::GpuTensor(result))),
         Err(error) => {
-            if let Some(temp) = owned_concat {
-                let _ = provider.free(&temp);
-            }
             if error.is_unsupported() {
                 Ok(None)
             } else {
                 Err(corrcoef_provider_error(error))
             }
         }
-    }
-}
-
-fn release_gpu_reshape(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    original: &GpuTensorHandle,
-    reshaped: &GpuTensorHandle,
-) {
-    if reshaped.buffer_id == original.buffer_id {
-        let _ = provider.reshape(reshaped, &original.shape);
-    } else {
-        let _ = provider.free(reshaped);
     }
 }
 

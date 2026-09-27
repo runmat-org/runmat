@@ -239,11 +239,13 @@ fn mode_type_resolver(args: &[Type], ctx: &ResolveContext) -> Type {
 )]
 async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let parsed = parse_arguments(&rest).await?;
-    let gpu_provider = match &value {
-        Value::GpuTensor(handle) => runmat_accelerate_api::provider_for_handle(handle)
-            .or_else(runmat_accelerate_api::provider),
+    let gpu_source = match &value {
+        Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     };
+    let gpu_provider = gpu_source
+        .as_ref()
+        .and_then(runmat_accelerate_api::provider_for_handle);
     let value = crate::gather_if_needed_async(&value).await?;
     let output_class = OutputClass::from_value(&value);
     let eval = mode_evaluate(value, parsed, output_class)?;
@@ -263,7 +265,8 @@ async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         eval.into_values_value()?
     };
     if let Some(provider) = gpu_provider {
-        upload_mode_value(provider, result)
+        let protected: Vec<_> = gpu_source.iter().collect();
+        upload_mode_value(provider, result, &protected)
     } else {
         Ok(result)
     }
@@ -272,22 +275,37 @@ async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 fn upload_mode_value(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: Value,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> BuiltinResult<Value> {
-        let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|error| mode_internal_error(format!("mode: GPU upload failed: {error}")))?;
-        if logical {
-            runmat_accelerate_api::set_handle_logical(&handle, true);
-        }
+    let upload_error = |error: runmat_accelerate_api::NumericUploadError| {
+        crate::build_runtime_error(format!("mode: GPU upload failed: {error}"))
+            .with_builtin("mode")
+            .with_identifier(MODE_ERROR_INTERNAL.identifier.expect("internal identifier"))
+            .with_source(error)
+            .build()
+    };
+    let upload_tensor = |tensor: Tensor| -> BuiltinResult<Value> {
+        let handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+            provider, &tensor, protected,
+        )
+        .map_err(upload_error)?;
+        Ok(Value::GpuTensor(handle))
+    };
+    let upload_logical = |data: &[u8], shape: &[usize]| -> BuiltinResult<Value> {
+        let handle = runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &runmat_accelerate_api::HostLogicalTensorView { data, shape },
+            protected,
+        )
+        .map_err(upload_error)?;
         Ok(Value::GpuTensor(handle))
     };
     match value {
         gpu @ Value::GpuTensor(_) => Ok(gpu),
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(
@@ -295,23 +313,15 @@ fn upload_mode_value(
                 vec![1, 1],
             )
             .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|error| mode_internal_error(format!("mode: {error}")))?,
-            true,
-        ),
-        Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(mode_internal_error)?;
-            upload_tensor(tensor, true)
-        }
+        Value::Bool(logical) => upload_logical(&[u8::from(logical)], &[1, 1]),
+        Value::LogicalArray(logical) => upload_logical(&logical.data, &logical.shape),
         Value::Cell(cell) => {
             let shape = cell.shape.clone();
             let data = cell
                 .data
                 .into_iter()
-                .map(|entry| upload_mode_value(provider, entry))
+                .map(|entry| upload_mode_value(provider, entry, protected))
                 .collect::<BuiltinResult<Vec<_>>>()?;
             runmat_value::CellArray::new_with_shape(data, shape)
                 .map(Value::Cell)
@@ -319,7 +329,7 @@ fn upload_mode_value(
         }
         Value::OutputList(values) => values
             .into_iter()
-            .map(|entry| upload_mode_value(provider, entry))
+            .map(|entry| upload_mode_value(provider, entry, protected))
             .collect::<BuiltinResult<Vec<_>>>()
             .map(Value::OutputList),
         other => Ok(other),
@@ -388,7 +398,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<ModeAxes>> {
         Value::Tensor(tensor) => (tensor::is_scalar_tensor(tensor), tensor.is_empty()),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let len = tensor::element_count(&handle.shape);
+            let len = tensor::element_count(handle.shape());
             (len == 1, len == 0)
         }
         _ => return Ok(None),

@@ -422,13 +422,13 @@ fn scalar_value(value: &Value) -> bool {
     matches!(value, Value::Num(_) | Value::Int(_) | Value::Bool(_))
         || matches!(value, Value::Tensor(value_tensor) if tensor::is_scalar_tensor(value_tensor))
         || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
-        || matches!(value, Value::GpuTensor(handle) if tensor::element_count(&handle.shape) == 1)
+        || matches!(value, Value::GpuTensor(handle) if tensor::element_count(handle.shape()) == 1)
 }
 
 fn documented_logical_scalar(value: &Value) -> bool {
     matches!(value, Value::Bool(_))
         || matches!(value, Value::LogicalArray(array) if array.data.len() == 1)
-        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) && tensor::element_count(&handle.shape) == 1)
+        || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle) && tensor::element_count(handle.shape()) == 1)
 }
 
 fn ensure_cvpartition_extensions(

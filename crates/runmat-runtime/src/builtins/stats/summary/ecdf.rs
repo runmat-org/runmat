@@ -699,9 +699,7 @@ fn restore_ecdf_output(
         .ok_or_else(|| internal_error(ECDF_NAME, "ecdf: source GPU provider is unavailable"))?;
     let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
         .map_err(|err| internal_error(ECDF_NAME, format!("ecdf: {err}")))?;
-    Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
-        handle,
-    ))
+    crate::builtins::common::gpu_helpers::resident_gpu_value(handle)
 }
 
 #[runtime_builtin(

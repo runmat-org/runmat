@@ -563,7 +563,7 @@ fn validate_kstest_alpha_role(value: &Value) -> BuiltinResult<()> {
         Value::LogicalArray(array) => array.data.len() == 1,
         Value::GpuTensor(handle) => {
             handle
-                .shape
+                .shape()
                 .iter()
                 .try_fold(1usize, |len, dim| len.checked_mul(*dim))
                 == Some(1)

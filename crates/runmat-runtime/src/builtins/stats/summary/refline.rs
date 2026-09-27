@@ -324,7 +324,7 @@ async fn normalize_refline_coefficients(args: &mut [Value]) -> BuiltinResult<()>
     };
     let first_len = match first {
         Value::Tensor(tensor) => tensor_utils::tensor_element_len(tensor),
-        Value::GpuTensor(handle) => handle.shape.iter().product(),
+        Value::GpuTensor(handle) => handle.shape().iter().product(),
         _ => 1,
     };
     let count = if first_len == 2 { 1 } else { args.len().min(2) };

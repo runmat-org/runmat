@@ -1158,7 +1158,7 @@ fn rest_requests_multi_axis(rest: &[Value]) -> bool {
     rest.iter().any(|value| {
         keyword_of(value).is_some_and(|keyword| keyword == "all")
             || matches!(value, Value::Tensor(tensor) if tensor::tensor_element_len(tensor) > 1)
-            || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() > 1)
+            || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().product::<usize>() > 1)
     })
 }
 

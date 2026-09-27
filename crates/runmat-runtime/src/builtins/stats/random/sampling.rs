@@ -1612,7 +1612,7 @@ pub mod randsample {
     pub(crate) async fn randsample_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         ensure_randsample_extensions(&args).await?;
         let resident_population = args.first().and_then(|value| match value {
-            Value::GpuTensor(handle) if tensor::element_count(&handle.shape) > 1 => {
+            Value::GpuTensor(handle) if tensor::element_count(handle.shape()) > 1 => {
                 Some(handle.clone())
             }
             _ => None,
@@ -1647,7 +1647,7 @@ async fn ensure_randsample_extensions(args: &[Value]) -> BuiltinResult<()> {
         let scalar = match first {
             Value::Int(_) => true,
             Value::Tensor(tensor) => tensor::is_scalar_tensor(tensor),
-            Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+            Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
             _ => false,
         };
         crate::compatibility::ensure_builtin_extension_enabled(

@@ -2,7 +2,6 @@
 
 use runmat_accelerate_api::{
     AccelProvider, CovNormalization, CovRows, CovarianceOptions, GpuTensorHandle, GpuTensorStorage,
-    HostTensorView,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -656,9 +655,7 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         _ => return Ok(None),
     };
 
-    let provider = match runmat_accelerate_api::provider_for_handle(first_handle)
-        .or_else(runmat_accelerate_api::provider)
-    {
+    let provider = match runmat_accelerate_api::provider_for_handle(first_handle) {
         Some(p) => p,
         None => return Ok(None),
     };
@@ -678,23 +675,17 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
     };
 
     let rows = gpu_observation_count(first_handle, maybe_second_handle.is_some())?;
-    let mut temporary_inputs = Vec::new();
-    let weight_handle = match materialize_gpu_weight_vector(
-        provider,
-        args.weight_vector.as_ref(),
-        rows,
-        &mut temporary_inputs,
-    )
-    .await
-    {
-        Ok(weight) => weight,
-        Err(err) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
-            return Err(err);
-        }
-    };
+    let protected: Vec<_> = std::iter::once(first_handle)
+        .chain(maybe_second_handle)
+        .collect();
+    let _residency: Vec<_> = protected
+        .iter()
+        .map(|handle| crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle))
+        .collect();
+    let weight_handle =
+        materialize_gpu_weight_vector(provider, args.weight_vector.as_ref(), rows, &protected)
+            .await?;
     if args.weight_vector.is_some() && weight_handle.is_none() {
-        free_temporary_gpu_inputs(provider, temporary_inputs);
         return Ok(None);
     }
 
@@ -713,12 +704,8 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
         )
         .await
     {
-        Ok(result) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
-            Ok(Some(Value::GpuTensor(result)))
-        }
+        Ok(result) => Ok(Some(Value::GpuTensor(result))),
         Err(error) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
             if error.is_unsupported() {
                 Ok(None)
             } else {
@@ -729,14 +716,14 @@ async fn cov_try_gpu(args: &CovArgs) -> BuiltinResult<Option<Value>> {
 }
 
 fn gpu_observation_count(handle: &GpuTensorHandle, paired_input: bool) -> BuiltinResult<usize> {
-    if handle.shape.len() > 2 {
+    if handle.shape().len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "inputs must be 2-D matrices or vectors",
         ));
     }
-    let len = handle.shape.iter().copied().product::<usize>();
-    Ok(match handle.shape.as_slice() {
+    let len = handle.shape().iter().copied().product::<usize>();
+    Ok(match handle.shape() {
         [] => 1,
         _ if paired_input => len,
         [length] => *length,
@@ -750,7 +737,7 @@ async fn materialize_gpu_weight_vector(
     provider: &dyn AccelProvider,
     value: Option<&Value>,
     expected_rows: usize,
-    temporary_inputs: &mut Vec<GpuTensorHandle>,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
     let Some(value) = value else {
         return Ok(None);
@@ -779,33 +766,44 @@ async fn materialize_gpu_weight_vector(
         }
         other => {
             let weights = value_to_weight_vector(other.clone(), expected_rows).await?;
-            let shape = [expected_rows, 1];
-            let handle = provider
-                .upload(&HostTensorView {
-                    data: &weights,
-                    shape: &shape,
-                })
-                .map_err(|err| cov_internal_error(err.to_string()))?;
-            temporary_inputs.push(handle.clone());
+            let shape = vec![expected_rows, 1];
+            let weights = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F32 => Tensor::from_f32(
+                    weights.into_iter().map(|value| value as f32).collect(),
+                    shape,
+                ),
+                runmat_accelerate_api::ProviderPrecision::F64 => Tensor::new(weights, shape),
+            }
+            .map_err(cov_internal_error)?;
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting_typed(
+                provider, &weights, protected,
+            )
+            .map_err(|error| {
+                crate::build_runtime_error(format!("cov: weight upload failed: {error}"))
+                    .with_builtin(NAME)
+                    .with_identifier(COV_ERROR_INTERNAL.identifier.expect("internal identifier"))
+                    .with_source(error)
+                    .build()
+            })?;
             Ok(Some(handle))
         }
     }
 }
 
 fn validate_gpu_weight_shape(handle: &GpuTensorHandle, expected_rows: usize) -> BuiltinResult<()> {
-    if handle.shape.len() > 2 {
+    if handle.shape().len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "weight vector must be one-dimensional",
         ));
     }
-    let rows = if handle.shape.is_empty() {
+    let rows = if handle.shape().is_empty() {
         1
     } else {
-        handle.shape[0]
+        handle.shape()[0]
     };
-    let cols = if handle.shape.len() >= 2 {
-        handle.shape[1]
+    let cols = if handle.shape().len() >= 2 {
+        handle.shape()[1]
     } else {
         1
     };
@@ -822,12 +820,6 @@ fn validate_gpu_weight_shape(handle: &GpuTensorHandle, expected_rows: usize) -> 
         ));
     }
     Ok(())
-}
-
-fn free_temporary_gpu_inputs(provider: &dyn AccelProvider, handles: Vec<GpuTensorHandle>) {
-    for handle in handles {
-        let _ = provider.free(&handle);
-    }
 }
 
 async fn cov_host(args: CovArgs) -> BuiltinResult<Value> {
@@ -1024,19 +1016,19 @@ fn value_rows_cols(value: &Value) -> BuiltinResult<(usize, usize)> {
             Ok((rows, cols))
         }
         Value::GpuTensor(handle) => {
-            if handle.shape.len() > 2 {
+            if handle.shape().len() > 2 {
                 return Err(cov_error_with_detail(
                     &COV_ERROR_INVALID_ARGUMENT,
                     "inputs must be 2-D matrices or vectors",
                 ));
             }
-            let rows = if handle.shape.is_empty() {
+            let rows = if handle.shape().is_empty() {
                 1
             } else {
-                handle.shape[0]
+                handle.shape()[0]
             };
-            let cols = if handle.shape.len() >= 2 {
-                handle.shape[1]
+            let cols = if handle.shape().len() >= 2 {
+                handle.shape()[1]
             } else {
                 1
             };
