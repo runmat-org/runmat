@@ -1,6 +1,8 @@
 //! Hardware-free tests exercise the same gate and scope-stack mechanics as the
 //! real device. They do not fabricate a WGPU device, buffer, or allocation.
 use super::*;
+#[cfg(target_arch = "wasm32")]
+wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 use std::{
     future::{ready, Ready},
     sync::{
@@ -241,6 +243,51 @@ fn successful_receipt_releases_work_only_after_every_pop_result() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
+fn two_shared_readers_overlap_before_either_is_released() {
+    use std::{sync::mpsc, time::Duration};
+    let gate = Arc::new(gate::Gate::default());
+    let active = Arc::new(AtomicUsize::new(0));
+    let peak = Arc::new(AtomicUsize::new(0));
+    let (entered, entries) = mpsc::channel();
+    let mut releases = Vec::new();
+    let mut readers = Vec::new();
+    for index in 0..2 {
+        let (release, released) = mpsc::channel();
+        releases.push(release);
+        let (gate, active, peak, entered) =
+            (gate.clone(), active.clone(), peak.clone(), entered.clone());
+        readers.push(std::thread::spawn(move || {
+            gate.shared(|| {
+                let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(count, Ordering::SeqCst);
+                entered.send(index).unwrap();
+                // Bounded even if a regression serializes the readers. A timeout
+                // is a failure, never evidence of successful concurrency.
+                let result = released.recv_timeout(Duration::from_secs(30));
+                active.fetch_sub(1, Ordering::SeqCst);
+                result
+            })
+        }));
+    }
+    let first = entries.recv_timeout(Duration::from_secs(5));
+    let second = entries.recv_timeout(Duration::from_secs(5));
+    let overlapped = active.load(Ordering::SeqCst);
+    // Always release/join before asserting, including a failed entry handshake.
+    for release in releases {
+        let _ = release.send(());
+    }
+    for reader in readers {
+        reader.join().unwrap().unwrap().unwrap();
+    }
+    assert!(first.is_ok() && second.is_ok(), "both readers must enter");
+    assert_ne!(first.unwrap(), second.unwrap());
+    assert_eq!(overlapped, 2, "both readers held the gate simultaneously");
+    assert_eq!(peak.load(Ordering::SeqCst), 2);
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
 fn exclusive_transaction_isolates_scope_errors_from_concurrent_shared_emission() {
     use std::sync::{mpsc, Barrier};
     let gate = Arc::new(gate::Gate::default());
@@ -303,7 +350,7 @@ fn unwind_balances_scopes_before_poisoned_gate_is_observed() {
 }
 
 #[cfg(target_arch = "wasm32")]
-#[test]
+#[wasm_bindgen_test::wasm_bindgen_test]
 fn browser_reentrancy_is_nonblocking_and_borrow_is_released() {
     let gate = gate::Gate::default();
     gate.shared(|| assert_eq!(gate.exclusive(|| ()), Err(WgpuAccessError::Busy)))

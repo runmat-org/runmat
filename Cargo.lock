@@ -6329,6 +6329,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
+ "wasm-bindgen-test",
  "wgpu 0.19.4",
  "wgpu 24.0.5",
 ]

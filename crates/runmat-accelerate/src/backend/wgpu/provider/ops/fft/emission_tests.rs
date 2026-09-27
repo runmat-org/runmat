@@ -2,6 +2,9 @@ use super::*;
 use crate::backend::wgpu::provider::WgpuProviderOptions;
 use runmat_accelerate_api::{HostTensorView, WgpuScopeErrors};
 
+#[path = "emission_pending_tests.rs"]
+mod pending_tests;
+
 async fn provider() -> WgpuProvider {
     #[cfg(not(target_arch = "wasm32"))]
     let provider = WgpuProvider::new(WgpuProviderOptions::default())
@@ -148,6 +151,10 @@ async fn suspended_browser_fft_scope_can_be_cancelled_before_promise_delivery() 
         1,
         "production dispatch was actually entered"
     );
+    provider
+        .access
+        .with_shared(|_| ())
+        .expect("still-pending receipt must not retain access");
     drop(pending);
     // Cancellation cannot retain the exclusive emission permit. The dispatch
     // helper publishes no tensor handles; its temporary bind group and popped
