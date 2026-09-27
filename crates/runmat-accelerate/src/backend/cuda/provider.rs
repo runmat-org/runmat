@@ -12,7 +12,7 @@ use runmat_accelerate_api::{
 };
 
 use super::allocation_state::{Allocation, AllocationState};
-use super::driver::CudaDriver;
+use super::driver::{CudaDriver, DevicePointer};
 use super::transfer::{
     numeric_owned_bytes_mut, numeric_to_integer, numeric_view_bytes, zeroed_numeric,
 };
@@ -79,6 +79,24 @@ impl CudaProvider {
         storage: GpuTensorStorage,
         initialization: NativeDeviceInitialization,
     ) -> Result<GpuTensorHandle> {
+        self.allocate_initialized(shape, element_type, storage, |pointer, byte_length| {
+            if initialization == NativeDeviceInitialization::Zeroed {
+                self.driver.zero(pointer, byte_length)
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    /// Keep fresh pointers unpublished until all synchronous initialization
+    /// succeeds. The allocation owner also retires them on initializer unwind.
+    fn allocate_initialized(
+        &self,
+        shape: &[usize],
+        element_type: NumericElementType,
+        storage: GpuTensorStorage,
+        initialize: impl FnOnce(DevicePointer, usize) -> Result<()>,
+    ) -> Result<GpuTensorHandle> {
         let byte_length = native_buffer_byte_length(shape, element_type, storage)?;
         let descriptor = GpuTensorDescriptor::numeric(element_type, storage);
         self.allocations.allocate(
@@ -86,35 +104,20 @@ impl CudaProvider {
             descriptor,
             byte_length,
             || self.driver.allocate(byte_length),
-            |pointer| {
-                if initialization == NativeDeviceInitialization::Zeroed {
-                    self.driver.zero(pointer, byte_length)
-                } else {
-                    Ok(())
-                }
-            },
+            |pointer| initialize(pointer, byte_length),
         )
     }
 
     fn upload_numeric_impl(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
         host.validate()?;
-        let handle = self.allocate(
+        let bytes = numeric_view_bytes(host.data);
+        let handle = self.allocate_initialized(
             host.shape,
             host.element_type(),
             host.storage,
-            NativeDeviceInitialization::Uninitialized,
+            |pointer, _| self.driver.upload(pointer, bytes),
         )?;
-        let allocation = self.allocation(&handle)?;
-        let bytes = numeric_view_bytes(host.data);
-        let result = self.with_context(|| self.driver.upload(allocation.pointer, bytes));
-        if let Err(error) = result {
-            let _ = self.free(&handle);
-            return Err(error);
-        }
-        runmat_value::record_host_copy(
-            runmat_value::HostCopyReason::ProviderUpload,
-            allocation.byte_length,
-        );
+        runmat_value::record_host_copy(runmat_value::HostCopyReason::ProviderUpload, bytes.len());
         Ok(handle)
     }
 
@@ -165,34 +168,27 @@ impl CudaProvider {
             .descriptor
             .element_type
             .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?;
-        let output = self.allocate(
-            &source.shape,
-            element_type,
-            GpuTensorStorage::Real,
-            NativeDeviceInitialization::Uninitialized,
-        )?;
-        let output_allocation = self.allocation(&output)?;
         let element_bytes = element_type.element_size();
         let offset = match component {
             NativeDeviceComponent::Real => 0,
             NativeDeviceComponent::Imaginary => element_bytes,
         };
         let elements = source_allocation.byte_length / (element_bytes * 2);
-        let result = self.with_context(|| {
-            self.driver.copy_strided(
-                output_allocation.pointer,
-                element_bytes,
-                source_allocation.pointer + offset as u64,
-                element_bytes * 2,
-                element_bytes,
-                elements,
-            )
-        });
-        if let Err(error) = result {
-            let _ = self.free(&output);
-            return Err(error);
-        }
-        Ok(output)
+        self.allocate_initialized(
+            &source.shape,
+            element_type,
+            GpuTensorStorage::Real,
+            |pointer, _| {
+                self.driver.copy_strided(
+                    pointer,
+                    element_bytes,
+                    source_allocation.pointer + offset as u64,
+                    element_bytes * 2,
+                    element_bytes,
+                    elements,
+                )
+            },
+        )
     }
 
     fn combine_components_impl(
@@ -215,38 +211,31 @@ impl CudaProvider {
             .descriptor
             .element_type
             .ok_or_else(|| anyhow!("CUDA handle is missing its element type"))?;
-        let output = self.allocate(
+        let element_bytes = element_type.element_size();
+        let elements = real_allocation.byte_length / element_bytes;
+        self.allocate_initialized(
             &real.shape,
             element_type,
             GpuTensorStorage::ComplexInterleaved,
-            NativeDeviceInitialization::Uninitialized,
-        )?;
-        let output_allocation = self.allocation(&output)?;
-        let element_bytes = element_type.element_size();
-        let elements = real_allocation.byte_length / element_bytes;
-        let result = self.with_context(|| {
-            self.driver.copy_strided(
-                output_allocation.pointer,
-                element_bytes * 2,
-                real_allocation.pointer,
-                element_bytes,
-                element_bytes,
-                elements,
-            )?;
-            self.driver.copy_strided(
-                output_allocation.pointer + element_bytes as u64,
-                element_bytes * 2,
-                imaginary_allocation.pointer,
-                element_bytes,
-                element_bytes,
-                elements,
-            )
-        });
-        if let Err(error) = result {
-            let _ = self.free(&output);
-            return Err(error);
-        }
-        Ok(output)
+            |pointer, _| {
+                self.driver.copy_strided(
+                    pointer,
+                    element_bytes * 2,
+                    real_allocation.pointer,
+                    element_bytes,
+                    element_bytes,
+                    elements,
+                )?;
+                self.driver.copy_strided(
+                    pointer + element_bytes as u64,
+                    element_bytes * 2,
+                    imaginary_allocation.pointer,
+                    element_bytes,
+                    element_bytes,
+                    elements,
+                )
+            },
+        )
     }
 }
 

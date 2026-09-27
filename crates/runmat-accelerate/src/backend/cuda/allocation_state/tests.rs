@@ -4,6 +4,7 @@ use std::sync::atomic::AtomicBool;
 
 mod driver;
 mod quarantine;
+mod initialization;
 use driver::FakeDriver;
 
 fn owner() -> (Arc<AllocationState>, Arc<FakeDriver>) {
