@@ -17,59 +17,29 @@ pub(crate) enum SpacingSpec {
 pub(crate) enum GpuIntegrationSpacing {
     Unit,
     Scalar(f64),
-    ScalarHandle {
-        handle: GpuTensorHandle,
-        owned: bool,
-    },
-    Vector {
-        handle: GpuTensorHandle,
-        owned: bool,
-    },
-    Tensor {
-        handle: GpuTensorHandle,
-        owned: bool,
-    },
+    ScalarHandle { handle: GpuTensorHandle },
+    Vector { handle: GpuTensorHandle },
+    Tensor { handle: GpuTensorHandle },
 }
 
 impl GpuIntegrationSpacing {
     pub(crate) fn as_provider_spacing(&self) -> ProviderTrapezoidSpacing<'_> {
         match self {
-            GpuIntegrationSpacing::Unit => ProviderTrapezoidSpacing::Unit,
-            GpuIntegrationSpacing::Scalar(value) => ProviderTrapezoidSpacing::Scalar(*value),
-            GpuIntegrationSpacing::ScalarHandle { handle, .. } => {
-                ProviderTrapezoidSpacing::ScalarHandle(handle)
-            }
-            GpuIntegrationSpacing::Vector { handle, .. } => {
-                ProviderTrapezoidSpacing::Vector(handle)
-            }
-            GpuIntegrationSpacing::Tensor { handle, .. } => {
-                ProviderTrapezoidSpacing::Tensor(handle)
-            }
+            Self::Unit => ProviderTrapezoidSpacing::Unit,
+            Self::Scalar(value) => ProviderTrapezoidSpacing::Scalar(*value),
+            Self::ScalarHandle { handle } => ProviderTrapezoidSpacing::ScalarHandle(handle),
+            Self::Vector { handle } => ProviderTrapezoidSpacing::Vector(handle),
+            Self::Tensor { handle } => ProviderTrapezoidSpacing::Tensor(handle),
         }
     }
 
-    pub(crate) fn free_owned(
-        &self,
-        fallback_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    ) -> anyhow::Result<()> {
-        let handle = match self {
-            GpuIntegrationSpacing::ScalarHandle {
-                handle,
-                owned: true,
+    pub(crate) fn handle(&self) -> Option<&GpuTensorHandle> {
+        match self {
+            Self::ScalarHandle { handle } | Self::Vector { handle } | Self::Tensor { handle } => {
+                Some(handle)
             }
-            | GpuIntegrationSpacing::Vector {
-                handle,
-                owned: true,
-            }
-            | GpuIntegrationSpacing::Tensor {
-                handle,
-                owned: true,
-            } => handle,
-            _ => return Ok(()),
-        };
-        runmat_accelerate_api::provider_for_handle(handle)
-            .unwrap_or(fallback_provider)
-            .free(handle)
+            Self::Unit | Self::Scalar(_) => None,
+        }
     }
 }
 
@@ -262,7 +232,7 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
     }
 
     if let Value::GpuTensor(handle) = value {
-        if runmat_accelerate_api::provider_for_handle(&handle)
+        if gpu_helpers::exact_provider_for_handle(&handle)
             .is_none_or(|owner| !std::ptr::eq(owner, provider))
         {
             return Err(integration_error(
@@ -277,20 +247,14 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
             ));
         }
         let padded_y_shape = pad_shape_for_dim(y_shape, dim);
-        let len = tensor::element_count(&handle.shape);
+        let len = tensor::element_count(handle.shape());
         if len == 1 {
-            return Ok(GpuIntegrationSpacing::ScalarHandle {
-                handle,
-                owned: false,
-            });
+            return Ok(GpuIntegrationSpacing::ScalarHandle { handle });
         }
-        if shapes_equal_with_trailing_ones(&handle.shape, &padded_y_shape) {
-            return Ok(GpuIntegrationSpacing::Tensor {
-                handle,
-                owned: false,
-            });
+        if shapes_equal_with_trailing_ones(handle.shape(), &padded_y_shape) {
+            return Ok(GpuIntegrationSpacing::Tensor { handle });
         }
-        if is_vector_shape(&handle.shape) {
+        if is_vector_shape(handle.shape()) {
             let expected = padded_y_shape[dim - 1];
             if len != expected {
                 return Err(integration_error(
@@ -301,10 +265,7 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
                     ),
                 ));
             }
-            return Ok(GpuIntegrationSpacing::Vector {
-                handle,
-                owned: false,
-            });
+            return Ok(GpuIntegrationSpacing::Vector { handle });
         }
         return Err(integration_error(
             name,
@@ -322,11 +283,9 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
                     data: &values,
                     shape: &shape,
                 })
-                .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
-            Ok(GpuIntegrationSpacing::Vector {
-                handle,
-                owned: true,
-            })
+                .map_err(|source| provider_spacing_error(name, source))?;
+            let handle = admit_spacing_upload(name, provider, handle, &shape)?;
+            Ok(GpuIntegrationSpacing::Vector { handle })
         }
         SpacingSpec::Tensor(tensor) => {
             let data = real_tensor_values(&tensor);
@@ -335,13 +294,40 @@ pub(crate) fn spacing_from_gpu_or_host_value_for_provider(
                     data: &data,
                     shape: &tensor.shape,
                 })
-                .map_err(|err| integration_error(name, format!("{name}: {err}")))?;
-            Ok(GpuIntegrationSpacing::Tensor {
-                handle,
-                owned: true,
-            })
+                .map_err(|source| provider_spacing_error(name, source))?;
+            let handle = admit_spacing_upload(name, provider, handle, &tensor.shape)?;
+            Ok(GpuIntegrationSpacing::Tensor { handle })
         }
     }
+}
+
+fn provider_spacing_error(name: &str, source: anyhow::Error) -> RuntimeError {
+    let mut error = integration_error(name, format!("{name}: spacing upload failed: {source}"));
+    error.source = Some(source.into_boxed_dyn_error());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
+fn admit_spacing_upload(
+    name: &str,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    handle: GpuTensorHandle,
+    shape: &[usize],
+) -> BuiltinResult<GpuTensorHandle> {
+    if handle.shape() != shape
+        || !gpu_helpers::exact_provider_for_handle(&handle)
+            .is_some_and(|owner| std::ptr::eq(owner, provider))
+        || runmat_accelerate_api::handle_storage(&handle) != GpuTensorStorage::Real
+        || runmat_accelerate_api::handle_precision(&handle) != Some(provider.precision())
+        || runmat_accelerate_api::handle_is_logical(&handle)
+        || runmat_accelerate_api::handle_integer_type(&handle).is_some()
+    {
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            integration_error(name, format!("{name}: malformed spacing upload")),
+        ));
+    }
+    Ok(handle)
 }
 
 pub(crate) fn interval_width(spacing: &SpacingSpec, idx0: usize, idx1: usize, k: usize) -> f64 {

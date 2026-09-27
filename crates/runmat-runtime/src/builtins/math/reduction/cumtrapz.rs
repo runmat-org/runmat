@@ -12,6 +12,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -358,7 +359,7 @@ fn same_size_tensor_spacing(parsed: &ParsedCumtrapzArgs) -> bool {
     };
     if matches!(spacing, Value::Tensor(value_tensor) if crate::builtins::common::tensor::is_scalar_tensor(value_tensor))
         || matches!(spacing, Value::LogicalArray(array) if array.data.len() == 1)
-        || matches!(spacing, Value::GpuTensor(handle) if crate::builtins::common::tensor::element_count(&handle.shape) == 1)
+        || matches!(spacing, Value::GpuTensor(handle) if crate::builtins::common::tensor::element_count(handle.shape()) == 1)
     {
         return false;
     }
@@ -476,7 +477,7 @@ fn native_spacing_is_eligible(
         Value::GpuTensor(handle) => {
             runmat_accelerate_api::handle_storage(handle)
                 == runmat_accelerate_api::GpuTensorStorage::Real
-                && runmat_accelerate_api::provider_for_handle(handle)
+                && gpu_helpers::exact_provider_for_handle(handle)
                     .is_some_and(|owner| std::ptr::eq(owner, provider))
         }
         _ => true,
@@ -491,76 +492,53 @@ fn native_result_is_valid(
 ) -> bool {
     result.device_id() == input.device_id()
         && result.shape() == expected_shape
+        && !result.shares_allocation_with(input)
+        && !runmat_accelerate_api::handle_is_logical(result)
+        && runmat_accelerate_api::handle_integer_type(result).is_none()
         && runmat_accelerate_api::handle_storage(result)
             == runmat_accelerate_api::handle_storage(input)
         && runmat_accelerate_api::handle_precision(result)
             == runmat_accelerate_api::handle_precision(input)
-        && runmat_accelerate_api::provider_for_handle(result)
+        && gpu_helpers::exact_provider_for_handle(result)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_result(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-    if let Err(error) = owner.free(handle) {
-        log::trace!("cumtrapz: failed to free rejected provider result: {error}");
-    }
 }
 
 fn restore_to_owner(
     value: Value,
     owner: Option<&runmat_accelerate_api::GpuTensorHandle>,
     single_output: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let Some(provider) = owner.and_then(runmat_accelerate_api::provider_for_handle) else {
+    let Some(owner) = owner else {
         return Ok(value);
     };
-    let expected = if single_output {
-        runmat_accelerate_api::ProviderPrecision::F32
-    } else {
-        runmat_accelerate_api::ProviderPrecision::F64
+    let value = match value {
+        Value::Num(number) if single_output => Value::Tensor(
+            Tensor::from_f32(vec![number as f32], vec![1, 1]).map_err(cumtrapz_internal_error)?,
+        ),
+        Value::Complex(real, imaginary) if single_output => Value::ComplexTensor(
+            ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
+                .map_err(cumtrapz_internal_error)?,
+        ),
+        value => value,
     };
-    if provider.precision() != expected {
-        return Ok(value);
-    }
-    match value {
-        Value::Num(number) => {
-            let tensor = if single_output {
-                Tensor::from_f32(vec![number as f32], vec![1, 1])
-            } else {
-                Tensor::new(vec![number], vec![1, 1])
-            }
-            .map_err(|error| cumtrapz_internal_error(&error))?;
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-                .map(crate::builtins::common::gpu_helpers::resident_gpu_value)
-                .map_err(|error| cumtrapz_internal_error(&error))
-        }
-        Value::Complex(real, imaginary) => {
-            let tensor = if single_output {
-                ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
-            } else {
-                ComplexTensor::new(vec![(real, imaginary)], vec![1, 1])
-            }
-            .map_err(|error| cumtrapz_internal_error(&error))?;
-            crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map(crate::builtins::common::gpu_helpers::complex_gpu_value)
-                .map_err(|error| cumtrapz_internal_error(error.to_string()))
-        }
-        Value::Tensor(tensor) => {
-            crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
-                .map(crate::builtins::common::gpu_helpers::resident_gpu_value)
-                .map_err(|error| cumtrapz_internal_error(&error))
-        }
-        Value::ComplexTensor(tensor) => {
-            crate::builtins::common::gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map(crate::builtins::common::gpu_helpers::complex_gpu_value)
-                .map_err(|error| cumtrapz_internal_error(error.to_string()))
-        }
-        other => Ok(other),
-    }
+    gpu_helpers::restore_class_preserving_value_protecting(owner, value, NAME, protected)
 }
+
+fn unsupported_spacing_failure(error: &RuntimeError) -> bool {
+    let mut source: Option<&(dyn std::error::Error + 'static)> = Some(error);
+    while let Some(error) = source {
+        if error.is::<runmat_accelerate_api::UnsupportedProviderOperation>() {
+            return true;
+        }
+        source = error.source();
+    }
+    false
+}
+
+#[cfg(test)]
+#[path = "cumtrapz/owning_tests.rs"]
+mod owning_tests;
 
 #[runtime_builtin(
     name = "cumtrapz",
@@ -590,8 +568,18 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
     }
     let single_output = value_uses_single(&parsed.y);
     let owner_handle = first_resident_handle(&parsed);
+    let protected = std::iter::once(&parsed.y)
+        .chain(parsed.spacing.iter())
+        .filter_map(|value| {
+            if let Value::GpuTensor(handle) = value {
+                Some(handle.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
     if let Value::GpuTensor(handle) = &parsed.y {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
             let shape = if handle.shape().is_empty() {
                 vec![1, 1]
             } else {
@@ -602,29 +590,59 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
                 .unwrap_or_else(|| default_dimension_from_shape(&shape));
             if native_y_is_eligible(handle) && native_spacing_is_eligible(&parsed.spacing, provider)
             {
-                if let Ok(spacing) = spacing_from_gpu_or_host_value_for_provider(
+                let spacing = match spacing_from_gpu_or_host_value_for_provider(
                     NAME,
                     parsed.spacing.clone(),
                     &shape,
                     dim,
                     provider,
                 ) {
+                    Ok(spacing) => Some(spacing),
+                    Err(error) if unsupported_spacing_failure(&error) => None,
+                    Err(error) => return Err(error),
+                };
+                if let Some(spacing) = spacing {
+                    if !matches!(parsed.spacing.as_ref(), Some(Value::GpuTensor(_)))
+                        && spacing
+                            .handle()
+                            .is_some_and(|spacing| spacing.shares_allocation_with(handle))
+                    {
+                        return Err(cumtrapz_internal_error("spacing upload aliased resident Y"));
+                    }
                     let native_result = provider.cumtrapz_dim(
                         handle,
                         dim.saturating_sub(1),
                         spacing.as_provider_spacing(),
                     );
-                    if let Err(error) = spacing.free_owned(provider) {
-                        log::trace!("cumtrapz: failed to free temporary spacing upload: {error}");
-                    }
                     match native_result {
-                        Ok(result) if native_result_is_valid(&result, handle, provider, &shape) => {
-                            return Ok(Value::GpuTensor(result));
+                        Ok(mut result)
+                            if native_result_is_valid(&result, handle, provider, &shape)
+                                && spacing.handle().is_none_or(|spacing| {
+                                    !result.shares_allocation_with(spacing)
+                                }) =>
+                        {
+                            gpu_helpers::propagate_output_provenance(
+                                &mut result,
+                                protected.iter(),
+                            )?;
+                            return gpu_helpers::resident_gpu_value(result);
                         }
-                        Ok(result) => free_rejected_native_result(&result, provider),
-                        Err(error) => log::trace!(
-                            "cumtrapz: provider hook unavailable, using host fallback: {error}"
-                        ),
+                        Ok(result) => {
+                            let mut error = cumtrapz_internal_error(
+                                "provider returned malformed or aliased cumulative integral",
+                            );
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            return Err(gpu_helpers::reject_gpu_output(result, error));
+                        }
+                        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                        Err(source) => {
+                            let mut error = cumtrapz_internal_error(format!(
+                                "provider execution failed: {source}"
+                            ));
+                            error.source = Some(source.into_boxed_dyn_error());
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            return Err(error);
+                        }
                     }
                 }
             }
@@ -637,15 +655,9 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
             .map(value_has_gpu_tensor)
             .unwrap_or(false);
 
-    let y_value = gather_host_value(parsed.y)
-        .await
-        .map_err(|err| cumtrapz_internal_error(err.message()))?;
+    let y_value = gather_host_value(parsed.y).await?;
     let spacing_value = match parsed.spacing {
-        Some(value) => Some(
-            gather_host_value(value)
-                .await
-                .map_err(|err| cumtrapz_internal_error(err.message()))?,
-        ),
+        Some(value) => Some(gather_host_value(value).await?),
         None => None,
     };
     ensure_exact_integer_boundary(&y_value, "Y")?;
@@ -692,7 +704,12 @@ async fn cumtrapz_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value
     };
 
     if wants_gpu_result {
-        restore_to_owner(result, owner_handle.as_ref(), single_output)
+        restore_to_owner(
+            result,
+            owner_handle.as_ref(),
+            single_output,
+            &protected.iter().collect::<Vec<_>>(),
+        )
     } else {
         Ok(result)
     }

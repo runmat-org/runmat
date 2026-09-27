@@ -1,0 +1,99 @@
+use super::*;
+use runmat_accelerate_api::{
+    test_support::{RetirementProbe, TestAllocationOwner},
+    AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned,
+    HostNumericTensorOwned, HostTensorView, NumericElementType, ProviderTrapezoidSpacing,
+    ThreadProviderGuard,
+};
+use std::sync::Mutex;
+
+#[derive(Clone, Copy)]
+enum Fault {
+    Failure,
+    InputAlias,
+    SpacingAlias,
+}
+struct Provider {
+    owner: TestAllocationOwner,
+    uploads: Mutex<Vec<RetirementProbe>>,
+    fault: Fault,
+}
+impl AccelProvider for Provider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "cumtrapz spacing ownership fixture".into()
+    }
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(host.data.to_vec()),
+            shape: host.shape.to_vec(),
+            storage: GpuTensorStorage::Real,
+        })?;
+        self.uploads.lock().unwrap().push(allocation.probe);
+        Ok(allocation.handle)
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("failure must not fall back to download") })
+    }
+    fn cumtrapz_dim(
+        &self,
+        input: &GpuTensorHandle,
+        _: usize,
+        spacing: ProviderTrapezoidSpacing<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        match self.fault {
+            Fault::Failure => Err(anyhow::Error::new(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "cumtrapz execution failed",
+            ))),
+            Fault::InputAlias => Ok(input.with_view(input.view().clone())?),
+            Fault::SpacingAlias => {
+                let handle = match spacing {
+                    ProviderTrapezoidSpacing::Vector(handle)
+                    | ProviderTrapezoidSpacing::Tensor(handle) => handle,
+                    _ => anyhow::bail!("expected uploaded coordinates"),
+                };
+                Ok(handle.with_view(handle.view().clone())?)
+            }
+        }
+    }
+}
+
+#[test]
+fn cumulative_integration_retires_spacing_on_execution_failure_and_alias_rejection() {
+    for fault in [Fault::Failure, Fault::InputAlias, Fault::SpacingAlias] {
+        let provider = Box::leak(Box::new(Provider {
+            owner: TestAllocationOwner::new(),
+            uploads: Mutex::new(Vec::new()),
+            fault,
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let input = provider
+            .owner
+            .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let x = Tensor::new(vec![0.0, 1.0, 2.0], vec![3, 1]).unwrap();
+        let error = futures::executor::block_on(cumtrapz_builtin(
+            Value::Tensor(x),
+            vec![Value::GpuTensor(input.handle.clone())],
+        ))
+        .unwrap_err();
+        assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+        match fault {
+            Fault::Failure => assert!(error
+                .source
+                .as_ref()
+                .unwrap()
+                .downcast_ref::<std::io::Error>()
+                .is_some()),
+            _ => assert!(error.message().contains("malformed or aliased")),
+        }
+        let uploads = provider.uploads.lock().unwrap();
+        assert_eq!(uploads.len(), 1);
+        assert_eq!(uploads[0].retirements(), 1);
+        assert_eq!(input.probe.retirements(), 0);
+        input.handle.allocation_lease().validate_live().unwrap();
+    }
+}
