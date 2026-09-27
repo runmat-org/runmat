@@ -1,6 +1,8 @@
 use anyhow::{anyhow, ensure, Result};
 #[path = "allocation_state.rs"]
 mod allocation_state;
+#[path = "registration.rs"]
+mod registration;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;
 use log::{debug, error};
@@ -159,17 +161,26 @@ mod trait_impl;
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;
 #[cfg(not(target_arch = "wasm32"))]
-fn install_device_error_handlers(device: &wgpu::Device) -> Arc<std::sync::atomic::AtomicBool> {
+fn install_device_error_handlers(
+    device: &wgpu::Device,
+    allocations: &Arc<allocation_state::AllocationState>,
+) -> Arc<std::sync::atomic::AtomicBool> {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
     }));
     let observation_stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let weak = Arc::downgrade(&observation_stopped);
+    let allocation_owner = Arc::downgrade(allocations);
     device.set_device_lost_callback(move |reason, message| {
-        error!("WGPU device lost: reason={:?}, message={}", reason, message);
+        if let Some(owner) = allocation_owner.upgrade() {
+            owner.mark_device_lost();
+        }
         if let Some(stopped) = weak.upgrade() {
             stopped.store(true, std::sync::atomic::Ordering::Release);
         }
+        let _ = runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+            error!("WGPU device lost: reason={:?}, message={}", reason, message);
+        });
     });
     observation_stopped
 }

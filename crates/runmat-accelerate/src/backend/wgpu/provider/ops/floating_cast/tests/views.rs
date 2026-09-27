@@ -121,15 +121,12 @@ fn actual_wgpu_cast_rejects_incoherent_view_before_allocating_result() {
         })
         .unwrap();
     runmat_accelerate_api::record_handle_transpose(&input, 1, 4);
-    let allocations = provider.allocations.lock_entries().unwrap().len();
+    let allocations = provider.allocations.record_count().unwrap();
     let pipelines = provider.fused_pipeline_cache.lock().unwrap().len();
     assert!(provider
         .floating_cast_exec(&input, NumericPrecision::F32)
         .is_err());
-    assert_eq!(
-        provider.allocations.lock_entries().unwrap().len(),
-        allocations
-    );
+    assert_eq!(provider.allocations.record_count().unwrap(), allocations);
     assert_eq!(
         provider.fused_pipeline_cache.lock().unwrap().len(),
         pipelines

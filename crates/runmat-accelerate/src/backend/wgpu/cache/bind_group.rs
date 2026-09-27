@@ -78,6 +78,23 @@ pub struct BindGroupCache {
     per_layout: Mutex<HashMap<usize, (u64, u64)>>,
 }
 
+impl Drop for BindGroupCache {
+    fn drop(&mut self) {
+        let entries = std::mem::take(self.inner.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for group in entries.groups.into_values() {
+            if runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| drop(group))
+                .is_err()
+            {
+                let _ = runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+                    log::error!(
+                        "WGPU bind-group terminal reference release unwound; no retry attempted"
+                    );
+                });
+            }
+        }
+    }
+}
+
 impl Default for BindGroupCache {
     fn default() -> Self {
         Self::new()

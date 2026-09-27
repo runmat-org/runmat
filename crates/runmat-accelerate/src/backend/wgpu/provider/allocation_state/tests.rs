@@ -25,7 +25,7 @@ fn allocation_state_does_not_strongly_retain_handle_provenance_owner() {
     assert!(state.kernel_resources.upgrade().is_none());
     let retained = state.clone();
     drop(state);
-    assert!(retained.lock_entries().unwrap().is_empty());
+    assert_eq!(retained.record_count().unwrap(), 0);
     drop(retained);
     assert_eq!(Arc::strong_count(&cache), 1);
 }
@@ -64,13 +64,15 @@ fn poisoned_allocation_map_does_not_report_successful_retirement() {
         Weak::new(),
     );
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _guard = state.lock_entries().unwrap();
+        let _guard = state.buffers.lock().unwrap();
         panic!("poison allocation map");
     }))
     .is_err());
     let handle = GpuTensorHandle::new(vec![1], device, 1);
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| state.free(&handle))).is_err()
+    let error = state.free(&handle).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<AllocationStateError>(),
+        Some(&AllocationStateError::Poisoned)
     );
 }
 
@@ -97,7 +99,9 @@ fn wgpu_allocation_views_exports_and_pool_keep_existing_physical_lifetimes() {
         .unwrap();
     let snapshot = provider.get_entry_raw(&input).unwrap();
     let expected_type = snapshot.element_type;
-    let alias = provider.register_storage_move_alias(&snapshot, vec![2, 1]);
+    let alias = provider
+        .register_storage_move_alias(&snapshot, vec![2, 1])
+        .unwrap();
     assert_ne!(input.buffer_id, alias.buffer_id);
     let alias_snapshot = provider.get_entry_raw(&alias).unwrap();
     assert!(Arc::ptr_eq(&snapshot.buffer, &alias_snapshot.buffer));
@@ -133,8 +137,7 @@ fn wgpu_allocation_views_exports_and_pool_keep_existing_physical_lifetimes() {
         })
         .unwrap();
     let (pointer, bytes) = {
-        let entries = provider.allocations.lock_entries().unwrap();
-        let entry = entries.get(&fresh.buffer_id).unwrap();
+        let entry = provider.allocations.live_entry(fresh.buffer_id).unwrap();
         (Arc::as_ptr(&entry.buffer), entry.allocated_bytes)
     };
     provider.free(&fresh).unwrap();
@@ -150,7 +153,7 @@ fn wgpu_allocation_views_exports_and_pool_keep_existing_physical_lifetimes() {
     assert!(did_reuse);
     assert_eq!(Arc::as_ptr(&reused), pointer);
     assert_eq!(provider.allocations.pooled_bytes(provider.element_size), 0);
-    assert!(provider.allocations.lock_entries().unwrap().is_empty());
+    assert_eq!(provider.allocations.record_count().unwrap(), 0);
 }
 
 #[cfg(all(not(target_arch = "wasm32"), panic = "unwind"))]
@@ -180,8 +183,23 @@ fn failed_cache_invalidation_preserves_allocation_and_annotations_without_poolin
         error.downcast_ref::<crate::backend::wgpu::cache::bind_group::CacheInvalidationError>(),
         Some(&crate::backend::wgpu::cache::bind_group::CacheInvalidationError::Poisoned)
     );
-    let retained = provider.get_entry_raw(&input).unwrap();
-    assert!(Arc::ptr_eq(&original.buffer, &retained.buffer));
+    assert!(provider.get_entry_raw(&input).is_err());
+    {
+        let records = provider.allocations.buffers.lock().unwrap();
+        let retained = records.get(&input.buffer_id).unwrap();
+        assert_eq!(
+            retained.phase,
+            Phase::Failed {
+                stage: Stage::Cache,
+                failure: Failure::Cache,
+                disposition: Disposition::Retained
+            }
+        );
+        assert!(Arc::ptr_eq(
+            &original.buffer,
+            &retained.entry.as_ref().unwrap().buffer
+        ));
+    }
     assert_eq!(
         runmat_accelerate_api::handle_transpose_info(&input),
         transpose
@@ -190,9 +208,8 @@ fn failed_cache_invalidation_preserves_allocation_and_annotations_without_poolin
         provider.allocations.pooled_bytes(provider.element_size),
         pooled_before
     );
-    // This slice keeps the failed payload in the existing owner. Explicit
-    // quarantine/drain and lease finalization belong to the later state slice.
-    // Remove this fixture's side annotations before its unregistered provider
-    // and retained payload leave scope; this is not a successful free receipt.
-    runmat_accelerate_api::clear_handle_metadata(&input);
+    // Final owner teardown disposes the quarantined reference and annotations,
+    // even though the poisoned cache cannot report successful invalidation.
+    drop(provider);
+    assert_eq!(runmat_accelerate_api::handle_transpose_info(&input), None);
 }

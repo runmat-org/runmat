@@ -23,6 +23,9 @@ use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
 impl WgpuProvider {
+    pub(super) fn registration_batch(&self) -> super::registration::RegistrationBatch<'_> {
+        super::registration::RegistrationBatch::new(&self.allocations)
+    }
     pub(super) async fn map_readback_bytes(
         &self,
         staging: wgpu::Buffer,
@@ -85,7 +88,7 @@ impl WgpuProvider {
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
         len: usize,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage(buffer, shape, len, BufferUsageClass::Generic)
     }
 
@@ -95,7 +98,7 @@ impl WgpuProvider {
         shape: Vec<usize>,
         len: usize,
         storage: GpuTensorStorage,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage_and_storage(
             buffer,
             shape,
@@ -111,7 +114,7 @@ impl WgpuProvider {
         shape: Vec<usize>,
         len: usize,
         usage: BufferUsageClass,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_existing_buffer_with_usage_and_storage(
             buffer,
             shape,
@@ -128,7 +131,7 @@ impl WgpuProvider {
         len: usize,
         storage: GpuTensorStorage,
         usage: BufferUsageClass,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         let element_type = match self.precision {
             NumericPrecision::F32 => NumericElementType::F32,
             NumericPrecision::F64 => NumericElementType::F64,
@@ -150,7 +153,7 @@ impl WgpuProvider {
         &self,
         buffer: Arc<wgpu::Buffer>,
         registration: NumericBufferRegistration,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         let NumericBufferRegistration {
             shape,
             len,
@@ -163,7 +166,7 @@ impl WgpuProvider {
         let entry = BufferEntry {
             buffer,
             len,
-            shape: shape.clone(),
+            shape,
             storage,
             element_type,
             precision: match element_type.precision() {
@@ -175,24 +178,7 @@ impl WgpuProvider {
             usage,
             last_submission_id: None,
         };
-        let id = self.allocations.register(entry);
-        log::trace!(
-            "wgpu register id={} len={} shape={:?} element_type={:?} storage={:?}",
-            id,
-            len,
-            &shape,
-            element_type,
-            storage
-        );
-        let handle = GpuTensorHandle {
-            shape,
-            device_id: self.runtime_device_id,
-            buffer_id: id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(element_type, storage),
-        };
-        runmat_accelerate_api::clear_handle_metadata(&handle);
-        runmat_accelerate_api::clear_handle_transpose(&handle);
-        handle
+        self.allocations.register(entry)
     }
 
     pub(super) fn register_integer_buffer(
@@ -202,7 +188,7 @@ impl WgpuProvider {
         len: usize,
         element_type: IntegerElementType,
         allocated_bytes: u64,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_numeric_buffer(
             buffer,
             NumericBufferRegistration {
@@ -237,19 +223,14 @@ impl WgpuProvider {
     }
 
     pub(super) fn mark_buffer_usage(&self, handle: &GpuTensorHandle, usage: BufferUsageClass) {
-        if let Ok(mut guard) = self.allocations.lock_entries() {
-            if let Some(entry) = guard.get_mut(&handle.buffer_id) {
-                entry.usage = usage;
-            }
+        // Usage is an optional pooling hint, never a live-operation admission.
+        if handle.device_id == self.runtime_device_id {
+            let _ = self.allocations.mark_usage(handle.buffer_id, usage);
         }
     }
 
     pub(super) fn record_buffer_submission(&self, buffer_id: u64, submission_id: u32) {
-        if let Ok(mut guard) = self.allocations.lock_entries() {
-            if let Some(entry) = guard.get_mut(&buffer_id) {
-                entry.last_submission_id = Some(submission_id);
-            }
-        }
+        let _ = self.allocations.record_submission(buffer_id, submission_id);
     }
 
     pub(super) fn create_storage_buffer_for_usage(
@@ -412,29 +393,12 @@ impl WgpuProvider {
                 handle.device_id
             ));
         }
-        let guard = self
-            .allocations
-            .lock_entries()
-            .expect("buffer mutex poisoned");
+        let mut entry = self.allocations.live_entry(handle.buffer_id)?;
         let handle_storage = runmat_accelerate_api::handle_storage(handle);
-        guard
-            .get(&handle.buffer_id)
-            .map(|entry| BufferEntry {
-                buffer: entry.buffer.clone(),
-                len: entry.len,
-                shape: entry.shape.clone(),
-                storage: if handle_storage == GpuTensorStorage::ComplexInterleaved {
-                    GpuTensorStorage::ComplexInterleaved
-                } else {
-                    entry.storage
-                },
-                element_type: entry.element_type,
-                precision: entry.precision,
-                allocated_bytes: entry.allocated_bytes,
-                usage: entry.usage,
-                last_submission_id: entry.last_submission_id,
-            })
-            .ok_or_else(|| anyhow!("buffer not found: {}", handle.buffer_id))
+        if handle_storage == GpuTensorStorage::ComplexInterleaved {
+            entry.storage = GpuTensorStorage::ComplexInterleaved;
+        }
+        Ok(entry)
     }
 
     pub(super) fn get_entry_for_storage_move(

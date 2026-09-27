@@ -141,15 +141,7 @@ impl AccelProvider for WgpuProvider {
         // WebGPU exposes a maximum single-buffer size, not a trustworthy total
         // device-memory budget. Keep total capacity unknown rather than
         // misclassifying several legal buffers as overcommitted.
-        let live_bytes = self
-            .allocations
-            .lock_entries()
-            .map(|buffers| {
-                buffers.values().fold(0_u64, |total, entry| {
-                    total.saturating_add(entry.allocated_bytes)
-                })
-            })
-            .unwrap_or(u64::MAX);
+        let live_bytes = self.allocations.retained_bytes();
         let reclaimable_bytes = self.allocations.pooled_bytes(self.element_size);
         let allocated_bytes = live_bytes.saturating_add(reclaimable_bytes);
         runmat_execution::ProviderResourceSnapshot {
@@ -160,7 +152,7 @@ impl AccelProvider for WgpuProvider {
             scratch_available_bytes: None,
             queue_depth: None,
             queue_limit: None,
-            lost: false,
+            lost: self.allocations.is_lost(),
             epoch: allocated_bytes ^ reclaimable_bytes.rotate_left(32),
         }
     }

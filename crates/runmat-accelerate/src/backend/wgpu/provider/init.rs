@@ -232,8 +232,6 @@ impl WgpuProvider {
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
         let device = Arc::new(device_raw);
-        #[cfg(not(target_arch = "wasm32"))]
-        let observation_stopped = install_device_error_handlers(&device);
         #[cfg(target_arch = "wasm32")]
         install_device_error_handlers(&device);
         let queue = Arc::new(queue_raw);
@@ -372,13 +370,24 @@ impl WgpuProvider {
             precision,
             image_norm_bootstrap,
             workgroup_config.scalar,
-        workgroup_config.matmul_tile,
+            workgroup_config.matmul_tile,
         );
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
 
+        let bind_group_cache = Arc::new(BindGroupCache::default());
+        let kernel_resources = Arc::new(KernelResourceRegistry::default());
+        let allocations = Arc::new(super::allocation_state::AllocationState::new(
+            runtime_device_id,
+            buffer_pool_limit,
+            max_poolable_bytes,
+            bind_group_cache.clone(),
+            Arc::downgrade(&kernel_resources),
+        ));
+        #[cfg(not(target_arch = "wasm32"))]
+        let observation_stopped = install_device_error_handlers(&device, &allocations);
         #[cfg(not(target_arch = "wasm32"))]
         let observation_progress = super::observation_progress::NativeObservationProgress::start(
             device.clone(),
@@ -388,8 +397,6 @@ impl WgpuProvider {
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
         .ok();
 
-        let bind_group_cache = Arc::new(BindGroupCache::default());
-        let kernel_resources = Arc::new(KernelResourceRegistry::default());
         Ok(Self {
             instance,
             device,
@@ -398,13 +405,7 @@ impl WgpuProvider {
             adapter_info,
             adapter_limits: satisfied_limits,
             workgroup_config,
-            allocations: Arc::new(super::allocation_state::AllocationState::new(
-                runtime_device_id,
-                buffer_pool_limit,
-                max_poolable_bytes,
-                bind_group_cache.clone(),
-                Arc::downgrade(&kernel_resources),
-            )),
+            allocations,
             pipelines,
             runtime_device_id,
             #[cfg(not(target_arch = "wasm32"))]

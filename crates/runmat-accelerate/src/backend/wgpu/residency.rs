@@ -52,6 +52,29 @@ pub struct RejectedBuffer {
     pub buffer: Arc<wgpu::Buffer>,
 }
 
+impl Drop for BufferResidency {
+    fn drop(&mut self) {
+        let pools = std::mem::take(self.pools.get_mut().unwrap_or_else(|e| e.into_inner()));
+        for buffers in pools.into_values() {
+            for buffer in buffers {
+                // Final pool disposal, not an uncertain driver free retry.
+                if runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+                    drop(buffer)
+                })
+                .is_err()
+                {
+                    let _ =
+                        runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind(|| {
+                            log::error!(
+                                "WGPU pool terminal reference release unwound; no retry attempted"
+                            );
+                        });
+                }
+            }
+        }
+    }
+}
+
 impl BufferResidency {
     pub fn new(max_per_key: usize) -> Self {
         Self {

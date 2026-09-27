@@ -26,6 +26,17 @@ pub struct KernelResourceRegistry {
     scratch_buffers: Mutex<HashMap<ScratchBufferKind, (u64, Arc<wgpu::Buffer>)>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct KernelProvenanceLockPoisoned;
+
+impl std::fmt::Display for KernelProvenanceLockPoisoned {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WGPU matmul provenance lock poisoned")
+    }
+}
+
+impl std::error::Error for KernelProvenanceLockPoisoned {}
+
 impl Default for KernelResourceRegistry {
     fn default() -> Self {
         Self::new()
@@ -157,12 +168,13 @@ impl KernelResourceRegistry {
             .and_then(|mut map| map.remove(&product.buffer_id))
     }
 
-    pub fn clear_matmul_source(&self, product_id: u64) {
+    pub(crate) fn clear_matmul_source_checked(&self, product_id: u64) -> anyhow::Result<()> {
         let removed = self
             .matmul_sources
             .lock()
-            .ok()
-            .and_then(|mut map| map.remove(&product_id));
+            .map_err(|_| KernelProvenanceLockPoisoned)?
+            .remove(&product_id);
         drop(removed);
+        Ok(())
     }
 }
