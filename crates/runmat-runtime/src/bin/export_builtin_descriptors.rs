@@ -93,6 +93,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<_>>();
 
     builtins.sort_by(|a, b| a.name.cmp(b.name));
+    validate_unique_names(builtins.iter().map(|builtin| builtin.name))?;
 
     let payload = BuiltinDescriptorFile {
         version: 1,
@@ -110,4 +111,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn validate_unique_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<(), String> {
+    let mut seen = std::collections::BTreeSet::new();
+    for name in names {
+        if !seen.insert(name) {
+            return Err(format!("duplicate builtin descriptor registration: {name}"));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_unique_names;
+
+    #[test]
+    fn duplicate_registrations_cannot_produce_an_ambiguous_catalog() {
+        assert!(validate_unique_names(["dir", "fileparts"]).is_ok());
+        assert_eq!(
+            validate_unique_names(["dir", "fileparts", "dir"]),
+            Err("duplicate builtin descriptor registration: dir".into())
+        );
+        assert!(validate_unique_names([]).is_ok());
+    }
 }
