@@ -72,18 +72,24 @@ fn missing_runmat_shape_extension_reads_every_integer_class_exactly() {
 #[test]
 fn missing_shaped_extension_gates_before_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let value = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_419_005,
-        descriptor: Default::default(),
-    });
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&allocation.handle).is_none());
+    let value = Value::GpuTensor(allocation.handle.clone());
     let error = block_on(missing_builtin(vec![value]))
         .expect_err("MATLAB-compatible mode must reject shaped missing");
     assert_eq!(
         error.identifier(),
         Some("RunMat:compatibility:MissingShapedArrayExtension")
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -226,22 +232,33 @@ fn ismissing_resident_integer_uses_shape_metadata_and_returns_host_mask() {
                 if mask.shape == vec![1, 2] && mask.data == vec![0, 0]
         ));
         assert!(gpu_helpers::exact_provider_for_handle(&handle).is_some());
-        provider.free(&handle).ok();
+        handle.release().unwrap();
     });
 }
 
 #[test]
-fn ismissing_rejects_contradictory_resident_integer_metadata() {
+fn ismissing_integer_owner_rejects_logical_reinterpretation() {
     test_support::with_test_provider(|provider| {
         let input =
             Tensor::new_integer(IntegerStorage::I8(vec![1]), vec![1, 1]).expect("integer tensor");
         let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-        runmat_accelerate_api::set_handle_logical(&handle, true);
+        let before = handle.wire_descriptor();
+        assert!(handle
+            .with_view(handle.view().clone().with_logical(true))
+            .is_err());
+        assert_eq!(handle.wire_descriptor(), before);
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
-            .expect_err("integer/logical metadata contradiction must reject");
-        assert!(error.message().contains("metadata is contradictory"));
-        provider.free(&handle).ok();
+        let result = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
+            .expect("rejected view must leave original integer input valid");
+        assert!(
+            matches!(result, Value::LogicalArray(mask) if mask.shape == vec![1, 1] && mask.data == vec![0])
+        );
+        let preserved = test_support::gather(Value::GpuTensor(handle.clone())).unwrap();
+        assert_eq!(
+            preserved.integer_storage(),
+            Some(&IntegerStorage::I8(vec![1]))
+        );
+        handle.release().unwrap();
     });
 }
 
@@ -261,7 +278,9 @@ fn ismissing_matlab_mode_only_gates_explicit_resident_input() {
                     if mask.shape == vec![1, 1] && mask.data == vec![0]
             ));
         }
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(ismissing_builtin(Value::GpuTensor(handle.clone())))
@@ -271,7 +290,7 @@ fn ismissing_matlab_mode_only_gates_explicit_resident_input() {
                 ISMISSING_RESIDENT_INPUT_EXTENSION.error_identifier
             );
         }
-        provider.free(&handle).ok();
+        handle.release().unwrap();
     });
 }
 

@@ -67,13 +67,18 @@ fn standardize_missing_documented_integer_indicator_needs_no_extension() {
 #[test]
 fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let handle = runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_451_002,
-        descriptor: Default::default(),
-    };
-    let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    let handle = allocation
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    assert!(gpu_helpers::exact_provider_for_handle(&handle).is_none());
     let error = block_on(standardize_missing_builtin(
         tensor(vec![-99.0, 2.0], vec![1, 2]),
         vec![Value::GpuTensor(handle)],
@@ -83,4 +88,7 @@ fn standardize_missing_explicit_gpu_indicator_is_gated_before_provider_access() 
         error.identifier(),
         Some("RunMat:compatibility:StandardizeMissingExplicitGpuIndicatorExtension")
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }

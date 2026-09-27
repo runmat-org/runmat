@@ -61,7 +61,9 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
         )
         .expect("integer tensor");
         let source = gpu_helpers::upload_tensor(provider, &input).expect("upload integer");
-        let source = source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let source = source
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let _outputs = crate::output_count::push_output_count(Some(2));
         let result = block_on(rmmissing_builtin(
             Value::GpuTensor(source.clone()),
@@ -91,10 +93,10 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
         assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
         for output in outputs {
             if let Value::GpuTensor(handle) = output {
-                provider.free(&handle).ok();
+                handle.release().unwrap();
             }
         }
-        provider.free(&source).ok();
+        source.release().unwrap();
     });
 }
 
