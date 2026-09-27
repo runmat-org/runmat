@@ -377,12 +377,11 @@ async fn gather_imwrite_argument(value: &Value) -> BuiltinResult<Value> {
         return Ok(value.clone());
     };
     let owner = validate_resident_numeric_metadata(handle, &IMWRITE_ERROR_INVALID_ARGUMENT)?;
-    let metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
     let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
         owner, handle,
     )
     .await;
-    crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &metadata);
     result.map_err(|err| imwrite_error_with_detail(&IMWRITE_ERROR_INVALID_ARGUMENT, err.message()))
 }
 
@@ -1871,10 +1870,10 @@ mod tests {
             let image = typed_tensor(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]);
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &image)
                 .expect("upload image");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             runmat_accelerate_api::mark_residency(&handle);
-            runmat_accelerate_api::record_handle_transpose(&handle, 1, 3);
             call(vec![
                 Value::GpuTensor(handle.clone()),
                 Value::from(path.to_string_lossy().as_ref()),
@@ -1882,22 +1881,21 @@ mod tests {
             .expect("resident write");
             assert!(path.exists());
             assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-            assert_eq!(
-                runmat_accelerate_api::handle_transpose_info(&handle),
-                Some(runmat_accelerate_api::TransposeInfo {
-                    base_rows: 1,
-                    base_cols: 3,
-                })
-            );
-
+            assert!(runmat_accelerate_api::handle_is_explicit(&handle));
             let bad_path = dir.path().join("bad.png");
-            runmat_accelerate_api::set_handle_class_identity(&handle, "uint16");
-            let err = call(vec![
-                Value::GpuTensor(handle),
-                Value::from(bad_path.to_string_lossy().as_ref()),
-            ])
-            .expect_err("contradictory class must reject");
-            assert!(err.message().contains("class metadata contradicts"));
+            let mut wire = handle.wire_descriptor();
+            wire.physical = runmat_accelerate_api::allocation::GpuPhysicalDescriptor::new(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                3,
+                6,
+                6,
+            )
+            .unwrap();
+            assert!(
+                provider.acquire_live(&wire).is_err(),
+                "contradictory image class cannot become an operational input"
+            );
             assert!(!bad_path.exists());
         });
     }

@@ -248,12 +248,12 @@ async fn rgb2hsv_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
     let dtype = common::resident_numeric_dtype(handle, NAME)
         .map_err(|err| rgb2hsv_map_error(err, &RGB2HSV_ERROR_INVALID_INPUT))?;
-    let supported = if handle.shape.len() == 3 && handle.shape.get(2) == Some(&3) {
+    let supported = if handle.shape().len() == 3 && handle.shape().get(2) == Some(&3) {
         matches!(
             dtype,
             NumericDType::F32 | NumericDType::F64 | NumericDType::U8 | NumericDType::U16
         )
-    } else if handle.shape.len() == 2 && handle.shape.get(1) == Some(&3) {
+    } else if handle.shape().len() == 2 && handle.shape().get(1) == Some(&3) {
         dtype == NumericDType::F64
     } else {
         false
@@ -263,7 +263,7 @@ fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> Bui
             format!(
                 "rgb2hsv: unsupported resident class {} or shape {:?}",
                 dtype.class_name(),
-                handle.shape
+                handle.shape()
             ),
             &RGB2HSV_ERROR_INVALID_INPUT,
         ));
@@ -456,8 +456,9 @@ mod tests {
             let rgb =
                 Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload rgb");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = block_on(rgb2hsv_builtin(
                 Value::GpuTensor(source.clone()),
                 Vec::new(),
@@ -488,22 +489,19 @@ mod tests {
 
     #[test]
     fn rgb2hsv_rejects_unsupported_resident_class_before_download() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: u32::MAX - 12,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U32,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 3],
+                runmat_accelerate_api::NumericElementType::U32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         let err = block_on(rgb2hsv_builtin(
             Value::GpuTensor(handle.clone()),
             Vec::new(),
         ))
         .expect_err("unsupported resident integer");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
         assert_eq!(err.identifier(), RGB2HSV_ERROR_INVALID_INPUT.identifier);
     }
 

@@ -276,12 +276,12 @@ async fn rgb2lab_builtin(rgb: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<()> {
     let dtype = common::resident_numeric_dtype(handle, NAME)
         .map_err(|err| rgb2lab_map_error(err, &RGB2LAB_ERROR_INVALID_INPUT))?;
-    let image_shape = handle.shape.len() >= 3
-        && handle.shape[0] > 0
-        && handle.shape[1] > 0
-        && handle.shape.get(2) == Some(&3);
+    let image_shape = handle.shape().len() >= 3
+        && handle.shape()[0] > 0
+        && handle.shape()[1] > 0
+        && handle.shape().get(2) == Some(&3);
     let colormap_shape =
-        handle.shape.len() == 2 && handle.shape[0] > 0 && handle.shape.get(1) == Some(&3);
+        handle.shape().len() == 2 && handle.shape()[0] > 0 && handle.shape().get(1) == Some(&3);
     let supported = (image_shape || colormap_shape)
         && matches!(
             dtype,
@@ -292,7 +292,7 @@ fn validate_resident_rgb(handle: &runmat_accelerate_api::GpuTensorHandle) -> Bui
             format!(
                 "rgb2lab: unsupported resident class {} or shape {:?}",
                 dtype.class_name(),
-                handle.shape
+                handle.shape()
             ),
             &RGB2LAB_ERROR_INVALID_INPUT,
         ));
@@ -705,24 +705,23 @@ mod tests {
 
     #[test]
     fn rgb2lab_explicit_gpu_form_is_extension_gated_before_download() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: u32::MAX - 13,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
         let _guard = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(rgb2lab_builtin(
             Value::GpuTensor(handle.clone()),
             Vec::new(),
         ))
         .expect_err("explicit GPU form must be gated");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
         assert_eq!(
             err.identifier(),
             RGB2LAB_EXPLICIT_GPU_EXTENSION.error_identifier
@@ -735,8 +734,9 @@ mod tests {
             let rgb = Tensor::new_integer(IntegerStorage::U8(vec![255, 0, 0]), vec![1, 1, 3])
                 .expect("RGB");
             let source = gpu_helpers::upload_tensor(provider, &rgb).expect("upload RGB");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             let value = block_on(rgb2lab_builtin(
                 Value::GpuTensor(source.clone()),
@@ -746,17 +746,15 @@ mod tests {
             let Value::GpuTensor(output) = value else {
                 panic!("explicit gpuArray output must remain resident");
             };
-            assert_eq!(output.device_id, source.device_id);
-            assert_ne!(output.buffer_id, source.buffer_id);
+            assert_eq!(output.device_id(), source.device_id());
+            assert_ne!(output.buffer_id(), source.buffer_id());
             assert_eq!(
                 runmat_accelerate_api::handle_precision(&output),
                 Some(runmat_accelerate_api::ProviderPrecision::F64)
             );
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
-            provider.free(&output).expect("free output");
-            provider.free(&source).expect("free source");
-            runmat_accelerate_api::clear_handle_metadata(&output);
-            runmat_accelerate_api::clear_handle_metadata(&source);
+            output.release().expect("free output");
+            source.release().expect("free source");
         });
     }
 

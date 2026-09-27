@@ -891,19 +891,14 @@ struct AdamUpdateEval {
 }
 
 struct AdamUpdateGpuEval {
-    provider: &'static dyn AccelProvider,
     parameters: GpuTensorHandle,
     average_grad: GpuTensorHandle,
     average_sq_grad: GpuTensorHandle,
 }
 
 impl AdamUpdateGpuEval {
-    fn from_provider(
-        provider: &'static dyn AccelProvider,
-        result: ProviderAdamUpdateResult,
-    ) -> Self {
+    fn from_provider(result: ProviderAdamUpdateResult) -> Self {
         Self {
-            provider,
             parameters: result.parameters,
             average_grad: result.average_grad,
             average_sq_grad: result.average_sq_grad,
@@ -912,47 +907,24 @@ impl AdamUpdateGpuEval {
 
     fn output(self) -> BuiltinResult<Value> {
         match crate::output_count::current_output_count() {
-            None => {
-                let _ = self.provider.free(&self.average_grad);
-                let _ = self.provider.free(&self.average_sq_grad);
-                Ok(gpu_helpers::resident_gpu_value(self.parameters))
-            }
-            Some(0) => {
-                let _ = self.provider.free(&self.parameters);
-                let _ = self.provider.free(&self.average_grad);
-                let _ = self.provider.free(&self.average_sq_grad);
-                Ok(Value::OutputList(Vec::new()))
-            }
-            Some(1) => {
-                let _ = self.provider.free(&self.average_grad);
-                let _ = self.provider.free(&self.average_sq_grad);
-                Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
-                    self.parameters,
-                )]))
-            }
-            Some(2) => {
-                let _ = self.provider.free(&self.average_sq_grad);
-                Ok(Value::OutputList(vec![
-                    gpu_helpers::resident_gpu_value(self.parameters),
-                    gpu_helpers::resident_gpu_value(self.average_grad),
-                ]))
-            }
-            Some(3) => Ok(Value::OutputList(vec![
-                gpu_helpers::resident_gpu_value(self.parameters),
-                gpu_helpers::resident_gpu_value(self.average_grad),
-                gpu_helpers::resident_gpu_value(self.average_sq_grad),
+            None => gpu_helpers::resident_gpu_value(self.parameters),
+            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                self.parameters,
+            )?])),
+            Some(2) => Ok(Value::OutputList(vec![
+                gpu_helpers::resident_gpu_value(self.parameters)?,
+                gpu_helpers::resident_gpu_value(self.average_grad)?,
             ])),
-            Some(requested) => {
-                let _ = self.provider.free(&self.parameters);
-                let _ = self.provider.free(&self.average_grad);
-                let _ = self.provider.free(&self.average_sq_grad);
-                Err(deep_learning_error(
-                    "adamupdate",
-                    format!(
-                        "adamupdate: requested {requested} outputs, but at most 3 are supported"
-                    ),
-                ))
-            }
+            Some(3) => Ok(Value::OutputList(vec![
+                gpu_helpers::resident_gpu_value(self.parameters)?,
+                gpu_helpers::resident_gpu_value(self.average_grad)?,
+                gpu_helpers::resident_gpu_value(self.average_sq_grad)?,
+            ])),
+            Some(requested) => Err(deep_learning_error(
+                "adamupdate",
+                format!("adamupdate: requested {requested} outputs, but at most 3 are supported"),
+            )),
         }
     }
 }
@@ -1003,15 +975,15 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
         ));
     }
 
-    if parameters.shape != gradient.shape
-        || average_grad.is_some_and(|handle| handle.shape != parameters.shape)
-        || average_sq_grad.is_some_and(|handle| handle.shape != parameters.shape)
+    if parameters.shape() != gradient.shape()
+        || average_grad.is_some_and(|handle| handle.shape() != parameters.shape())
+        || average_sq_grad.is_some_and(|handle| handle.shape() != parameters.shape())
     {
         return Err(deep_learning_error(
             "adamupdate",
             format!(
                 "adamupdate: optimizer tensors must match parameter shape {:?}",
-                parameters.shape
+                parameters.shape()
             ),
         ));
     }
@@ -1049,7 +1021,7 @@ fn try_adamupdate_gpu(args: &[Value]) -> BuiltinResult<Option<AdamUpdateGpuEval>
     };
 
     match provider.adam_update(&request) {
-        Ok(result) => Ok(Some(AdamUpdateGpuEval::from_provider(provider, result))),
+        Ok(result) => Ok(Some(AdamUpdateGpuEval::from_provider(result))),
         Err(err) if provider_is_unsupported(&err) => Ok(None),
         Err(err) => Err(deep_learning_error(
             "adamupdate",

@@ -275,29 +275,16 @@ async fn deconv_builtin(numerator: Value, denominator: Value) -> crate::BuiltinR
     let eval = evaluate(numerator, denominator).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            free_deconv_output(&eval.quotient);
-            free_deconv_output(&eval.remainder);
             return Ok(Value::OutputList(Vec::new()));
         }
         let mut outputs = vec![eval.quotient()];
         if out_count >= 2 {
             outputs.push(eval.remainder());
-        } else {
-            free_deconv_output(&eval.remainder);
         }
         return Ok(Value::OutputList(outputs));
     }
     let quotient = eval.quotient();
-    free_deconv_output(&eval.remainder);
     Ok(quotient)
-}
-
-fn free_deconv_output(value: &Value) {
-    if let Value::GpuTensor(handle) = value {
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
-            let _ = owner.free(handle);
-        }
-    }
 }
 
 /// Evaluate `deconv` and retain both outputs for multi-value contexts.
@@ -349,7 +336,7 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
                             "resident input has no owning provider",
                         )
                     })?;
-                if !std::ptr::eq(owner, provider) || handle.device_id != prototype.device_id {
+                if !std::ptr::eq(owner, provider) || handle.device_id() != prototype.device_id() {
                     return Err(deconv_error_with_detail(
                         &DECONV_ERROR_INVALID_INPUT,
                         "resident inputs must share one owning provider and device",
@@ -400,11 +387,6 @@ pub async fn evaluate(numerator: Value, denominator: Value) -> BuiltinResult<Dec
             ) {
                 Ok(value) => value,
                 Err(error) => {
-                    if let Value::GpuTensor(handle) = &quotient {
-                        let owner =
-                            runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
-                        let _ = owner.free(handle);
-                    }
                     return Err(error);
                 }
             };
@@ -1186,12 +1168,11 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         test_support::with_test_provider(|provider| {
             let numerator = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 1.0, 1.0],
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 1, 1],
                     shape: &[1, 3],
                 })
                 .expect("upload logical numerator");
-            runmat_accelerate_api::set_handle_logical(&numerator, true);
             let denominator = provider
                 .upload(&HostTensorView {
                     data: &[1.0, 1.0],

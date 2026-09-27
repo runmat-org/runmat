@@ -534,23 +534,6 @@ fn output_eval(eval: PwelchEvaluation, output_dtype: NumericDType) -> BuiltinRes
     Ok(pxx)
 }
 
-fn same_gpu_handle(
-    a: &runmat_accelerate_api::GpuTensorHandle,
-    b: &runmat_accelerate_api::GpuTensorHandle,
-) -> bool {
-    a.device_id == b.device_id && a.buffer_id == b.buffer_id
-}
-
-fn free_if_distinct(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    freed: &[&runmat_accelerate_api::GpuTensorHandle],
-) {
-    if !freed.iter().any(|other| same_gpu_handle(handle, other)) {
-        provider.free(handle).ok();
-    }
-}
-
 async fn output_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     rows: usize,
@@ -606,8 +589,6 @@ async fn output_gpu(
     let ps_frames = match provider.reshape(&estimate.ps, &[estimate.rows, segment_count, cols]) {
         Ok(ps_frames) => ps_frames,
         Err(err) => {
-            provider.free(&estimate.s).ok();
-            provider.free(&estimate.ps).ok();
             return Err(pwelch_error_with_detail(
                 &PWELCH_ERROR_INTERNAL,
                 err.to_string(),
@@ -617,9 +598,6 @@ async fn output_gpu(
     let ps_mean = match provider.reduce_mean_nd(&ps_frames, &[1]).await {
         Ok(ps_mean) => ps_mean,
         Err(err) => {
-            provider.free(&estimate.s).ok();
-            provider.free(&estimate.ps).ok();
-            free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
             return Err(pwelch_error_with_detail(
                 &PWELCH_ERROR_INTERNAL,
                 err.to_string(),
@@ -629,10 +607,6 @@ async fn output_gpu(
     let pxx = match provider.reshape(&ps_mean, &[estimate.rows, cols]) {
         Ok(pxx) => pxx,
         Err(err) => {
-            provider.free(&estimate.s).ok();
-            provider.free(&estimate.ps).ok();
-            free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
-            free_if_distinct(provider, &ps_mean, &[&estimate.ps, &ps_frames]);
             return Err(pwelch_error_with_detail(
                 &PWELCH_ERROR_INTERNAL,
                 err.to_string(),
@@ -640,17 +614,13 @@ async fn output_gpu(
         }
     };
 
-    provider.free(&estimate.s).ok();
-    provider.free(&estimate.ps).ok();
-    free_if_distinct(provider, &ps_frames, &[&estimate.ps]);
-    free_if_distinct(provider, &ps_mean, &[&estimate.ps, &ps_frames, &pxx]);
-
-    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx);
+    drop(ps_frames);
+    drop(ps_mean);
+    drop(estimate.s);
+    drop(estimate.ps);
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            if let Value::GpuTensor(handle) = &pxx {
-                provider.free(handle).ok();
-            }
             return Ok(Value::OutputList(Vec::new()));
         }
         if out_count == 1 {
@@ -664,16 +634,13 @@ async fn output_gpu(
         }) {
             Ok(f) => f,
             Err(err) => {
-                if let Value::GpuTensor(handle) = &pxx {
-                    provider.free(handle).ok();
-                }
                 return Err(pwelch_error_with_detail(
                     &PWELCH_ERROR_INTERNAL,
                     err.to_string(),
                 ));
             }
         };
-        let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
+        let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
@@ -1832,7 +1799,7 @@ mod tests {
                 "actual={actual} expected={expected}"
             );
         }
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[test]

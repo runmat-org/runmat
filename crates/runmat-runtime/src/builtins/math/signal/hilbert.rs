@@ -336,7 +336,7 @@ async fn hilbert_gpu_tensor(
     let integer_input = runmat_accelerate_api::handle_integer_type(&handle).is_some();
     let logical_input = runmat_accelerate_api::handle_is_logical(&handle);
 
-    let mut shape = handle.shape.clone();
+    let mut shape = handle.shape().to_vec();
     if crate::builtins::common::shape::is_scalar_shape(&shape) {
         shape = crate::builtins::common::shape::normalize_scalar_shape(&shape);
     }
@@ -373,10 +373,12 @@ async fn hilbert_gpu_tensor(
                 if hilbert_gpu_handles_alias(&out, &handle) {
                     restore_hilbert_input_metadata(&handle, input_metadata);
                 }
-                free_rejected_hilbert_output(&out, &handle);
-                return Err(hilbert_terminal_error(
-                    &HILBERT_ERROR_INTERNAL,
-                    "provider signal_hilbert returned malformed output",
+                return Err(gpu_helpers::reject_gpu_output(
+                    out,
+                    hilbert_terminal_error(
+                        &HILBERT_ERROR_INTERNAL,
+                        "provider signal_hilbert returned malformed output",
+                    ),
                 ));
             }
             Err(err) => {
@@ -447,7 +449,7 @@ fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()>
         Value::Tensor(tensor) => tensor.shape.len(),
         Value::ComplexTensor(tensor) => tensor.shape.len(),
         Value::LogicalArray(array) => array.shape.len(),
-        Value::GpuTensor(handle) => handle.shape.len(),
+        Value::GpuTensor(handle) => handle.shape().len(),
         _ => 2,
     };
     if rank > 2 {
@@ -591,10 +593,12 @@ fn restore_hilbert_gpu_output(
         if hilbert_gpu_handles_alias(&output, input) {
             restore_hilbert_input_metadata(input, input_metadata);
         }
-        free_rejected_hilbert_output(&output, input);
-        return Err(hilbert_terminal_error(
-            &HILBERT_ERROR_INTERNAL,
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            hilbert_terminal_error(
+                &HILBERT_ERROR_INTERNAL,
+                "provider upload returned malformed fallback output",
+            ),
         ));
     }
     gpu_helpers::complex_gpu_value(output)
@@ -607,8 +611,8 @@ fn valid_hilbert_gpu_output(
     expected_shape: &[usize],
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    output.shape == expected_shape
-        && output.device_id == input.device_id
+    output.shape() == expected_shape
+        && output.device_id() == input.device_id()
         && !hilbert_gpu_handles_alias(output, input)
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::ComplexInterleaved
         && runmat_accelerate_api::handle_integer_type(output).is_none()
@@ -626,29 +630,22 @@ struct HilbertGpuMetadata {
 
 fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
     HilbertGpuMetadata {
-        descriptor: handle.descriptor,
+        descriptor: handle.descriptor(),
         logical: runmat_accelerate_api::handle_is_logical(handle),
     }
 }
 
 fn restore_hilbert_input_metadata(handle: &GpuTensorHandle, metadata: HilbertGpuMetadata) {
-    debug_assert_eq!(handle.descriptor, metadata.descriptor);
-    runmat_accelerate_api::set_handle_logical(handle, metadata.logical);
+    debug_assert_eq!(handle.descriptor(), metadata.descriptor);
+    debug_assert_eq!(
+        runmat_accelerate_api::handle_is_logical(handle),
+        metadata.logical
+    );
+    runmat_accelerate_api::mark_residency(handle);
 }
 
 fn hilbert_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
-}
-
-fn free_rejected_hilbert_output(output: &GpuTensorHandle, input: &GpuTensorHandle) {
-    if hilbert_gpu_handles_alias(output, input) {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
-        if owner.free(output).is_ok() {
-            runmat_accelerate_api::clear_residency(output);
-        }
-    }
+    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<usize>> {
@@ -1059,8 +1056,8 @@ pub(crate) mod tests {
             assert!((actual.0 - expected.0).abs() <= 1.0e-5);
             assert!((actual.1 - expected.1).abs() <= 1.0e-5);
         }
-        provider.free(&handle).ok();
-        provider.free(&out_handle).ok();
+        handle.release().ok();
+        out_handle.release().ok();
     }
 
     #[cfg(feature = "wgpu")]
@@ -1122,7 +1119,7 @@ pub(crate) mod tests {
                 expected.1
             );
         }
-        provider.free(&handle).ok();
-        provider.free(&out_handle).ok();
+        handle.release().ok();
+        out_handle.release().ok();
     }
 }

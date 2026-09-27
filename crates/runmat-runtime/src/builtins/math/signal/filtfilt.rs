@@ -620,35 +620,6 @@ async fn try_filtfilt_gpu(
     Ok(Some(Value::GpuTensor(handle)))
 }
 
-struct OwnedGpuHandle<'a> {
-    provider: &'a dyn runmat_accelerate_api::AccelProvider,
-    handle: Option<runmat_accelerate_api::GpuTensorHandle>,
-}
-
-impl<'a> OwnedGpuHandle<'a> {
-    fn new(
-        provider: &'a dyn runmat_accelerate_api::AccelProvider,
-        handle: runmat_accelerate_api::GpuTensorHandle,
-    ) -> Self {
-        Self {
-            provider,
-            handle: Some(handle),
-        }
-    }
-
-    fn handle(&self) -> &runmat_accelerate_api::GpuTensorHandle {
-        self.handle.as_ref().expect("owned GPU handle")
-    }
-}
-
-impl Drop for OwnedGpuHandle<'_> {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let _ = self.provider.free(&handle);
-        }
-    }
-}
-
 async fn gpu_filter_pass(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     coeffs: &NormalizedCoefficients,
@@ -675,7 +646,6 @@ async fn gpu_filter_pass(
                 format!("provider signal upload failed: {e}"),
             )
         })?;
-    let signal_handle = OwnedGpuHandle::new(provider, signal_handle);
     let b = Tensor::new(
         coeffs.b.iter().map(|z| z.re).collect(),
         vec![1, coeffs.b.len()],
@@ -697,15 +667,14 @@ async fn gpu_filter_pass(
     let eval = filter::evaluate(
         Value::Tensor(b),
         Value::Tensor(a),
-        Value::GpuTensor(signal_handle.handle().clone()),
+        Value::GpuTensor(signal_handle.clone()),
         &[zi_value, Value::Num(dim)],
     )
     .await?;
     let (output, _) = eval.into_pair();
     let tensor = match output {
         Value::GpuTensor(handle) => {
-            let output_handle = OwnedGpuHandle::new(provider, handle);
-            gpu_helpers::gather_tensor_async(output_handle.handle())
+            gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|flow| {
                     signal_error(
@@ -735,7 +704,6 @@ mod tests {
     };
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::ComplexTensor;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn call(b: Value, a: Value, x: Value) -> BuiltinResult<Value> {
         block_on(evaluate(b, a, x))
@@ -767,57 +735,47 @@ mod tests {
     }
 
     struct DownloadFailProvider {
-        next_buffer_id: AtomicU64,
-        frees: AtomicU64,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        probes: std::sync::Mutex<Vec<runmat_accelerate_api::test_support::RetirementProbe>>,
     }
-
     impl DownloadFailProvider {
-        const fn new() -> Self {
+        fn new() -> Self {
             Self {
-                next_buffer_id: AtomicU64::new(1),
-                frees: AtomicU64::new(0),
+                owner: Default::default(),
+                probes: Default::default(),
             }
         }
-
-        fn reset(&self) {
-            self.next_buffer_id.store(1, Ordering::SeqCst);
-            self.frees.store(0, Ordering::SeqCst);
-        }
-
-        fn free_count(&self) -> u64 {
-            self.frees.load(Ordering::SeqCst)
+        fn free_count(&self) -> usize {
+            self.probes
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|probe| probe.retirements())
+                .sum()
         }
     }
-
     impl AccelProvider for DownloadFailProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: self.next_buffer_id.fetch_add(1, Ordering::SeqCst),
-                descriptor: Default::default(),
-            })
+            let allocation =
+                self.owner
+                    .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                        data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                        shape: host.shape.to_vec(),
+                        storage: GpuTensorStorage::Real,
+                    })?;
+            self.probes.lock().unwrap().push(allocation.probe);
+            Ok(allocation.handle)
         }
-
         fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async { Err(anyhow::anyhow!("forced download failure")) })
         }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            self.frees.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "download-fail-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            10_001
+            self.owner.device_id()
         }
     }
-
-    static DOWNLOAD_FAIL_PROVIDER: DownloadFailProvider = DownloadFailProvider::new();
 
     #[test]
     fn descriptor_is_registered() {
@@ -948,9 +906,8 @@ mod tests {
     #[test]
     fn gpu_filter_pass_frees_signal_handle_when_filter_evaluation_fails() {
         let _guard = test_support::accel_test_lock();
-        DOWNLOAD_FAIL_PROVIDER.reset();
-        let _provider_guard =
-            runmat_accelerate_api::ThreadProviderGuard::set(Some(&DOWNLOAD_FAIL_PROVIDER));
+        let provider = Box::leak(Box::new(DownloadFailProvider::new()));
+        let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
 
         let b = vec![Complex::new(0.5, 0.0), Complex::new(0.5, 0.0)];
         let a = vec![Complex::new(1.0, 0.0)];
@@ -960,16 +917,10 @@ mod tests {
             .collect::<Vec<_>>();
         let zi = vec![Complex::new(0.0, 0.0)];
 
-        let result = block_on(gpu_filter_pass(
-            &DOWNLOAD_FAIL_PROVIDER,
-            &coeffs,
-            &signal,
-            &[1, 8],
-            &zi,
-        ));
+        let result = block_on(gpu_filter_pass(provider, &coeffs, &signal, &[1, 8], &zi));
 
         assert!(result.is_err());
-        assert_eq!(DOWNLOAD_FAIL_PROVIDER.free_count(), 1);
+        assert_eq!(provider.free_count(), 1);
     }
 
     #[test]

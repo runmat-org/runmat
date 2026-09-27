@@ -34,7 +34,14 @@ fn discarded_samples_still_validate_representation_and_exactness() {
         let error = call(value, vec![]).unwrap_err();
         assert_eq!(error.identifier(), GAUSPULS_ERROR_INVALID_INPUT.identifier);
     }
-    let handle = GpuTensorHandle::new(vec![1, 1], u32::MAX, u64::MAX);
+    let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap()
+        .handle;
     assert!(call(Value::GpuTensor(handle), vec![]).is_err());
     assert_eq!(
         call(Value::Num(0.0), vec![]).unwrap(),
@@ -213,16 +220,14 @@ fn gauspuls_extension_roles_and_compatibility_order_are_stable() {
         GAUSPULS_SINGLE_CONTROL_EXTENSION.error_identifier
     );
 
-    let mut resident = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX - 8,
-        buffer_id: u64::MAX - 8,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::F64,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("admit owned fixture")
+        .handle;
     let resident_error = call(Value::GpuTensor(resident.clone()), Vec::new())
         .expect_err("resident extension before provider access");
     assert_eq!(
@@ -236,7 +241,14 @@ fn gauspuls_extension_roles_and_compatibility_order_are_stable() {
         GAUSPULS_RESIDENT_INPUT_EXTENSION.error_identifier
     );
 
-    resident.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U64);
+    let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            vec![1, 1],
+            runmat_accelerate_api::NumericElementType::U64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .expect("admit owned fixture")
+        .handle;
     let typed_resident_error = call(Value::GpuTensor(resident.clone()), Vec::new())
         .expect_err("integer role precedes residency");
     assert_eq!(

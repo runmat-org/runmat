@@ -631,7 +631,7 @@ mod tests {
             else {
                 panic!("expected resident double output");
             };
-            assert_eq!(output.device_id, provider.device_id());
+            assert_eq!(output.device_id(), provider.device_id());
             assert_eq!(runmat_accelerate_api::handle_integer_type(&output), None);
             let host = block_on(provider.download(&output)).expect("download double image");
             assert_eq!(host.shape, vec![1, 3]);

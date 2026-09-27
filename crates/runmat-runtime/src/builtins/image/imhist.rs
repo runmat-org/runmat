@@ -408,12 +408,11 @@ async fn gather_preserving_resident_value(value: &Value) -> BuiltinResult<Value>
     };
     let owner = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
         .ok_or_else(|| internal("no acceleration provider owns the gpuArray input"))?;
-    let metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(handle);
+    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
     let result = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
         owner, handle,
     )
     .await;
-    crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, &metadata);
     result.map_err(map_flow)
 }
 
@@ -452,7 +451,7 @@ fn ensure_supported_resident_image_class(value: &Value) -> BuiltinResult<()> {
 fn is_colormap_argument(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor.shape.len() == 2 && tensor.shape.get(1) == Some(&3),
-        Value::GpuTensor(handle) => handle.shape.len() == 2 && handle.shape.get(1) == Some(&3),
+        Value::GpuTensor(handle) => handle.shape().len() == 2 && handle.shape().get(1) == Some(&3),
         _ => false,
     }
 }
@@ -883,7 +882,6 @@ impl ImhistEvaluation {
             ) {
                 Ok(output) => output,
                 Err(err) => {
-                    free_restored_outputs(&restored, source);
                     if runmat_accelerate_api::handle_is_explicit(source) {
                         return Err(err);
                     }
@@ -891,7 +889,6 @@ impl ImhistEvaluation {
                 }
             };
             let Value::GpuTensor(handle) = &output else {
-                free_restored_outputs(&restored, source);
                 if !runmat_accelerate_api::handle_is_explicit(source) {
                     return Ok(host_values);
                 }
@@ -903,7 +900,6 @@ impl ImhistEvaluation {
                 .iter()
                 .any(|protected| same_gpu_handle(handle, protected))
             {
-                free_restored_outputs(&restored, source);
                 return Err(internal(
                     "provider aliased a protected handle during result publication",
                 ));
@@ -922,20 +918,7 @@ fn same_gpu_handle(
     left: &runmat_accelerate_api::GpuTensorHandle,
     right: &runmat_accelerate_api::GpuTensorHandle,
 ) -> bool {
-    left.device_id == right.device_id && left.buffer_id == right.buffer_id
-}
-
-fn free_restored_outputs(outputs: &[Value], source: &runmat_accelerate_api::GpuTensorHandle) {
-    let mut freed = std::collections::BTreeSet::new();
-    for handle in outputs.iter().filter_map(|value| match value {
-        Value::GpuTensor(handle) => Some(handle),
-        _ => None,
-    }) {
-        if same_gpu_handle(handle, source) || !freed.insert((handle.device_id, handle.buffer_id)) {
-            continue;
-        }
-        crate::builtins::common::gpu_helpers::free_unprotected_exact_owner(handle, &[source]);
-    }
+    left.shares_allocation_with(right)
 }
 
 #[cfg(feature = "plot-core")]
@@ -1589,8 +1572,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0, 1.0, 255.0], vec![2, 2], NumericDType::U8);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = {
                 let _outputs = crate::output_count::push_output_count(Some(2));
                 block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
@@ -1624,8 +1608,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F64);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = {
                 let _requested = crate::output_context::push_output_count(0);
                 block_on(imhist_builtin(Value::GpuTensor(source.clone()), vec![]))
@@ -1647,8 +1632,9 @@ mod tests {
             runmat_accelerate::ensure_residency_hooks();
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let err = block_on(imhist_builtin(Value::GpuTensor(source), vec![]))
                 .expect_err("double output cannot silently become host output");
             assert!(
@@ -1666,8 +1652,9 @@ mod tests {
             runmat_accelerate::ensure_residency_hooks();
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("publish provenance view");
             runmat_accelerate_api::mark_residency(&source);
             let result = {
                 let _outputs = crate::output_count::push_output_count(Some(2));
@@ -1690,8 +1677,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
             let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let map = tensor(vec![0.0; 6], vec![2, 3], NumericDType::F64);
             let err = block_on(imhist_builtin(
                 Value::GpuTensor(source.clone()),

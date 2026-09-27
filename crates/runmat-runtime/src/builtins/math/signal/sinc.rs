@@ -432,69 +432,40 @@ mod tests {
         assert_close(got.1, want.1);
     }
 
-    struct UnsupportedSincProvider;
+    #[derive(Default)]
+    struct UnsupportedSincProvider(runmat_accelerate::simple_provider::InProcessProvider);
 
     impl AccelProvider for UnsupportedSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 2,
-                descriptor: Default::default(),
-            })
+            self.0.upload(host)
         }
-
-        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async move {
-                Ok(HostTensorOwned {
-                    data: vec![0.0, 0.5, 1.0],
-                    shape: vec![1, 3],
-                    storage: GpuTensorStorage::Real,
-                })
-            })
+        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            self.0.download(handle)
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "unsupported-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_001
+            self.0.device_id()
         }
     }
 
-    struct FailingSincProvider;
+    #[derive(Default)]
+    struct FailingSincProvider(runmat_accelerate::simple_provider::InProcessProvider);
 
     impl AccelProvider for FailingSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 1,
-                descriptor: Default::default(),
-            })
+            self.0.upload(host)
         }
-
         fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move { Err(anyhow::anyhow!("download should not be called")) })
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "failing-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_002
+            self.0.device_id()
         }
-
         fn unary_sinc<'a>(
             &'a self,
             _: &'a GpuTensorHandle,
@@ -503,52 +474,46 @@ mod tests {
         }
     }
 
-    struct ComplexSincProvider;
+    #[derive(Default)]
+    struct ComplexSincProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider,
+        malformed_download: bool,
+    }
 
     impl AccelProvider for ComplexSincProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: self.device_id(),
-                buffer_id: 3,
-                descriptor: Default::default(),
-            })
+            self.inner.upload(host)
         }
-
+        fn upload_numeric_raw(
+            &self,
+            host: &runmat_accelerate_api::HostNumericTensorView<'_>,
+        ) -> anyhow::Result<GpuTensorHandle> {
+            self.inner.upload_numeric_raw(host)
+        }
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
-                if handle.buffer_id == 4 {
-                    return Ok(HostTensorOwned {
-                        data: vec![0.0, 0.0, 0.5],
-                        shape: vec![2, 1],
-                        storage: GpuTensorStorage::ComplexInterleaved,
-                    });
+                let mut result = self.inner.download(handle).await?;
+                if self.malformed_download {
+                    result.data.pop();
                 }
-                Ok(HostTensorOwned {
-                    data: vec![0.0, 0.0, 0.5, 0.25],
-                    shape: vec![2, 1],
-                    storage: GpuTensorStorage::ComplexInterleaved,
-                })
+                Ok(result)
             })
         }
-
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "complex-sinc-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            90_003
+            self.inner.device_id()
         }
-
         fn unary_sinc<'a>(
             &'a self,
             _: &'a GpuTensorHandle,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-            Box::pin(async move { Err(anyhow::anyhow!("unary_sinc not supported by provider")) })
+            Box::pin(async move {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "unary_sinc",
+                ))
+            })
         }
     }
 
@@ -725,16 +690,14 @@ mod tests {
             assert!(call(Value::Int(IntValue::I16(1))).is_ok());
         }
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_300_005,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = call(Value::GpuTensor(handle.clone()))
@@ -788,18 +751,15 @@ mod tests {
     #[test]
     fn sinc_gpu_falls_back_only_for_explicit_unsupported_hook() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(UnsupportedSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(UnsupportedSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: provider.device_id(),
-            buffer_id: 2,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::Real,
-        );
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 0.5, 1.0],
+                shape: &[1, 3],
+            })
+            .expect("owned input");
         let result = call(Value::GpuTensor(handle)).expect("sinc gpu fallback");
         match result {
             Value::Tensor(out) => {
@@ -816,14 +776,15 @@ mod tests {
     #[test]
     fn sinc_gpu_propagates_provider_execution_errors() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(FailingSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(FailingSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: provider.device_id(),
-            buffer_id: 1,
-            descriptor: Default::default(),
-        };
+        let handle = provider
+            .upload(&HostTensorView {
+                data: &[0.0, 0.5, 1.0],
+                shape: &[1, 3],
+            })
+            .expect("owned input");
         let err = call(Value::GpuTensor(handle)).expect_err("provider error should surface");
         assert!(err
             .message()
@@ -836,18 +797,16 @@ mod tests {
     #[test]
     fn sinc_gpu_complex_interleaved_falls_back_when_hook_unsupported() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let provider: &'static dyn AccelProvider =
+            Box::leak(Box::new(ComplexSincProvider::default()));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: provider.device_id(),
-            buffer_id: 3,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 0.0, 0.5, 0.25]),
+                shape: &[2, 1],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("owned complex input");
 
         let result = call(Value::GpuTensor(handle)).expect("complex sinc gpu fallback");
         match result {
@@ -863,18 +822,18 @@ mod tests {
     #[test]
     fn sinc_gpu_complex_interleaved_rejects_odd_buffer_length() {
         let _guard = test_support::accel_test_lock();
-        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider));
+        let provider: &'static dyn AccelProvider = Box::leak(Box::new(ComplexSincProvider {
+            malformed_download: true,
+            ..Default::default()
+        }));
         let _thread_provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: provider.device_id(),
-            buffer_id: 4,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::F64,
-            GpuTensorStorage::ComplexInterleaved,
-        );
+        let handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 0.0, 0.5, 0.25]),
+                shape: &[2, 1],
+                storage: GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("owned complex input");
 
         let err = call(Value::GpuTensor(handle)).expect_err("odd complex buffer should error");
         assert_eq!(err.identifier(), Some("RunMat:gather:DownloadFailed"));

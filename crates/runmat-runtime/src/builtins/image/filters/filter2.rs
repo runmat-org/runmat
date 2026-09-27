@@ -305,7 +305,7 @@ fn value_rank(value: &Value) -> Option<usize> {
     match value {
         Value::Tensor(tensor) => Some(tensor.shape.len()),
         Value::LogicalArray(array) => Some(array.shape.len()),
-        Value::GpuTensor(handle) => Some(handle.shape.len()),
+        Value::GpuTensor(handle) => Some(handle.shape().len()),
         _ => None,
     }
 }
@@ -412,8 +412,8 @@ async fn filter2_gpu(
     let kernel_clone = kernel_value.clone();
     #[cfg(all(test, feature = "wgpu"))]
     {
-        let kernel_is_wgpu = matches!(kernel_clone, Value::GpuTensor(ref h) if h.device_id != 0);
-        if kernel_is_wgpu || image_handle.device_id != 0 {
+        let kernel_is_wgpu = matches!(kernel_clone, Value::GpuTensor(ref h) if h.device_id() != 0);
+        if kernel_is_wgpu || image_handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -491,15 +491,11 @@ async fn filter2_gpu(
         .await
     {
         Ok(output) => {
-            if let Some(uploaded) = uploaded_kernel {
-                let _ = provider.free(&uploaded);
-            }
+            drop(uploaded_kernel);
             Ok(Value::GpuTensor(output))
         }
         Err(_) => {
-            if let Some(uploaded) = uploaded_kernel {
-                let _ = provider.free(&uploaded);
-            }
+            drop(uploaded_kernel);
             let image_tensor = gpu_helpers::gather_tensor_async(&image_handle)
                 .await
                 .map_err(|err| filter2_map_error(err, &FILTER2_ERROR_INVALID_INPUT))?;
@@ -1023,8 +1019,8 @@ pub(crate) mod tests {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
-        let _ = provider.free(&kernel_handle);
-        let _ = provider.free(&image_handle);
+        let _ = kernel_handle.release();
+        let _ = image_handle.release();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1094,8 +1090,8 @@ pub(crate) mod tests {
             assert!((gpu - cpu).abs() < tol, "{gpu} vs {cpu}");
         }
 
-        let _ = provider.free(&kernel_handle);
-        let _ = provider.free(&image_handle);
+        let _ = kernel_handle.release();
+        let _ = image_handle.release();
     }
 
     #[test]

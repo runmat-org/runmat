@@ -259,7 +259,7 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
                 &IND2RGB_ERROR_INVALID_INPUT,
             ));
         }
-        if handle.shape.len() != 2 {
+        if handle.shape().len() != 2 {
             return Err(ind2rgb_error_with_message(
                 "ind2rgb: indexed image must be an MxN matrix",
                 &IND2RGB_ERROR_INVALID_INPUT,
@@ -275,7 +275,8 @@ async fn ind2rgb_builtin(indexed: Value, map: Value, rest: Vec<Value>) -> Builti
                 &IND2RGB_ERROR_INVALID_COLORMAP,
             ));
         }
-        if handle.shape.len() != 2 || handle.shape.get(1) != Some(&3) || handle.shape[0] == 0 {
+        if handle.shape().len() != 2 || handle.shape().get(1) != Some(&3) || handle.shape()[0] == 0
+        {
             return Err(ind2rgb_error(&IND2RGB_ERROR_INVALID_COLORMAP));
         }
     }
@@ -547,8 +548,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let indexed = Tensor::new_integer(IntegerStorage::U8(vec![0, 1]), vec![1, 2]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &indexed).expect("upload indexed");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let map = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0], vec![2, 3]).unwrap();
 
             let result = block_on(ind2rgb_builtin(
@@ -580,16 +582,14 @@ mod tests {
 
     #[test]
     fn ind2rgb_rejects_unsupported_resident_integer_before_download() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX - 10,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::I16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::I16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         let map = Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap();
         let err = block_on(ind2rgb_builtin(
             Value::GpuTensor(handle.clone()),
@@ -597,7 +597,6 @@ mod tests {
             Vec::new(),
         ))
         .expect_err("unsupported resident integer");
-        runmat_accelerate_api::clear_handle_metadata(&handle);
         assert_eq!(err.identifier(), IND2RGB_ERROR_INVALID_INPUT.identifier);
     }
 

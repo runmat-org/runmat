@@ -418,25 +418,24 @@ async fn try_gpu_envelope(
         Err(_) => return Ok(None),
     };
     if !valid_gpu_envelope_result(&result, handle, provider, &output_shape) {
-        free_rejected_envelope_handle(&result.upper, &[handle]);
-        free_rejected_envelope_handle(&result.lower, &[handle, &result.upper]);
+        drop(result);
         return Ok(None);
     }
-    Ok(Some(gpu_envelope_value(result, out_count)))
+    Ok(Some(gpu_envelope_value(result, out_count)?))
 }
 
 fn resolved_actual_envelope_owner(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 fn gpu_handles_alias(
     lhs: &runmat_accelerate_api::GpuTensorHandle,
     rhs: &runmat_accelerate_api::GpuTensorHandle,
 ) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.shares_allocation_with(rhs)
 }
 
 fn valid_gpu_envelope_result(
@@ -446,8 +445,8 @@ fn valid_gpu_envelope_result(
     output_shape: &[usize],
 ) -> bool {
     let valid = |output: &runmat_accelerate_api::GpuTensorHandle| {
-        output.shape == output_shape
-            && output.device_id == input.device_id
+        output.shape() == output_shape
+            && output.device_id() == input.device_id()
             && !gpu_handles_alias(output, input)
             && runmat_accelerate_api::handle_storage(output)
                 == runmat_accelerate_api::GpuTensorStorage::Real
@@ -459,21 +458,6 @@ fn valid_gpu_envelope_result(
                 .is_some_and(|owner| std::ptr::eq(owner, provider))
     };
     valid(&result.upper) && valid(&result.lower) && !gpu_handles_alias(&result.upper, &result.lower)
-}
-
-fn free_rejected_envelope_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    protected: &[&runmat_accelerate_api::GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|protected| gpu_handles_alias(handle, protected))
-    {
-        return;
-    }
-    if let Some(owner) = resolved_actual_envelope_owner(handle) {
-        let _ = owner.free(handle);
-    }
 }
 
 fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelopeMethod> {
@@ -492,17 +476,17 @@ fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelop
 fn gpu_signal_shape(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Option<(usize, usize, Vec<usize>)>> {
-    if handle.shape.is_empty() || handle.shape.len() > 2 {
+    if handle.shape().is_empty() || handle.shape().len() > 2 {
         return Ok(None);
     }
     let Some(handle_len) = handle
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
     else {
         return Err(envelope_error(&ENVELOPE_ERROR_INVALID_SIGNAL));
     };
-    let output_shape = tensor::default_shape_for(&handle.shape, handle_len);
+    let output_shape = tensor::default_shape_for(&handle.shape(), handle_len);
     let Some(total_len) = output_shape
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
@@ -524,24 +508,29 @@ fn gpu_signal_shape(
     }
 }
 
-fn gpu_envelope_value(result: ProviderEnvelopeResult, out_count: Option<usize>) -> Value {
+fn gpu_envelope_value(
+    result: ProviderEnvelopeResult,
+    out_count: Option<usize>,
+) -> BuiltinResult<Value> {
     let ProviderEnvelopeResult { upper, lower } = result;
     match out_count {
         None => {
-            free_rejected_envelope_handle(&lower, &[&upper]);
+            drop(lower);
             gpu_helpers::resident_gpu_value(upper)
         }
         Some(1) => {
-            free_rejected_envelope_handle(&lower, &[&upper]);
-            Value::OutputList(vec![gpu_helpers::resident_gpu_value(upper)])
+            drop(lower);
+            Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+                upper,
+            )?]))
         }
-        Some(count) => crate::output_count::output_list_with_padding(
+        Some(count) => Ok(crate::output_count::output_list_with_padding(
             count,
             vec![
-                gpu_helpers::resident_gpu_value(upper),
-                gpu_helpers::resident_gpu_value(lower),
+                gpu_helpers::resident_gpu_value(upper)?,
+                gpu_helpers::resident_gpu_value(lower)?,
             ],
-        ),
+        )),
     }
 }
 
@@ -1181,7 +1170,7 @@ mod tests {
                 .expect_err("resident integer data is an extension");
             assert_eq!(error.identifier(), INTEGER_DATA_EXTENSION.error_identifier);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            provider.free(&handle).expect("free input");
+            handle.release().expect("free input");
         });
     }
 
@@ -1339,9 +1328,9 @@ mod tests {
         for (actual, expected) in lower.materialize_f64().iter().zip(expected_lower.iter()) {
             assert!((actual - expected).abs() < 1.0e-5, "{actual} != {expected}");
         }
-        provider.free(&handle).ok();
-        provider.free(&upper_handle).ok();
-        provider.free(&lower_handle).ok();
+        handle.release().ok();
+        upper_handle.release().ok();
+        lower_handle.release().ok();
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 

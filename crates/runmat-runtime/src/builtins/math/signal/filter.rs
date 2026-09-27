@@ -1096,8 +1096,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         None => return Ok(None),
     };
 
-    let mut temp_handles: Vec<GpuTensorHandle> = Vec::new();
-
     let b_shape = vec![args.coeffs_b.len, 1];
     let view_b = runmat_accelerate_api::HostTensorView {
         data: &b_real,
@@ -1109,7 +1107,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
             format!("numerator upload failed: {e}"),
         )
     })?;
-    temp_handles.push(b_handle.clone());
 
     let a_shape = vec![args.coeffs_a.len, 1];
     let view_a = runmat_accelerate_api::HostTensorView {
@@ -1117,21 +1114,18 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         shape: &a_shape,
     };
     let a_handle = provider.upload(&view_a).map_err(|e| {
-        cleanup_temp_handles(provider, temp_handles.clone());
         filter_error_with_detail(
             &FILTER_ERROR_PROVIDER_UPLOAD,
             format!("denominator upload failed: {e}"),
         )
     })?;
-    temp_handles.push(a_handle.clone());
 
-    let (zi_handle_opt, zi_temp) = if args.state_len == 0 || !args.initial.provided {
+    let (zi_handle_opt, _zi_temp) = if args.state_len == 0 || !args.initial.provided {
         (None, None)
     } else if let Some(handle) = &args.initial.gpu_handle {
         if !runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         {
-            cleanup_temp_handles(provider, temp_handles);
             return Ok(None);
         }
         (Some(handle.clone()), None)
@@ -1139,7 +1133,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         let zi_real = match to_real_vec(&args.initial.column_major) {
             Some(vec) => vec,
             None => {
-                cleanup_temp_handles(provider, temp_handles);
                 return Ok(None);
             }
         };
@@ -1148,7 +1141,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
             shape: &args.initial.shape,
         };
         let handle = provider.upload(&view).map_err(|e| {
-            cleanup_temp_handles(provider, temp_handles.clone());
             filter_error_with_detail(
                 &FILTER_ERROR_PROVIDER_UPLOAD,
                 format!("initial-state upload failed: {e}"),
@@ -1156,10 +1148,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         })?;
         (Some(handle.clone()), Some(handle))
     };
-
-    if let Some(handle) = &zi_temp {
-        temp_handles.push(handle.clone());
-    }
 
     let options = ProviderIirFilterOptions {
         dim: args.dim_idx,
@@ -1170,8 +1158,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
     let result = provider
         .iir_filter(&b_handle, &a_handle, &signal_handle, options)
         .await;
-
-    cleanup_temp_handles(provider, temp_handles);
 
     let result = match result {
         Ok(res) => res,
@@ -1205,15 +1191,6 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         output: output_value,
         final_state: final_state_value,
     }))
-}
-
-fn cleanup_temp_handles(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    handles: Vec<GpuTensorHandle>,
-) {
-    for handle in handles {
-        let _ = provider.free(&handle);
-    }
 }
 
 fn filter_host(args: &FilterArgs) -> BuiltinResult<FilterEvaluation> {

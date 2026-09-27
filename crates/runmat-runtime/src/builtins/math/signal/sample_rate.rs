@@ -779,7 +779,7 @@ fn value_rank(value: &Value) -> Option<usize> {
         Value::Tensor(tensor) => Some(tensor.shape.len()),
         Value::LogicalArray(array) => Some(array.shape.len()),
         Value::ComplexTensor(tensor) => Some(tensor.shape.len()),
-        Value::GpuTensor(handle) => Some(handle.shape.len()),
+        Value::GpuTensor(handle) => Some(handle.shape().len()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(2),
         _ => None,
     }
@@ -919,7 +919,7 @@ impl ResampleFilter {
         source: &runmat_accelerate_api::GpuTensorHandle,
     ) -> Option<&runmat_accelerate_api::GpuTensorHandle> {
         match self {
-            Self::Gpu { handle, .. } if handle.device_id == source.device_id => Some(handle),
+            Self::Gpu { handle, .. } if handle.device_id() == source.device_id() => Some(handle),
             _ => None,
         }
     }
@@ -964,9 +964,9 @@ async fn resample_gpu(
         return Ok(None);
     };
     let storage = runmat_accelerate_api::handle_storage(handle);
-    let handle_len = checked_product(&handle.shape)
+    let handle_len = checked_product(&handle.shape())
         .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
-    let mut shape = canonical_shape(handle.shape.clone(), handle_len);
+    let mut shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = options
         .dim
         .unwrap_or_else(|| first_non_singleton_dim(&shape));
@@ -992,13 +992,12 @@ async fn resample_gpu(
                 ) =>
             {
                 Ok(Some(ResampleEval {
-                    y: wrap_resampled_gpu(output),
+                    y: wrap_resampled_gpu(output)?,
                     filter: options.filter.clone(),
                 }))
             }
             Ok(output) => {
-                let _ = provider.free(&output);
-                runmat_accelerate_api::clear_handle_metadata(&output);
+                drop(output);
                 Err(sample_error_with_detail(
                     RESAMPLE_NAME,
                     &SAMPLE_ERROR_GATHER_FAILED,
@@ -1052,27 +1051,24 @@ async fn resample_gpu(
         .scatter_linear(&padded, &scatter_indices, handle)
         .is_err()
     {
-        let _ = provider.free(&padded);
         return Ok(None);
     }
 
     let filter_shape = [filter_len, 1usize];
-    let (b_handle, free_b_handle) =
-        if let Some(handle) = options.filter.same_provider_handle(handle) {
-            (handle.clone(), false)
-        } else {
-            let filter = options.filter.host_values().await?;
-            match provider.upload(&runmat_accelerate_api::HostTensorView {
-                data: &filter,
-                shape: &filter_shape,
-            }) {
-                Ok(handle) => (handle, true),
-                Err(_) => {
-                    let _ = provider.free(&padded);
-                    return Ok(None);
-                }
+    let b_handle = if let Some(handle) = options.filter.same_provider_handle(handle) {
+        handle.clone()
+    } else {
+        let filter = options.filter.host_values().await?;
+        match provider.upload(&runmat_accelerate_api::HostTensorView {
+            data: &filter,
+            shape: &filter_shape,
+        }) {
+            Ok(handle) => handle,
+            Err(_) => {
+                return Ok(None);
             }
-        };
+        }
+    };
     let a_coeff = [1.0f64];
     let a_shape = [1usize, 1usize];
     let a_handle = match provider.upload(&runmat_accelerate_api::HostTensorView {
@@ -1081,10 +1077,6 @@ async fn resample_gpu(
     }) {
         Ok(handle) => handle,
         Err(_) => {
-            if free_b_handle {
-                let _ = provider.free(&b_handle);
-            }
-            let _ = provider.free(&padded);
             return Ok(None);
         }
     };
@@ -1104,26 +1096,16 @@ async fn resample_gpu(
     {
         Ok(result) => result,
         Err(_) => {
-            let _ = provider.free(&a_handle);
-            if free_b_handle {
-                let _ = provider.free(&b_handle);
-            }
-            let _ = provider.free(&padded);
             return Ok(None);
         }
     };
 
     let output = provider.gather_linear(&filter_result.output, &gather_indices, &output_shape);
-    if let Some(final_state) = &filter_result.final_state {
-        let _ = provider.free(final_state);
-    }
-    let _ = provider.free(&filter_result.output);
-    let _ = provider.free(&a_handle);
-    if free_b_handle {
-        let _ = provider.free(&b_handle);
-    }
-    let _ = provider.free(&padded);
 
+    drop(filter_result);
+    drop(a_handle);
+    drop(b_handle);
+    drop(padded);
     match output {
         Ok(output)
             if valid_class_preserving_gpu_output(
@@ -1135,13 +1117,12 @@ async fn resample_gpu(
             ) =>
         {
             Ok(Some(ResampleEval {
-                y: wrap_resampled_gpu(output),
+                y: wrap_resampled_gpu(output)?,
                 filter: options.filter.clone(),
             }))
         }
         Ok(output) => {
-            let _ = provider.free(&output);
-            runmat_accelerate_api::clear_handle_metadata(&output);
+            drop(output);
             Err(sample_error_with_detail(
                 RESAMPLE_NAME,
                 &SAMPLE_ERROR_GATHER_FAILED,
@@ -1248,7 +1229,7 @@ async fn parse_resample_filter_spec(
 async fn scalar_integer_option(value: &Value) -> BuiltinResult<Option<usize>> {
     match value {
         Value::Tensor(tensor) if !tensor::is_scalar_tensor(tensor) => return Ok(None),
-        Value::GpuTensor(handle) if checked_product(&handle.shape) != Some(1) => return Ok(None),
+        Value::GpuTensor(handle) if checked_product(&handle.shape()) != Some(1) => return Ok(None),
         Value::ComplexTensor(_) => return Ok(None),
         _ => {}
     }
@@ -1316,9 +1297,9 @@ async fn parse_filter_vector(value: Value) -> BuiltinResult<ResampleFilter> {
         ));
     }
     if let Value::GpuTensor(handle) = value {
-        let len = checked_product(&handle.shape)
+        let len = checked_product(&handle.shape())
             .ok_or_else(|| sample_error(RESAMPLE_NAME, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
-        validate_filter_shape(len, &handle.shape)?;
+        validate_filter_shape(len, &handle.shape())?;
         if runmat_accelerate_api::handle_storage(&handle)
             != runmat_accelerate_api::GpuTensorStorage::Real
         {
@@ -1587,9 +1568,9 @@ fn upsample_gpu(
     phase: usize,
     builtin: &'static str,
 ) -> BuiltinResult<Option<Value>> {
-    let handle_len = checked_product(&handle.shape)
+    let handle_len = checked_product(&handle.shape())
         .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
-    let shape = canonical_shape(handle.shape.clone(), handle_len);
+    let shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = first_non_singleton_dim(&shape);
     let input_len = shape[dim];
     let output_len = output_len(input_len, factor, phase, SampleOp::Up)
@@ -1598,7 +1579,7 @@ fn upsample_gpu(
     output_shape[dim] = output_len;
 
     if factor == 1 && phase == 0 {
-        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
+        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())?));
     }
 
     let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
@@ -1609,30 +1590,24 @@ fn upsample_gpu(
     else {
         return Ok(None);
     };
-    let allocation = match runmat_accelerate_api::handle_integer_type(handle) {
-        Some(_) => provider.zeros_integer_like(handle, &output_shape),
-        None => provider
-            .zeros_with_storage(&output_shape, runmat_accelerate_api::handle_storage(handle)),
-    };
+    let allocation = provider.zeros_like(handle, &output_shape);
     let output = match allocation {
         Ok(output) => output,
         Err(_) => return Ok(None),
     };
     if !valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, false) {
-        let _ = provider.free(&output);
-        runmat_accelerate_api::clear_handle_metadata(&output);
-        return Err(sample_error_with_detail(
-            builtin,
-            &SAMPLE_ERROR_GATHER_FAILED,
-            "provider returned an incompatible upsample allocation",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            sample_error_with_detail(
+                builtin,
+                &SAMPLE_ERROR_GATHER_FAILED,
+                "provider returned an incompatible upsample allocation",
+            ),
         ));
     }
     match provider.scatter_linear(&output, &indices, handle) {
-        Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output))),
-        Err(_) => {
-            let _ = provider.free(&output);
-            Ok(None)
-        }
+        Ok(()) => Ok(Some(wrap_sample_rate_gpu(handle, output)?)),
+        Err(_) => Ok(None),
     }
 }
 
@@ -1642,9 +1617,9 @@ fn downsample_gpu(
     phase: usize,
     builtin: &'static str,
 ) -> BuiltinResult<Option<Value>> {
-    let handle_len = checked_product(&handle.shape)
+    let handle_len = checked_product(&handle.shape())
         .ok_or_else(|| sample_error(builtin, &SAMPLE_ERROR_SIZE_OVERFLOW))?;
-    let shape = canonical_shape(handle.shape.clone(), handle_len);
+    let shape = canonical_shape(handle.shape().to_vec(), handle_len);
     let dim = first_non_singleton_dim(&shape);
     let input_len = shape[dim];
     let output_len = output_len(input_len, factor, phase, SampleOp::Down)
@@ -1661,7 +1636,7 @@ fn downsample_gpu(
     })?;
 
     if factor == 1 && phase == 0 {
-        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())));
+        return Ok(Some(wrap_sample_rate_gpu(handle, handle.clone())?));
     }
 
     let Some(indices) =
@@ -1672,22 +1647,18 @@ fn downsample_gpu(
 
     match provider.gather_linear(handle, &indices, &output_shape) {
         Ok(output) => {
-            let output_identity = (output.device_id, output.buffer_id);
-            let input_identity = (handle.device_id, handle.buffer_id);
             let valid =
                 valid_class_preserving_gpu_output(provider, handle, &output, &output_shape, true);
             if valid {
-                Ok(Some(wrap_sample_rate_gpu(handle, output)))
+                Ok(Some(wrap_sample_rate_gpu(handle, output)?))
             } else {
-                if output_identity != input_identity {
-                    if let Some(owner) = resolved_actual_downsample_owner(&output) {
-                        let _ = owner.free(&output);
-                    }
-                }
-                Err(sample_error_with_detail(
-                    builtin,
-                    &SAMPLE_ERROR_GATHER_FAILED,
-                    "provider returned an incompatible linear-gather result",
+                Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    sample_error_with_detail(
+                        builtin,
+                        &SAMPLE_ERROR_GATHER_FAILED,
+                        "provider returned an incompatible linear-gather result",
+                    ),
                 ))
             }
         }
@@ -1699,13 +1670,13 @@ fn resolved_actual_downsample_owner(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
     runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id)
+        .filter(|owner| owner.device_id() == handle.device_id())
 }
 
 fn wrap_sample_rate_gpu(
     source: &runmat_accelerate_api::GpuTensorHandle,
     output: runmat_accelerate_api::GpuTensorHandle,
-) -> Value {
+) -> BuiltinResult<Value> {
     if runmat_accelerate_api::handle_is_logical(source) {
         gpu_helpers::logical_gpu_value(output)
     } else {
@@ -1713,8 +1684,16 @@ fn wrap_sample_rate_gpu(
     }
 }
 
-fn wrap_resampled_gpu(output: runmat_accelerate_api::GpuTensorHandle) -> Value {
-    runmat_accelerate_api::clear_handle_logical(&output);
+fn wrap_resampled_gpu(output: runmat_accelerate_api::GpuTensorHandle) -> BuiltinResult<Value> {
+    if runmat_accelerate_api::handle_is_logical(&output) {
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            build_runtime_error(
+                "resampling provider returned logical storage instead of numeric output",
+            )
+            .build(),
+        ));
+    }
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -1726,8 +1705,8 @@ fn valid_class_preserving_gpu_output(
     require_distinct: bool,
 ) -> bool {
     (!require_distinct || !gpu_helpers::same_gpu_handle(source, output))
-        && output.device_id == provider.device_id()
-        && output.shape == expected_shape
+        && output.device_id() == provider.device_id()
+        && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && gpu_helpers::numeric_descriptor_matches_source(source, output)
@@ -2150,107 +2129,99 @@ mod tests {
     use std::sync::Mutex;
 
     struct HostileDownsampleProvider {
-        device_id: u32,
-        next_buffer: AtomicU64,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        foreign_owner: runmat_accelerate_api::test_support::TestAllocationOwner,
         mode: AtomicU8,
-        frees: AtomicUsize,
         downloads: AtomicUsize,
         gathers: AtomicUsize,
         last_output: AtomicU64,
-        buffers: Mutex<HashMap<u64, HostTensorOwned>>,
+        probes: Mutex<HashMap<u64, runmat_accelerate_api::test_support::RetirementProbe>>,
     }
 
     impl HostileDownsampleProvider {
         fn new() -> Self {
             Self {
-                device_id: runmat_accelerate_api::next_device_id(),
-                next_buffer: AtomicU64::new(9_399_100_000),
+                owner: Default::default(),
+                foreign_owner: Default::default(),
                 mode: AtomicU8::new(0),
-                frees: AtomicUsize::new(0),
                 downloads: AtomicUsize::new(0),
                 gathers: AtomicUsize::new(0),
                 last_output: AtomicU64::new(0),
-                buffers: Mutex::new(HashMap::new()),
+                probes: Default::default(),
             }
         }
-
-        fn allocate(
+        fn remember(
             &self,
-            data: Vec<f64>,
-            shape: Vec<usize>,
-            device_id: u32,
-            precision: ProviderPrecision,
-            storage: GpuTensorStorage,
+            allocation: runmat_accelerate_api::test_support::TestAllocation,
         ) -> GpuTensorHandle {
-            let buffer_id = self.next_buffer.fetch_add(1, Ordering::Relaxed);
-            self.buffers.lock().unwrap().insert(
-                buffer_id,
-                HostTensorOwned {
-                    data,
-                    shape: shape.clone(),
-                    storage,
-                },
-            );
-            GpuTensorHandle {
-                shape,
-                device_id,
-                buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
-                    match precision {
-                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-                    },
-                    storage,
-                ),
-            }
+            self.probes
+                .lock()
+                .unwrap()
+                .insert(allocation.handle.buffer_id(), allocation.probe);
+            allocation.handle
+        }
+        fn frees(&self) -> usize {
+            self.probes
+                .lock()
+                .unwrap()
+                .values()
+                .map(|probe| probe.retirements())
+                .sum()
+        }
+        fn is_live(&self, handle: &GpuTensorHandle) -> bool {
+            self.probes
+                .lock()
+                .unwrap()
+                .get(&handle.buffer_id())
+                .is_some_and(|probe| probe.retirements() == 0)
+        }
+        fn live_count(&self) -> usize {
+            self.probes
+                .lock()
+                .unwrap()
+                .values()
+                .filter(|probe| probe.retirements() == 0)
+                .count()
         }
     }
 
     impl AccelProvider for HostileDownsampleProvider {
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Ok(self.allocate(
-                host.data.to_vec(),
-                host.shape.to_vec(),
-                self.device_id,
-                ProviderPrecision::F64,
-                GpuTensorStorage::Real,
-            ))
+            Ok(self.remember(self.owner.allocate_numeric(
+                runmat_accelerate_api::HostNumericTensorOwned {
+                    data: runmat_accelerate_api::HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: GpuTensorStorage::Real,
+                },
+            )?))
         }
-
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             self.downloads.fetch_add(1, Ordering::Relaxed);
             Box::pin(async move {
-                self.buffers
+                let probe = self
+                    .probes
                     .lock()
                     .unwrap()
-                    .get(&handle.buffer_id)
+                    .get(&handle.buffer_id())
                     .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("unknown hostile test buffer"))
+                    .ok_or_else(|| anyhow::anyhow!("unknown hostile test allocation"))?;
+                let data = probe.with_data(handle, |data| match data {
+                    runmat_accelerate_api::HostNumericDataView::F64(data) => Ok(data.to_vec()),
+                    _ => Err(anyhow::anyhow!("test download expects F64")),
+                })??;
+                Ok(HostTensorOwned {
+                    data,
+                    shape: handle.shape().to_vec(),
+                    storage: handle.physical().storage(),
+                })
             })
         }
-
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            if self
-                .buffers
-                .lock()
-                .unwrap()
-                .remove(&handle.buffer_id)
-                .is_some()
-            {
-                self.frees.fetch_add(1, Ordering::Relaxed);
-            }
-            runmat_accelerate_api::clear_handle_logical(handle);
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "hostile-downsample-test-provider".to_string()
         }
-
         fn device_id(&self) -> u32 {
-            self.device_id
+            self.owner.device_id()
         }
-
         fn gather_linear(
             &self,
             source: &GpuTensorHandle,
@@ -2260,7 +2231,9 @@ mod tests {
             self.gathers.fetch_add(1, Ordering::Relaxed);
             let mode = self.mode.load(Ordering::Relaxed);
             if mode == 6 {
-                return Err(anyhow::anyhow!("forced gather fallback"));
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "forced gather fallback",
+                ));
             }
             if mode == 7 {
                 return Ok(source.clone());
@@ -2270,36 +2243,34 @@ mod tests {
             } else {
                 output_shape.to_vec()
             };
-            let device_id = if mode == 1 {
-                self.device_id.wrapping_add(10_000)
+            let owner = if mode == 1 {
+                &self.foreign_owner
             } else {
-                self.device_id
+                &self.owner
             };
-            let precision = if mode == 3 {
-                ProviderPrecision::F32
+            let allocation = if mode == 5 {
+                owner.allocate_logical_zeroed(shape, ProviderPrecision::F64)?
             } else {
-                ProviderPrecision::F64
+                let storage = if mode == 2 {
+                    GpuTensorStorage::ComplexInterleaved
+                } else {
+                    GpuTensorStorage::Real
+                };
+                let count = shape.iter().product::<usize>() * if mode == 2 { 2 } else { 1 };
+                let data = match mode {
+                    3 => runmat_accelerate_api::HostNumericDataOwned::F32(vec![99.0; count]),
+                    4 => runmat_accelerate_api::HostNumericDataOwned::U8(vec![99; count]),
+                    _ => runmat_accelerate_api::HostNumericDataOwned::F64(vec![99.0; count]),
+                };
+                owner.allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data,
+                    shape,
+                    storage,
+                })?
             };
-            let storage = if mode == 2 {
-                GpuTensorStorage::ComplexInterleaved
-            } else {
-                GpuTensorStorage::Real
-            };
-            let mut output = self.allocate(
-                vec![99.0; shape.iter().product()],
-                shape,
-                device_id,
-                precision,
-                storage,
-            );
-            if mode == 4 {
-                output.descriptor.element_type =
-                    Some(runmat_accelerate_api::NumericElementType::U8);
-            }
-            if mode == 5 {
-                runmat_accelerate_api::set_handle_logical(&output, true);
-            }
-            self.last_output.store(output.buffer_id, Ordering::Relaxed);
+            let output = self.remember(allocation);
+            self.last_output
+                .store(output.buffer_id(), Ordering::Relaxed);
             Ok(output)
         }
     }
@@ -2405,7 +2376,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![4, 2]);
+            assert_eq!(out_handle.shape(), vec![4, 2]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let gathered =
@@ -2415,7 +2386,7 @@ mod tests {
                 gathered.materialize_f64(),
                 vec![0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0, 4.0]
             );
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -2445,8 +2416,8 @@ mod tests {
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![1_u64 << 63, 0, u64::MAX, 0]))
             );
-            provider.free(&handle).expect("free input");
-            provider.free(&out_handle).expect("free output");
+            handle.release().expect("free input");
+            out_handle.release().expect("free output");
         });
     }
 
@@ -2640,7 +2611,7 @@ mod tests {
             let Value::GpuTensor(output) = output else {
                 panic!("expected resident integer output")
             };
-            assert_eq!(output.device_id, input.device_id);
+            assert_eq!(output.device_id(), input.device_id());
             assert_eq!(output.shape, vec![1, 2]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
@@ -2653,8 +2624,8 @@ mod tests {
                 gathered.data,
                 runmat_accelerate_api::HostIntegerDataOwned::U64(vec![2, u64::MAX])
             );
-            let _ = provider.free(&input);
-            let _ = provider.free(&output);
+            let _ = input.release();
+            let _ = output.release();
         });
     }
 
@@ -2700,7 +2671,7 @@ mod tests {
             panic!("expected resident WGPU integer output")
         };
 
-        assert_eq!(output.device_id, input.device_id);
+        assert_eq!(output.device_id(), input.device_id());
         assert_eq!(output.shape, vec![1, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
@@ -2718,8 +2689,8 @@ mod tests {
             )
         );
 
-        provider.free(&input).expect("free WGPU input");
-        provider.free(&output).expect("free WGPU output");
+        input.release().expect("free WGPU input");
+        output.release().expect("free WGPU output");
     }
 
     #[test]
@@ -2736,13 +2707,16 @@ mod tests {
                 shape: &[1, 4],
             })
             .expect("input upload");
-        let hostile = GpuTensorHandle {
-            shape: input.shape.clone(),
-            device_id: input.device_id.wrapping_add(10_000),
-            buffer_id: input.buffer_id,
-            descriptor: Default::default(),
-        };
-        let frees_before = provider.frees.load(Ordering::Relaxed);
+        let hostile = provider
+            .foreign_owner
+            .allocate_zeroed(
+                input.shape().to_vec(),
+                runmat_accelerate_api::NumericElementType::F64,
+                GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle;
+        let frees_before = provider.frees();
 
         let error = block_on(downsample_builtin(
             Value::GpuTensor(hostile),
@@ -2754,15 +2728,11 @@ mod tests {
         assert!(error.message().contains("no proven owner"));
         assert_eq!(provider.gathers.load(Ordering::Relaxed), 0);
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
-        assert_eq!(provider.frees.load(Ordering::Relaxed), frees_before);
-        assert!(provider
-            .buffers
-            .lock()
-            .unwrap()
-            .contains_key(&input.buffer_id));
+        assert_eq!(provider.frees(), frees_before);
+        assert!(provider.is_live(&input));
 
-        provider.free(&input).expect("free live input");
-        assert!(provider.buffers.lock().unwrap().is_empty());
+        input.release().expect("release live input");
+        assert_eq!(provider.live_count(), 0);
     }
 
     #[test]
@@ -2781,33 +2751,15 @@ mod tests {
                     shape: &[1, 4],
                 })
                 .expect("input upload");
-            let frees_before = provider.frees.load(Ordering::Relaxed);
+            let frees_before = provider.frees();
             let error = downsample_gpu(&input, 2, 0, DOWNSAMPLE_NAME)
                 .expect_err("malformed provider result must be an explicit error");
             assert_eq!(error.identifier(), SAMPLE_ERROR_GATHER_FAILED.identifier);
 
-            if mode == 1 {
-                assert_eq!(
-                    provider.frees.load(Ordering::Relaxed),
-                    frees_before,
-                    "unknown-owner output must not be freed through the input owner"
-                );
-                let unknown = GpuTensorHandle {
-                    shape: vec![1, 2],
-                    device_id: provider.device_id.wrapping_add(10_000),
-                    buffer_id: provider.last_output.load(Ordering::Relaxed),
-                    descriptor: Default::default(),
-                };
-                provider.free(&unknown).expect("test cleanup");
-            } else {
-                assert_eq!(
-                    provider.frees.load(Ordering::Relaxed),
-                    frees_before + 1,
-                    "known-owner malformed output must be freed exactly once"
-                );
-            }
-            provider.free(&input).expect("free input");
-            assert!(provider.buffers.lock().unwrap().is_empty());
+            assert_eq!(provider.frees(), frees_before + 1,
+                "malformed owned output retires through its actual owner, including a foreign owner");
+            input.release().expect("free input");
+            assert_eq!(provider.live_count(), 0);
         }
 
         provider.mode.store(7, Ordering::Relaxed);
@@ -2817,22 +2769,18 @@ mod tests {
                 shape: &[1, 4],
             })
             .expect("alias input upload");
-        let frees_before = provider.frees.load(Ordering::Relaxed);
+        let frees_before = provider.frees();
         let error = downsample_gpu(&input, 2, 0, DOWNSAMPLE_NAME)
             .expect_err("provider output alias must be an explicit error");
         assert_eq!(error.identifier(), SAMPLE_ERROR_GATHER_FAILED.identifier);
         assert_eq!(
-            provider.frees.load(Ordering::Relaxed),
+            provider.frees(),
             frees_before,
             "aliased input must remain caller-owned"
         );
-        assert!(provider
-            .buffers
-            .lock()
-            .unwrap()
-            .contains_key(&input.buffer_id));
-        provider.free(&input).expect("free aliased input");
-        assert!(provider.buffers.lock().unwrap().is_empty());
+        assert!(provider.is_live(&input));
+        input.release().expect("free aliased input");
+        assert_eq!(provider.live_count(), 0);
 
         provider.mode.store(6, Ordering::Relaxed);
         let input = provider
@@ -2852,8 +2800,8 @@ mod tests {
         };
         assert_eq!(output.shape, vec![1, 2]);
         assert_eq!(output.materialize_f64(), vec![1.0, 3.0]);
-        provider.free(&input).expect("free fallback input");
-        assert!(provider.buffers.lock().unwrap().is_empty());
+        input.release().expect("free fallback input");
+        assert_eq!(provider.live_count(), 0);
     }
 
     #[test]
@@ -2876,14 +2824,14 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 2]);
+            assert_eq!(out_handle.shape(), vec![1, 2]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(gathered.shape, vec![1, 2]);
             assert_eq!(gathered.materialize_f64(), vec![2.0, 4.0]);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -2902,7 +2850,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 4]);
+            assert_eq!(out_handle.shape(), vec![1, 4]);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&out_handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -2913,8 +2861,8 @@ mod tests {
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.shape, vec![1, 4]);
             assert_eq!(host.data, vec![0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 3.0, 4.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out_handle);
+            let _ = handle.release();
+            let _ = out_handle.release();
         });
     }
 
@@ -2937,7 +2885,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 2]);
+            assert_eq!(out_handle.shape(), vec![1, 2]);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&out_handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -2948,8 +2896,8 @@ mod tests {
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.shape, vec![1, 2]);
             assert_eq!(host.data, vec![2.0, -2.0, 4.0, -4.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out_handle);
+            let _ = handle.release();
+            let _ = out_handle.release();
         });
     }
 
@@ -3204,7 +3152,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 6]);
+            assert_eq!(out_handle.shape(), vec![1, 6]);
 
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
@@ -3213,7 +3161,7 @@ mod tests {
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
             );
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -3246,7 +3194,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 6]);
+            assert_eq!(out_handle.shape(), vec![1, 6]);
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
 
             let gathered =
@@ -3256,9 +3204,9 @@ mod tests {
                 gathered.materialize_f64(),
                 vec![1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
             );
-            let _ = provider.free(&handle);
-            let _ = provider.free(&filter_handle);
-            let _ = provider.free(&out_handle);
+            let _ = handle.release();
+            let _ = filter_handle.release();
+            let _ = out_handle.release();
         });
     }
 
@@ -3278,7 +3226,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 4]);
+            assert_eq!(out_handle.shape(), vec![1, 4]);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&out_handle),
                 GpuTensorStorage::ComplexInterleaved
@@ -3289,8 +3237,8 @@ mod tests {
             assert_eq!(host.storage, GpuTensorStorage::ComplexInterleaved);
             assert_eq!(host.shape, vec![1, 4]);
             assert_eq!(host.data, vec![1.0, 2.0, 0.0, 0.0, 3.0, 4.0, 0.0, 0.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out_handle);
+            let _ = handle.release();
+            let _ = out_handle.release();
         });
     }
 
@@ -3320,14 +3268,14 @@ mod tests {
             let Value::GpuTensor(signal_handle) = &outputs[0] else {
                 panic!("expected resident signal output");
             };
-            assert_eq!(signal_handle.shape, vec![1, 3]);
+            assert_eq!(signal_handle.shape(), vec![1, 3]);
             let gathered = test_support::gather(outputs[0].clone()).expect("gather signal output");
             assert_eq!(gathered.materialize_f64(), vec![1.0, 3.0, 5.0]);
             let Value::Tensor(filter) = &outputs[1] else {
                 panic!("expected host filter tensor");
             };
             assert_eq!(filter.materialize_f64(), vec![0.0, 1.0, 0.0]);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 
@@ -3351,11 +3299,11 @@ mod tests {
             let Value::GpuTensor(out_handle) = out else {
                 panic!("expected resident gpu tensor");
             };
-            assert_eq!(out_handle.shape, vec![1, 1]);
+            assert_eq!(out_handle.shape(), vec![1, 1]);
             let gathered =
                 test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(gathered.materialize_f64(), vec![1.0]);
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 

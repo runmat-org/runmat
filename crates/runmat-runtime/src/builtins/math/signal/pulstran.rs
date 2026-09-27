@@ -1037,8 +1037,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &times).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let error = call(
                 Value::GpuTensor(explicit),
                 Value::Num(0.0),
@@ -1069,8 +1070,9 @@ mod tests {
         for storage in all_integer_storages() {
             let times = Tensor::new_integer(storage, vec![1, 2]).expect("integer times");
             let handle = gpu_helpers::upload_tensor(provider, &times).expect("upload");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = call(
                 Value::GpuTensor(handle),
                 Value::Num(0.0),

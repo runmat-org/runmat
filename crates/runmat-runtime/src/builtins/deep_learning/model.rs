@@ -76,7 +76,7 @@ pub(super) async fn forward_builtin(
             vec![
                 (
                     "Data",
-                    crate::builtins::common::gpu_helpers::resident_gpu_value(output),
+                    crate::builtins::common::gpu_helpers::resident_gpu_value(output)?,
                 ),
                 ("Format", Value::String(format.clone())),
                 ("Labels", Value::String(format)),
@@ -546,21 +546,12 @@ async fn evaluate_network_gpu(
     validate_gpu_forward_layers(&layers, input, function)?;
 
     let mut current = input.clone();
-    let mut current_is_temporary = false;
     for layer in layers {
         let Value::Object(layer) = layer else {
             unreachable!("validate_gpu_forward_layers accepts layer objects only");
         };
         if layer.class_name.is(super::FULLY_CONNECTED_LAYER_CLASS) {
-            current = fully_connected_forward_gpu(
-                provider,
-                current,
-                current_is_temporary,
-                &layer,
-                function,
-            )
-            .await?;
-            current_is_temporary = true;
+            current = fully_connected_forward_gpu(provider, current, &layer, function).await?;
         } else if layer.class_name.is(super::RELU_LAYER_CLASS) {
             let output = provider.scalar_max(&current, 0.0).map_err(|err| {
                 deep_learning_error(
@@ -568,48 +559,30 @@ async fn evaluate_network_gpu(
                     format!("{function}: provider-resident ReLU failed: {err}"),
                 )
             })?;
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             current = output;
-            current_is_temporary = true;
         } else if layer.class_name.is(super::ELU_LAYER_CLASS) {
             let alpha = elu_alpha(&layer, function)?;
             let output = match provider.activation_elu(&current, alpha).await {
                 Ok(handle) => handle,
                 Err(err) => {
-                    if current_is_temporary {
-                        let _ = provider.free(&current);
-                    }
                     return Err(deep_learning_error(
                         function,
                         format!("{function}: provider-resident ELU failed: {err}"),
                     ));
                 }
             };
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             current = output;
-            current_is_temporary = true;
         } else if layer.class_name.is(super::SOFTMAX_LAYER_CLASS) {
             let output = match provider.activation_softmax_rows(&current).await {
                 Ok(handle) => handle,
                 Err(err) => {
-                    if current_is_temporary {
-                        let _ = provider.free(&current);
-                    }
                     return Err(deep_learning_error(
                         function,
                         format!("{function}: provider-resident Softmax failed: {err}"),
                     ));
                 }
             };
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             current = output;
-            current_is_temporary = true;
         }
     }
     Ok(current)
@@ -629,13 +602,13 @@ fn validate_gpu_forward_layers(
             ),
         ));
     }
-    if input.shape.len() != 2 {
+    if input.shape().len() != 2 {
         return Err(unsupported_error(
             function,
             format!("{function}: provider-resident forward currently requires a 2-D dlarray input"),
         ));
     }
-    let mut features = input.shape[1];
+    let mut features = input.shape()[1];
     let mut saw_input = false;
     let mut saw_transform = false;
     for layer in layers {
@@ -719,7 +692,6 @@ fn validate_gpu_forward_layers(
 async fn fully_connected_forward_gpu(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     current: GpuTensorHandle,
-    current_is_temporary: bool,
     layer: &ObjectInstance,
     function: &'static str,
 ) -> BuiltinResult<GpuTensorHandle> {
@@ -751,10 +723,6 @@ async fn fully_connected_forward_gpu(
     }) {
         Ok(handle) => handle,
         Err(err) => {
-            let _ = provider.free(&weights_handle);
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             return Err(deep_learning_error(
                 function,
                 format!("{function}: GPU bias upload failed: {err}"),
@@ -764,11 +732,6 @@ async fn fully_connected_forward_gpu(
     let product = match provider.matmul(&current, &weights_handle).await {
         Ok(handle) => handle,
         Err(err) => {
-            let _ = provider.free(&weights_handle);
-            let _ = provider.free(&bias_handle);
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             return Err(deep_learning_error(
                 function,
                 format!("{function}: provider-resident fully connected matmul failed: {err}"),
@@ -778,24 +741,12 @@ async fn fully_connected_forward_gpu(
     let output = match provider.elem_add(&product, &bias_handle).await {
         Ok(handle) => handle,
         Err(err) => {
-            let _ = provider.free(&weights_handle);
-            let _ = provider.free(&bias_handle);
-            let _ = provider.free(&product);
-            if current_is_temporary {
-                let _ = provider.free(&current);
-            }
             return Err(deep_learning_error(
                 function,
                 format!("{function}: provider-resident fully connected bias add failed: {err}"),
             ));
         }
     };
-    let _ = provider.free(&weights_handle);
-    let _ = provider.free(&bias_handle);
-    let _ = provider.free(&product);
-    if current_is_temporary {
-        let _ = provider.free(&current);
-    }
     Ok(output)
 }
 

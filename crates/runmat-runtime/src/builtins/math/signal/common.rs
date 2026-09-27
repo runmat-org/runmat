@@ -173,11 +173,11 @@ pub(crate) fn gpu_vector_len(
     label: &str,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<usize> {
-    ensure_vector_shape(builtin, label, &handle.shape)?;
-    if handle.shape.contains(&0) {
+    ensure_vector_shape(builtin, label, &handle.shape())?;
+    if handle.shape().contains(&0) {
         return Ok(0);
     }
-    Ok(handle.shape.iter().copied().max().unwrap_or(1))
+    Ok(handle.shape().iter().copied().max().unwrap_or(1))
 }
 
 pub(crate) fn gpu_matrix_shape(
@@ -185,15 +185,15 @@ pub(crate) fn gpu_matrix_shape(
     label: &str,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<(usize, usize)> {
-    if handle.shape.len() > 2 {
+    if handle.shape().len() > 2 {
         return Err(signal_error(
             builtin,
             None,
             format!("{builtin}: {label} must be a vector or 2-D matrix"),
         ));
     }
-    let rows = handle.shape.first().copied().unwrap_or(1);
-    let cols = handle.shape.get(1).copied().unwrap_or(1);
+    let rows = handle.shape().first().copied().unwrap_or(1);
+    let cols = handle.shape().get(1).copied().unwrap_or(1);
     if rows == 0 || cols == 0 {
         return Err(signal_error(
             builtin,
@@ -598,12 +598,14 @@ mod tests {
 
     #[test]
     fn gpu_vector_len_reports_zero_for_empty_vector_shape() {
-        let handle = GpuTensorHandle {
-            shape: vec![1, 0],
-            device_id: 0,
-            buffer_id: 0,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 0],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         let len = gpu_vector_len("test", "x", &handle).expect("vector length");
         assert_eq!(len, 0);
     }

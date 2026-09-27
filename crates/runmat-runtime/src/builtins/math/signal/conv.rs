@@ -291,10 +291,10 @@ fn restore_to_owner(
     }
     match value {
         Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map(gpu_helpers::resident_gpu_value)
+            .and_then(gpu_helpers::resident_gpu_value)
             .map_err(|error| conv_error_with_detail(&CONV_ERROR_BUILD_OUTPUT, error)),
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map(gpu_helpers::complex_gpu_value),
+            .and_then(gpu_helpers::complex_gpu_value),
         other => Ok(other),
     }
 }
@@ -385,7 +385,7 @@ fn try_conv_gpu(
     {
         return Ok(None);
     }
-    if lhs_handle.device_id != rhs_handle.device_id {
+    if lhs_handle.device_id() != rhs_handle.device_id() {
         return Ok(None);
     }
     let provider = match runmat_accelerate_api::provider_for_handle(lhs_handle) {
@@ -399,8 +399,8 @@ fn try_conv_gpu(
         return Ok(None);
     }
 
-    let lhs_meta = conv_meta_from_shape(&lhs_handle.shape);
-    let rhs_meta = conv_meta_from_shape(&rhs_handle.shape);
+    let lhs_meta = conv_meta_from_shape(&lhs_handle.shape());
+    let rhs_meta = conv_meta_from_shape(&rhs_handle.shape());
 
     if lhs_meta.len == 0 || rhs_meta.len == 0 {
         return Ok(None);
@@ -462,7 +462,7 @@ fn try_conv_gpu(
         Ok(handle)
             if native_result_matches_provider(
                 &handle,
-                lhs_handle.device_id,
+                lhs_handle.device_id(),
                 provider,
                 expected,
             ) =>
@@ -470,7 +470,7 @@ fn try_conv_gpu(
             Ok(Some(Value::GpuTensor(handle)))
         }
         Ok(handle) => {
-            free_rejected_native_handle(&handle, provider);
+            drop(handle);
             Ok(None)
         }
         Err(err) => {
@@ -486,22 +486,12 @@ fn native_result_matches_provider(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.device_id == input_device
+    handle.device_id() == input_device
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-    if let Err(err) = owner.free(handle) {
-        log::trace!("conv: failed to free rejected provider result: {err}");
-    }
 }
 
 async fn normalize_input(value: Value) -> BuiltinResult<ConvInput> {
@@ -1013,7 +1003,7 @@ pub(crate) mod tests {
         else {
             panic!("owner-restored output")
         };
-        assert_eq!(output.device_id, provider_a.device_id());
+        assert_eq!(output.device_id(), provider_a.device_id());
         let gathered = block_on(provider_a.download(&output)).unwrap();
         assert_eq!(gathered.data, vec![1.0, 3.0, 2.0]);
     }

@@ -530,8 +530,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let error = call(Value::GpuTensor(explicit), Vec::new())
                 .expect_err("MATLAB mode rejects explicit interactive gpuArray input");
             assert_eq!(
@@ -548,8 +549,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = Tensor::new(vec![-0.5, 0.0, 0.5], vec![1, 3]).expect("input");
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let _runmat_mode = crate::compatibility::push_runmat_extensions_enabled(true);
             let output = call(Value::GpuTensor(explicit), Vec::new())
                 .expect("RunMat mode accepts explicit gpuArray input");

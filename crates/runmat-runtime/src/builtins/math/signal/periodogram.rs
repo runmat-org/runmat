@@ -517,8 +517,8 @@ async fn output_gpu(
             shape: &f_shape,
         })
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps);
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
+    let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
+    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -1397,7 +1397,7 @@ mod tests {
             .map(|(idx, _)| idx)
             .unwrap();
         assert_eq!(peak, 4);
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[cfg(feature = "wgpu")]
@@ -1454,7 +1454,7 @@ mod tests {
                 "centered bin {idx}: gpu {actual}, host {expected}"
             );
         }
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[test]

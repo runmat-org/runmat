@@ -551,13 +551,17 @@ mod tests {
             assert!(call(Value::Int(IntValue::I16(0))).is_ok());
         }
 
-        let handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 0,
-            buffer_id: 9_300_004,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = call(Value::GpuTensor(handle))
             .expect_err("MATLAB mode rejects explicit interactive gpuArray input before gather");

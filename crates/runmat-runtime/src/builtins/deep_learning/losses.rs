@@ -117,16 +117,17 @@ async fn try_crossentropy_gpu(
             "crossentropy: complex gpuArray inputs are not supported",
         ));
     }
-    if predictions.shape != targets.shape {
+    if predictions.shape() != targets.shape() {
         return Err(deep_learning_error(
             "crossentropy",
             format!(
                 "crossentropy: targets must match prediction shape {:?}, got {:?}",
-                predictions.shape, targets.shape
+                predictions.shape(),
+                targets.shape()
             ),
         ));
     }
-    let len = predictions.shape.iter().copied().product::<usize>();
+    let len = predictions.shape().iter().copied().product::<usize>();
     if len == 0 {
         return Err(deep_learning_error(
             "crossentropy",
@@ -134,7 +135,7 @@ async fn try_crossentropy_gpu(
         ));
     }
 
-    let Some(options) = GpuCrossentropyOptions::from_args(rest.to_vec(), &predictions.shape)?
+    let Some(options) = GpuCrossentropyOptions::from_args(rest.to_vec(), predictions.shape())?
     else {
         return Ok(None);
     };
@@ -152,7 +153,7 @@ async fn try_crossentropy_gpu(
     let weights = match materialize_gpu_loss_factor(
         provider,
         options.weights.as_ref(),
-        &predictions.shape,
+        predictions.shape(),
         "weights",
         &mut temporary_inputs,
     ) {
@@ -168,17 +169,17 @@ async fn try_crossentropy_gpu(
     let mask = match materialize_gpu_loss_factor(
         provider,
         options.mask.as_ref(),
-        &predictions.shape,
+        predictions.shape(),
         "mask",
         &mut temporary_inputs,
     ) {
         Ok(handle) => handle,
         Err(err) if provider_is_unsupported(&err) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
+            drop(temporary_inputs);
             return Ok(None);
         }
         Err(err) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
+            drop(temporary_inputs);
             return Err(deep_learning_error(
                 "crossentropy",
                 format!("crossentropy: {err}"),
@@ -195,11 +196,11 @@ async fn try_crossentropy_gpu(
     }) {
         Ok(result) => result,
         Err(err) if provider_is_unsupported(&err) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
+            drop(temporary_inputs);
             return Ok(None);
         }
         Err(err) => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
+            drop(temporary_inputs);
             return Err(deep_learning_error(
                 "crossentropy",
                 format!("crossentropy: {err}"),
@@ -209,20 +210,20 @@ async fn try_crossentropy_gpu(
 
     match options.reduction {
         CrossentropyReduction::None => {
-            free_temporary_gpu_inputs(provider, temporary_inputs);
-            Ok(Some(Value::GpuTensor(result.losses)))
+            drop(temporary_inputs);
+            Ok(Some(
+                crate::builtins::common::gpu_helpers::resident_gpu_value(result.losses)?,
+            ))
         }
         CrossentropyReduction::Sum => {
             let sum = match provider.reduce_sum(&result.losses).await {
                 Ok(sum) => sum,
                 Err(err) if provider_is_unsupported(&err) => {
-                    let _ = provider.free(&result.losses);
-                    free_temporary_gpu_inputs(provider, temporary_inputs);
+                    drop(temporary_inputs);
                     return Ok(None);
                 }
                 Err(err) => {
-                    let _ = provider.free(&result.losses);
-                    free_temporary_gpu_inputs(provider, temporary_inputs);
+                    drop(temporary_inputs);
                     return Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: {err}"),
@@ -230,26 +231,20 @@ async fn try_crossentropy_gpu(
                 }
             };
             let scalar = match provider.read_scalar(&sum, 0) {
-                Ok(value) => value / options.normalization_denominator(len, &predictions.shape)?,
+                Ok(value) => value / options.normalization_denominator(len, predictions.shape())?,
                 Err(err) if provider_is_unsupported(&err) => {
-                    let _ = provider.free(&result.losses);
-                    let _ = provider.free(&sum);
-                    free_temporary_gpu_inputs(provider, temporary_inputs);
+                    drop(temporary_inputs);
                     return Ok(None);
                 }
                 Err(err) => {
-                    let _ = provider.free(&result.losses);
-                    let _ = provider.free(&sum);
-                    free_temporary_gpu_inputs(provider, temporary_inputs);
+                    drop(temporary_inputs);
                     return Err(deep_learning_error(
                         "crossentropy",
                         format!("crossentropy: {err}"),
                     ));
                 }
             };
-            let _ = provider.free(&result.losses);
-            let _ = provider.free(&sum);
-            free_temporary_gpu_inputs(provider, temporary_inputs);
+            drop(temporary_inputs);
             if !scalar.is_finite() {
                 return Err(deep_learning_error(
                     "crossentropy",
@@ -689,7 +684,7 @@ impl GpuLossFactor {
                 if weights_format.is_some()
                     || runmat_accelerate_api::handle_storage(&handle)
                         == GpuTensorStorage::ComplexInterleaved
-                    || handle.shape != shape
+                    || handle.shape() != shape
                 {
                     return Ok(GpuLossFactorParse::Unsupported);
                 }
@@ -711,7 +706,7 @@ impl GpuLossFactor {
             Value::GpuTensor(handle) => {
                 if runmat_accelerate_api::handle_storage(&handle)
                     == GpuTensorStorage::ComplexInterleaved
-                    || handle.shape != shape
+                    || handle.shape() != shape
                 {
                     return Ok(GpuLossFactorParse::Unsupported);
                 }
@@ -744,12 +739,6 @@ fn materialize_gpu_loss_factor(
             Ok(Some(handle))
         }
         None => Ok(None),
-    }
-}
-
-fn free_temporary_gpu_inputs(provider: &dyn AccelProvider, handles: Vec<GpuTensorHandle>) {
-    for handle in handles {
-        let _ = provider.free(&handle);
     }
 }
 
@@ -1138,7 +1127,7 @@ fn reduce_mask_included(
         .map(|dim| predictions.shape[dim])
         .unwrap_or(1)
         .max(1);
-    let pred_strides = column_major_strides(&predictions.shape);
+    let pred_strides = column_major_strides(predictions.shape());
     let mut included = vec![0usize; batch_count];
     let mut totals = vec![0.0; batch_count];
     for idx in 0..weighted_losses.len() {

@@ -295,8 +295,8 @@ async fn blackman_builtin(
                     WindowOutputType::Double => runmat_accelerate_api::NumericElementType::F64,
                     WindowOutputType::Single => runmat_accelerate_api::NumericElementType::F32,
                 };
-                let valid = handle.device_id == provider.device_id()
-                    && handle.shape == [options.len, 1]
+                let valid = handle.device_id() == provider.device_id()
+                    && handle.shape() == [options.len, 1]
                     && runmat_accelerate_api::provider_for_handle(&handle)
                         .is_some_and(|owner| std::ptr::eq(owner, provider))
                     && gpu_helpers::numeric_descriptor_matches(
@@ -307,8 +307,7 @@ async fn blackman_builtin(
                 if valid {
                     return Ok(runmat_value::Value::GpuTensor(handle));
                 }
-                let _ = provider.free(&handle);
-                runmat_accelerate_api::clear_handle_metadata(&handle);
+                drop(handle);
             }
         }
     }

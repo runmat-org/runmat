@@ -462,8 +462,9 @@ mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let error = call(Value::GpuTensor(explicit), vec![Value::Num(2.0)])
                 .expect_err("strict explicit input");
             assert_eq!(
@@ -489,8 +490,9 @@ mod tests {
         for storage in all_integer_storages() {
             let input = Tensor::new_integer(storage, vec![1, 2]).expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let result = call(Value::GpuTensor(handle), vec![Value::Num(2.0)]);
             let output = result.expect("resident integer rectpuls");
             let Value::GpuTensor(output_handle) = &output else {

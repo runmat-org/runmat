@@ -698,7 +698,7 @@ mod tests {
             else {
                 panic!("expected resident uint8 output");
             };
-            assert_eq!(output.device_id, provider.device_id());
+            assert_eq!(output.device_id(), provider.device_id());
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(IntegerElementType::U8)

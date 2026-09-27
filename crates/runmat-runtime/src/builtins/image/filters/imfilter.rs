@@ -4,8 +4,8 @@
 #[cfg(test)]
 use runmat_accelerate_api::{AccelDownloadFuture, AccelProvider, AccelProviderFuture};
 use runmat_accelerate_api::{
-    GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, HostTensorView, ImfilterMode,
-    ImfilterOptions, ImfilterPadding, ImfilterShape, IntegerElementType, ProviderPrecision,
+    GpuTensorHandle, GpuTensorStorage, HostTensorView, ImfilterMode, ImfilterOptions,
+    ImfilterPadding, ImfilterShape, IntegerElementType, ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -274,37 +274,14 @@ enum ImageOutputClass {
     Logical,
 }
 
-#[derive(Clone)]
-struct ProtectedGpuMetadata {
-    numeric: crate::builtins::math::fft::common::GpuMetadataSnapshot,
-    class_identity: Option<runmat_types::ClassIdentity>,
-    transpose: Option<runmat_accelerate_api::TransposeInfo>,
-}
+type ProtectedGpuMetadata = crate::builtins::math::fft::common::GpuMetadataSnapshot;
 
 fn protected_gpu_metadata(handle: &GpuTensorHandle) -> ProtectedGpuMetadata {
-    ProtectedGpuMetadata {
-        numeric: gpu_metadata_snapshot(handle),
-        class_identity: runmat_accelerate_api::handle_class_identity(handle),
-        transpose: runmat_accelerate_api::handle_transpose_info(handle),
-    }
+    gpu_metadata_snapshot(handle)
 }
 
 fn restore_protected_gpu_metadata(handle: &GpuTensorHandle, metadata: ProtectedGpuMetadata) {
-    restore_gpu_metadata(handle, metadata.numeric);
-    match metadata.class_identity {
-        Some(class_identity) => {
-            runmat_accelerate_api::set_handle_class_identity(handle, class_identity)
-        }
-        None => runmat_accelerate_api::clear_handle_class_identity(handle),
-    }
-    match metadata.transpose {
-        Some(transpose) => runmat_accelerate_api::record_handle_transpose(
-            handle,
-            transpose.base_rows,
-            transpose.base_cols,
-        ),
-        None => runmat_accelerate_api::clear_handle_transpose(handle),
-    }
+    restore_gpu_metadata(handle, metadata);
     runmat_accelerate_api::mark_residency(handle);
 }
 
@@ -477,9 +454,8 @@ async fn download_kernel_tensor(handle: &GpuTensorHandle) -> BuiltinResult<Tenso
             "no acceleration provider owns H",
         )
     })?;
-    let metadata = gpu_helpers::snapshot_handle_metadata(handle);
+    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(handle);
     let result = gpu_helpers::download_value_preserving_residency_async(provider, handle).await;
-    gpu_helpers::restore_handle_metadata(handle, &metadata);
     let value = result.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
     host_kernel_tensor(value)
 }
@@ -511,8 +487,8 @@ async fn imfilter_gpu(
 ) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        let kernel_is_wgpu = matches!(kernel_value, Value::GpuTensor(ref h) if h.device_id != 0);
-        if kernel_is_wgpu || image_handle.device_id != 0 {
+        let kernel_is_wgpu = matches!(kernel_value, Value::GpuTensor(ref h) if h.device_id() != 0);
+        if kernel_is_wgpu || image_handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
@@ -527,7 +503,7 @@ async fn imfilter_gpu(
         other => (host_kernel_tensor(other)?, None),
     };
     let expected_shape = build_imfilter_plan(
-        &image_handle.shape,
+        &image_handle.shape(),
         &kernel_tensor,
         &options,
         IMFILTER_BUILTIN,
@@ -590,9 +566,7 @@ async fn imfilter_gpu(
         .await;
     restore_protected_gpu_metadata(&image_handle, image_metadata);
     restore_protected_gpu_metadata(&kernel_handle, kernel_metadata);
-    if let Some(uploaded) = uploaded_kernel.as_ref() {
-        free_temporary_handle(provider, uploaded);
-    }
+    drop(uploaded_kernel);
 
     match provider_result {
         Ok(mut output) => {
@@ -604,19 +578,16 @@ async fn imfilter_gpu(
                 expected_precision,
                 provider,
             ) {
-                free_rejected_provider_output(provider, &output, &image_handle, &kernel_handle);
-                return Err(imfilter_error_with_detail(
-                    &IMFILTER_ERROR_INTERNAL,
-                    "provider returned an invalid imfilter result",
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    imfilter_error_with_detail(
+                        &IMFILTER_ERROR_INTERNAL,
+                        "provider returned an invalid imfilter result",
+                    ),
                 ));
             }
-            runmat_accelerate_api::set_handle_provenance(
-                &mut output,
-                runmat_accelerate_api::handle_provenance(&image_handle)
-                    .unwrap_or(GpuHandleProvenance::Automatic),
-            );
-            runmat_accelerate_api::mark_residency(&output);
-            Ok(Value::GpuTensor(output))
+            gpu_helpers::propagate_output_provenance(&mut output, [&image_handle])?;
+            gpu_helpers::resident_gpu_value(output)
         }
         Err(error) => {
             log::trace!("imfilter: provider path unavailable, using host fallback: {error}");
@@ -653,8 +624,8 @@ fn upload_kernel(
     let aliases_image = same_handle(&output, image);
     let aliases_resident_kernel =
         resident_kernel.is_some_and(|kernel| same_handle(&output, kernel));
-    let valid = output.shape == tensor.shape
-        && output.device_id == provider.device_id()
+    let valid = output.shape() == tensor.shape
+        && output.device_id() == provider.device_id()
         && !aliases_image
         && !aliases_resident_kernel
         && runmat_accelerate_api::provider_for_handle(&output)
@@ -670,19 +641,19 @@ fn upload_kernel(
             false,
         );
     if !valid {
-        if !aliases_image && !aliases_resident_kernel {
-            free_actual_owner(&output, "invalid uploaded kernel");
-        }
-        return Err(imfilter_error_with_detail(
-            &IMFILTER_ERROR_INTERNAL,
-            "provider returned an invalid uploaded H handle",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            imfilter_error_with_detail(
+                &IMFILTER_ERROR_INTERNAL,
+                "provider returned an invalid uploaded H handle",
+            ),
         ));
     }
     Ok(output)
 }
 
 fn same_handle(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
+    lhs.shares_allocation_with(rhs)
 }
 
 async fn imfilter_gpu_host_fallback(
@@ -691,10 +662,9 @@ async fn imfilter_gpu_host_fallback(
     kernel: &Tensor,
     options: &ImfilterOptions,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::snapshot_handle_metadata(image_handle);
+    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(image_handle);
     let download =
         gpu_helpers::download_value_preserving_residency_async(provider, image_handle).await;
-    gpu_helpers::restore_handle_metadata(image_handle, &metadata);
     let image = download.map_err(|err| imfilter_map_error(err, &IMFILTER_ERROR_INVALID_INPUT))?;
     let output_class = ImageOutputClass::from_gpu_handle(image_handle)?;
     let image_tensor = tensor::value_into_tensor_for(IMFILTER_BUILTIN, image)
@@ -753,10 +723,10 @@ fn valid_provider_output(
     expected_precision: ProviderPrecision,
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
 ) -> bool {
-    output.shape == expected_shape
-        && output.device_id == image.device_id
-        && output.buffer_id != image.buffer_id
-        && (output.device_id != kernel.device_id || output.buffer_id != kernel.buffer_id)
+    output.shape() == expected_shape
+        && output.device_id() == image.device_id()
+        && output.buffer_id() != image.buffer_id()
+        && (output.device_id() != kernel.device_id() || output.buffer_id() != kernel.buffer_id())
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
@@ -764,60 +734,6 @@ fn valid_provider_output(
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && gpu_helpers::gpu_class_metadata_matches(output, Some(expected_precision), None, false)
-}
-
-fn free_temporary_handle(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    handle: &GpuTensorHandle,
-) {
-    let Some(owner) = gpu_helpers::exact_provider_for_handle(handle) else {
-        log::trace!("imfilter: temporary kernel has no registered owner");
-        return;
-    };
-    if !std::ptr::eq(owner, provider) {
-        log::trace!("imfilter: temporary kernel owner changed before cleanup");
-        return;
-    }
-    if let Err(error) = owner.free(handle) {
-        log::trace!("imfilter: failed to free temporary kernel: {error}");
-    } else {
-        runmat_accelerate_api::clear_handle_metadata(handle);
-    }
-}
-
-fn free_actual_owner(handle: &GpuTensorHandle, context: &str) {
-    let Some(owner) = gpu_helpers::exact_provider_for_handle(handle) else {
-        log::trace!("imfilter: {context} has no registered owner");
-        return;
-    };
-    if let Err(error) = owner.free(handle) {
-        log::trace!("imfilter: failed to free {context}: {error}");
-    } else {
-        runmat_accelerate_api::clear_handle_metadata(handle);
-    }
-}
-
-fn free_rejected_provider_output(
-    _invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    output: &GpuTensorHandle,
-    image: &GpuTensorHandle,
-    kernel: &GpuTensorHandle,
-) {
-    let aliases_protected = (output.device_id == image.device_id
-        && output.buffer_id == image.buffer_id)
-        || (output.device_id == kernel.device_id && output.buffer_id == kernel.buffer_id);
-    if aliases_protected {
-        return;
-    }
-    let Some(owner) = gpu_helpers::exact_provider_for_handle(output) else {
-        log::trace!("imfilter: rejected provider result has no registered owner");
-        return;
-    };
-    if let Err(error) = owner.free(output) {
-        log::trace!("imfilter: failed to free rejected provider result: {error}");
-    } else {
-        runmat_accelerate_api::clear_handle_metadata(output);
-    }
 }
 
 fn parse_imfilter_options(args: &[Value]) -> BuiltinResult<ImfilterOptions> {
@@ -1442,10 +1358,6 @@ pub(crate) mod tests {
             self.inner.download(handle)
         }
 
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            self.inner.free(handle)
-        }
-
         fn device_info(&self) -> String {
             "mutating-aliasing-imfilter-test-provider".to_string()
         }
@@ -1460,9 +1372,9 @@ pub(crate) mod tests {
             _kernel: &'a GpuTensorHandle,
             _options: &'a ImfilterOptions,
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-            runmat_accelerate_api::set_handle_logical(image, true);
-            runmat_accelerate_api::set_handle_class_identity(image, "single");
-            runmat_accelerate_api::clear_handle_transpose(image);
+            assert!(image
+                .with_view(image.view().clone().with_logical(true))
+                .is_err());
             Box::pin(async move { Ok(image.clone()) })
         }
     }
@@ -1708,9 +1620,9 @@ pub(crate) mod tests {
                 shape: &[2, 2],
             })
             .expect("image upload");
-        runmat_accelerate_api::set_handle_class_identity(&image, "double");
-        runmat_accelerate_api::record_handle_transpose(&image, 2, 2);
-        let image = image.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let image = image
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("publish provenance view");
 
         let error = block_on(imfilter_builtin(
             Value::GpuTensor(image.clone()),
@@ -1737,7 +1649,7 @@ pub(crate) mod tests {
         assert_eq!(
             runmat_accelerate_api::handle_transpose_info(&image)
                 .map(|info| { (info.base_rows, info.base_cols) }),
-            Some((2, 2))
+            None
         );
         assert!(runmat_accelerate_api::handle_is_explicit(&image));
         assert_eq!(
@@ -1746,7 +1658,7 @@ pub(crate) mod tests {
                 .data,
             vec![1.0, 2.0, 3.0, 4.0]
         );
-        provider.free(&image).expect("free image");
+        image.release().expect("release image");
     }
 
     #[test]

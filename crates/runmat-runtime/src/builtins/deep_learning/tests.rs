@@ -819,13 +819,13 @@ fn forward_rejects_complex_gpu_dlarray_before_dense_dispatch() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let net = block_on(dlnetwork_builtin(vec![dense_feature_network_layers()])).unwrap();
         let shape = [1usize, 2usize];
-        let mut handle = provider
-            .upload(&HostTensorView {
-                data: &[1.0, 2.0],
+        let handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[1.0, 0.0, 2.0, 0.0]),
                 shape: &shape,
+                storage: GpuTensorStorage::ComplexInterleaved,
             })
             .expect("upload");
-        handle.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
         provider.reset_telemetry();
         let dl = block_on(dlarray_builtin(
             Value::GpuTensor(handle),
@@ -1617,9 +1617,9 @@ fn dlarray_preserves_gpu_array_residency() {
         let Value::GpuTensor(wrapped) = object.properties.get("Data").unwrap() else {
             panic!("expected gpu tensor data");
         };
-        assert_eq!(wrapped.buffer_id, handle.buffer_id);
-        assert_eq!(wrapped.device_id, handle.device_id);
-        assert_eq!(wrapped.shape, handle.shape);
+        assert_eq!(wrapped.allocation_identity(), handle.allocation_identity());
+        assert_eq!(wrapped.view_identity(), handle.view_identity());
+        assert_eq!(wrapped.shape(), handle.shape());
         assert_eq!(handle_precision(wrapped), handle_precision(&handle));
         assert_eq!(handle_storage(wrapped), handle_storage(&handle));
         assert_eq!(

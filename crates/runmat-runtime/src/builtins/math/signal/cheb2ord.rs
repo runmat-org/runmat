@@ -964,7 +964,7 @@ mod tests {
             )
             .unwrap();
             assert!(matches!(out, Value::OutputList(values) if values.len() == 1));
-            let _ = provider.free(&handle);
+            let _ = handle.release();
         });
     }
 

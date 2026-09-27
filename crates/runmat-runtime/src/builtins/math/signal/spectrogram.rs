@@ -560,10 +560,10 @@ async fn output_gpu(
             shape: &t_shape,
         })
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s);
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f);
-    let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t);
-    let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps);
+    let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s)?;
+    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
+    let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t)?;
+    let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Value::OutputList(Vec::new()));
@@ -1268,7 +1268,7 @@ mod tests {
             .map(|(idx, _)| idx)
             .unwrap();
         assert_eq!(peak, 4);
-        provider.free(&handle).ok();
+        handle.release().ok();
     }
 
     #[test]

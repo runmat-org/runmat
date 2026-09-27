@@ -295,7 +295,7 @@ async fn hann_builtin(
                 if valid_provider_window(&handle, provider, options.len, precision) {
                     return Ok(runmat_value::Value::GpuTensor(handle));
                 }
-                free_rejected_provider_window(&handle);
+                drop(handle);
             }
         }
     }
@@ -353,8 +353,8 @@ fn valid_provider_window(
     len: usize,
     precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.shape == [len, 1]
-        && handle.device_id == provider.device_id()
+    handle.shape() == [len, 1]
+        && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(handle) == Some(precision)
@@ -362,14 +362,6 @@ fn valid_provider_window(
         && !runmat_accelerate_api::handle_is_logical(handle)
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_provider_window(handle: &runmat_accelerate_api::GpuTensorHandle) {
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
-        if owner.free(handle).is_ok() {
-            runmat_accelerate_api::clear_residency(handle);
-        }
-    }
 }
 
 #[cfg(test)]

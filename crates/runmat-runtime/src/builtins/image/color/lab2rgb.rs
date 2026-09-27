@@ -454,8 +454,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let lab = Tensor::new(vec![70.0, 5.0, 10.0], vec![1, 1, 3]).unwrap();
             let source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("publish provenance view");
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             let value = block_on(lab2rgb_builtin(
                 Value::GpuTensor(source.clone()),
@@ -465,17 +466,15 @@ mod tests {
             let Value::GpuTensor(output) = value else {
                 panic!("explicit gpuArray output must remain resident");
             };
-            assert_eq!(output.device_id, source.device_id);
-            assert_ne!(output.buffer_id, source.buffer_id);
+            assert_eq!(output.device_id(), source.device_id());
+            assert_ne!(output.buffer_id(), source.buffer_id());
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(runmat_accelerate_api::IntegerElementType::U8)
             );
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
-            provider.free(&output).expect("free output");
-            provider.free(&source).expect("free source");
-            runmat_accelerate_api::clear_handle_metadata(&output);
-            runmat_accelerate_api::clear_handle_metadata(&source);
+            output.release().expect("free output");
+            source.release().expect("free source");
         });
     }
 
@@ -546,16 +545,14 @@ mod tests {
 
     #[test]
     fn resident_integer_input_rejects_before_provider_lookup() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1, 3],
-            device_id: u32::MAX - 21,
-            buffer_id: u64::MAX - 21,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U8,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1, 3],
+                runmat_accelerate_api::NumericElementType::U8,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("admit owned fixture")
+            .handle;
         let error = block_on(lab2rgb_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect_err("integer resident LAB must reject");
         assert_eq!(error.identifier(), LAB2RGB_ERROR_INVALID_INPUT.identifier);
@@ -568,25 +565,26 @@ mod tests {
             let lab =
                 Tensor::new_with_dtype(vec![70.0, 5.0, 10.0], vec![1, 1, 3], NumericDType::F32)
                     .expect("LAB");
-            let mut source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
-            let original_element_type = source.descriptor.element_type;
-            source.descriptor.element_type = Some(match original_element_type {
-                Some(runmat_accelerate_api::NumericElementType::F32) => {
-                    runmat_accelerate_api::NumericElementType::F64
-                }
-                _ => runmat_accelerate_api::NumericElementType::F32,
-            });
-            let error = block_on(lab2rgb_builtin(
-                Value::GpuTensor(source.clone()),
-                Vec::new(),
-            ))
-            .expect_err("contradictory floating descriptor must reject before download");
-            assert_eq!(
-                error.identifier(),
-                Some("RunMat:gpu:ProviderPayloadMismatch")
+            let source = gpu_helpers::upload_tensor(provider, &lab).expect("upload LAB");
+            let mut wire = source.wire_descriptor();
+            wire.physical = runmat_accelerate_api::allocation::GpuPhysicalDescriptor::new(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                3,
+                24,
+                24,
+            )
+            .unwrap();
+            assert!(
+                provider.acquire_live(&wire).is_err(),
+                "contradictory physical facts cannot mint a live input"
             );
-            source.descriptor.element_type = original_element_type;
-            provider.free(&source).expect("free source");
+            assert_eq!(
+                source.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::F32
+            );
+            block_on(lab2rgb_builtin(Value::GpuTensor(source), Vec::new()))
+                .expect("authentic input remains usable");
         });
     }
 }
