@@ -285,7 +285,9 @@ fn gpu_handle_bytes(handle: &GpuTensorHandle) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, NumericElementType};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
     use runmat_value::{CellArray, StructArray, StructValue, Tensor};
 
     use super::*;
@@ -303,8 +305,11 @@ mod tests {
     #[test]
     fn nested_values_are_counted_and_aliased_gpu_handles_are_deduplicated() {
         let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
-        let gpu = GpuTensorHandle::new(vec![2, 2], 9, 41)
-            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let gpu = allocation.handle;
+        let device = gpu.device_id();
         let cell = Value::Cell(
             CellArray::new(
                 vec![host, Value::GpuTensor(gpu.clone()), Value::GpuTensor(gpu)],
@@ -315,14 +320,20 @@ mod tests {
         );
         let summary = summarize_values(&[&cell]);
         assert_eq!(summary.host_bytes, 16);
-        assert_eq!(summary.provider_bytes.get(&9), Some(&16));
-        assert_eq!(summary.required_upload_bytes(9), 16);
+        assert_eq!(summary.provider_bytes.get(&device), Some(&16));
+        assert_eq!(summary.required_upload_bytes(device), 16);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(cell);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
     fn nd_structure_array_residency_visits_field_columns_and_empty_schema() {
-        let gpu = GpuTensorHandle::new(vec![2, 2], 9, 51)
-            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
+        let allocation = TestAllocationOwner::new()
+            .allocate_zeroed(vec![2, 2], NumericElementType::F32, GpuTensorStorage::Real)
+            .unwrap();
+        let gpu = allocation.handle;
+        let device = gpu.device_id();
         let element = |host: Value, resident: Value| {
             let mut value = StructValue::new();
             value.insert("host", host);
@@ -353,7 +364,10 @@ mod tests {
 
         let summary = summarize_values(&[&value, &empty]);
         assert_eq!(summary.host_bytes, 24);
-        assert_eq!(summary.provider_bytes.get(&9), Some(&16));
-        assert_eq!(summary.required_upload_bytes(9), 24);
+        assert_eq!(summary.provider_bytes.get(&device), Some(&16));
+        assert_eq!(summary.required_upload_bytes(device), 24);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

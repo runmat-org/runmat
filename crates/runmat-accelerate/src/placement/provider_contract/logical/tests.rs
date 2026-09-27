@@ -65,7 +65,7 @@ fn exact_canonical_queries_match_actual_in_process_logical_hooks() {
             Operation::Cast => {
                 let zeros = provider.zeros_like(&left, left.shape()).unwrap();
                 let result = block_on(provider.elem_ne(&left, &zeros)).unwrap();
-                provider.free(&zeros).unwrap();
+                zeros.release().unwrap();
                 result
             }
             Operation::Binary(LogicalBinaryOperator::And) => {
@@ -122,10 +122,10 @@ fn exact_canonical_queries_match_actual_in_process_logical_hooks() {
         let downloaded = block_on(provider.download(&output)).unwrap();
         assert_eq!(downloaded.shape, vec![1, 4]);
         assert_eq!(downloaded.data, expected, "{}", operation.identity());
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&left).unwrap();
-    provider.free(&right).unwrap();
+    left.release().unwrap();
+    right.release().unwrap();
 }
 
 #[test]
@@ -146,8 +146,8 @@ fn in_process_nd_broadcast_is_preserved() {
     let downloaded = block_on(provider.download(&output)).unwrap();
     assert_eq!(downloaded.shape, vec![1, 2, 2]);
     assert_eq!(downloaded.data, vec![0.0, 0.0, 1.0, 0.0]);
-    for handle in [&left, &right, &output] {
-        provider.free(handle).unwrap();
+    for handle in [left, right, output] {
+        handle.release().unwrap();
     }
 }
 

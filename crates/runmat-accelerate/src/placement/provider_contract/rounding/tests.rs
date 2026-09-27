@@ -45,16 +45,16 @@ fn declared_rounding_hooks_execute_the_admitted_representations() {
             _ => vec![1.0, -1.0, 2.0, -2.0],
         };
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-        assert_eq!(output.shape, input.shape);
-        assert_ne!(output.buffer_id, input.buffer_id);
-        provider.free(&output).unwrap();
+        assert_eq!(output.shape(), input.shape());
+        assert!(!output.shares_allocation_with(&input));
+        output.release().unwrap();
         query.inputs[0].element_type = ProviderElementType::F32;
         assert!(!provider.query_feasibility(&query).is_supported());
         query.inputs[0].element_type = ProviderElementType::F64;
         query.inputs[0].storage = ProviderStorage::Sparse;
         assert!(!provider.query_feasibility(&query).is_supported());
     }
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -134,9 +134,9 @@ fn digit_capability_preserves_parsed_strategy_and_validates_evidence() {
         let output =
             block_on(provider.round_digits(&input, digits, mode == RoundDigitsMode::Significant))
                 .unwrap();
-        assert_eq!(output.shape, input.shape);
+        assert_eq!(output.shape(), input.shape());
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
     query.workload.numerical_domain = NumericalDomainEvidence::RoundDigits {
         digits: 0,
@@ -149,5 +149,5 @@ fn digit_capability_preserves_parsed_strategy_and_validates_evidence() {
     };
     query.operation = ProviderOperationIdentity::new(CEIL_CATALOG_ENTRY.identity.name);
     assert!(!provider.query_feasibility(&query).is_supported());
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }

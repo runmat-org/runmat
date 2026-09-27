@@ -72,10 +72,10 @@ fn declarations_match_real_in_process_arithmetic_hooks() {
         })
         .unwrap();
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&left).unwrap();
-    provider.free(&right).unwrap();
+    left.release().unwrap();
+    right.release().unwrap();
     assert!(feasibility(
         HookProfile::InProcess,
         provider.precision(),
@@ -160,8 +160,8 @@ fn division_hook_broadcasts_without_replicating_inputs() {
     let downloaded = block_on(provider.download(&result)).unwrap();
     assert_eq!(downloaded.shape, vec![2, 3]);
     assert_eq!(downloaded.data, vec![2.0, 4.0, 1.0, 2.0, 0.5, 1.0]);
-    for handle in [&result, &left, &right] {
-        provider.free(handle).unwrap();
+    for handle in [result, left, right] {
+        handle.release().unwrap();
     }
 }
 

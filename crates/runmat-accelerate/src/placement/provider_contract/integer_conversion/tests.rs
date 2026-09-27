@@ -47,13 +47,13 @@ fn exact_eight_canonical_capabilities_match_real_typed_hooks() {
             runmat_accelerate_api::handle_integer_type(&output),
             Some(*target)
         );
-        assert_eq!(output.shape, source.shape);
+        assert_eq!(output.shape(), source.shape());
         let values = block_on(provider.download_integer(&output)).unwrap();
         assert_eq!(values.shape, vec![1, 2, 2]);
         assert_eq!(values.data.element_type(), *target);
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&source).unwrap();
+    source.release().unwrap();
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn wide_integer_and_empty_queries_match_resident_execution() {
             block_on(provider.download_integer(&output)).unwrap().data,
             runmat_accelerate_api::HostIntegerDataOwned::U64(data)
         );
-        provider.free(&output).unwrap();
-        provider.free(&source).unwrap();
+        output.release().unwrap();
+        source.release().unwrap();
     }
 }
 

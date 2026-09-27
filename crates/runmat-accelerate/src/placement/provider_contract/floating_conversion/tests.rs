@@ -62,8 +62,8 @@ fn typed_conversion_feasibility_matches_real_inprocess_output_and_bytes() {
             })
         );
         assert_eq!(estimate.dispatches, Some(0));
-        provider.free(&input).unwrap();
-        provider.free(&output).unwrap();
+        input.release().unwrap();
+        output.release().unwrap();
     }
     assert!(validate(
         &provider,

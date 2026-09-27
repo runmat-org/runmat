@@ -90,9 +90,9 @@ fn real_and_complex_component_declarations_match_actual_provider_results() {
                 _ => vec![2.0, -4.0],
             };
             assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-            provider.free(&output).unwrap();
+            output.release().unwrap();
         }
-        provider.free(&handle).unwrap();
+        handle.release().unwrap();
     }
 }
 
@@ -163,14 +163,14 @@ fn constructor_hooks_preserve_shape_and_interleave_real_and_imaginary_components
             vec![2.0, 3.0, -4.0, 3.0],
         ),
     ] {
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), vec![1, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&output),
             GpuTensorStorage::ComplexInterleaved
         );
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&real).unwrap();
-    provider.free(&imaginary).unwrap();
+    real.release().unwrap();
+    imaginary.release().unwrap();
 }

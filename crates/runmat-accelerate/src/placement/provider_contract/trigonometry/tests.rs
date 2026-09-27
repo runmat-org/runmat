@@ -49,12 +49,12 @@ fn exact_atan2_capability_matches_real_hook_and_rejects_unsupported_broadcast() 
     let output = block_on(provider.elem_atan2(&y, &x)).unwrap();
     let actual = block_on(provider.download(&output)).unwrap();
     let expected = [0.0_f64, -0.0, 1.0_f64.atan2(-1.0), (-1.0_f64).atan2(1.0)];
-    assert_eq!(actual.shape, y.shape);
+    assert_eq!(actual.shape, y.shape());
     for (actual, expected) in actual.data.iter().zip(expected) {
         assert_eq!(actual.to_bits(), expected.to_bits());
     }
-    for handle in [&y, &x, &output] {
-        provider.free(handle).unwrap();
+    for handle in [y, x, output] {
+        handle.release().unwrap();
     }
     let valid = query.clone();
     query.inputs[1].shape = vec![1, 1];
@@ -141,9 +141,9 @@ fn exact_trigonometric_capabilities_match_real_inprocess_hooks() {
                 operation.entry().identity.name
             );
         }
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[test]
@@ -235,9 +235,9 @@ fn direct_complex_trigonometric_queries_match_interleaved_provider_values() {
             assert!((actual[0] - expected.re).abs() < 1e-12);
             assert!((actual[1] - expected.im).abs() < 1e-12);
         }
-        provider.free(&output).unwrap();
+        output.release().unwrap();
     }
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
 
 #[test]

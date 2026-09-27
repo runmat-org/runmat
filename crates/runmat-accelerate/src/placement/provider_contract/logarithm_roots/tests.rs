@@ -62,7 +62,7 @@ fn exact_declarations_require_matching_domain_and_actual_hooks() {
             _ => vec![1.0, 2.0],
         };
         assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
-        provider.free(&output).unwrap();
+        output.release().unwrap();
         for evidence in [
             NumericalDomainEvidence::Unknown,
             NumericalDomainEvidence::RealUnary {
@@ -78,5 +78,5 @@ fn exact_declarations_require_matching_domain_and_actual_hooks() {
             assert!(!provider.query_feasibility(&request).is_supported());
         }
     }
-    provider.free(&input).unwrap();
+    input.release().unwrap();
 }
