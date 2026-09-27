@@ -238,6 +238,14 @@ pub fn import_observation_partition_contribution(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let mut expected =
+        objects.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    expected.push(output_set.root.clone());
+    if expected != output_set.result_objects {
+        return Err(AnalysisBridgeError::Identity(
+            "observation contribution inventory differs from canonical closure",
+        ));
+    }
     let contribution = ObservationPartitionContribution::from_canonical_bytes(&objects.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if contribution.identity.digest() != output.logical_identity
@@ -438,6 +446,14 @@ pub fn import_reduced_observation(
         &prepared.host.artifact_access,
         limits,
     )?;
+    let mut expected =
+        objects.unique_references(&prepared.host.artifact_access, ValueRefKind::ResultObject)?;
+    expected.push(output_set.root.clone());
+    if expected != output_set.result_objects {
+        return Err(AnalysisBridgeError::Identity(
+            "observation reduction inventory differs from canonical closure",
+        ));
+    }
     let result = ObservationResult::from_canonical_bytes(&objects.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let contributions = prepared

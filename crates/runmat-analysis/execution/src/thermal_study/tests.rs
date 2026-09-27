@@ -13,7 +13,7 @@ use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, StableDigest,
 };
 
-fn preparation() -> ThermalStudyPreparation {
+pub(super) fn preparation() -> ThermalStudyPreparation {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.constraints.clear();

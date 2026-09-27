@@ -80,8 +80,10 @@ pub use structural_state_profiles::{
     StructuralStateProfileResult,
 };
 pub use thermal_study::{
-    CompletedThermalObservations, CompletedThermalStudy, ThermalObservationTask,
-    ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
+    import_thermal_study_completion, import_thermal_study_root, prepare_thermal_study_root,
+    CompletedThermalObservations, CompletedThermalStudy, PreparedThermalStudyRoot,
+    ThermalObservationTask, ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
+    ThermalStudyResultClosure, ThermalStudyResultPhase,
 };
 mod thermal_task;
 mod thermal_task_result;

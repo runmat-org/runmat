@@ -32,6 +32,7 @@ mod tests;
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisNumericalObjectKind {
+    ThermalStudyCompletion,
     ThermalWorkload,
     Mesh,
     Signal,

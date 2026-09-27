@@ -30,13 +30,21 @@ use crate::{
     ThermalTaskPreparation,
 };
 
+mod completion;
 mod observations;
+mod root;
+pub use completion::{
+    import_thermal_study_completion, ThermalStudyResultClosure, ThermalStudyResultPhase,
+};
+pub use root::{import_thermal_study_root, prepare_thermal_study_root, PreparedThermalStudyRoot};
 #[cfg(test)]
 mod tests;
 pub use observations::{CompletedThermalObservations, ThermalObservationTask};
 
 /// Owned terminal artifacts; consuming the coordinator does not clone numerical storage.
 pub struct CompletedThermalStudy {
+    replay: completion::ThermalStudyReplayContext,
+    closures: Vec<ThermalStudyResultClosure>,
     pub observations: CompletedThermalObservations,
     pub compiled: CompiledAnalysisStudy,
     pub workload: runmat_analysis_fea::execution::ThermalWorkload,
@@ -76,6 +84,7 @@ pub enum ThermalStudyPhase {
 
 /// No numerical kernels or placement decisions live in this coordinator.
 pub struct ThermalStudyCoordinator {
+    closures: Vec<ThermalStudyResultClosure>,
     preparation: ThermalStudyPreparation,
     definition_digest: Digest,
     phase: ThermalStudyPhase,
@@ -119,6 +128,7 @@ impl ThermalStudyCoordinator {
             .definition_digest()
             .map_err(|error| invalid(error.to_string()))?;
         Ok(Self {
+            closures: Vec::new(),
             preparation,
             definition_digest,
             phase: ThermalStudyPhase::ReadyForSolve,
@@ -164,6 +174,12 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::AwaitingSolve)?;
         let task = self.solve_task.as_ref().expect("awaited solve");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
+        let closure = ThermalStudyResultClosure::new(
+            ThermalStudyResultPhase::Solve,
+            &task.host,
+            &response,
+            &accounting,
+        );
         let completion = import_thermal_completion(
             source,
             response,
@@ -173,6 +189,7 @@ impl ThermalStudyCoordinator {
         )?;
         self.result = Some(completion.result);
         self.usage = Some(completion.solve_usage);
+        self.closures.push(closure);
         self.phase = if self.preparation.product.workload.model.sequence.steps[0]
             .observations
             .is_empty()
@@ -213,6 +230,12 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::AwaitingObservation)?;
         let task = self.observations.pending()?;
         validate_accounting(task.host, task.resource_plan, &response, &accounting)?;
+        let closure = ThermalStudyResultClosure::new(
+            ThermalStudyResultPhase::Observation,
+            task.host,
+            &response,
+            &accounting,
+        );
         let usage = self.extend_usage(task.resource_plan, accounting)?;
         let context = observations::Context {
             setup: &self.preparation,
@@ -220,6 +243,7 @@ impl ThermalStudyCoordinator {
             result: self.result.as_ref().expect("completed result"),
         };
         self.observations.complete(source, response, &context)?;
+        self.closures.push(closure);
         self.usage = Some(usage);
         self.phase = ThermalStudyPhase::ReadyForObservations;
         Ok(())
@@ -269,6 +293,12 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::AwaitingAccuracy)?;
         let task = self.accuracy_task.as_ref().expect("awaited accuracy");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
+        let closure = ThermalStudyResultClosure::new(
+            ThermalStudyResultPhase::Accuracy,
+            &task.host,
+            &response,
+            &accounting,
+        );
         let accuracy = import_accuracy(
             source,
             response,
@@ -277,6 +307,7 @@ impl ThermalStudyCoordinator {
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
         self.accuracy = Some(accuracy);
+        self.closures.push(closure);
         self.usage = Some(usage);
         self.advance_state();
         Ok(())
@@ -319,6 +350,14 @@ impl ThermalStudyCoordinator {
         })?;
         let task = self.state_task.as_ref().expect("awaited state");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
+        let closure = ThermalStudyResultClosure::new(
+            ThermalStudyResultPhase::State {
+                ordinal: self.states.len(),
+            },
+            &task.host,
+            &response,
+            &accounting,
+        );
         let state = import_semantic_state_completion(
             source,
             response,
@@ -327,6 +366,7 @@ impl ThermalStudyCoordinator {
         )?;
         let usage = self.extend_usage(&task.resource_plan, accounting)?;
         self.states.push(state);
+        self.closures.push(closure);
         self.usage = Some(usage);
         self.state_task = None;
         self.advance_state();
@@ -382,6 +422,12 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::AwaitingPublication)?;
         let task = self.publication_task.as_ref().expect("awaited publication");
         validate_accounting(&task.host, &task.resource_plan, &response, &accounting)?;
+        let closure = ThermalStudyResultClosure::new(
+            ThermalStudyResultPhase::Publication,
+            &task.host,
+            &response,
+            &accounting,
+        );
         let publication = import_published_result(
             source,
             response,
@@ -399,6 +445,7 @@ impl ThermalStudyCoordinator {
             self.preparation.output_policy,
         )?;
         self.publication = Some(publication);
+        self.closures.push(closure);
         self.terminal = Some(terminal);
         self.phase = ThermalStudyPhase::Complete;
         Ok(())
@@ -411,6 +458,15 @@ impl ThermalStudyCoordinator {
     pub fn into_completed(self) -> AnalysisBridgeResult<CompletedThermalStudy> {
         self.require(ThermalStudyPhase::Complete)?;
         Ok(CompletedThermalStudy {
+            replay: completion::ThermalStudyReplayContext {
+                mesh: self.preparation.mesh,
+                frozen_project_digest: self.preparation.frozen_project_digest,
+                artifact_access: self.preparation.artifact_access,
+                program_revision: self.preparation.program_revision,
+                output_policy: self.preparation.output_policy,
+                required_capabilities: self.preparation.required_capabilities,
+            },
+            closures: self.closures,
             observations: self.observations.into_completed(),
             compiled: self.preparation.product.compiled,
             workload: self.preparation.product.workload,

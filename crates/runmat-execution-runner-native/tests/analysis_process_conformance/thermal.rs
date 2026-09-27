@@ -23,6 +23,9 @@ use runmat_execution_runner_native::{
 };
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
+#[path = "thermal/cold_reimport.rs"]
+mod cold_reimport;
+
 pub(super) async fn run(session: &NativeProgramSession) {
     let mut store = session.object_store();
     run_driver(
@@ -338,6 +341,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             FormulationRequirement::Experimental
         );
         assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
+        cold_reimport::assert_closed_completion(driver.store(), completed, limits.inventory);
     }
 }
 
