@@ -25,7 +25,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Accelerated, fused, and distributed execution",
         paragraphs: &[
-            "Shape-matched real floating operands owned by one provider can use its direct `elem_atan2` operation. The returned handle is accepted only when its shape, real storage, precision, owner, device, and aliasing satisfy the contract. Only a typed unsupported result enters host fallback; other provider failures remain visible.",
+            "Real floating arrays may be placed on the CPU or a provider automatically. Shape-matched real floating operands owned by one provider can use its direct `elem_atan2` operation. The returned handle is accepted only when its shape, real storage, precision, owner, device, and aliasing satisfy the contract. Only a typed unsupported result enters host fallback; other provider failures remain visible.",
             "Broadcasting, mixed physical types, and admitted integer or logical storage gather through the exact owner, compute with the canonical host rule, and restore the floating result to that owner when possible. Real floating expressions may also participate in elementwise fusion, including the signed-zero correction.",
             "Distributed inputs currently use the declared materialization path before the same canonical operation is applied. This preserves behavior without claiming a partition-local binary mapping primitive that the execution service does not yet provide.",
         ],

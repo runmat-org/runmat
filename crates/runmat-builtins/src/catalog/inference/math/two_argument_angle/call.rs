@@ -77,6 +77,17 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
     super::super::super::support::facts::materialize(&mut output);
     output.residency = preserved_binary_residency(&left.residency, &right.residency);
+    if [left_numeric.class, right_numeric.class]
+        .iter()
+        .all(|class| {
+            matches!(
+                class,
+                runmat_types::NumericClass::Single | runmat_types::NumericClass::Double
+            )
+        })
+    {
+        output.residency = runmat_types::ResidencyFact::Unknown;
+    }
     finish_fixed(entry, request, output, diagnostics)
 }
 

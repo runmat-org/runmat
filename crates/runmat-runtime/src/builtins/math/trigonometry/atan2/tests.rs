@@ -501,7 +501,7 @@ fn atan2_wgpu_matches_cpu_elementwise() {
             shape: &x.shape,
         })
         .unwrap();
-    let gpu = block_on(atan2_gpu_pair(hy, hx)).unwrap();
+    let gpu = block_on(atan2_gpu_pair(hy, hx, &[])).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     match cpu {
         Value::Tensor(ct) => {

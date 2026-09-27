@@ -21,6 +21,14 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const BUILTIN_NAME: &str = "atan2";
 
+mod admission;
+mod preparation;
+mod tabular;
+
+#[cfg(test)]
+#[path = "atan2/admission_tests.rs"]
+mod admission_tests;
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::trigonometry::atan2")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "atan2",
@@ -99,17 +107,11 @@ async fn atan2_builtin(y: Value, x: Value) -> BuiltinResult<Value> {
     {
         common_binary::BinaryInputPlan::Values(values) => {
             let (y, x) = *values;
-            atan2_non_tabular(y, x).await
+            preparation::execute(y, x).await
         }
         common_binary::BinaryInputPlan::Structured(plan) => {
             let (source, variables) = plan.variables();
-            let mut output = Vec::with_capacity(variables.len());
-            for (name, y, x) in variables {
-                output.push((name, atan2_non_tabular(y, x).await?));
-            }
-            crate::builtins::table::finish_binary(&source, output).map_err(|error| {
-                atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error.to_string())
-            })
+            tabular::execute(source, variables).await
         }
     }
 }
@@ -121,11 +123,9 @@ fn reject_excess_outputs() -> BuiltinResult<()> {
     Ok(())
 }
 
-async fn atan2_non_tabular(y: Value, x: Value) -> BuiltinResult<Value> {
-    ensure_atan2_input_extensions(&y)?;
-    ensure_atan2_input_extensions(&x)?;
+async fn atan2_admitted(y: Value, x: Value, protected: &[GpuTensorHandle]) -> BuiltinResult<Value> {
     match (y, x) {
-        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh).await,
+        (Value::GpuTensor(yh), Value::GpuTensor(xh)) => atan2_gpu_pair(yh, xh, protected).await,
         (Value::GpuTensor(yh), other) => {
             let provider = gpu_helpers::exact_provider_for_handle(&yh).ok_or_else(|| {
                 atan2_error_with_detail(&ATAN2_ERROR_INTERNAL, "GPU input has no owning provider")
@@ -137,7 +137,7 @@ async fn atan2_non_tabular(y: Value, x: Value) -> BuiltinResult<Value> {
                 output,
                 BUILTIN_NAME,
                 &yh,
-                std::slice::from_ref(&yh),
+                protected,
             )
         }
         (other, Value::GpuTensor(xh)) => {
@@ -151,14 +151,18 @@ async fn atan2_non_tabular(y: Value, x: Value) -> BuiltinResult<Value> {
                 output,
                 BUILTIN_NAME,
                 &xh,
-                std::slice::from_ref(&xh),
+                protected,
             )
         }
         (lhs, rhs) => atan2_host(lhs, rhs),
     }
 }
 
-async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult<Value> {
+async fn atan2_gpu_pair(
+    y: GpuTensorHandle,
+    x: GpuTensorHandle,
+    protected: &[GpuTensorHandle],
+) -> BuiltinResult<Value> {
     let owner = gpu_helpers::exact_provider_for_binary_inputs(&y, &x)
         .map_err(|error| atan2_error_with_detail(&ATAN2_ERROR_INVALID_INPUT, error))?;
     let nonfloating = |handle: &GpuTensorHandle| {
@@ -172,6 +176,17 @@ async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult
     {
         match owner.elem_atan2(&y, &x).await {
             Ok(output) => {
+                if protected
+                    .iter()
+                    .any(|input| gpu_helpers::same_gpu_handle(input, &output))
+                {
+                    let borrowed: Vec<_> = protected.iter().chain([&y, &x]).collect();
+                    gpu_helpers::free_rejected_provider_output(&output, &borrowed, owner);
+                    return Err(atan2_error_with_detail(
+                        &ATAN2_ERROR_INTERNAL,
+                        "provider aliased a borrowed coordinate operand",
+                    ));
+                }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
                     shape: y.shape.clone(),
                     storage: GpuTensorStorage::Real,
@@ -202,12 +217,14 @@ async fn atan2_gpu_pair(y: GpuTensorHandle, x: GpuTensorHandle) -> BuiltinResult
     } else {
         &y
     };
+    let mut protected = protected.to_vec();
+    protected.extend([y.clone(), x.clone()]);
     crate::builtins::common::provider_restore::upload_value_like_protected(
         owner,
         output,
         BUILTIN_NAME,
         prototype,
-        &[y.clone(), x.clone()],
+        &protected,
     )
 }
 
