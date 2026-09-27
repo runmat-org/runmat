@@ -1,3 +1,6 @@
+//! Native filesystem persistence and warm-cache integration test.
+#![cfg(not(target_arch = "wasm32"))]
+
 #[cfg(feature = "wgpu")]
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
