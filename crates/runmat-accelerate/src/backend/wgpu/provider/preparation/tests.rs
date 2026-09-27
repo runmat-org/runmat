@@ -134,9 +134,25 @@ fn actual_cache_queries_are_read_only_and_lazy_hits_reuse_exact_pipeline() {
         FusionPipelineLayout::Single,
         provider.workgroup_config.scalar,
     );
-    let bindings = provider.cached_fusion_bind_group_layout(1);
-    let first = provider.recipe_pipeline(&recipe, &bindings, "preparation-qualification");
-    let second = provider.recipe_pipeline(&recipe, &bindings, "preparation-qualification");
+    let (bindings, first, second) = provider
+        .with_emission(|emission, _| -> anyhow::Result<_> {
+            let bindings = provider.cached_fusion_bind_group_layout(emission, 1)?;
+            let first = provider.recipe_pipeline(
+                emission,
+                &recipe,
+                &bindings,
+                "preparation-qualification",
+            )?;
+            let second = provider.recipe_pipeline(
+                emission,
+                &recipe,
+                &bindings,
+                "preparation-qualification",
+            )?;
+            Ok((bindings, first, second))
+        })
+        .unwrap()
+        .unwrap();
     assert!(std::sync::Arc::ptr_eq(&first, &second));
     let warm = provider.preparation_snapshot(&query, source).unwrap();
     assert_eq!(warm.identity, cold.identity);
@@ -163,7 +179,17 @@ fn actual_cache_queries_are_read_only_and_lazy_hits_reuse_exact_pipeline() {
     };
     let mut receipt = ProviderOperationReceipt::new();
     let uncached = with_provider_observation(Some(receipt.recorder()), || {
-        provider.recipe_pipeline(&recipe, &bindings, "poisoned-cache-qualification")
+        provider
+            .with_emission(|emission, _| {
+                provider.recipe_pipeline(
+                    emission,
+                    &recipe,
+                    &bindings,
+                    "poisoned-cache-qualification",
+                )
+            })
+            .unwrap()
+            .unwrap()
     });
     assert!(!std::sync::Arc::ptr_eq(&first, &uncached));
     assert!(matches!(

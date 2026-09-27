@@ -5,6 +5,7 @@ use fixture::{cast, plan};
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::graph::{VarBinding, VarKind};
+use runmat_accelerate_api::allocation::WeakGpuTensorHandle;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_value::Value;

@@ -95,110 +95,126 @@ impl WgpuProvider {
             rows <= u32::MAX as usize && cols <= u32::MAX as usize,
             "activation_softmax_rows: tensor shape exceeds GPU dispatch limits"
         );
-        let output = self.create_storage_buffer_checked(entry.len, "runmat-softmax-rows-out")?;
+        let output = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, entry.len, "runmat-softmax-rows-out")
+        })??;
         if entry.len == 0 {
             return self.register_existing_buffer(output, entry.shape, 0);
         }
-        let error_buffer =
-            self.device_ref()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("runmat-softmax-rows-error"),
-                    contents: bytes_of(&0u32),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                });
-        let shader = softmax_rows_shader(self.precision);
-        let layout_tag = "runmat-softmax-rows-layout";
-        let bind_layout = self.cached_bind_group_layout(layout_tag, |device| {
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some(layout_tag),
-                entries: &softmax_rows_bind_layout_entries(),
-            })
-        });
-        let pipeline_layout =
-            self.device_ref()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("runmat-softmax-rows-pipeline-layout"),
-                    bind_group_layouts: &[bind_layout.as_ref()],
-                    push_constant_ranges: &[],
-                });
-        let shader_module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-softmax-rows-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader.clone())),
+        let (staging, error_size) = self.with_emission(|emission, pending| -> Result<_> {
+            let error_buffer =
+                emission
+                    .device()
+                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-softmax-rows-error"),
+                        contents: bytes_of(&0u32),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                    });
+            let shader = softmax_rows_shader(self.precision);
+            let layout_tag = "runmat-softmax-rows-layout";
+            let bind_layout = self.cached_bind_group_layout(emission, layout_tag, |emission| {
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some(layout_tag),
+                        entries: &softmax_rows_bind_layout_entries(),
+                    })
+            })?;
+            let pipeline_layout =
+                emission
+                    .device()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-softmax-rows-pipeline-layout"),
+                        bind_group_layouts: &[bind_layout.as_ref()],
+                        push_constant_ranges: &[],
+                    });
+            let shader_module =
+                emission
+                    .device()
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("runmat-softmax-rows-shader"),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader.clone())),
+                    });
+            let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+            let pipeline_key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                layout_tag,
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                pipeline_key,
+                &pipeline_layout,
+                &shader_module,
+                "runmat-softmax-rows-pipeline",
+                Some(shader.as_bytes()),
+                Some(layout_tag),
+                Some(workgroup_size),
+            )?;
+            let chunk_rows = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+            for row_offset in (0..rows).step_by(chunk_rows) {
+                let params = self.uniform_buffer(
+                    emission,
+                    &SoftmaxRowsParams {
+                        rows: rows as u32,
+                        cols: cols as u32,
+                        row_offset: row_offset as u32,
+                        _pad0: 0,
+                    },
+                    "runmat-softmax-rows-params",
+                )?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-softmax-rows-bind"),
+                        layout: bind_layout.as_ref(),
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: output.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: error_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = (rows - row_offset).min(chunk_rows) as u32;
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    pipeline.as_ref(),
+                    &bind_group,
+                    workgroups,
+                    "runmat-softmax-rows-encoder",
+                    "runmat-softmax-rows-pass",
+                )?;
+            }
+            let error_size = std::mem::size_of::<u32>() as u64;
+            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-softmax-rows-error-staging"),
+                size: error_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
             });
-        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
-        let pipeline_key =
-            self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
-        let pipeline = self.get_or_create_pipeline(
-            pipeline_key,
-            &pipeline_layout,
-            &shader_module,
-            "runmat-softmax-rows-pipeline",
-            Some(shader.as_bytes()),
-            Some(layout_tag),
-            Some(workgroup_size),
-        );
-        let chunk_rows = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
-        for row_offset in (0..rows).step_by(chunk_rows) {
-            let params = self.uniform_buffer(
-                &SoftmaxRowsParams {
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    row_offset: row_offset as u32,
-                    _pad0: 0,
-                },
-                "runmat-softmax-rows-params",
-            );
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-softmax-rows-bind"),
-                    layout: bind_layout.as_ref(),
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: output.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: error_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = (rows - row_offset).min(chunk_rows) as u32;
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                pipeline.as_ref(),
-                &bind_group,
-                workgroups,
-                "runmat-softmax-rows-encoder",
-                "runmat-softmax-rows-pass",
-            );
-        }
-        let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-softmax-rows-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-softmax-rows-error-copy"),
-                });
-        encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-        self.submit(encoder);
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-softmax-rows-error-copy"),
+                    });
+            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+            self.submit(emission, pending, encoder)?;
+            Ok((staging, error_size))
+        })??;
         let code = self
             .map_readback_bytes_sync(staging, error_size, "softmax_rows")
             .and_then(|bytes| {
@@ -264,153 +280,166 @@ impl WgpuProvider {
             "crossentropy_terms: tensor length exceeds GPU dispatch limits"
         );
 
-        let out_losses =
-            self.create_storage_buffer_checked(predictions_entry.len, "runmat-crossentropy-out")?;
-        let error_buffer =
-            self.device_ref()
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("runmat-crossentropy-error"),
-                    contents: bytes_of(&0u32),
-                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                });
-        let bind_layout =
-            self.device_ref()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-crossentropy-layout"),
-                    entries: &crossentropy_terms_bind_layout_entries(),
-                });
-        let mode = match request.mode {
-            ProviderCrossentropyMode::SingleLabel => 0,
-            ProviderCrossentropyMode::MultiLabel => 1,
-        };
-        let weights_buffer = weights_entry
-            .as_ref()
-            .map(|entry| entry.buffer.as_ref())
-            .unwrap_or_else(|| predictions_entry.buffer.as_ref());
-        let mask_buffer = mask_entry
-            .as_ref()
-            .map(|entry| entry.buffer.as_ref())
-            .unwrap_or_else(|| predictions_entry.buffer.as_ref());
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < predictions_entry.len {
-            let chunk_len = (predictions_entry.len - offset).min(chunk_capacity);
-            let params = CrossentropyParams {
-                total: predictions_entry.len as u32,
-                offset: offset as u32,
-                chunk: chunk_len as u32,
-                mode,
-                weights_enabled: u32::from(weights_entry.is_some()),
-                mask_enabled: u32::from(mask_entry.is_some()),
-                _pad0: 0,
-                _pad1: 0,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-crossentropy-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-crossentropy-bind"),
-                    layout: &bind_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: predictions_entry.buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: targets_entry.buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: weights_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: mask_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 4,
-                            resource: out_losses.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 5,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 6,
-                            resource: error_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            let positive_pipeline = create_crossentropy_pipeline(
-                self.device_ref(),
-                &bind_layout,
-                "runmat-crossentropy-positive",
-                crossentropy_positive_shader(self.precision, &params),
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &positive_pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-crossentropy-positive-encoder",
-                "runmat-crossentropy-positive-pass",
-            );
-            if mode == 1 {
-                let complementary_pipeline = create_crossentropy_pipeline(
-                    self.device_ref(),
-                    &bind_layout,
-                    "runmat-crossentropy-complementary",
-                    crossentropy_complementary_shader(self.precision, &params),
-                );
-                crate::backend::wgpu::dispatch::creation::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &complementary_pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-crossentropy-complementary-encoder",
-                    "runmat-crossentropy-complementary-pass",
-                );
-            }
-            let validation_pipeline = create_crossentropy_pipeline(
-                self.device_ref(),
-                &bind_layout,
-                "runmat-crossentropy-validation",
-                crossentropy_validation_shader(self.precision, &params),
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &validation_pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-crossentropy-validation-encoder",
-                "runmat-crossentropy-validation-pass",
-            );
-            offset += chunk_len;
-        }
+        let (out_losses, staging, error_size) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let out_losses = self.create_storage_buffer_checked(
+                    emission,
+                    predictions_entry.len,
+                    "runmat-crossentropy-out",
+                )?;
+                let error_buffer =
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-crossentropy-error"),
+                            contents: bytes_of(&0u32),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        });
+                let bind_layout =
+                    emission
+                        .device()
+                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-crossentropy-layout"),
+                            entries: &crossentropy_terms_bind_layout_entries(),
+                        });
+                let mode = match request.mode {
+                    ProviderCrossentropyMode::SingleLabel => 0,
+                    ProviderCrossentropyMode::MultiLabel => 1,
+                };
+                let weights_buffer = weights_entry
+                    .as_ref()
+                    .map(|entry| entry.buffer.as_ref())
+                    .unwrap_or_else(|| predictions_entry.buffer.as_ref());
+                let mask_buffer = mask_entry
+                    .as_ref()
+                    .map(|entry| entry.buffer.as_ref())
+                    .unwrap_or_else(|| predictions_entry.buffer.as_ref());
+                let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
+                    as usize)
+                    * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+                let mut offset = 0usize;
+                while offset < predictions_entry.len {
+                    let chunk_len = (predictions_entry.len - offset).min(chunk_capacity);
+                    let params = CrossentropyParams {
+                        total: predictions_entry.len as u32,
+                        offset: offset as u32,
+                        chunk: chunk_len as u32,
+                        mode,
+                        weights_enabled: u32::from(weights_entry.is_some()),
+                        mask_enabled: u32::from(mask_entry.is_some()),
+                        _pad0: 0,
+                        _pad1: 0,
+                    };
+                    let params_buffer =
+                        self.uniform_buffer(emission, &params, "runmat-crossentropy-params")?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-crossentropy-bind"),
+                                layout: &bind_layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: predictions_entry.buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: targets_entry.buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: weights_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: mask_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 4,
+                                        resource: out_losses.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 5,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 6,
+                                        resource: error_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        chunk_len as u32,
+                        crate::backend::wgpu::config::WORKGROUP_SIZE,
+                    );
+                    let positive_pipeline = create_crossentropy_pipeline(
+                        emission,
+                        &bind_layout,
+                        "runmat-crossentropy-positive",
+                        crossentropy_positive_shader(self.precision, &params),
+                    );
+                    crate::backend::wgpu::dispatch::creation::run(
+                        emission,
+                        pending,
+                        &positive_pipeline,
+                        &bind_group,
+                        workgroups,
+                        "runmat-crossentropy-positive-encoder",
+                        "runmat-crossentropy-positive-pass",
+                    )?;
+                    if mode == 1 {
+                        let complementary_pipeline = create_crossentropy_pipeline(
+                            emission,
+                            &bind_layout,
+                            "runmat-crossentropy-complementary",
+                            crossentropy_complementary_shader(self.precision, &params),
+                        );
+                        crate::backend::wgpu::dispatch::creation::run(
+                            emission,
+                            pending,
+                            &complementary_pipeline,
+                            &bind_group,
+                            workgroups,
+                            "runmat-crossentropy-complementary-encoder",
+                            "runmat-crossentropy-complementary-pass",
+                        )?;
+                    }
+                    let validation_pipeline = create_crossentropy_pipeline(
+                        emission,
+                        &bind_layout,
+                        "runmat-crossentropy-validation",
+                        crossentropy_validation_shader(self.precision, &params),
+                    );
+                    crate::backend::wgpu::dispatch::creation::run(
+                        emission,
+                        pending,
+                        &validation_pipeline,
+                        &bind_group,
+                        workgroups,
+                        "runmat-crossentropy-validation-encoder",
+                        "runmat-crossentropy-validation-pass",
+                    )?;
+                    offset += chunk_len;
+                }
 
-        let error_size = std::mem::size_of::<u32>() as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-crossentropy-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-crossentropy-error-copy"),
+                let error_size = std::mem::size_of::<u32>() as u64;
+                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-crossentropy-error-staging"),
+                    size: error_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
-        encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-        self.submit(encoder);
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-crossentropy-error-copy"),
+                        });
+                encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+                self.submit(emission, pending, encoder)?;
+                Ok((out_losses, staging, error_size))
+            })??;
         let code = self
             .map_readback_bytes_sync(staging, error_size, "crossentropy")
             .and_then(|bytes| {
@@ -553,162 +582,194 @@ impl WgpuProvider {
         let average_grad_entry = self.get_entry(&average_grad)?;
         let average_sq_grad_entry = self.get_entry(&average_sq_grad)?;
 
-        let out_parameters = self
-            .create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-params-out")?;
-        let out_average_grad =
-            self.create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-avg-out")?;
-        let out_average_sq_grad = self
-            .create_storage_buffer_checked(parameters_entry.len, "runmat-adamupdate-avg-sq-out")?;
+        let (out_parameters, out_average_grad, out_average_sq_grad) =
+            self.with_emission(|emission, _| -> Result<_> {
+                let out_parameters = self.create_storage_buffer_checked(
+                    emission,
+                    parameters_entry.len,
+                    "runmat-adamupdate-params-out",
+                )?;
+                let out_average_grad = self.create_storage_buffer_checked(
+                    emission,
+                    parameters_entry.len,
+                    "runmat-adamupdate-avg-out",
+                )?;
+                let out_average_sq_grad = self.create_storage_buffer_checked(
+                    emission,
+                    parameters_entry.len,
+                    "runmat-adamupdate-avg-sq-out",
+                )?;
+
+                Ok((out_parameters, out_average_grad, out_average_sq_grad))
+            })??;
 
         let mut validation_result = Ok(());
         if parameters_entry.len > 0 {
-            let error_buffer =
-                self.device_ref()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-adamupdate-error"),
-                        contents: bytes_of(&0u32),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-                    });
-            let shader = adam_update_shader(self.precision);
-            let shader_module =
-                self.device_ref()
-                    .create_shader_module(wgpu::ShaderModuleDescriptor {
-                        label: Some("runmat-adamupdate-shader"),
-                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-                    });
-            let bind_layout =
-                self.device_ref()
-                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                        label: Some("runmat-adamupdate-layout"),
-                        entries: &adam_update_bind_layout_entries(),
-                    });
-            let pipeline_layout =
-                self.device_ref()
-                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                        label: Some("runmat-adamupdate-pipeline-layout"),
-                        bind_group_layouts: &[&bind_layout],
-                        push_constant_ranges: &[],
-                    });
-            let pipeline = self.device_ref().create_compute_pipeline(
-                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                    label: Some("runmat-adamupdate-pipeline"),
-                    layout: Some(&pipeline_layout),
-                    module: &shader_module,
-                    entry_point: "main",
-                },
-            );
-
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-            let mut offset = 0usize;
-            while offset < parameters_entry.len {
-                let chunk_len = (parameters_entry.len - offset).min(chunk_capacity);
-                let params_buffer = match self.precision {
-                    NumericPrecision::F64 => self.uniform_buffer(
-                        &AdamUpdateParamsF64 {
-                            total: parameters_entry.len as u32,
-                            offset: offset as u32,
-                            chunk: chunk_len as u32,
-                            _pad0: 0,
-                            iteration: request.iteration as f64,
-                            learn_rate: request.learn_rate,
-                            gradient_decay_factor: request.gradient_decay_factor,
-                            squared_gradient_decay_factor: request.squared_gradient_decay_factor,
-                            epsilon: request.epsilon,
+            let (staging, error_size) =
+                self.with_emission(|emission, pending| -> Result<_> {
+                    let error_buffer =
+                        emission
+                            .device()
+                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-adamupdate-error"),
+                                contents: bytes_of(&0u32),
+                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                            });
+                    let shader = adam_update_shader(self.precision);
+                    let shader_module =
+                        emission
+                            .device()
+                            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                                label: Some("runmat-adamupdate-shader"),
+                                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                            });
+                    let bind_layout = emission.device().create_bind_group_layout(
+                        &wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-adamupdate-layout"),
+                            entries: &adam_update_bind_layout_entries(),
                         },
-                        "runmat-adamupdate-params",
-                    ),
-                    NumericPrecision::F32 => self.uniform_buffer(
-                        &AdamUpdateParamsF32 {
-                            total: parameters_entry.len as u32,
-                            offset: offset as u32,
-                            chunk: chunk_len as u32,
-                            _pad0: 0,
-                            iteration: request.iteration as f32,
-                            learn_rate: request.learn_rate as f32,
-                            gradient_decay_factor: request.gradient_decay_factor as f32,
-                            squared_gradient_decay_factor: request.squared_gradient_decay_factor
-                                as f32,
-                            epsilon: request.epsilon as f32,
-                            _pad1: [0.0; 3],
+                    );
+                    let pipeline_layout =
+                        emission
+                            .device()
+                            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                                label: Some("runmat-adamupdate-pipeline-layout"),
+                                bind_group_layouts: &[&bind_layout],
+                                push_constant_ranges: &[],
+                            });
+                    let pipeline = emission.device().create_compute_pipeline(
+                        &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                            label: Some("runmat-adamupdate-pipeline"),
+                            layout: Some(&pipeline_layout),
+                            module: &shader_module,
+                            entry_point: "main",
                         },
-                        "runmat-adamupdate-params",
-                    ),
-                };
-                let bind_group = self
-                    .device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-adamupdate-bind"),
-                        layout: &bind_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: parameters_entry.buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: gradient_entry.buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: average_grad_entry.buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: average_sq_grad_entry.buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 4,
-                                resource: out_parameters.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 5,
-                                resource: out_average_grad.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 6,
-                                resource: out_average_sq_grad.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 7,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 8,
-                                resource: error_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
-                crate::backend::wgpu::dispatch::creation::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-adamupdate-encoder",
-                    "runmat-adamupdate-pass",
-                );
-                offset += chunk_len;
-            }
+                    );
 
-            let error_size = std::mem::size_of::<u32>() as u64;
-            let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-adamupdate-error-staging"),
-                size: error_size,
-                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
-            let mut encoder =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-adamupdate-error-copy"),
+                    let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS
+                        as usize)
+                        * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+                    let mut offset = 0usize;
+                    while offset < parameters_entry.len {
+                        let chunk_len = (parameters_entry.len - offset).min(chunk_capacity);
+                        let params_buffer = match self.precision {
+                            NumericPrecision::F64 => self.uniform_buffer(
+                                emission,
+                                &AdamUpdateParamsF64 {
+                                    total: parameters_entry.len as u32,
+                                    offset: offset as u32,
+                                    chunk: chunk_len as u32,
+                                    _pad0: 0,
+                                    iteration: request.iteration as f64,
+                                    learn_rate: request.learn_rate,
+                                    gradient_decay_factor: request.gradient_decay_factor,
+                                    squared_gradient_decay_factor: request
+                                        .squared_gradient_decay_factor,
+                                    epsilon: request.epsilon,
+                                },
+                                "runmat-adamupdate-params",
+                            )?,
+                            NumericPrecision::F32 => self.uniform_buffer(
+                                emission,
+                                &AdamUpdateParamsF32 {
+                                    total: parameters_entry.len as u32,
+                                    offset: offset as u32,
+                                    chunk: chunk_len as u32,
+                                    _pad0: 0,
+                                    iteration: request.iteration as f32,
+                                    learn_rate: request.learn_rate as f32,
+                                    gradient_decay_factor: request.gradient_decay_factor as f32,
+                                    squared_gradient_decay_factor: request
+                                        .squared_gradient_decay_factor
+                                        as f32,
+                                    epsilon: request.epsilon as f32,
+                                    _pad1: [0.0; 3],
+                                },
+                                "runmat-adamupdate-params",
+                            )?,
+                        };
+                        let bind_group =
+                            emission
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-adamupdate-bind"),
+                                    layout: &bind_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: parameters_entry.buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: gradient_entry.buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: average_grad_entry.buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: average_sq_grad_entry
+                                                .buffer
+                                                .as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 4,
+                                            resource: out_parameters.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 5,
+                                            resource: out_average_grad.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 6,
+                                            resource: out_average_sq_grad
+                                                .as_ref()
+                                                .as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 7,
+                                            resource: params_buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 8,
+                                            resource: error_buffer.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                            chunk_len as u32,
+                            crate::backend::wgpu::config::WORKGROUP_SIZE,
+                        );
+                        crate::backend::wgpu::dispatch::creation::run(
+                            emission,
+                            pending,
+                            &pipeline,
+                            &bind_group,
+                            workgroups,
+                            "runmat-adamupdate-encoder",
+                            "runmat-adamupdate-pass",
+                        )?;
+                        offset += chunk_len;
+                    }
+
+                    let error_size = std::mem::size_of::<u32>() as u64;
+                    let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("runmat-adamupdate-error-staging"),
+                        size: error_size,
+                        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
                     });
-            encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
-            self.submit(encoder);
+                    let mut encoder =
+                        emission
+                            .device()
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: Some("runmat-adamupdate-error-copy"),
+                            });
+                    encoder.copy_buffer_to_buffer(&error_buffer, 0, &staging, 0, error_size);
+                    self.submit(emission, pending, encoder)?;
+                    Ok((staging, error_size))
+                })??;
             validation_result = self
                 .map_readback_bytes_sync(staging, error_size, "adamupdate")
                 .and_then(|bytes| {
@@ -779,11 +840,12 @@ fn crossentropy_terms_bind_layout_entries() -> [wgpu::BindGroupLayoutEntry; 7] {
 }
 
 fn create_crossentropy_pipeline(
-    device: &wgpu::Device,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     bind_layout: &wgpu::BindGroupLayout,
     label: &str,
     shader: String,
 ) -> wgpu::ComputePipeline {
+    let device = emission.device();
     let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some(label),
         source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),

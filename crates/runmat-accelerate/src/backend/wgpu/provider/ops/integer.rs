@@ -211,7 +211,9 @@ impl WgpuProvider {
         ensure!(op <= 3, "{operation_name}: unsupported integer scan opcode");
         if entry.len == 0 {
             let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-integer-cumulative-empty")
+                })??,
                 entry.shape.clone(),
                 0,
                 integer_type,
@@ -219,7 +221,13 @@ impl WgpuProvider {
             )?;
             let indices = if op >= 2 {
                 Some(self.register_existing_buffer(
-                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                    self.with_emission(|emission, _| {
+                        self.create_storage_buffer(
+                            emission,
+                            0,
+                            "runmat-integer-cumulative-indices-empty",
+                        )
+                    })??,
                     entry.shape.clone(),
                     0,
                 )?)
@@ -232,7 +240,9 @@ impl WgpuProvider {
         let segment_len = entry.shape[dim];
         if segment_len == 0 {
             let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-integer-cumulative-empty")
+                })??,
                 entry.shape.clone(),
                 0,
                 integer_type,
@@ -240,7 +250,13 @@ impl WgpuProvider {
             )?;
             let indices = if op >= 2 {
                 Some(self.register_existing_buffer(
-                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                    self.with_emission(|emission, _| {
+                        self.create_storage_buffer(
+                            emission,
+                            0,
+                            "runmat-integer-cumulative-indices-empty",
+                        )
+                    })??,
                     entry.shape.clone(),
                     0,
                 )?)
@@ -277,119 +293,131 @@ impl WgpuProvider {
 
         let words = integer_word_count(integer_type, entry.len)?;
         let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
-        let values_buffer =
-            self.create_storage_buffer_checked(words, "runmat-integer-cumulative-values")?;
-        let indices_buffer = if op >= 2 {
-            self.create_storage_buffer(entry.len, "runmat-integer-cumulative-indices")
-        } else {
-            values_buffer.clone()
-        };
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let values_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    words,
+                    "runmat-integer-cumulative-values",
+                )?;
+                let indices_buffer = if op >= 2 {
+                    self.create_storage_buffer(
+                        emission,
+                        entry.len,
+                        "runmat-integer-cumulative-indices",
+                    )?
+                } else {
+                    values_buffer.clone()
+                };
 
-        let scalar_type = match self.precision {
-            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
-            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
-        };
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader = crate::backend::wgpu::shaders::integer::cumulative_scan_shader(
-            scalar_type,
-            workgroup_size,
-        );
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-cumulative-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                    crate::backend::wgpu::bindings::uniform_entry(3),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-cumulative-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-cumulative-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-cumulative-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-cumulative",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-cumulative-bgl"),
-            Some(workgroup_size),
-        );
+                let scalar_type = match self.precision {
+                    crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+                    crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+                };
+                let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+                let shader = crate::backend::wgpu::shaders::integer::cumulative_scan_shader(
+                    scalar_type,
+                    workgroup_size,
+                );
+                let layout =
+                    emission
+                        .device()
+                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-integer-cumulative-bgl"),
+                            entries: &[
+                                crate::backend::wgpu::bindings::storage_read_entry(0),
+                                crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                                crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                                crate::backend::wgpu::bindings::uniform_entry(3),
+                            ],
+                        });
+                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    emission,
+                    "runmat-integer-cumulative-pl",
+                    &layout,
+                );
+                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                    emission,
+                    "runmat-integer-cumulative-module",
+                    &shader,
+                );
+                let key = self.compute_pipeline_hash_bytes(
+                    shader.as_bytes(),
+                    "runmat-integer-cumulative-bgl",
+                    Some(workgroup_size),
+                );
+                let pipeline = self.get_or_create_pipeline(
+                    emission,
+                    key,
+                    &pipeline_layout,
+                    &module,
+                    "runmat-integer-cumulative",
+                    Some(shader.as_bytes()),
+                    Some("runmat-integer-cumulative-bgl"),
+                    Some(workgroup_size),
+                )?;
 
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            segment_len: u32,
-            segments: u32,
-            stride_before: u32,
-            block: u32,
-            total_len: u32,
-            integer_type: u32,
-            op: u32,
-            direction: u32,
-        }
-        let params = Params {
-            segment_len: segment_len as u32,
-            segments: segments as u32,
-            stride_before: stride_before as u32,
-            block: block as u32,
-            total_len: entry.len as u32,
-            integer_type: integer_type_code(integer_type),
-            op,
-            direction: u32::from(matches!(
-                direction,
-                runmat_accelerate_api::ProviderScanDirection::Reverse
-            )),
-        };
-        let uniform = self.uniform_buffer(&params, "runmat-integer-cumulative-params");
-        let group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-integer-cumulative-bg"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: uniform.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups =
-            crate::backend::wgpu::dispatch::common::dispatch_size(segments as u32, workgroup_size);
-        crate::backend::wgpu::dispatch::elementwise::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &group,
-            groups,
-        );
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct Params {
+                    segment_len: u32,
+                    segments: u32,
+                    stride_before: u32,
+                    block: u32,
+                    total_len: u32,
+                    integer_type: u32,
+                    op: u32,
+                    direction: u32,
+                }
+                let params = Params {
+                    segment_len: segment_len as u32,
+                    segments: segments as u32,
+                    stride_before: stride_before as u32,
+                    block: block as u32,
+                    total_len: entry.len as u32,
+                    integer_type: integer_type_code(integer_type),
+                    op,
+                    direction: u32::from(matches!(
+                        direction,
+                        runmat_accelerate_api::ProviderScanDirection::Reverse
+                    )),
+                };
+                let uniform =
+                    self.uniform_buffer(emission, &params, "runmat-integer-cumulative-params")?;
+                let group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-cumulative-bg"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: values_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: indices_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: uniform.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    segments as u32,
+                    workgroup_size,
+                );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission, pending, &pipeline, &group, groups,
+                )?;
 
+                Ok((values_buffer, indices_buffer))
+            })??;
         let values = self.register_integer_buffer(
             values_buffer,
             entry.shape.clone(),
@@ -458,7 +486,9 @@ impl WgpuProvider {
         let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if out_len == 0 {
             return self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-reduce-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-integer-reduce-empty")
+                })??,
                 out_shape,
                 0,
                 integer_type,
@@ -468,137 +498,149 @@ impl WgpuProvider {
         if rows == 0 {
             return identity_integer_buffer(self, integer_type, out_len, &out_shape, is_product);
         }
-        let out = self.create_storage_buffer_checked(raw_words, "runmat-integer-reduce-out")?;
-        let workgroup_size = crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE;
-        let shader = crate::backend::wgpu::shaders::integer::reduce_dim_shader(workgroup_size);
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-reduce-dim-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::uniform_entry(2),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-reduce-dim-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-reduce-dim",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-reduce-dim-bgl"),
-            Some(workgroup_size),
-        );
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            rank: u32,
-            kept_count: u32,
-            reduce_count: u32,
-            op: u32,
-            rows: u32,
-            cols: u32,
-            integer_type: u32,
-            slice_offset: u32,
-            kept_sizes: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            kept_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            reduce_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-        }
-        let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        for (position, &index) in kept.iter().enumerate() {
-            kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(entry.shape[index])
-                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+        let out = self.with_emission(|emission, pending| -> Result<_> {
+            let out = self.create_storage_buffer_checked(
+                emission,
+                raw_words,
+                "runmat-integer-reduce-out",
+            )?;
+            let workgroup_size = crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE;
+            let shader = crate::backend::wgpu::shaders::integer::reduce_dim_shader(workgroup_size);
+            let layout =
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-reduce-dim-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                            crate::backend::wgpu::bindings::uniform_entry(2),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-integer-reduce-dim-pl",
+                &layout,
             );
-            kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(strides[index])
-                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-integer-reduce-dim-module",
+                &shader,
             );
-        }
-        reduce_sizes[0] = crate::backend::wgpu::params::AlignedU32::new(
-            u32::try_from(rows)
-                .map_err(|_| anyhow!("{operation_name}: reduce size exceeds GPU kernel limit"))?,
-        );
-        reduce_strides[0] = crate::backend::wgpu::params::AlignedU32::new(
-            u32::try_from(strides[dim])
-                .map_err(|_| anyhow!("{operation_name}: reduce stride exceeds GPU kernel limit"))?,
-        );
-        let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
-        let mut offset = 0usize;
-        while offset < out_len {
-            let chunk = (out_len - offset).min(max_groups);
-            let params = Params {
-                rank: rank as u32,
-                kept_count: kept.len() as u32,
-                reduce_count: 1,
-                op: u32::from(is_product),
-                rows: rows as u32,
-                cols: cols as u32,
-                integer_type: integer_type_code(integer_type),
-                slice_offset: offset as u32,
-                kept_sizes,
-                reduce_sizes,
-                kept_strides,
-                reduce_strides,
-            };
-            let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-params");
-            let group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-integer-reduce-dim-bg"),
-                    layout: &layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform.as_entire_binding(),
-                        },
-                    ],
-                });
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &group,
-                chunk as u32,
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-reduce-dim-bgl",
+                Some(workgroup_size),
             );
-            offset += chunk;
-        }
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-reduce-dim",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-reduce-dim-bgl"),
+                Some(workgroup_size),
+            )?;
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                rank: u32,
+                kept_count: u32,
+                reduce_count: u32,
+                op: u32,
+                rows: u32,
+                cols: u32,
+                integer_type: u32,
+                slice_offset: u32,
+                kept_sizes: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                kept_strides: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                reduce_strides: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+            }
+            let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            for (position, &index) in kept.iter().enumerate() {
+                kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(entry.shape[index])
+                        .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+                );
+                kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(strides[index]).map_err(|_| {
+                        anyhow!("{operation_name}: stride exceeds GPU kernel limit")
+                    })?,
+                );
+            }
+            reduce_sizes[0] =
+                crate::backend::wgpu::params::AlignedU32::new(u32::try_from(rows).map_err(
+                    |_| anyhow!("{operation_name}: reduce size exceeds GPU kernel limit"),
+                )?);
+            reduce_strides[0] = crate::backend::wgpu::params::AlignedU32::new(
+                u32::try_from(strides[dim]).map_err(|_| {
+                    anyhow!("{operation_name}: reduce stride exceeds GPU kernel limit")
+                })?,
+            );
+            let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+            let mut offset = 0usize;
+            while offset < out_len {
+                let chunk = (out_len - offset).min(max_groups);
+                let params = Params {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: 1,
+                    op: u32::from(is_product),
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    integer_type: integer_type_code(integer_type),
+                    slice_offset: offset as u32,
+                    kept_sizes,
+                    reduce_sizes,
+                    kept_strides,
+                    reduce_strides,
+                };
+                let uniform =
+                    self.uniform_buffer(emission, &params, "runmat-integer-reduce-dim-params")?;
+                let group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-reduce-dim-bg"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: uniform.as_entire_binding(),
+                            },
+                        ],
+                    });
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission,
+                    pending,
+                    &pipeline,
+                    &group,
+                    chunk as u32,
+                )?;
+                offset += chunk;
+            }
+            Ok(out)
+        })??;
         self.register_integer_buffer(out, out_shape, out_len, integer_type, allocated_bytes)
     }
 
@@ -719,7 +761,9 @@ impl WgpuProvider {
         }
         if cols == 0 {
             return self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-mean-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-integer-mean-empty")
+                })??,
                 out_shape,
                 0,
                 integer_type,
@@ -731,139 +775,148 @@ impl WgpuProvider {
         }
         let raw_words = integer_word_count(integer_type, cols)?;
         let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
-        let out = self.create_storage_buffer_checked(raw_words, "runmat-integer-mean-out")?;
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader = crate::backend::wgpu::shaders::integer::mean_dim_shader(workgroup_size);
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-mean-dim-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::uniform_entry(2),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-mean-dim-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-mean-dim-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-mean-dim-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-mean-dim",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-mean-dim-bgl"),
-            Some(workgroup_size),
-        );
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            rank: u32,
-            kept_count: u32,
-            reduce_count: u32,
-            rows: u32,
-            cols: u32,
-            integer_type: u32,
-            slice_offset: u32,
-            _pad0: u32,
-            kept_sizes: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            kept_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-            reduce_strides: [crate::backend::wgpu::params::AlignedU32;
-                crate::backend::wgpu::params::BCAST_MAX_RANK],
-        }
-        let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
-            crate::backend::wgpu::params::BCAST_MAX_RANK];
-        for (position, &index) in kept.iter().enumerate() {
-            kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(entry.shape[index])
-                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+        let out = self.with_emission(|emission, pending| -> Result<_> {
+            let out =
+                self.create_storage_buffer_checked(emission, raw_words, "runmat-integer-mean-out")?;
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let shader = crate::backend::wgpu::shaders::integer::mean_dim_shader(workgroup_size);
+            let layout =
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-mean-dim-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                            crate::backend::wgpu::bindings::uniform_entry(2),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-integer-mean-dim-pl",
+                &layout,
             );
-            kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(strides[index])
-                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-integer-mean-dim-module",
+                &shader,
             );
-        }
-        for (position, &index) in reduce_dims.iter().enumerate() {
-            reduce_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(entry.shape[index])
-                    .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-mean-dim-bgl",
+                Some(workgroup_size),
             );
-            reduce_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
-                u32::try_from(strides[index])
-                    .map_err(|_| anyhow!("{operation_name}: stride exceeds GPU kernel limit"))?,
-            );
-        }
-        let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
-        let mut offset = 0usize;
-        while offset < cols {
-            let chunk = (cols - offset).min(max_groups);
-            let params = Params {
-                rank: rank as u32,
-                kept_count: kept.len() as u32,
-                reduce_count: reduce_dims.len() as u32,
-                rows: rows as u32,
-                cols: cols as u32,
-                integer_type: integer_type_code(integer_type),
-                slice_offset: offset as u32,
-                _pad0: 0,
-                kept_sizes,
-                reduce_sizes,
-                kept_strides,
-                reduce_strides,
-            };
-            let uniform = self.uniform_buffer(&params, "runmat-integer-mean-dim-params");
-            let group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-integer-mean-dim-bg"),
-                    layout: &layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform.as_entire_binding(),
-                        },
-                    ],
-                });
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &group,
-                chunk as u32,
-            );
-            offset += chunk;
-        }
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-mean-dim",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-mean-dim-bgl"),
+                Some(workgroup_size),
+            )?;
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                rank: u32,
+                kept_count: u32,
+                reduce_count: u32,
+                rows: u32,
+                cols: u32,
+                integer_type: u32,
+                slice_offset: u32,
+                _pad0: u32,
+                kept_sizes: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                reduce_sizes: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                kept_strides: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+                reduce_strides: [crate::backend::wgpu::params::AlignedU32;
+                    crate::backend::wgpu::params::BCAST_MAX_RANK],
+            }
+            let mut kept_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut reduce_sizes = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut kept_strides = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            let mut reduce_strides = [crate::backend::wgpu::params::AlignedU32::default();
+                crate::backend::wgpu::params::BCAST_MAX_RANK];
+            for (position, &index) in kept.iter().enumerate() {
+                kept_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(entry.shape[index])
+                        .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+                );
+                kept_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(strides[index]).map_err(|_| {
+                        anyhow!("{operation_name}: stride exceeds GPU kernel limit")
+                    })?,
+                );
+            }
+            for (position, &index) in reduce_dims.iter().enumerate() {
+                reduce_sizes[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(entry.shape[index])
+                        .map_err(|_| anyhow!("{operation_name}: shape exceeds GPU kernel limit"))?,
+                );
+                reduce_strides[position] = crate::backend::wgpu::params::AlignedU32::new(
+                    u32::try_from(strides[index]).map_err(|_| {
+                        anyhow!("{operation_name}: stride exceeds GPU kernel limit")
+                    })?,
+                );
+            }
+            let max_groups = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize;
+            let mut offset = 0usize;
+            while offset < cols {
+                let chunk = (cols - offset).min(max_groups);
+                let params = Params {
+                    rank: rank as u32,
+                    kept_count: kept.len() as u32,
+                    reduce_count: reduce_dims.len() as u32,
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    integer_type: integer_type_code(integer_type),
+                    slice_offset: offset as u32,
+                    _pad0: 0,
+                    kept_sizes,
+                    reduce_sizes,
+                    kept_strides,
+                    reduce_strides,
+                };
+                let uniform =
+                    self.uniform_buffer(emission, &params, "runmat-integer-mean-dim-params")?;
+                let group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-mean-dim-bg"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: uniform.as_entire_binding(),
+                            },
+                        ],
+                    });
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission,
+                    pending,
+                    &pipeline,
+                    &group,
+                    chunk as u32,
+                )?;
+                offset += chunk;
+            }
+            Ok(out)
+        })??;
         self.register_integer_buffer(out, out_shape, cols, integer_type, allocated_bytes)
     }
 
@@ -899,14 +952,26 @@ impl WgpuProvider {
             // the f64 host gather fallback, which cannot reconstruct wide
             // integers.
             let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-values"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(
+                        emission,
+                        0,
+                        "runmat-integer-reduce-empty-extrema-values",
+                    )
+                })??,
                 out_shape.clone(),
                 0,
                 integer_type,
                 0,
             )?;
             let indices = self.register_existing_buffer(
-                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-indices"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(
+                        emission,
+                        0,
+                        "runmat-integer-reduce-empty-extrema-indices",
+                    )
+                })??,
                 out_shape,
                 0,
             )?;
@@ -920,108 +985,124 @@ impl WgpuProvider {
         }
         let words = integer_word_count(integer_type, out_len)?;
         let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
-        let values_buffer =
-            self.create_storage_buffer_checked(words, "runmat-integer-reduce-dim-extrema-values")?;
-        let indices_buffer = self
-            .create_storage_buffer_checked(out_len, "runmat-integer-reduce-dim-extrema-indices")?;
-        let scalar_type = match self.precision {
-            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
-            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
-        };
-        let workgroup_size = self.workgroup_config.scalar;
-        let shader =
-            crate::backend::wgpu::shaders::integer::extrema_dim_shader(scalar_type, workgroup_size);
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-reduce-dim-extrema-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                    crate::backend::wgpu::bindings::uniform_entry(3),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-extrema-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-extrema-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-reduce-dim-extrema-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-reduce-dim-extrema",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-reduce-dim-extrema-bgl"),
-            Some(workgroup_size),
-        );
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            rows: u32,
-            cols: u32,
-            dim: u32,
-            select_min: u32,
-            integer_type: u32,
-            _pad0: u32,
-            _pad1: u32,
-            _pad2: u32,
-        }
-        let params = Params {
-            rows: rows as u32,
-            cols: cols as u32,
-            dim: dim as u32,
-            select_min: u32::from(select_min),
-            integer_type: integer_type_code(integer_type),
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-extrema-params");
-        let group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-integer-reduce-dim-extrema-bg"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: uniform.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups =
-            crate::backend::wgpu::dispatch::common::dispatch_size(out_len as u32, workgroup_size);
-        crate::backend::wgpu::dispatch::elementwise::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &group,
-            groups,
-        );
+        let (values_buffer, indices_buffer) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let values_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    words,
+                    "runmat-integer-reduce-dim-extrema-values",
+                )?;
+                let indices_buffer = self.create_storage_buffer_checked(
+                    emission,
+                    out_len,
+                    "runmat-integer-reduce-dim-extrema-indices",
+                )?;
+                let scalar_type = match self.precision {
+                    crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+                    crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+                };
+                let workgroup_size = self.workgroup_config.scalar;
+                let shader = crate::backend::wgpu::shaders::integer::extrema_dim_shader(
+                    scalar_type,
+                    workgroup_size,
+                );
+                let layout =
+                    emission
+                        .device()
+                        .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                            label: Some("runmat-integer-reduce-dim-extrema-bgl"),
+                            entries: &[
+                                crate::backend::wgpu::bindings::storage_read_entry(0),
+                                crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                                crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                                crate::backend::wgpu::bindings::uniform_entry(3),
+                            ],
+                        });
+                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    emission,
+                    "runmat-integer-reduce-dim-extrema-pl",
+                    &layout,
+                );
+                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                    emission,
+                    "runmat-integer-reduce-dim-extrema-module",
+                    &shader,
+                );
+                let key = self.compute_pipeline_hash_bytes(
+                    shader.as_bytes(),
+                    "runmat-integer-reduce-dim-extrema-bgl",
+                    Some(workgroup_size),
+                );
+                let pipeline = self.get_or_create_pipeline(
+                    emission,
+                    key,
+                    &pipeline_layout,
+                    &module,
+                    "runmat-integer-reduce-dim-extrema",
+                    Some(shader.as_bytes()),
+                    Some("runmat-integer-reduce-dim-extrema-bgl"),
+                    Some(workgroup_size),
+                )?;
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct Params {
+                    rows: u32,
+                    cols: u32,
+                    dim: u32,
+                    select_min: u32,
+                    integer_type: u32,
+                    _pad0: u32,
+                    _pad1: u32,
+                    _pad2: u32,
+                }
+                let params = Params {
+                    rows: rows as u32,
+                    cols: cols as u32,
+                    dim: dim as u32,
+                    select_min: u32::from(select_min),
+                    integer_type: integer_type_code(integer_type),
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                };
+                let uniform = self.uniform_buffer(
+                    emission,
+                    &params,
+                    "runmat-integer-reduce-dim-extrema-params",
+                )?;
+                let group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-reduce-dim-extrema-bg"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: values_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: indices_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: uniform.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    out_len as u32,
+                    workgroup_size,
+                );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission, pending, &pipeline, &group, groups,
+                )?;
+                Ok((values_buffer, indices_buffer))
+            })??;
         Ok(runmat_accelerate_api::ReduceDimResult {
             values: self.register_integer_buffer(
                 values_buffer,
@@ -1071,7 +1152,9 @@ impl WgpuProvider {
         let bytes = (raw_len as u64).saturating_mul(4);
         if len == 0 {
             return self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-arithmetic-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-integer-arithmetic-empty")
+                })??,
                 broadcast.output_shape,
                 0,
                 integer_type,
@@ -1098,100 +1181,108 @@ impl WgpuProvider {
             a_strides: [AlignedU32; BCAST_MAX_RANK],
             b_strides: [AlignedU32; BCAST_MAX_RANK],
         }
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader = crate::backend::wgpu::shaders::integer::arithmetic_shader(workgroup_size);
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-arithmetic-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_entry(1),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                    crate::backend::wgpu::bindings::uniform_entry(3),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-arithmetic-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-arithmetic-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-arithmetic-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-arithmetic",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-arithmetic-bgl"),
-            Some(workgroup_size),
-        );
-        let out = self.create_storage_buffer_checked(raw_len, "runmat-integer-arithmetic-out")?;
-        let capacity = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize
-            * workgroup_size as usize;
-        let mut offset = 0;
-        while offset < len {
-            let chunk = (len - offset).min(capacity);
-            let params = Params {
-                len: chunk as u32,
-                op,
-                offset: offset as u32,
-                total: u32::try_from(len).expect("integer dispatch length was checked"),
-                integer_type: integer_type_code(integer_type),
-                rank: broadcast.rank,
-                _pad0: 0,
-                _pad1: 0,
-                out_shape: broadcast.out_shape,
-                a_shape: broadcast.a_shape,
-                b_shape: broadcast.b_shape,
-                a_strides: broadcast.a_strides,
-                b_strides: broadcast.b_strides,
-            };
-            let uniform = self.uniform_buffer(&params, "runmat-integer-arithmetic-params");
-            let group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-integer-arithmetic-bg"),
-                    layout: &layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: entry_b.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: out.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: uniform.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups =
-                crate::backend::wgpu::dispatch::common::dispatch_size(chunk as u32, workgroup_size);
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &group,
-                groups,
+        let out = self.with_emission(|emission, pending| -> Result<_> {
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let shader = crate::backend::wgpu::shaders::integer::arithmetic_shader(workgroup_size);
+            let layout =
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-arithmetic-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_entry(1),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                            crate::backend::wgpu::bindings::uniform_entry(3),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-integer-arithmetic-pl",
+                &layout,
             );
-            offset += chunk;
-        }
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-integer-arithmetic-module",
+                &shader,
+            );
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-arithmetic-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-arithmetic",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-arithmetic-bgl"),
+                Some(workgroup_size),
+            )?;
+            let out = self.create_storage_buffer_checked(
+                emission,
+                raw_len,
+                "runmat-integer-arithmetic-out",
+            )?;
+            let capacity = crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize
+                * workgroup_size as usize;
+            let mut offset = 0;
+            while offset < len {
+                let chunk = (len - offset).min(capacity);
+                let params = Params {
+                    len: chunk as u32,
+                    op,
+                    offset: offset as u32,
+                    total: u32::try_from(len).expect("integer dispatch length was checked"),
+                    integer_type: integer_type_code(integer_type),
+                    rank: broadcast.rank,
+                    _pad0: 0,
+                    _pad1: 0,
+                    out_shape: broadcast.out_shape,
+                    a_shape: broadcast.a_shape,
+                    b_shape: broadcast.b_shape,
+                    a_strides: broadcast.a_strides,
+                    b_strides: broadcast.b_strides,
+                };
+                let uniform =
+                    self.uniform_buffer(emission, &params, "runmat-integer-arithmetic-params")?;
+                let group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-arithmetic-bg"),
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: out.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: uniform.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk as u32,
+                    workgroup_size,
+                );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission, pending, &pipeline, &group, groups,
+                )?;
+                offset += chunk;
+            }
+            Ok(out)
+        })??;
         self.register_integer_buffer(out, broadcast.output_shape, len, integer_type, bytes)
     }
 
@@ -1226,7 +1317,9 @@ impl WgpuProvider {
         let raw_len = integer_word_count(integer_type, len)?;
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if len == 0 {
-            let out = self.create_storage_buffer(0, "runmat-integer-minmax-empty");
+            let out = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-integer-minmax-empty")
+            })??;
             return self.register_integer_buffer(out, broadcast.output_shape, 0, integer_type, 0);
         }
         if len > u32::MAX as usize {
@@ -1252,103 +1345,109 @@ impl WgpuProvider {
             b_strides: [AlignedU32; BCAST_MAX_RANK],
         }
 
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader = crate::backend::wgpu::shaders::integer::minmax_shader(workgroup_size);
-        let bind_group_layout =
-            self.device_ref()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-integer-minmax-bgl"),
-                    entries: &[
-                        crate::backend::wgpu::bindings::storage_read_entry(0),
-                        crate::backend::wgpu::bindings::storage_read_entry(1),
-                        crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                        crate::backend::wgpu::bindings::uniform_entry(3),
-                    ],
-                });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-minmax-pl",
-            &bind_group_layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-minmax-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-minmax-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-minmax",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-minmax-bgl"),
-            Some(workgroup_size),
-        );
-        let out_buffer =
-            self.create_storage_buffer_checked(raw_len, "runmat-integer-minmax-out")?;
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * workgroup_size as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let chunk_len = (len - offset).min(chunk_capacity);
-            let params = Params {
-                len: chunk_len as u32,
-                select_min: u32::from(select_min),
-                offset: offset as u32,
-                total: len as u32,
-                integer_type: integer_type_code(integer_type),
-                rank: broadcast.rank,
-                _pad0: 0,
-                _pad1: 0,
-                out_shape: broadcast.out_shape,
-                a_shape: broadcast.a_shape,
-                b_shape: broadcast.b_shape,
-                a_strides: broadcast.a_strides,
-                b_strides: broadcast.b_strides,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-integer-minmax-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-integer-minmax-bg"),
-                    layout: &bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: entry_b.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                workgroup_size,
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let shader = crate::backend::wgpu::shaders::integer::minmax_shader(workgroup_size);
+            let bind_group_layout =
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-minmax-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_entry(1),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                            crate::backend::wgpu::bindings::uniform_entry(3),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-integer-minmax-pl",
+                &bind_group_layout,
             );
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &bind_group,
-                groups,
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-integer-minmax-module",
+                &shader,
             );
-            offset += chunk_len;
-        }
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-minmax-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-minmax",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-minmax-bgl"),
+                Some(workgroup_size),
+            )?;
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, raw_len, "runmat-integer-minmax-out")?;
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * workgroup_size as usize;
+            let mut offset = 0usize;
+            while offset < len {
+                let chunk_len = (len - offset).min(chunk_capacity);
+                let params = Params {
+                    len: chunk_len as u32,
+                    select_min: u32::from(select_min),
+                    offset: offset as u32,
+                    total: len as u32,
+                    integer_type: integer_type_code(integer_type),
+                    rank: broadcast.rank,
+                    _pad0: 0,
+                    _pad1: 0,
+                    out_shape: broadcast.out_shape,
+                    a_shape: broadcast.a_shape,
+                    b_shape: broadcast.b_shape,
+                    a_strides: broadcast.a_strides,
+                    b_strides: broadcast.b_strides,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-integer-minmax-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-minmax-bg"),
+                        layout: &bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    workgroup_size,
+                );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission,
+                    pending,
+                    &pipeline,
+                    &bind_group,
+                    groups,
+                )?;
+                offset += chunk_len;
+            }
+            Ok(out_buffer)
+        })??;
         self.register_integer_buffer(
             out_buffer,
             broadcast.output_shape,
@@ -1380,7 +1479,9 @@ impl WgpuProvider {
         let raw_len = integer_word_count(target_type, len)?;
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if len == 0 {
-            let out = self.create_integer_word_buffer(0, "runmat-integer-cast-empty")?;
+            let out = self.with_emission(|emission, _| {
+                self.create_integer_word_buffer(emission, 0, "runmat-integer-cast-empty")
+            })??;
             return self.register_integer_buffer(out, entry.shape, 0, target_type, 0);
         }
         if len > u32::MAX as usize {
@@ -1394,103 +1495,110 @@ impl WgpuProvider {
                 NumericPrecision::F64 => 9,
             }
         };
-        let raw_out = self.create_integer_word_buffer(raw_len, "runmat-integer-cast-out")?;
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let scalar_type = match entry.precision {
-            NumericPrecision::F32 => "f32",
-            NumericPrecision::F64 => "f64",
-        };
-        let shader =
-            crate::backend::wgpu::shaders::integer::cast_shader(scalar_type, workgroup_size);
-        let bind_group_layout =
-            self.device_ref()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-integer-cast-bgl"),
-                    entries: &[
-                        crate::backend::wgpu::bindings::storage_read_entry(0),
-                        crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                        crate::backend::wgpu::bindings::uniform_entry(2),
-                    ],
-                });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-cast-pl",
-            &bind_group_layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-cast-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-cast-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-cast",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-cast-bgl"),
-            Some(workgroup_size),
-        );
-
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            len: u32,
-            offset: u32,
-            source_type: u32,
-            target_type: u32,
-        }
-
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * workgroup_size as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let chunk_len = (len - offset).min(chunk_capacity);
-            let params = Params {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                source_type,
-                target_type: integer_type_code(target_type),
+        let raw_out = self.with_emission(|emission, pending| -> Result<_> {
+            let raw_out =
+                self.create_integer_word_buffer(emission, raw_len, "runmat-integer-cast-out")?;
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let scalar_type = match entry.precision {
+                NumericPrecision::F32 => "f32",
+                NumericPrecision::F64 => "f64",
             };
-            let params_buffer = self.uniform_buffer(&params, "runmat-integer-cast-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-integer-cast-bg"),
-                    layout: &bind_group_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: raw_out.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                workgroup_size,
+            let shader =
+                crate::backend::wgpu::shaders::integer::cast_shader(scalar_type, workgroup_size);
+            let bind_group_layout =
+                emission
+                    .device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-cast-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                            crate::backend::wgpu::bindings::uniform_entry(2),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                emission,
+                "runmat-integer-cast-pl",
+                &bind_group_layout,
             );
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                &bind_group,
-                groups,
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                emission,
+                "runmat-integer-cast-module",
+                &shader,
             );
-            offset += chunk_len;
-        }
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-cast-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                emission,
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-cast",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-cast-bgl"),
+                Some(workgroup_size),
+            )?;
+
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                len: u32,
+                offset: u32,
+                source_type: u32,
+                target_type: u32,
+            }
+
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * workgroup_size as usize;
+            let mut offset = 0usize;
+            while offset < len {
+                let chunk_len = (len - offset).min(chunk_capacity);
+                let params = Params {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    source_type,
+                    target_type: integer_type_code(target_type),
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-integer-cast-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-integer-cast-bg"),
+                        layout: &bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: raw_out.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    workgroup_size,
+                );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission,
+                    pending,
+                    &pipeline,
+                    &bind_group,
+                    groups,
+                )?;
+                offset += chunk_len;
+            }
+            Ok(raw_out)
+        })??;
         self.register_integer_buffer(raw_out, entry.shape, len, target_type, allocated_bytes)
     }
 }

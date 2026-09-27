@@ -568,13 +568,14 @@ async fn build_stairs_gpu_plot(
         color: appearance.color,
     };
 
-    let gpu_vertices = runmat_plot::gpu::stairs::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::stairs::pack_vertices_from_xy(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
 
     let marker_gpu = if let Some(marker) = marker_meta.clone() {
         let marker_inputs = MarkerGpuInputs {
@@ -596,18 +597,19 @@ async fn build_stairs_gpu_plot(
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };
         Some(
-            line::pack_marker_vertices_from_xy(
-                &context.device,
-                &context.queue,
-                &marker_inputs,
-                &marker_params,
-            )
-            .map_err(|e| {
-                plotting_error(
-                    name,
-                    format!("{name}: failed to build marker vertices: {e}"),
-                )
-            })?,
+            context
+                .access
+                .with_shared(|emission| {
+                    line::pack_marker_vertices_from_xy(emission, &marker_inputs, &marker_params)
+                })
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+                .map_err(|e| {
+                    plotting_error(
+                        name,
+                        format!("{name}: failed to build marker vertices: {e}"),
+                    )
+                })?,
         )
     } else {
         None

@@ -67,11 +67,11 @@ impl KernelResourceRegistry {
 
     pub fn uniform_buffer(
         &self,
-        device: &wgpu::Device,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         key: UniformBufferKey,
         size: u64,
         label: &'static str,
-    ) -> Arc<wgpu::Buffer> {
+    ) -> anyhow::Result<Arc<wgpu::Buffer>> {
         let should_cache = !matches!(
             key,
             UniformBufferKey::MatmulParams
@@ -91,8 +91,9 @@ impl KernelResourceRegistry {
                 .get(&key)
                 .cloned()
             {
-                return existing;
+                return Ok(existing);
             }
+            super::cache::scope::allow_creation(emission.mode())?;
         }
 
         const UNIFORM_ALIGN: u64 = 256;
@@ -101,7 +102,7 @@ impl KernelResourceRegistry {
         } else {
             size.div_ceil(UNIFORM_ALIGN) * UNIFORM_ALIGN
         };
-        let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: alloc_size,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -115,27 +116,29 @@ impl KernelResourceRegistry {
                 .expect("uniform buffer registry poisoned");
             guard.entry(key).or_insert_with(|| buffer.clone());
         }
-        buffer
+        Ok(buffer)
     }
 
     pub fn scratch_storage_buffer(
         &self,
-        device: &wgpu::Device,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         kind: ScratchBufferKind,
         size: u64,
         label: &'static str,
-    ) -> Arc<wgpu::Buffer> {
-        let mut guard = self
+    ) -> anyhow::Result<Arc<wgpu::Buffer>> {
+        let guard = self
             .scratch_buffers
             .lock()
             .expect("scratch buffer registry poisoned");
         if let Some((capacity, existing)) = guard.get(&kind) {
             if *capacity >= size {
-                return existing.clone();
+                return Ok(existing.clone());
             }
         }
+        drop(guard);
+        super::cache::scope::allow_creation(emission.mode())?;
         let alloc_size = size.max(1);
-        let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: alloc_size,
             usage: wgpu::BufferUsages::STORAGE
@@ -143,10 +146,19 @@ impl KernelResourceRegistry {
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
+        let mut guard = self
+            .scratch_buffers
+            .lock()
+            .expect("scratch buffer registry poisoned");
+        if let Some((capacity, existing)) = guard.get(&kind) {
+            if *capacity >= size {
+                return Ok(existing.clone());
+            }
+        }
         let replaced = guard.insert(kind, (alloc_size, buffer.clone()));
         drop(guard);
         drop(replaced);
-        buffer
+        Ok(buffer)
     }
 
     pub fn remember_matmul_sources(

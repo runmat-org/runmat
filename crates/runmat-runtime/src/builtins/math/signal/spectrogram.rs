@@ -436,7 +436,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, signal_len, complex_input).await?;
-        if let Ok(value) = output_gpu(handle, &options, signal_len).await {
+        if let Some(value) = output_gpu(handle, &options, signal_len).await? {
             return Ok(value);
         }
     }
@@ -498,12 +498,12 @@ async fn output_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &SpectrogramOptions,
     signal_len: usize,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL));
+        return Ok(None);
     };
     if options.reassigned {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INVALID_OPTION));
+        return Ok(None);
     }
     let window_len = options.window.len();
     let step = window_len - options.n_overlap;
@@ -524,7 +524,7 @@ async fn output_gpu(
         }
     };
     let range = gpu_range(options.range);
-    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
         input: handle,
         input_len: signal_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -537,8 +537,20 @@ async fn output_gpu(
         denominator,
     })
     .await
-    .map_err(|err| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, err.to_string()))?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                spectrogram_error_with_detail(
+                    &SPECTROGRAM_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
         return Err(spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL));
     };
     let f_values = frequency_vector(nfft, options.units, options.range);
@@ -548,32 +560,56 @@ async fn output_gpu(
         .collect::<Vec<_>>();
     let f_shape = [estimate.rows, 1usize];
     let t_shape = [1usize, estimate.cols];
-    let f = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        })
-        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e.to_string()))?;
-    let t = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &t_values,
-            shape: &t_shape,
-        })
-        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e.to_string()))?;
+    let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
+        data: &f_values,
+        shape: &f_shape,
+    }) {
+        Ok(value) => value,
+        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                spectrogram_error_with_detail(
+                    &SPECTROGRAM_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {error}"),
+                ),
+                error.into(),
+            ))
+        }
+    };
+    let t = match provider.upload(&runmat_accelerate_api::HostTensorView {
+        data: &t_values,
+        shape: &t_shape,
+    }) {
+        Ok(value) => value,
+        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                spectrogram_error_with_detail(
+                    &SPECTROGRAM_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {error}"),
+                ),
+                error.into(),
+            ))
+        }
+    };
     let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s)?;
     let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t)?;
     let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Some(Value::OutputList(Vec::new())));
         }
-        return Ok(crate::output_count::output_list_with_padding(
+        return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![s, f, t, ps],
-        ));
+        )));
     }
-    Ok(s)
+    Ok(Some(s))
 }
 
 async fn parse_options(

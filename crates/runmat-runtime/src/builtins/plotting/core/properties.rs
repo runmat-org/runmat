@@ -405,7 +405,7 @@ pub fn split_legend_style_pairs<'a>(
 
 pub fn map_figure_error(
     builtin: &'static str,
-    err: impl std::error::Error + Send + Sync + 'static,
+    err: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> crate::RuntimeError {
     let message = format!("{builtin}: {err}");
     plotting_error_with_source(builtin, message, err)

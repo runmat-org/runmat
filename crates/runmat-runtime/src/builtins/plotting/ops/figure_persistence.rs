@@ -1311,7 +1311,7 @@ fn persistence_error_with_source(
     error: &'static BuiltinErrorDescriptor,
     builtin: &'static str,
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     let mut builder = build_runtime_error(format!("{}: {}", error.message, message.into()))
         .with_builtin(builtin)

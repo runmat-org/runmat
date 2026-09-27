@@ -37,6 +37,13 @@ mod placement;
 mod power;
 mod numerical_domain;
 pub mod reduction;
+#[cfg(feature = "wgpu")]
+mod wgpu_access;
+#[cfg(feature = "wgpu")]
+pub use wgpu_access::{
+    WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission, WgpuEmissionMode,
+    WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
+};
 
 pub use fusion_outputs::validate_fused_output_classes;
 pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
@@ -410,7 +417,7 @@ pub struct ProviderBitModulationRequest<'a> {
 
 pub async fn uniform_spectral_estimate(
     request: ProviderSpectralRequest<'_>,
-) -> anyhow::Result<ProviderSpectralResult> {
+) -> ProviderExecutionResult<ProviderSpectralResult> {
     validate_uniform_spectral_request(&request)?;
 
     let provider = provider_for_handle(request.input)
@@ -478,7 +485,7 @@ fn validate_uniform_spectral_request(request: &ProviderSpectralRequest<'_>) -> a
 
 pub async fn signal_envelope(
     request: ProviderEnvelopeRequest<'_>,
-) -> anyhow::Result<ProviderEnvelopeResult> {
+) -> ProviderExecutionResult<ProviderEnvelopeResult> {
     let expected_len = request
         .channel_len
         .checked_mul(request.channel_count)
@@ -505,14 +512,14 @@ pub async fn signal_envelope(
             request.channel_count,
         )
     {
-        return Err(anyhow!("signal_envelope: invalid request"));
+        return Err(anyhow!("signal_envelope: invalid request").into());
     }
 
     match request.method {
         ProviderEnvelopeMethod::AnalyticFir { filter_len }
         | ProviderEnvelopeMethod::Rms {
             window_len: filter_len,
-        } if filter_len == 0 => return Err(anyhow!("signal_envelope: invalid request")),
+        } if filter_len == 0 => return Err(anyhow!("signal_envelope: invalid request").into()),
         _ => {}
     }
 
@@ -541,12 +548,12 @@ fn provider_envelope_input_shape_matches(
 
 pub async fn signal_hilbert(
     request: ProviderHilbertRequest<'_>,
-) -> anyhow::Result<GpuTensorHandle> {
+) -> ProviderExecutionResult<GpuTensorHandle> {
     if request.length == Some(0) {
-        return Err(anyhow!("signal_hilbert: invalid request"));
+        return Err(anyhow!("signal_hilbert: invalid request").into());
     }
     if request.dim >= request.input.shape().len() {
-        return Err(anyhow!("signal_hilbert: invalid request"));
+        return Err(anyhow!("signal_hilbert: invalid request").into());
     }
 
     let provider = provider_for_handle(request.input)
@@ -609,8 +616,7 @@ impl AccelContextHandle {
 #[derive(Clone)]
 pub struct WgpuContextHandle {
     pub instance: Arc<wgpu::Instance>,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
+    pub access: WgpuDeviceAccess,
     pub adapter: Arc<wgpu::Adapter>,
     pub adapter_info: wgpu::AdapterInfo,
     pub limits: wgpu::Limits,
@@ -633,7 +639,8 @@ pub struct WgpuBufferRef {
     // Retains allocation accounting as well as the backend buffer. The backend
     // must associate this exact buffer with this handle before construction.
     owner: GpuTensorHandle,
-    pub buffer: Arc<wgpu::Buffer>,
+    buffer: Arc<wgpu::Buffer>,
+    access: WgpuDeviceAccess,
     pub len: usize,
     pub shape: Vec<usize>,
     pub element_size: usize,
@@ -645,9 +652,12 @@ impl WgpuBufferRef {
     /// Publish an export after the backend has authenticated the buffer against
     /// its existing allocation record. Materialized exports must pass their own
     /// newly admitted allocation, never the source allocation's lease.
+    /// `access` must be the existing authority which created this backing;
+    /// raw buffer properties cannot authenticate its device association.
     pub fn from_owned_buffer(
         buffer: Arc<wgpu::Buffer>,
         handle: GpuTensorHandle,
+        access: WgpuDeviceAccess,
     ) -> anyhow::Result<Self> {
         handle.allocation_lease().validate_live()?;
         anyhow::ensure!(
@@ -688,6 +698,7 @@ impl WgpuBufferRef {
             shape: handle.shape().to_vec(),
             owner: handle,
             buffer,
+            access,
             len,
             element_size,
             precision,
@@ -696,6 +707,24 @@ impl WgpuBufferRef {
 
     pub fn owning_handle(&self) -> &GpuTensorHandle {
         &self.owner
+    }
+
+    /// The backend must establish this association at construction. Reusing an
+    /// export on another actual device is rejected before exposing its buffer.
+    pub fn buffer<'a>(
+        &'a self,
+        permit: &'a WgpuEmission<'_>,
+    ) -> Result<&'a wgpu::Buffer, WgpuAccessError> {
+        permit.ensure_device(&self.access)?;
+        self.owner
+            .allocation_lease()
+            .validate_live()
+            .map_err(WgpuAccessError::Allocation)?;
+        Ok(self.buffer.as_ref())
+    }
+
+    pub fn access(&self) -> &WgpuDeviceAccess {
+        &self.access
     }
 }
 
@@ -3148,20 +3177,29 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn uniform_spectral_estimate<'a>(
         &'a self,
         _request: &'a ProviderSpectralRequest<'a>,
-    ) -> AccelProviderFuture<'a, ProviderSpectralResult> {
-        unsupported_future("uniform_spectral_estimate not supported by provider")
+    ) -> ProviderExecutionFuture<'a, ProviderSpectralResult> {
+        Box::pin(async {
+            Err(unsupported_provider_operation(
+                "uniform_spectral_estimate not supported by provider",
+            )
+            .into())
+        })
     }
     fn signal_envelope<'a>(
         &'a self,
         _request: &'a ProviderEnvelopeRequest<'a>,
-    ) -> AccelProviderFuture<'a, ProviderEnvelopeResult> {
-        unsupported_future("signal_envelope not supported by provider")
+    ) -> ProviderExecutionFuture<'a, ProviderEnvelopeResult> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("signal_envelope not supported by provider").into())
+        })
     }
     fn signal_hilbert<'a>(
         &'a self,
         _request: &'a ProviderHilbertRequest<'a>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("signal_hilbert not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("signal_hilbert not supported by provider").into())
+        })
     }
     /// Reorder tensor dimensions according to `order`, expressed as zero-based indices.
     fn permute(
@@ -3221,22 +3259,28 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _handle: &'a GpuTensorHandle,
         _len: Option<usize>,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("fft_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("fft_dim not supported by provider").into())
+        })
     }
     fn ifft_dim<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,
         _len: Option<usize>,
         _dim: usize,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("ifft_dim not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("ifft_dim not supported by provider").into())
+        })
     }
     fn fft_extract_real<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("fft_extract_real not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(unsupported_provider_operation("fft_extract_real not supported by provider").into())
+        })
     }
     fn unique<'a>(
         &'a self,

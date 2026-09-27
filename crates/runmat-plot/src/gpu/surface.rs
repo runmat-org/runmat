@@ -51,11 +51,12 @@ struct SurfaceUniforms {
 
 /// Builds a GPU-resident vertex buffer for surface plots directly from provider-owned Z data.
 pub fn pack_surface_vertices(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &SurfaceGpuInputs<'_>,
     params: &SurfaceGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.x_len < 2 || inputs.y_len < 2 {
         return Err("surf: axis vectors must contain at least two elements".to_string());
     }
@@ -63,8 +64,8 @@ pub fn pack_surface_vertices(
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
-    let x_buffer = axis_storage_buffer(device, "surface-x-axis", &inputs.x_axis, inputs.scalar)?;
-    let y_buffer = axis_storage_buffer(device, "surface-y-axis", &inputs.y_axis, inputs.scalar)?;
+    let x_buffer = axis_storage_buffer(emission, "surface-x-axis", &inputs.x_axis, inputs.scalar)?;
+    let y_buffer = axis_storage_buffer(emission, "surface-y-axis", &inputs.y_axis, inputs.scalar)?;
 
     let color_buffer = Arc::new(
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -228,15 +229,25 @@ pub fn pack_surface_vertices(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: x_buffer.as_ref().as_entire_binding(),
+                resource: x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: y_buffer.as_ref().as_entire_binding(),
+                resource: y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: inputs.z_buffer.as_ref().as_entire_binding(),
+                resource: inputs
+                    .z_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -272,7 +283,7 @@ pub fn pack_surface_vertices(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -292,7 +303,7 @@ mod stress_tests {
     use super::*;
     use pollster::FutureExt;
 
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -318,12 +329,12 @@ mod stress_tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
     fn gpu_packer_handles_large_surface() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x_len = 2048u32;
@@ -338,11 +349,17 @@ mod stress_tests {
             *value = (x.sin() + y.cos()) * 0.5;
         }
         let z_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("surface-test-z"),
-                contents: bytemuck::cast_slice(&z_data),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("surface-test-z"),
+                            contents: bytemuck::cast_slice(&z_data),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
 
         let color_table: Vec<[f32; 4]> = (0..256)
@@ -375,58 +392,72 @@ mod stress_tests {
             lod_y_len,
         };
 
-        let gpu_vertices =
-            pack_surface_vertices(&device, &queue, &inputs, &params).expect("surface pack failed");
+        let gpu_vertices = access
+            .with_shared(|emission| pack_surface_vertices(emission, &inputs, &params))
+            .expect("test device access")
+            .expect("surface pack failed");
         assert!(gpu_vertices.vertex_count > 0);
         assert_eq!(gpu_vertices.vertex_count, (lod_x_len * lod_y_len) as usize);
     }
 
     #[test]
     fn gpu_surface_layout_matches_non_square_cpu_surface_contract() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x_axis = [10.0f32, 20.0, 30.0];
         let y_axis = [1.0f32, 2.0];
         let z_data = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let z_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("surface-layout-test-z"),
-                contents: bytemuck::cast_slice(&z_data),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("surface-layout-test-z"),
+                            contents: bytemuck::cast_slice(&z_data),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let color_table = [[0.0, 0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0]];
-        let packed = pack_surface_vertices(
-            &device,
-            &queue,
-            &SurfaceGpuInputs {
-                x_axis: SurfaceAxis::F32(&x_axis),
-                y_axis: SurfaceAxis::F32(&y_axis),
-                z_buffer: z_buffer.into(),
-                color_table: &color_table,
-                x_len: 3,
-                y_len: 2,
-                scalar: ScalarType::F32,
-            },
-            &SurfaceGpuParams {
-                min_z: 1.0,
-                max_z: 6.0,
-                alpha: 1.0,
-                flatten_z: false,
-                x_stride: 1,
-                y_stride: 1,
-                lod_x_len: 3,
-                lod_y_len: 2,
-            },
-        )
-        .expect("surface pack should succeed");
+        let packed = access
+            .with_shared(|emission| {
+                pack_surface_vertices(
+                    emission,
+                    &SurfaceGpuInputs {
+                        x_axis: SurfaceAxis::F32(&x_axis),
+                        y_axis: SurfaceAxis::F32(&y_axis),
+                        z_buffer: z_buffer.into(),
+                        color_table: &color_table,
+                        x_len: 3,
+                        y_len: 2,
+                        scalar: ScalarType::F32,
+                    },
+                    &SurfaceGpuParams {
+                        min_z: 1.0,
+                        max_z: 6.0,
+                        alpha: 1.0,
+                        flatten_z: false,
+                        x_stride: 1,
+                        y_stride: 1,
+                        lod_x_len: 3,
+                        lod_y_len: 2,
+                    },
+                )
+            })
+            .expect("test device access")
+            .expect("surface pack should succeed");
 
         let byte_len = packed.vertex_count * std::mem::size_of::<Vertex>();
-        let bytes =
-            crate::gpu::util::copy_readback_bytes(&device, &queue, &packed.buffer, byte_len)
-                .block_on()
-                .expect("surface vertices should read back");
+        let bytes = crate::gpu::util::copy_readback_bytes(
+            &access,
+            &crate::gpu::GpuInputBuffer::from(packed.buffer.clone()),
+            byte_len,
+        )
+        .block_on()
+        .expect("surface vertices should read back");
         let vertices = bytes
             .chunks_exact(std::mem::size_of::<Vertex>())
             .map(bytemuck::pod_read_unaligned)

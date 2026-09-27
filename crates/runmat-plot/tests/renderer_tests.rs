@@ -1342,8 +1342,7 @@ mod gpu_stress {
             .ok()?;
         Some(SharedWgpuContext {
             instance,
-            device: Arc::new(device),
-            queue: Arc::new(queue),
+            access: runmat_accelerate_api::WgpuDeviceAccess::new(device, queue),
             adapter: Arc::new(adapter),
             adapter_info,
             limits,

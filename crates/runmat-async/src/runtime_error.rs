@@ -3,6 +3,10 @@ use std::error::Error as StdError;
 use miette::SourceSpan;
 use thiserror::Error;
 
+#[path = "runtime_error/source_bound.rs"]
+mod source_bound;
+pub use source_bound::RuntimeErrorSourceBound;
+
 /// Native errors retain the thread-safe source required by worker transport.
 /// Browser sources may own thread-local resources and stay on that execution
 /// lane; formatting a diagnostic does not replace or release the source.
@@ -246,14 +250,7 @@ impl RuntimeErrorBuilder {
         self
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn with_source(mut self, source: impl StdError + Send + Sync + 'static) -> Self {
-        self.error.source = Some(Box::new(source));
-        self
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn with_source(mut self, source: impl StdError + 'static) -> Self {
+    pub fn with_source(mut self, source: impl RuntimeErrorSourceBound) -> Self {
         self.error.source = Some(Box::new(source));
         self
     }

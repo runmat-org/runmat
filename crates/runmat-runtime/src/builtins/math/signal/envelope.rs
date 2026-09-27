@@ -415,11 +415,25 @@ async fn try_gpu_envelope(
     };
     let result = match provider.signal_envelope(&request).await {
         Ok(result) => result,
-        Err(_) => return Ok(None),
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                envelope_error_with_detail(
+                    &ENVELOPE_ERROR_INTERNAL,
+                    format!("provider envelope failed: {error}"),
+                ),
+                error,
+            ))
+        }
     };
     if !valid_gpu_envelope_result(&result, handle, provider, &output_shape) {
         drop(result);
-        return Ok(None);
+        let mut error = envelope_error_with_detail(
+            &ENVELOPE_ERROR_INTERNAL,
+            "provider envelope returned malformed output",
+        );
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
     }
     Ok(Some(gpu_envelope_value(result, out_count)?))
 }

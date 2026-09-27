@@ -149,16 +149,41 @@ impl WgpuProvider {
             strides_arr[i] = crate::backend::wgpu::params::AlignedU32::new(src_strides[i] as u32);
         }
 
-        let out_buffer = if word_copy {
-            self.create_integer_word_buffer(storage_total, "runmat-bitwise-permute-out")?
-        } else {
-            self.create_storage_buffer(storage_total, "runmat-permute-out")
-        };
-        let pipeline = if word_copy {
+        let bundle = if word_copy {
             &self.pipelines.integer_permute
         } else {
             &self.pipelines.permute
         };
+        // This operation owns two synchronous phases separated by the existing
+        // progress boundary. Callers must not already hold an emission permit.
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let out_buffer = if word_copy {
+                self.create_integer_word_buffer(
+                    emission,
+                    storage_total,
+                    "runmat-bitwise-permute-out",
+                )?
+            } else {
+                self.create_storage_buffer(emission, storage_total, "runmat-permute-out")?
+            };
+            if storage_total > 0 {
+                let pipeline = bundle.get(emission)?;
+                let mut enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-permute-noop"),
+                        });
+                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-permute-noop-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&pipeline.pipeline);
+                drop(pass);
+                self.submit(emission, pending, enc)?;
+            }
+            Ok(out_buffer)
+        })??;
         let out_shape = dst_shape;
         if storage_total == 0 {
             return Ok(BufferEntry {
@@ -173,83 +198,76 @@ impl WgpuProvider {
             });
         }
 
-        {
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-permute-noop"),
-                    });
-            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-permute-noop-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline.pipeline);
-            drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-permute-flush-gap"),
-                });
-            self.submit(enc);
-        }
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let pipeline = bundle.get(emission)?;
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-permute-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity =
-            crate::backend::wgpu::config::elementwise_chunk_capacity(self.workgroup_config.scalar)
-                .ok_or_else(|| anyhow!("permute: invalid provider workgroup geometry"))?
-                as usize;
-        let mut offset = 0usize;
-        while offset < storage_total {
-            let remaining = storage_total - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::PermuteParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                rank: kernel_rank as u32,
-                _pad: 0,
-                src_shape: src_shape_arr,
-                dst_shape: dst_shape_arr,
-                order: order_arr,
-                src_strides: strides_arr,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-permute-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-permute-bind"),
-                    layout: &pipeline.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
+            let chunk_capacity = crate::backend::wgpu::config::elementwise_chunk_capacity(
                 self.workgroup_config.scalar,
-            );
-            crate::backend::wgpu::dispatch::permute::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline.pipeline,
-                &bind_group,
-                workgroups,
-            );
-            offset += chunk_len;
-        }
+            )
+            .ok_or_else(|| anyhow!("permute: invalid provider workgroup geometry"))?
+                as usize;
+            let mut offset = 0usize;
+            while offset < storage_total {
+                let remaining = storage_total - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::PermuteParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    rank: kernel_rank as u32,
+                    _pad: 0,
+                    src_shape: src_shape_arr,
+                    dst_shape: dst_shape_arr,
+                    order: order_arr,
+                    src_strides: strides_arr,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-permute-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-permute-bind"),
+                        layout: &pipeline.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    self.workgroup_config.scalar,
+                );
+                crate::backend::wgpu::dispatch::permute::run(
+                    emission,
+                    pending,
+                    &pipeline.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         Ok(BufferEntry {
             logical: entry.logical,
             allocated_bytes: out_buffer.size(),

@@ -55,3 +55,21 @@ fn native_error_retains_send_sync_boundary() {
     fn requires_send_sync<T: Send + Sync>() {}
     requires_send_sync::<ProviderExecutionError>();
 }
+
+#[test]
+fn async_execution_boundary_retains_platform_local_source() {
+    let owner = Owner::new(());
+    let weak = Owner::downgrade(&owner);
+    let mut future: ProviderExecutionFuture<'static, ()> =
+        Box::pin(async move { Err(ProviderExecutionError::from_source(RetainedOwner(owner))) });
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+    let std::task::Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
+        panic!("immediate provider failure must be ready");
+    };
+    drop(future);
+    assert!(!error.is_unsupported());
+    assert!(error.source().unwrap().is::<RetainedOwner>());
+    assert!(weak.upgrade().is_some());
+    drop(error);
+    assert!(weak.upgrade().is_none());
+}

@@ -31,9 +31,8 @@ impl ContourFillPlot {
             })?;
             let generated_count = if let Some(indirect) = &gpu_vertices.indirect {
                 let bytes = copy_readback_bytes(
-                    &context.device,
-                    &context.queue,
-                    &indirect.args,
+                    &context.access,
+                    &crate::gpu::GpuInputBuffer::from(indirect.args.clone()),
                     std::mem::size_of::<u32>(),
                 )
                 .await?;
@@ -52,9 +51,8 @@ impl ContourFillPlot {
             let vertex_count = generated_count.min(gpu_vertices.vertex_count);
             let byte_len = vertex_count * std::mem::size_of::<Vertex>();
             let bytes = copy_readback_bytes(
-                &context.device,
-                &context.queue,
-                &gpu_vertices.buffer,
+                &context.access,
+                &crate::gpu::GpuInputBuffer::from(gpu_vertices.buffer.clone()),
                 byte_len,
             )
             .await?;

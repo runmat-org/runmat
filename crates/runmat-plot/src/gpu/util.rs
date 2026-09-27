@@ -1,139 +1,227 @@
-use crate::gpu::ScalarType;
-use bytemuck::cast_slice;
+use crate::gpu::{GpuInputBuffer, ScalarType};
 use futures::channel::oneshot;
-use std::sync::Arc;
+use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
+use runmat_accelerate_api::WgpuDeviceAccess;
 
-pub(crate) async fn map_read_async(
-    device: &wgpu::Device,
-    slice: &wgpu::BufferSlice<'_>,
-) -> Result<(), String> {
-    let (tx, rx) = oneshot::channel();
-    slice.map_async(wgpu::MapMode::Read, move |result| {
-        let _ = tx.send(result);
-    });
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[path = "util/tests.rs"]
+mod tests;
 
-    #[cfg(not(target_arch = "wasm32"))]
-    device.poll(wgpu::Maintain::Wait);
+#[cfg(all(test, target_arch = "wasm32"))]
+#[path = "util/browser_tests.rs"]
+mod browser_tests;
 
-    #[cfg(target_arch = "wasm32")]
-    device.poll(wgpu::Maintain::Poll);
-
-    rx.await
-        .map_err(|_| "map failed".to_string())?
-        .map_err(|_| "map error".to_string())?;
-    Ok(())
+/// The mapping belongs to the waiting future, not the callback. Cancellation
+/// unmaps through the same device authority after registration has returned.
+struct Mapping<'a> {
+    access: &'a WgpuDeviceAccess,
+    buffer: &'a wgpu::Buffer,
+    registered: bool,
 }
-
-pub async fn readback_u32(
-    device: &Arc<wgpu::Device>,
-    buffer: &wgpu::Buffer,
-) -> Result<u32, String> {
-    let slice = buffer.slice(..);
-    map_read_async(device, &slice).await?;
-    let data = slice.get_mapped_range();
-    if data.len() < std::mem::size_of::<u32>() {
-        drop(data);
-        buffer.unmap();
-        return Err("readback buffer too small".to_string());
+impl Mapping<'_> {
+    fn finish(&mut self) -> Result<(), String> {
+        if !self.registered {
+            return Ok(());
+        }
+        // Never retry an unmap that unwound: its completion is uncertain.
+        self.registered = false;
+        catch_allocation_cleanup_unwind(|| {
+            self.access
+                .with_cleanup(|cleanup| cleanup.unmap_buffer(self.buffer))
+        })
+        .map_err(|_| "GPU readback unmap panicked; mapping state is uncertain".to_string())?
+        .map_err(|error| format!("GPU readback cleanup could not acquire its device: {error}"))
     }
-    let mut bytes = [0u8; 4];
-    bytes.copy_from_slice(&data[..4]);
-    drop(data);
-    buffer.unmap();
-    Ok(u32::from_le_bytes(bytes))
 }
-
-pub async fn readback_f32(
-    device: &Arc<wgpu::Device>,
-    buffer: &wgpu::Buffer,
-) -> Result<f32, String> {
-    let bits = readback_u32(device, buffer).await?;
-    Ok(f32::from_bits(bits))
-}
-
-pub async fn readback_f32_buffer(
-    device: &Arc<wgpu::Device>,
-    buffer: &wgpu::Buffer,
-    element_count: usize,
-) -> Result<Vec<f32>, String> {
-    if element_count == 0 {
-        return Ok(Vec::new());
+impl Drop for Mapping<'_> {
+    fn drop(&mut self) {
+        if let Err(error) = self.finish() {
+            log::error!("{error}");
+        }
     }
-    let byte_len = element_count * std::mem::size_of::<f32>();
-    let slice = buffer.slice(0..byte_len as u64);
-    map_read_async(device, &slice).await?;
-    let data = slice.get_mapped_range();
-    if data.len() < byte_len {
-        drop(data);
-        buffer.unmap();
-        return Err("GPU readback buffer too small".to_string());
-    }
-    let floats: &[f32] = cast_slice(&data[..byte_len]);
-    let out = floats.to_vec();
-    drop(data);
-    buffer.unmap();
-    Ok(out)
 }
 
-pub async fn copy_readback_bytes(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+pub(crate) async fn readback_bytes(
+    access: &WgpuDeviceAccess,
     buffer: &wgpu::Buffer,
     byte_len: usize,
 ) -> Result<Vec<u8>, String> {
-    if byte_len == 0 {
-        return Ok(Vec::new());
-    }
-
-    let staging = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("runmat-plot-readback-staging"),
-        size: byte_len as u64,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-plot-readback-encoder"),
-    });
-    encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, byte_len as u64);
-    queue.submit(Some(encoder.finish()));
-
-    let slice = staging.slice(0..byte_len as u64);
-    map_read_async(device, &slice).await?;
-    let data = slice.get_mapped_range();
-    if data.len() < byte_len {
-        drop(data);
-        staging.unmap();
-        return Err("GPU readback staging buffer too small".to_string());
-    }
-    let out = data[..byte_len].to_vec();
-    drop(data);
-    staging.unmap();
-    Ok(out)
+    readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec())).await
 }
 
-pub async fn readback_scalar_buffer_f64(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+async fn readback_mapped<T>(
+    access: &WgpuDeviceAccess,
     buffer: &wgpu::Buffer,
+    byte_len: usize,
+    decode: impl FnOnce(&[u8]) -> Result<T, String>,
+) -> Result<T, String> {
+    if byte_len == 0 {
+        return decode(&[]);
+    }
+    let byte_len_u64 = u64::try_from(byte_len).map_err(|error| error.to_string())?;
+    if byte_len_u64 > buffer.size() {
+        return Err("GPU readback buffer too small".to_string());
+    }
+    let slice = buffer.slice(0..byte_len_u64);
+    let (tx, rx) = oneshot::channel();
+    // Install the cleanup owner before registration, including inline failure.
+    let mut mapping = Mapping {
+        access,
+        buffer,
+        registered: false,
+    };
+    let result = async {
+        access
+            .with_shared(|_| {
+                mapping.registered = true;
+                slice.map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = tx.send(result);
+                });
+            })
+            .map_err(|error| error.to_string())?;
+        #[cfg(not(target_arch = "wasm32"))]
+        access.poll(wgpu::Maintain::Wait);
+        #[cfg(target_arch = "wasm32")]
+        access.poll(wgpu::Maintain::Poll);
+        rx.await
+            .map_err(|_| "map callback dropped".to_string())?
+            .map_err(|error| error.to_string())?;
+        access
+            .with_shared(|_| {
+                let data = slice.get_mapped_range();
+                if data.len() < byte_len {
+                    return Err("GPU readback buffer too small".to_string());
+                }
+                decode(&data[..byte_len])
+            })
+            .map_err(|error| error.to_string())?
+    }
+    .await;
+    // The mapped view and emission permit have both ended before cleanup.
+    combine_cleanup(result, mapping.finish())
+}
+
+fn combine_cleanup<T>(result: Result<T, String>, cleanup: Result<(), String>) -> Result<T, String> {
+    match (result, cleanup) {
+        (result, Ok(())) => result,
+        (Ok(_), Err(cleanup)) => Err(cleanup),
+        (Err(error), Err(cleanup)) => Err(format!("{error}; additionally, {cleanup}")),
+    }
+}
+
+/// Read a scalar from a same-device, MAP_READ staging buffer.
+///
+/// The caller must supply the buffer's actual device authority; raw buffers do
+/// not authenticate that association. Do not poll or drop this future while an
+/// emission permit is active: progress and mapping cleanup need that authority.
+pub async fn readback_u32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> Result<u32, String> {
+    readback_mapped(access, buffer, 4, |bytes| {
+        Ok(u32::from_le_bytes(
+            bytes
+                .try_into()
+                .map_err(|_| "invalid u32 readback extent".to_string())?,
+        ))
+    })
+    .await
+}
+
+/// Read one float under the same raw staging-buffer and future-lifetime
+/// requirements as [`readback_u32`].
+pub async fn readback_f32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> Result<f32, String> {
+    Ok(f32::from_bits(readback_u32(access, buffer).await?))
+}
+
+/// Read floats from a same-device MAP_READ staging buffer. The raw association
+/// is caller-established, not authenticated here. As with [`readback_u32`], do
+/// not poll or drop the future under an active emission permit.
+pub async fn readback_f32_buffer(
+    access: &WgpuDeviceAccess,
+    buffer: &wgpu::Buffer,
+    element_count: usize,
+) -> Result<Vec<f32>, String> {
+    let byte_len = element_count
+        .checked_mul(4)
+        .ok_or("readback byte size overflow")?;
+    readback_mapped(access, buffer, byte_len, |bytes| {
+        Ok(bytes
+            .chunks_exact(4)
+            .map(|bytes| f32::from_le_bytes(bytes.try_into().expect("four-byte chunk")))
+            .collect())
+    })
+    .await
+}
+
+/// Copy and read bytes using the buffer's actual device authority. Exported
+/// buffers authenticate that authority; raw renderer buffers rely on the caller.
+/// Do not poll or drop this future under an active emission permit.
+pub async fn copy_readback_bytes(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
+    byte_len: usize,
+) -> Result<Vec<u8>, String> {
+    copy_readback_mapped(access, buffer, byte_len, |bytes| Ok(bytes.to_vec())).await
+}
+
+async fn copy_readback_mapped<T>(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
+    byte_len: usize,
+    decode: impl FnOnce(&[u8]) -> Result<T, String>,
+) -> Result<T, String> {
+    if byte_len == 0 {
+        return decode(&[]);
+    }
+    let staging = access
+        .with_shared(|emission| -> Result<_, String> {
+            let source = buffer.buffer(emission).map_err(|error| error.to_string())?;
+            let byte_size = u64::try_from(byte_len).map_err(|error| error.to_string())?;
+            if byte_size > source.size() {
+                return Err("GPU copy readback buffer too small".to_string());
+            }
+            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-plot-readback-staging"),
+                size: byte_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let commands = emission.encode("runmat-plot-readback-encoder", |encoder| {
+                encoder.copy_buffer_to_buffer(source, 0, &staging, 0, byte_size);
+            });
+            emission.queue().submit(Some(commands));
+            Ok(staging)
+        })
+        .map_err(|error| error.to_string())??;
+    readback_mapped(access, &staging, byte_len, decode).await
+}
+
+/// Copy and decode scalar data, with the same authority and future-lifetime
+/// requirements as [`copy_readback_bytes`].
+pub async fn readback_scalar_buffer_f64(
+    access: &WgpuDeviceAccess,
+    buffer: &GpuInputBuffer,
     element_count: usize,
     scalar: ScalarType,
 ) -> Result<Vec<f64>, String> {
-    if element_count == 0 {
-        return Ok(Vec::new());
-    }
-
-    match scalar {
-        ScalarType::F32 => {
-            let byte_len = element_count * std::mem::size_of::<f32>();
-            let bytes = copy_readback_bytes(device, queue, buffer, byte_len).await?;
-            let values: &[f32] = cast_slice(&bytes);
-            Ok(values.iter().map(|value| f64::from(*value)).collect())
-        }
-        ScalarType::F64 => {
-            let byte_len = element_count * std::mem::size_of::<f64>();
-            let bytes = copy_readback_bytes(device, queue, buffer, byte_len).await?;
-            let values: &[f64] = cast_slice(&bytes);
-            Ok(values.to_vec())
-        }
-    }
+    let width = match scalar {
+        ScalarType::F32 => 4,
+        ScalarType::F64 => 8,
+    };
+    let byte_len = element_count
+        .checked_mul(width)
+        .ok_or("readback byte size overflow")?;
+    copy_readback_mapped(access, buffer, byte_len, |bytes| match scalar {
+        ScalarType::F32 => Ok(bytes
+            .chunks_exact(4)
+            .map(|bytes| {
+                f64::from(f32::from_le_bytes(
+                    bytes.try_into().expect("four-byte chunk"),
+                ))
+            })
+            .collect()),
+        ScalarType::F64 => Ok(bytes
+            .chunks_exact(8)
+            .map(|bytes| f64::from_le_bytes(bytes.try_into().expect("eight-byte chunk")))
+            .collect()),
+    })
+    .await
 }

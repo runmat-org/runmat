@@ -56,22 +56,12 @@ impl StemPlot {
                 "stem plot has GPU source data but no shared WGPU context is installed".to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             return Ok((x, y));
         }
 

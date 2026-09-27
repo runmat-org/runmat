@@ -1700,8 +1700,7 @@ async fn build_histogram_gpu_chart_async(
     };
 
     let histogram_output = runmat_plot::gpu::histogram::histogram_values_buffer(
-        &context.device,
-        &context.queue,
+        &context.access,
         histogram_inputs,
         &histogram_params,
         normalization_mode,
@@ -1715,7 +1714,7 @@ async fn build_histogram_gpu_chart_async(
     } = histogram_output;
 
     let bar_inputs = BarGpuInputs {
-        values_buffer: values_buffer.into(),
+        values_buffer: values_buffer.clone().into(),
         row_count: bin_count_u32,
         scalar: ScalarType::F32,
     };
@@ -1732,13 +1731,14 @@ async fn build_histogram_gpu_chart_async(
         layout: BarLayoutMode::Grouped,
     };
 
-    let gpu_vertices = runmat_plot::gpu::bar::pack_vertices_from_values(
-        &context.device,
-        &context.queue,
-        &bar_inputs,
-        &bar_params,
-    )
-    .map_err(|e| hist_internal(format!("failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::bar::pack_vertices_from_values(emission, &bar_inputs, &bar_params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| hist_internal(format!("failed to build GPU vertices: {e}")))?;
 
     let bin_count = bins.bin_count();
     let normalization_scale = match normalization {
@@ -1776,13 +1776,10 @@ async fn build_histogram_gpu_chart_async(
     )
     .with_gpu_source(bar_inputs.clone(), 0, 1);
     bar.label = Some(HIST_DEFAULT_LABEL.to_string());
-    let counts_f32 = runmat_plot::gpu::util::readback_f32_buffer(
-        &context.device,
-        bar_inputs.values_buffer.as_ref(),
-        bin_count,
-    )
-    .await
-    .map_err(|e| hist_internal(format!("failed to read GPU histogram counts: {e}")))?;
+    let counts_f32 =
+        runmat_plot::gpu::util::readback_f32_buffer(&context.access, &values_buffer, bin_count)
+            .await
+            .map_err(|e| hist_internal(format!("failed to read GPU histogram counts: {e}")))?;
     let counts: Vec<f64> = counts_f32.iter().map(|v| *v as f64).collect();
 
     Ok(HistComputation {

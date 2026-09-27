@@ -1029,13 +1029,14 @@ async fn build_scatter3_gpu_plot(
         lod_stride,
     };
 
-    let gpu_vertices = runmat_plot::gpu::scatter3::pack_vertices_from_xyz(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::scatter3::pack_vertices_from_xyz(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| scatter3_err(format!("scatter3: failed to build GPU vertices: {e}")))?;
 
     let drawn_points = gpu_vertices.vertex_count;
     let gpu_style = Scatter3GpuStyle {

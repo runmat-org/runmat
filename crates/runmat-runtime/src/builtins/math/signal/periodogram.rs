@@ -407,7 +407,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, rows, complex_input).await?;
-        if let Ok(value) = output_gpu(handle, rows, cols, &options).await {
+        if let Some(value) = output_gpu(handle, rows, cols, &options).await? {
             return Ok(value);
         }
     }
@@ -470,9 +470,9 @@ async fn output_gpu(
     rows: usize,
     cols: usize,
     options: &PeriodogramOptions,
-) -> BuiltinResult<Value> {
+) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
-        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+        return Ok(None);
     };
     let window_energy = options.window.iter().map(|v| v * v).sum::<f64>();
     let coherent_gain = options.window.iter().sum::<f64>();
@@ -492,7 +492,7 @@ async fn output_gpu(
     let input_len = rows
         .checked_mul(cols)
         .ok_or_else(|| periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
-    let estimate = runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
         input: handle,
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -505,33 +505,57 @@ async fn output_gpu(
         denominator,
     })
     .await
-    .map_err(|err| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, err.to_string()))?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
+    {
+        Ok(estimate) => estimate,
+        Err(error) if error.is_unsupported() => return Ok(None),
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                periodogram_error_with_detail(
+                    &PERIODOGRAM_ERROR_INTERNAL,
+                    format!("provider spectral estimate failed: {error}"),
+                ),
+                error,
+            ))
+        }
+    };
+    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
         return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
     };
     let f_values = frequency_vector(nfft, options.frequency_units, options.range);
     let f_shape = [estimate.rows, 1usize];
-    let f = provider
-        .upload(&runmat_accelerate_api::HostTensorView {
-            data: &f_values,
-            shape: &f_shape,
-        })
-        .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e.to_string()))?;
+    let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
+        data: &f_values,
+        shape: &f_shape,
+    }) {
+        Ok(value) => value,
+        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
+            return Ok(None)
+        }
+        Err(error) => {
+            return Err(crate::runtime_error::with_provider_execution_source(
+                periodogram_error_with_detail(
+                    &PERIODOGRAM_ERROR_INTERNAL,
+                    format!("provider output preparation failed: {error}"),
+                ),
+                error.into(),
+            ))
+        }
+    };
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Some(Value::OutputList(Vec::new())));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![pxx]));
+            return Ok(Some(Value::OutputList(vec![pxx])));
         }
-        return Ok(crate::output_count::output_list_with_padding(
+        return Ok(Some(crate::output_count::output_list_with_padding(
             out_count,
             vec![pxx, f],
-        ));
+        )));
     }
-    Ok(pxx)
+    Ok(Some(pxx))
 }
 
 async fn value_to_signal_columns(value: Value) -> BuiltinResult<SignalColumns> {

@@ -30,33 +30,36 @@ impl WgpuProvider {
             ));
         }
 
-        let buffer = if data.is_empty() {
-            self.create_storage_buffer(0, label)
-        } else {
-            match self.precision {
-                NumericPrecision::F64 => Arc::new(self.device_ref().create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some(label),
-                        contents: cast_slice(data),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    },
-                )),
-                NumericPrecision::F32 => {
-                    let data_f32: Vec<f32> = data.iter().map(|value| *value as f32).collect();
-                    Arc::new(self.device_ref().create_buffer_init(
+        let buffer = self.with_emission(|emission, _| -> Result<_> {
+            let buffer = if data.is_empty() {
+                self.create_storage_buffer(emission, 0, label)?
+            } else {
+                match self.precision {
+                    NumericPrecision::F64 => Arc::new(emission.device().create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
                             label: Some(label),
-                            contents: cast_slice(&data_f32),
+                            contents: cast_slice(data),
                             usage: wgpu::BufferUsages::STORAGE
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
                         },
-                    ))
+                    )),
+                    NumericPrecision::F32 => {
+                        let data_f32: Vec<f32> = data.iter().map(|value| *value as f32).collect();
+                        Arc::new(emission.device().create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some(label),
+                                contents: cast_slice(&data_f32),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            },
+                        ))
+                    }
                 }
-            }
-        };
+            };
+            Ok(buffer)
+        })??;
         self.telemetry.record_upload_bytes(bytes);
         self.register_existing_buffer_with_storage(
             buffer,
@@ -105,7 +108,9 @@ impl WgpuProvider {
             .checked_mul(2)
             .ok_or_else(|| anyhow!("modulate_constellation: output length overflow"))?;
         if out_len == 0 {
-            let buffer = self.create_storage_buffer(0, "runmat-modulate-constellation-empty");
+            let buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-modulate-constellation-empty")
+            })??;
             let handle = self.register_existing_buffer_with_storage(
                 buffer,
                 entry.shape,
@@ -161,123 +166,133 @@ impl WgpuProvider {
             shape: &table_shape,
         })?;
         let table_entry = self.get_entry(&table)?;
-        let output =
-            self.create_storage_buffer_checked(out_len, "runmat-modulate-constellation")?;
-        let error_words = [u32::MAX, 0, 0, 0];
-        let error_bytes = cast_slice(&error_words);
-        let error_buffer = Arc::new(self.device_ref().create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("runmat-modulate-constellation-error"),
-                contents: error_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-            },
-        ));
+        let (output, staging, error_size) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let output = self.create_storage_buffer_checked(
+                    emission,
+                    out_len,
+                    "runmat-modulate-constellation",
+                )?;
+                let error_words = [u32::MAX, 0, 0, 0];
+                let error_bytes = cast_slice(&error_words);
+                let error_buffer = Arc::new(emission.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-modulate-constellation-error"),
+                        contents: error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    },
+                ));
 
-        let workgroup_size = self.workgroup_config.scalar;
-        let shader = modulate_constellation_shader(self.precision, order, workgroup_size);
-        let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-            self.device_ref(),
-            "runmat-modulate-constellation-layout",
-        )
-        .ok_or_else(|| anyhow!("modulate_constellation: missing bind group layout"))?;
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-modulate-constellation-pipeline-layout",
-            &bgl,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-modulate-constellation-shader",
-            &shader,
-        );
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-modulate-constellation-layout",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            shader_hash,
-            &pipeline_layout,
-            &module,
-            "runmat-modulate-constellation-pipeline",
-            Some(shader.as_bytes()),
-            Some("runmat-modulate-constellation-layout"),
-            Some(workgroup_size),
-        );
+                let workgroup_size = self.workgroup_config.scalar;
+                let shader = modulate_constellation_shader(self.precision, order, workgroup_size);
+                let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
+                    emission,
+                    "runmat-modulate-constellation-layout",
+                )
+                .ok_or_else(|| anyhow!("modulate_constellation: missing bind group layout"))?;
+                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    emission,
+                    "runmat-modulate-constellation-pipeline-layout",
+                    &bgl,
+                );
+                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                    emission,
+                    "runmat-modulate-constellation-shader",
+                    &shader,
+                );
+                let shader_hash = self.compute_pipeline_hash_bytes(
+                    shader.as_bytes(),
+                    "runmat-modulate-constellation-layout",
+                    Some(workgroup_size),
+                );
+                let pipeline = self.get_or_create_pipeline(
+                    emission,
+                    shader_hash,
+                    &pipeline_layout,
+                    &module,
+                    "runmat-modulate-constellation-pipeline",
+                    Some(shader.as_bytes()),
+                    Some("runmat-modulate-constellation-layout"),
+                    Some(workgroup_size),
+                )?;
 
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            len: u32,
-            _pad0: u32,
-            _pad1: u32,
-            _pad2: u32,
-        }
-        let params = Params {
-            len: logical_len as u32,
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-modulate-constellation-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-modulate-constellation-bind-group"),
-                layout: &bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: table_entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: output.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: error_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct Params {
+                    len: u32,
+                    _pad0: u32,
+                    _pad1: u32,
+                    _pad2: u32,
+                }
+                let params = Params {
+                    len: logical_len as u32,
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-modulate-constellation-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-modulate-constellation-bind-group"),
+                        layout: &bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: table_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: output.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: error_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-        let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-modulate-constellation-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-modulate-constellation-encoder"),
+                let error_size = (std::mem::size_of::<u32>() * 4) as u64;
+                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-modulate-constellation-error-staging"),
+                    size: error_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-modulate-constellation-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                logical_len as u32,
-                workgroup_size,
-            );
-            pass.dispatch_workgroups(groups, 1, 1);
-        }
-        encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
-        self.submit(encoder);
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-modulate-constellation-encoder"),
+                        });
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("runmat-modulate-constellation-pass"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, &bind_group, &[]);
+                    let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        logical_len as u32,
+                        workgroup_size,
+                    );
+                    pass.dispatch_workgroups(groups, 1, 1);
+                }
+                encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
+                self.submit(emission, pending, encoder)?;
+                Ok((output, staging, error_size))
+            })??;
 
         let bytes_result =
             self.map_readback_bytes_sync(staging, error_size, "modulate_constellation");
@@ -395,7 +410,9 @@ impl WgpuProvider {
             "modulate_bits_constellation: output too large"
         );
         if out_len == 0 {
-            let buffer = self.create_storage_buffer(0, "runmat-modulate-bits-constellation-empty");
+            let buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-modulate-bits-constellation-empty")
+            })??;
             let handle = self.register_existing_buffer_with_storage(
                 buffer,
                 output_shape,
@@ -460,124 +477,137 @@ impl WgpuProvider {
             shape: &table_shape,
         })?;
         let table_entry = self.get_entry(&table)?;
-        let output =
-            self.create_storage_buffer_checked(out_len, "runmat-modulate-bits-constellation")?;
-        let error_words = [u32::MAX, 0, 0, 0];
-        let error_bytes = cast_slice(&error_words);
-        let error_buffer = Arc::new(self.device_ref().create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("runmat-modulate-bits-constellation-error"),
-                contents: error_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-            },
-        ));
+        let (output, staging, error_size) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                let output = self.create_storage_buffer_checked(
+                    emission,
+                    out_len,
+                    "runmat-modulate-bits-constellation",
+                )?;
+                let error_words = [u32::MAX, 0, 0, 0];
+                let error_bytes = cast_slice(&error_words);
+                let error_buffer = Arc::new(emission.device().create_buffer_init(
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("runmat-modulate-bits-constellation-error"),
+                        contents: error_bytes,
+                        usage: wgpu::BufferUsages::STORAGE
+                            | wgpu::BufferUsages::COPY_SRC
+                            | wgpu::BufferUsages::COPY_DST,
+                    },
+                ));
 
-        let workgroup_size = self.workgroup_config.scalar;
-        let shader = modulate_bits_constellation_shader(self.precision, order, workgroup_size);
-        let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
-            self.device_ref(),
-            "runmat-modulate-constellation-layout",
-        )
-        .ok_or_else(|| anyhow!("modulate_bits_constellation: missing bind group layout"))?;
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-modulate-bits-constellation-pipeline-layout",
-            &bgl,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-modulate-bits-constellation-shader",
-            &shader,
-        );
-        let shader_hash = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-modulate-constellation-layout",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            shader_hash,
-            &pipeline_layout,
-            &module,
-            "runmat-modulate-bits-constellation-pipeline",
-            Some(shader.as_bytes()),
-            Some("runmat-modulate-constellation-layout"),
-            Some(workgroup_size),
-        );
+                let workgroup_size = self.workgroup_config.scalar;
+                let shader =
+                    modulate_bits_constellation_shader(self.precision, order, workgroup_size);
+                let bgl = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(
+                    emission,
+                    "runmat-modulate-constellation-layout",
+                )
+                .ok_or_else(|| anyhow!("modulate_bits_constellation: missing bind group layout"))?;
+                let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                    emission,
+                    "runmat-modulate-bits-constellation-pipeline-layout",
+                    &bgl,
+                );
+                let module = crate::backend::wgpu::pipelines::create_shader_module(
+                    emission,
+                    "runmat-modulate-bits-constellation-shader",
+                    &shader,
+                );
+                let shader_hash = self.compute_pipeline_hash_bytes(
+                    shader.as_bytes(),
+                    "runmat-modulate-constellation-layout",
+                    Some(workgroup_size),
+                );
+                let pipeline = self.get_or_create_pipeline(
+                    emission,
+                    shader_hash,
+                    &pipeline_layout,
+                    &module,
+                    "runmat-modulate-bits-constellation-pipeline",
+                    Some(shader.as_bytes()),
+                    Some("runmat-modulate-constellation-layout"),
+                    Some(workgroup_size),
+                )?;
 
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            output_len: u32,
-            input_rows: u32,
-            output_rows: u32,
-            bits_per_symbol: u32,
-        }
-        let params = Params {
-            output_len: output_logical_len as u32,
-            input_rows: request.input_rows as u32,
-            output_rows: output_rows as u32,
-            bits_per_symbol: request.bits_per_symbol as u32,
-        };
-        let params_buffer =
-            self.uniform_buffer(&params, "runmat-modulate-bits-constellation-params");
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-modulate-bits-constellation-bind-group"),
-                layout: &bgl,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: table_entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: output.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: error_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+                #[repr(C)]
+                #[derive(Clone, Copy, Pod, Zeroable)]
+                struct Params {
+                    output_len: u32,
+                    input_rows: u32,
+                    output_rows: u32,
+                    bits_per_symbol: u32,
+                }
+                let params = Params {
+                    output_len: output_logical_len as u32,
+                    input_rows: request.input_rows as u32,
+                    output_rows: output_rows as u32,
+                    bits_per_symbol: request.bits_per_symbol as u32,
+                };
+                let params_buffer = self.uniform_buffer(
+                    emission,
+                    &params,
+                    "runmat-modulate-bits-constellation-params",
+                )?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-modulate-bits-constellation-bind-group"),
+                        layout: &bgl,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: table_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: output.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: error_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 4,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-        let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device_ref().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-modulate-bits-constellation-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-modulate-bits-constellation-encoder"),
+                let error_size = (std::mem::size_of::<u32>() * 4) as u64;
+                let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-modulate-bits-constellation-error-staging"),
+                    size: error_size,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
                 });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-modulate-bits-constellation-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                output_logical_len as u32,
-                workgroup_size,
-            );
-            pass.dispatch_workgroups(groups, 1, 1);
-        }
-        encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
-        self.submit(encoder);
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-modulate-bits-constellation-encoder"),
+                        });
+                {
+                    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("runmat-modulate-bits-constellation-pass"),
+                        timestamp_writes: None,
+                    });
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, &bind_group, &[]);
+                    let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                        output_logical_len as u32,
+                        workgroup_size,
+                    );
+                    pass.dispatch_workgroups(groups, 1, 1);
+                }
+                encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
+                self.submit(emission, pending, encoder)?;
+                Ok((output, staging, error_size))
+            })??;
 
         let bytes_result =
             self.map_readback_bytes_sync(staging, error_size, "modulate_bits_constellation");

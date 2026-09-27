@@ -435,8 +435,21 @@ pub struct ProviderSubmission {
 
 impl ProviderSubmission {
     /// Call only at actual completion of this submission, never at enqueue.
-    pub fn complete(mut self) {
+    pub fn complete(self) {
+        self.capture_completion().complete();
+    }
+
+    /// Capture callback delivery time without publishing successful evidence.
+    /// Keep the returned token until provider-owned fence cleanup succeeds.
+    pub fn capture_completion(self) -> ProviderCompletedSubmission {
         let now = self.shared.clock.now();
+        ProviderCompletedSubmission {
+            submission: self,
+            timestamp: now,
+        }
+    }
+
+    fn complete_at(mut self, now: Option<Duration>) {
         self.shared.with(|state| {
             if state.failure.is_some() || state.taken {
                 return;
@@ -453,6 +466,24 @@ impl ProviderSubmission {
         self.shared
             .with(|state| state.fail(ProviderObservationFailure::ProviderFailed));
         self.consumed = true;
+    }
+}
+
+/// Actual callback timing, still pending until safe provider cleanup. This does
+/// not expose timestamp construction or a second clock. Dropping the token
+/// fails observation through the original submission's abandonment contract.
+pub struct ProviderCompletedSubmission {
+    submission: ProviderSubmission,
+    timestamp: Option<Duration>,
+}
+
+impl ProviderCompletedSubmission {
+    pub fn complete(self) {
+        self.submission.complete_at(self.timestamp);
+    }
+
+    pub fn fail(self) {
+        self.submission.fail();
     }
 }
 

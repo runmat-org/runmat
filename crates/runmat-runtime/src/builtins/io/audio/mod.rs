@@ -319,7 +319,7 @@ fn audioinfo_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(AUDIOINFO_BUILTIN_NAME)
@@ -351,7 +351,7 @@ fn audioread_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     let mut builder = build_runtime_error(message)
         .with_builtin(AUDIOREAD_BUILTIN_NAME)

@@ -87,11 +87,12 @@ struct Scatter2Uniforms {
 /// provider-owned XY arrays. Only single-precision tensors are supported
 /// today; callers should fall back to host packing for other types.
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &Scatter2GpuInputs,
     params: &Scatter2GpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len == 0 {
         return Err("scatter: empty input tensors".to_string());
     }
@@ -244,11 +245,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -260,11 +269,17 @@ pub fn pack_vertices_from_xy(
             },
             wgpu::BindGroupEntry {
                 binding: 4,
-                resource: size_buffer.as_entire_binding(),
+                resource: size_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: color_buffer.as_entire_binding(),
+                resource: color_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
@@ -296,9 +311,9 @@ pub fn pack_vertices_from_xy(
 }
 
 fn prepare_size_buffer(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     params: &Scatter2GpuParams,
-) -> (Arc<wgpu::Buffer>, bool) {
+) -> (crate::gpu::GpuInputBuffer, bool) {
     match &params.sizes {
         ScatterAttributeBuffer::None => (
             Arc::new(
@@ -309,7 +324,8 @@ fn prepare_size_buffer(
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
                 }),
-            ),
+            )
+            .into(),
             false,
         ),
         ScatterAttributeBuffer::Host(data) => {
@@ -323,7 +339,8 @@ fn prepare_size_buffer(
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
                         }),
-                    ),
+                    )
+                    .into(),
                     false,
                 )
             } else {
@@ -336,19 +353,20 @@ fn prepare_size_buffer(
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
                         }),
-                    ),
+                    )
+                    .into(),
                     true,
                 )
             }
         }
-        ScatterAttributeBuffer::Gpu(buffer) => (Arc::clone(buffer), true),
+        ScatterAttributeBuffer::Gpu(buffer) => (buffer.clone(), true),
     }
 }
 
 fn prepare_color_buffer(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     params: &Scatter2GpuParams,
-) -> (Arc<wgpu::Buffer>, bool, u32) {
+) -> (crate::gpu::GpuInputBuffer, bool, u32) {
     match &params.colors {
         ScatterColorBuffer::None => (
             Arc::new(
@@ -364,7 +382,8 @@ fn prepare_color_buffer(
                         | wgpu::BufferUsages::COPY_DST
                         | wgpu::BufferUsages::COPY_SRC,
                 }),
-            ),
+            )
+            .into(),
             false,
             4,
         ),
@@ -384,7 +403,8 @@ fn prepare_color_buffer(
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
                         }),
-                    ),
+                    )
+                    .into(),
                     false,
                     4,
                 )
@@ -398,18 +418,19 @@ fn prepare_color_buffer(
                                 | wgpu::BufferUsages::COPY_DST
                                 | wgpu::BufferUsages::COPY_SRC,
                         }),
-                    ),
+                    )
+                    .into(),
                     true,
                     4,
                 )
             }
         }
-        ScatterColorBuffer::Gpu { buffer, components } => (Arc::clone(buffer), true, *components),
+        ScatterColorBuffer::Gpu { buffer, components } => (buffer.clone(), true, *components),
     }
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -429,7 +450,7 @@ mod stress_tests {
     use super::*;
     use pollster::FutureExt;
 
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -455,12 +476,12 @@ mod stress_tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
     fn gpu_packer_handles_large_point_cloud() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let point_count = 1_200_000u32;
@@ -468,18 +489,30 @@ mod stress_tests {
         let y_data: Vec<f32> = x_data.iter().map(|v| v.sin()).collect();
 
         let x_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("scatter2-test-x"),
-                contents: bytemuck::cast_slice(&x_data),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-test-x"),
+                            contents: bytemuck::cast_slice(&x_data),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        })
+                })
+                .expect("test device access"),
         );
         let y_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("scatter2-test-y"),
-                contents: bytemuck::cast_slice(&y_data),
-                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("scatter2-test-y"),
+                            contents: bytemuck::cast_slice(&y_data),
+                            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+                        })
+                })
+                .expect("test device access"),
         );
 
         let target = 250_000u32;
@@ -504,8 +537,10 @@ mod stress_tests {
             lod_stride: stride,
         };
 
-        let gpu_vertices =
-            pack_vertices_from_xy(&device, &queue, &inputs, &params).expect("gpu packing failed");
+        let gpu_vertices = access
+            .with_shared(|emission| pack_vertices_from_xy(emission, &inputs, &params))
+            .expect("test device access")
+            .expect("gpu packing failed");
         assert!(gpu_vertices.vertex_count > 0);
         assert_eq!(gpu_vertices.vertex_count, expected_vertices);
     }

@@ -2,7 +2,6 @@ use anyhow::{anyhow, ensure, Result};
 #[path = "allocation_state.rs"]
 mod allocation_state;
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
-use futures::channel::oneshot;
 use log::{debug, error};
 use once_cell::sync::OnceCell;
 use rand::seq::SliceRandom;

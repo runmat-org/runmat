@@ -59,11 +59,12 @@ struct MarkerUniforms {
 }
 
 pub fn pack_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 2 {
         return Err("plot: line inputs must contain at least two points".to_string());
     }
@@ -184,11 +185,19 @@ pub fn pack_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -219,7 +228,7 @@ pub fn pack_vertices_from_xy(
 }
 
 fn compile_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {
@@ -235,11 +244,12 @@ fn compile_shader(
 }
 
 pub fn pack_marker_vertices_from_xy(
-    device: &Arc<wgpu::Device>,
-    queue: &Arc<wgpu::Queue>,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     inputs: &LineGpuInputs,
     params: &LineGpuParams,
 ) -> Result<GpuVertexBuffer, String> {
+    let device = emission.device();
+    let queue = emission.queue();
     if inputs.len < 1 {
         return Err("plot: marker inputs must contain at least one point".to_string());
     }
@@ -338,11 +348,19 @@ pub fn pack_marker_vertices_from_xy(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: inputs.x_buffer.as_entire_binding(),
+                resource: inputs
+                    .x_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: inputs.y_buffer.as_entire_binding(),
+                resource: inputs
+                    .y_buffer
+                    .buffer(emission)
+                    .map_err(|error| error.to_string())?
+                    .as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
@@ -377,7 +395,7 @@ pub fn pack_marker_vertices_from_xy(
 }
 
 fn compile_marker_shader(
-    device: &Arc<wgpu::Device>,
+    device: &wgpu::Device,
     workgroup_size: u32,
     scalar: ScalarType,
 ) -> wgpu::ShaderModule {

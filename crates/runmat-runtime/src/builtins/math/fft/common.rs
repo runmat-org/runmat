@@ -387,11 +387,6 @@ pub fn restore_gpu_metadata(handle: &GpuTensorHandle, snapshot: GpuMetadataSnaps
     runmat_accelerate_api::mark_residency(handle);
 }
 
-pub fn provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
-    let expected = format!("{operation} not supported by provider");
-    error.chain().any(|cause| cause.to_string() == expected)
-}
-
 /// Validate a provider FFT result before it crosses the public builtin boundary.
 pub fn valid_provider_fft_output(
     provider: &dyn AccelProvider,
@@ -1456,18 +1451,24 @@ mod tests {
 
     #[test]
     fn fft_provider_unsupported_classifier_is_exact() {
-        assert!(provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim not supported by provider"),
-            "ifft_dim"
-        ));
-        assert!(provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim not supported by provider").context("provider context"),
-            "ifft_dim"
-        ));
-        assert!(!provider_operation_unsupported(
-            &anyhow::anyhow!("ifft_dim failed on provider"),
-            "ifft_dim"
-        ));
+        use runmat_accelerate_api::{unsupported_provider_operation, ProviderExecutionError};
+        assert!(ProviderExecutionError::from(unsupported_provider_operation(
+            "ifft_dim not supported by provider"
+        ))
+        .is_unsupported());
+        assert!(ProviderExecutionError::from(
+            unsupported_provider_operation("ifft_dim not supported by provider")
+                .context("provider context")
+        )
+        .is_unsupported());
+        assert!(!ProviderExecutionError::from(anyhow::anyhow!(
+            "ifft_dim not supported by provider"
+        ))
+        .is_unsupported());
+        assert!(
+            !ProviderExecutionError::from(anyhow::anyhow!("ifft_dim failed on provider"))
+                .is_unsupported()
+        );
     }
 
     #[test]

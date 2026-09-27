@@ -101,7 +101,9 @@ impl WgpuProvider {
         let len = points_entry.len;
         let shape = points_entry.shape.clone();
         if len == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-polyval-out");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-polyval-out")
+            })??;
             return self.register_existing_buffer(out_buffer, shape, 0);
         }
 
@@ -114,9 +116,10 @@ impl WgpuProvider {
             "polyval: coefficient vector exceeds GPU limits"
         );
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-polyval-warmup"),
                     });
@@ -124,99 +127,105 @@ impl WgpuProvider {
                 label: Some("runmat-polyval-warmup-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.polyval.pipeline);
+            pass.set_pipeline(&self.pipelines.polyval.get(emission)?.pipeline);
             drop(pass);
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
 
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-polyval-gap"),
-                });
-            self.submit(enc);
-        }
+        self.access.poll(wgpu::Maintain::Poll);
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-polyval-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-polyval-out")?;
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let (mu_mean, mu_scale) = options.mu.map(|m| (m.mean, m.scale)).unwrap_or((0.0, 1.0));
-        let has_mu = options.mu.is_some() as u32;
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, len, "runmat-polyval-out")?;
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let (mu_mean, mu_scale) = options.mu.map(|m| (m.mean, m.scale)).unwrap_or((0.0, 1.0));
+            let has_mu = options.mu.is_some() as u32;
 
-        let mut offset = 0usize;
-        while offset < len {
-            let remaining = len - offset;
-            let chunk_len = remaining.min(chunk_capacity).max(1);
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::PolyvalParamsF64 {
-                        len: chunk_len as u32,
-                        coeff_len: coeff_entry.len as u32,
-                        offset: offset as u32,
-                        has_mu,
-                        mu_mean,
-                        mu_scale,
-                    };
-                    self.uniform_buffer(&params, "runmat-polyval-params-f64")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::PolyvalParamsF32 {
-                        len: chunk_len as u32,
-                        coeff_len: coeff_entry.len as u32,
-                        offset: offset as u32,
-                        has_mu,
-                        mu_mean: mu_mean as f32,
-                        mu_scale: mu_scale as f32,
-                        _pad0: 0,
-                        _pad1: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-polyval-params-f32")
-                }
-            };
+            let mut offset = 0usize;
+            while offset < len {
+                let remaining = len - offset;
+                let chunk_len = remaining.min(chunk_capacity).max(1);
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => {
+                        let params = crate::backend::wgpu::params::PolyvalParamsF64 {
+                            len: chunk_len as u32,
+                            coeff_len: coeff_entry.len as u32,
+                            offset: offset as u32,
+                            has_mu,
+                            mu_mean,
+                            mu_scale,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-polyval-params-f64")?
+                    }
+                    NumericPrecision::F32 => {
+                        let params = crate::backend::wgpu::params::PolyvalParamsF32 {
+                            len: chunk_len as u32,
+                            coeff_len: coeff_entry.len as u32,
+                            offset: offset as u32,
+                            has_mu,
+                            mu_mean: mu_mean as f32,
+                            mu_scale: mu_scale as f32,
+                            _pad0: 0,
+                            _pad1: 0,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-polyval-params-f32")?
+                    }
+                };
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-polyval-bind"),
-                    layout: &self.pipelines.polyval.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: coeff_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: points_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-polyval-bind"),
+                        layout: &self.pipelines.polyval.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: coeff_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: points_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
 
-            crate::backend::wgpu::dispatch::elementwise::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.polyval.pipeline,
-                &bind_group,
-                workgroups,
-            );
+                crate::backend::wgpu::dispatch::elementwise::run(
+                    emission,
+                    pending,
+                    &self.pipelines.polyval.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
 
-            offset += chunk_len;
-        }
+                offset += chunk_len;
+            }
 
+            Ok(out_buffer)
+        })??;
         self.register_existing_buffer(out_buffer, shape, len)
     }
 
@@ -262,15 +271,15 @@ impl WgpuProvider {
         if entry.len == 0 {
             let shape = shape_for_orientation(orientation, 1);
             let output_len = storage_factor;
-            let buffer =
-                match self.precision {
-                    NumericPrecision::F64 => {
-                        let values = if storage_factor == 1 {
-                            vec![constant]
-                        } else {
-                            vec![constant, 0.0]
-                        };
-                        Arc::new(self.device.create_buffer_init(
+            let buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let values = if storage_factor == 1 {
+                        vec![constant]
+                    } else {
+                        vec![constant, 0.0]
+                    };
+                    self.with_emission(|emission, _| {
+                        Arc::new(emission.device().create_buffer_init(
                             &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-polyint-const-f64"),
                                 contents: cast_slice(&values),
@@ -279,14 +288,16 @@ impl WgpuProvider {
                                     | wgpu::BufferUsages::COPY_SRC,
                             },
                         ))
-                    }
-                    NumericPrecision::F32 => {
-                        let values = if storage_factor == 1 {
-                            vec![constant as f32]
-                        } else {
-                            vec![constant as f32, 0.0]
-                        };
-                        Arc::new(self.device.create_buffer_init(
+                    })?
+                }
+                NumericPrecision::F32 => {
+                    let values = if storage_factor == 1 {
+                        vec![constant as f32]
+                    } else {
+                        vec![constant as f32, 0.0]
+                    };
+                    self.with_emission(|emission, _| {
+                        Arc::new(emission.device().create_buffer_init(
                             &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-polyint-const-f32"),
                                 contents: cast_slice(&values),
@@ -295,8 +306,9 @@ impl WgpuProvider {
                                     | wgpu::BufferUsages::COPY_SRC,
                             },
                         ))
-                    }
-                };
+                    })?
+                }
+            };
             return self.register_existing_buffer_with_storage(buffer, shape, output_len, storage);
         }
 
@@ -313,71 +325,78 @@ impl WgpuProvider {
             output_len <= u32::MAX as usize,
             "polyint: output length exceeds GPU limits"
         );
-        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyint-out")?;
-        let params_buffer = match self.precision {
-            NumericPrecision::F64 => {
-                let params = PolyintParamsF64 {
-                    input_len: input_len as u32,
-                    output_len: output_len as u32,
-                    storage_factor: storage_factor as u32,
-                    _pad0: 0,
-                    constant,
-                };
-                self.uniform_buffer(&params, "runmat-polyint-params-f64")
-            }
-            NumericPrecision::F32 => {
-                let params = PolyintParamsF32 {
-                    input_len: input_len as u32,
-                    output_len: output_len as u32,
-                    storage_factor: storage_factor as u32,
-                    _pad0: 0,
-                    constant: constant as f32,
-                    _pad1: 0.0,
-                    _pad2: 0.0,
-                    _pad3: 0.0,
-                };
-                self.uniform_buffer(&params, "runmat-polyint-params-f32")
-            }
-        };
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, output_len, "runmat-polyint-out")?;
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = PolyintParamsF64 {
+                        input_len: input_len as u32,
+                        output_len: output_len as u32,
+                        storage_factor: storage_factor as u32,
+                        _pad0: 0,
+                        constant,
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-polyint-params-f64")?
+                }
+                NumericPrecision::F32 => {
+                    let params = PolyintParamsF32 {
+                        input_len: input_len as u32,
+                        output_len: output_len as u32,
+                        storage_factor: storage_factor as u32,
+                        _pad0: 0,
+                        constant: constant as f32,
+                        _pad1: 0.0,
+                        _pad2: 0.0,
+                        _pad3: 0.0,
+                    };
+                    self.uniform_buffer(emission, &params, "runmat-polyint-params-f32")?
+                }
+            };
 
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-polyint-bind"),
-            layout: &self.pipelines.polyint.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-polyint-bind"),
+                    layout: &self.pipelines.polyint.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            output_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-polyint-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-polyint-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.polyint.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(workgroups, 1, 1);
-        }
-        self.submit(encoder);
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                output_len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-polyint-encoder"),
+                    });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-polyint-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.polyint.get(emission)?.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(workgroups, 1, 1);
+            }
+            self.submit(emission, pending, encoder)?;
+            Ok(out_buffer)
+        })??;
 
         let out_shape = shape_for_orientation(orientation, output_logical_len);
         self.register_existing_buffer_with_storage(out_buffer, out_shape, output_len, storage)
@@ -409,27 +428,30 @@ impl WgpuProvider {
         if entry.len <= 1 {
             let shape = shape_for_orientation(orientation, 1);
             let buffer = match self.precision {
-                NumericPrecision::F64 => Arc::new(self.device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-polyder-const-f64"),
-                        contents: cast_slice(&[0.0f64]),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    },
-                )),
+                NumericPrecision::F64 => self.with_emission(|emission, _| {
+                    Arc::new(emission.device().create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-polyder-const-f64"),
+                            contents: cast_slice(&[0.0f64]),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    ))
+                })?,
                 NumericPrecision::F32 => {
                     let zeros: [f32; 1] = [0.0];
-                    Arc::new(
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    self.with_emission(|emission, _| {
+                        Arc::new(emission.device().create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-polyder-const-f32"),
                                 contents: cast_slice(&zeros),
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
+                            },
+                        ))
+                    })?
                 }
             };
             return self.register_existing_buffer(buffer, shape, 1);
@@ -440,51 +462,58 @@ impl WgpuProvider {
             "polyder: polynomial length exceeds GPU limits"
         );
         let output_len = entry.len - 1;
-        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyder-out")?;
-        let params = PolyderParams {
-            input_len: entry.len as u32,
-            output_len: output_len as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-polyder-params");
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-polyder-bind"),
-            layout: &self.pipelines.polyder.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            params.output_len,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-polyder-encoder"),
-            });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-polyder-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.polyder.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(groups, 1, 1);
-        }
-        self.submit(encoder);
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, output_len, "runmat-polyder-out")?;
+            let params = PolyderParams {
+                input_len: entry.len as u32,
+                output_len: output_len as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-polyder-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-polyder-bind"),
+                    layout: &self.pipelines.polyder.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                params.output_len,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-polyder-encoder"),
+                    });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-polyder-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.polyder.get(emission)?.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(emission, pending, encoder)?;
+            Ok(out_buffer)
+        })??;
 
         let out_shape = shape_for_orientation(orientation, output_len);
         let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
@@ -607,35 +636,41 @@ impl WgpuProvider {
         let shape_vec = shape_for_orientation(orientation, trimmed.len());
         let new_handle = if trimmed.is_empty() {
             self.register_existing_buffer(
-                self.create_storage_buffer(0, "runmat-polyder-trim-empty"),
+                self.with_emission(|emission, _| {
+                    self.create_storage_buffer(emission, 0, "runmat-polyder-trim-empty")
+                })??,
                 shape_vec,
                 0,
             )?
         } else {
             match self.precision {
                 NumericPrecision::F64 => {
-                    let buffer = Arc::new(self.device.create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-polyder-trim-f64"),
-                            contents: cast_slice(trimmed.as_slice()),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        },
-                    ));
+                    let buffer = self.with_emission(|emission, _| {
+                        Arc::new(emission.device().create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyder-trim-f64"),
+                                contents: cast_slice(trimmed.as_slice()),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            },
+                        ))
+                    })?;
                     self.register_existing_buffer(buffer, shape_vec, trimmed.len())?
                 }
                 NumericPrecision::F32 => {
                     let data_f32: Vec<f32> = trimmed.iter().map(|v| *v as f32).collect();
-                    let buffer = Arc::new(self.device.create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
-                            label: Some("runmat-polyder-trim-f32"),
-                            contents: cast_slice(&data_f32),
-                            usage: wgpu::BufferUsages::STORAGE
-                                | wgpu::BufferUsages::COPY_DST
-                                | wgpu::BufferUsages::COPY_SRC,
-                        },
-                    ));
+                    let buffer = self.with_emission(|emission, _| {
+                        Arc::new(emission.device().create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
+                                label: Some("runmat-polyder-trim-f32"),
+                                contents: cast_slice(&data_f32),
+                                usage: wgpu::BufferUsages::STORAGE
+                                    | wgpu::BufferUsages::COPY_DST
+                                    | wgpu::BufferUsages::COPY_SRC,
+                            },
+                        ))
+                    })?;
                     self.register_existing_buffer(buffer, shape_vec, trimmed.len())?
                 }
             }

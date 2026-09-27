@@ -1,5 +1,7 @@
 #![cfg(feature = "wgpu")]
 
+#[path = "support/retirement.rs"]
+mod retirement;
 use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderQrOptions, ProviderQrPivot};
@@ -48,9 +50,5 @@ fn qr_precision_boundary_uses_expected_execution_path() {
         provider.precision()
     );
 
-    let _ = provider.free(&input);
-    let _ = provider.free(&qr.q);
-    let _ = provider.free(&qr.r);
-    let _ = provider.free(&qr.perm_matrix);
-    let _ = provider.free(&qr.perm_vector);
+    retirement::release_all([input, qr.q, qr.r, qr.perm_matrix, qr.perm_vector]);
 }

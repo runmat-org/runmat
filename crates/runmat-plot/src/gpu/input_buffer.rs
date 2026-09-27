@@ -1,5 +1,5 @@
-use runmat_accelerate_api::WgpuBufferRef;
-use std::{ops::Deref, sync::Arc};
+use runmat_accelerate_api::{WgpuAccessError, WgpuBufferRef, WgpuEmission};
+use std::sync::Arc;
 
 /// A renderer-owned buffer or an authenticated provider export.
 /// Clones of a provider input retain its physical allocation authority, including
@@ -22,12 +22,17 @@ impl From<WgpuBufferRef> for GpuInputBuffer {
     }
 }
 
-impl Deref for GpuInputBuffer {
-    type Target = Arc<wgpu::Buffer>;
-    fn deref(&self) -> &Self::Target {
+impl GpuInputBuffer {
+    /// Borrow backing only during the caller's lexical emission. Renderer
+    /// buffers are created in that renderer's device domain; provider exports
+    /// additionally authenticate the exact access authority and live lease.
+    pub fn buffer<'a>(
+        &'a self,
+        emission: &'a WgpuEmission<'_>,
+    ) -> Result<&'a wgpu::Buffer, WgpuAccessError> {
         match self {
-            Self::Renderer(buffer) => buffer,
-            Self::Exported(export) => &export.buffer,
+            Self::Renderer(buffer) => Ok(buffer),
+            Self::Exported(export) => export.buffer(emission),
         }
     }
 }
@@ -35,7 +40,6 @@ impl Deref for GpuInputBuffer {
 impl std::fmt::Debug for GpuInputBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GpuInputBuffer")
-            .field("buffer", &**self)
             .field("provider_owned", &matches!(self, Self::Exported(_)))
             .finish()
     }

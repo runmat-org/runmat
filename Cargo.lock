@@ -6310,6 +6310,7 @@ dependencies = [
  "tracing",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
  "web-sys",
  "wgpu 0.19.4",
  "wgpu 24.0.5",
@@ -6411,6 +6412,7 @@ version = "0.6.2"
 dependencies = [
  "miette",
  "thiserror 1.0.69",
+ "wasm-bindgen-test",
 ]
 
 [[package]]
@@ -7204,6 +7206,7 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "wasm-bindgen-test",
  "web-sys",
  "webbrowser",
  "wgpu 0.19.4",

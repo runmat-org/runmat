@@ -1,4 +1,7 @@
 use super::*;
+use runmat_accelerate_api::observation::{
+    current_provider_observation, ProviderObservationFailure,
+};
 
 pub(crate) struct FusedReductionTelemetryRequest<'a> {
     pub(crate) shader: &'a str,
@@ -124,7 +127,9 @@ impl WgpuProvider {
         let entry = self.get_entry(handle)?;
         let len = entry.len;
         if len == 0 {
-            let out = self.create_storage_buffer(0, "runmat-nan-to-zero-empty");
+            let out = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-nan-to-zero-empty")
+            })??;
             return self.register_existing_buffer(out, entry.shape, 0);
         }
         let shader = match self.precision {
@@ -143,7 +148,9 @@ impl WgpuProvider {
         let entry = self.get_entry(handle)?;
         let len = entry.len;
         if len == 0 {
-            let out = self.create_storage_buffer(0, "runmat-not-nan-mask-empty");
+            let out = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-not-nan-mask-empty")
+            })??;
             return self.register_existing_buffer(out, entry.shape, 0);
         }
         let shader = match self.precision {
@@ -234,48 +241,60 @@ impl WgpuProvider {
 
         let start = Instant::now();
         self.warmup_from_disk();
-        let pl = &self.pipelines;
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.binary.pipeline,
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.binary_broadcast.pipeline,
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.unary.pipeline,
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.scalar.pipeline,
-        );
-        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.reduce_dim_sum_mean.pipeline,
-        );
-        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.reduce_nd_mean.pipeline,
-        );
-        crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.reduce_global.pipeline,
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pl.fill.pipeline,
-        );
+        let warmup = self
+            .with_emission(|emission, pending| -> Result<()> {
+                let pl = &self.pipelines;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission,
+                    pending,
+                    &pl.binary.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission,
+                    pending,
+                    &pl.binary_broadcast.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission,
+                    pending,
+                    &pl.unary.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission,
+                    pending,
+                    &pl.scalar.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                    emission,
+                    pending,
+                    &pl.reduce_dim_sum_mean.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                    emission,
+                    pending,
+                    &pl.reduce_nd_mean.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::reduction::warmup_noop_single(
+                    emission,
+                    pending,
+                    &pl.reduce_global.get(emission)?.pipeline,
+                )?;
+                crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                    emission,
+                    pending,
+                    &pl.fill.get(emission)?.pipeline,
+                )?;
 
+                Ok(())
+            })
+            .and_then(|result| result);
+        if let Err(error) = warmup {
+            if let Some(recorder) = current_provider_observation() {
+                recorder.fail(ProviderObservationFailure::ProviderFailed);
+            }
+            log::warn!("RunMat Accelerate: WGPU warmup failed: {error:#}");
+            return;
+        }
         let ms = start.elapsed().as_millis() as u64;
         self.metrics.set_last_warmup_millis(ms);
     }

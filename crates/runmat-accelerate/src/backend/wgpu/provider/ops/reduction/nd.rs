@@ -116,163 +116,177 @@ impl WgpuProvider {
             return Ok(current);
         }
 
-        let mut out_buffer = self.create_storage_buffer(cols, "runmat-reduce-nd-mean-out");
-        // Prevent aliasing: output must not be the same as input buffer
-        if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
-            let size_bytes = (cols * self.element_size) as u64;
-            out_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("runmat-reduce-nd-mean-out-unique"),
-                size: size_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }));
-        }
-        let mut out_shape = entry.shape.clone();
-        for &d in &reduce {
-            out_shape[d] = 1;
-        }
-
-        match entry.precision {
-            NumericPrecision::F64 => {
-                let mut params = crate::backend::wgpu::params::ReduceNdParams {
-                    rank: rank as u32,
-                    kept_count: kept.len() as u32,
-                    reduce_count: reduce.len() as u32,
-                    _pad: 0,
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    _pad2: [0; 2],
-                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                };
-                for (i, v) in kept_sizes.iter().enumerate() {
-                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_sizes.iter().enumerate() {
-                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in kept_strides.iter().enumerate() {
-                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_strides.iter().enumerate() {
-                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-mean-params-f64");
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-nd-mean-bind-f64"),
-                    layout: &self.pipelines.reduce_nd_mean.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: pbuf.as_entire_binding(),
-                        },
-                    ],
-                });
-                if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-                    eprintln!(
-                        "[reduce-nd-mean f64] in ptr={:p} out ptr={:p} rows={} cols={}",
-                        entry.buffer.as_ref(),
-                        out_buffer.as_ref(),
-                        rows,
-                        cols
-                    );
-                }
-                // One workgroup per output column (kept slice)
-                let groups_x = cols as u32;
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.reduce_nd_mean.pipeline,
-                    &bind_group,
-                    groups_x,
-                );
+        let (out_buffer, out_shape) = self.with_emission(|emission, pending| -> Result<_> {
+            let mut out_buffer =
+                self.create_storage_buffer(emission, cols, "runmat-reduce-nd-mean-out")?;
+            // Prevent aliasing: output must not be the same as input buffer
+            if std::ptr::eq(out_buffer.as_ref(), entry.buffer.as_ref()) {
+                let size_bytes = (cols * self.element_size) as u64;
+                out_buffer = Arc::new(emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-reduce-nd-mean-out-unique"),
+                    size: size_bytes,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
             }
-            NumericPrecision::F32 => {
-                let mut params = crate::backend::wgpu::params::ReduceNdParams {
-                    rank: rank as u32,
-                    kept_count: kept.len() as u32,
-                    reduce_count: reduce.len() as u32,
-                    _pad: 0,
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    _pad2: [0; 2],
-                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                };
-                for (i, v) in kept_sizes.iter().enumerate() {
-                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_sizes.iter().enumerate() {
-                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in kept_strides.iter().enumerate() {
-                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_strides.iter().enumerate() {
-                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-mean-params-f32");
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-nd-mean-bind-f32"),
-                    layout: &self.pipelines.reduce_nd_mean.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: pbuf.as_entire_binding(),
-                        },
-                    ],
-                });
-                if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
-                    eprintln!(
-                        "[reduce-nd-mean f32] in ptr={:p} out ptr={:p} rows={} cols={}",
-                        entry.buffer.as_ref(),
-                        out_buffer.as_ref(),
-                        rows,
-                        cols
-                    );
-                }
-                // One workgroup per output column (kept slice)
-                let groups_x = cols as u32;
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.reduce_nd_mean.pipeline,
-                    &bind_group,
-                    groups_x,
-                );
+            let mut out_shape = entry.shape.clone();
+            for &d in &reduce {
+                out_shape[d] = 1;
             }
-        }
 
+            match entry.precision {
+                NumericPrecision::F64 => {
+                    let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                        rank: rank as u32,
+                        kept_count: kept.len() as u32,
+                        reduce_count: reduce.len() as u32,
+                        _pad: 0,
+                        rows: rows as u32,
+                        cols: cols as u32,
+                        _pad2: [0; 2],
+                        kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    };
+                    for (i, v) in kept_sizes.iter().enumerate() {
+                        params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in reduce_sizes.iter().enumerate() {
+                        params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in kept_strides.iter().enumerate() {
+                        params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in reduce_strides.iter().enumerate() {
+                        params.reduce_strides[i] =
+                            crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    let pbuf =
+                        self.uniform_buffer(emission, &params, "runmat-reduce-nd-mean-params-f64")?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-reduce-nd-mean-bind-f64"),
+                                layout: &self.pipelines.reduce_nd_mean.get(emission)?.layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: entry.buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: out_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: pbuf.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+                        eprintln!(
+                            "[reduce-nd-mean f64] in ptr={:p} out ptr={:p} rows={} cols={}",
+                            entry.buffer.as_ref(),
+                            out_buffer.as_ref(),
+                            rows,
+                            cols
+                        );
+                    }
+                    // One workgroup per output column (kept slice)
+                    let groups_x = cols as u32;
+                    crate::backend::wgpu::dispatch::elementwise::run(
+                        emission,
+                        pending,
+                        &self.pipelines.reduce_nd_mean.get(emission)?.pipeline,
+                        &bind_group,
+                        groups_x,
+                    )?;
+                }
+                NumericPrecision::F32 => {
+                    let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                        rank: rank as u32,
+                        kept_count: kept.len() as u32,
+                        reduce_count: reduce.len() as u32,
+                        _pad: 0,
+                        rows: rows as u32,
+                        cols: cols as u32,
+                        _pad2: [0; 2],
+                        kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                            crate::backend::wgpu::params::BCAST_MAX_RANK],
+                    };
+                    for (i, v) in kept_sizes.iter().enumerate() {
+                        params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in reduce_sizes.iter().enumerate() {
+                        params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in kept_strides.iter().enumerate() {
+                        params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    for (i, v) in reduce_strides.iter().enumerate() {
+                        params.reduce_strides[i] =
+                            crate::backend::wgpu::params::AlignedU32::new(*v);
+                    }
+                    let pbuf =
+                        self.uniform_buffer(emission, &params, "runmat-reduce-nd-mean-params-f32")?;
+                    let bind_group =
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-reduce-nd-mean-bind-f32"),
+                                layout: &self.pipelines.reduce_nd_mean.get(emission)?.layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: entry.buffer.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: out_buffer.as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: pbuf.as_entire_binding(),
+                                    },
+                                ],
+                            });
+                    if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
+                        eprintln!(
+                            "[reduce-nd-mean f32] in ptr={:p} out ptr={:p} rows={} cols={}",
+                            entry.buffer.as_ref(),
+                            out_buffer.as_ref(),
+                            rows,
+                            cols
+                        );
+                    }
+                    // One workgroup per output column (kept slice)
+                    let groups_x = cols as u32;
+                    crate::backend::wgpu::dispatch::elementwise::run(
+                        emission,
+                        pending,
+                        &self.pipelines.reduce_nd_mean.get(emission)?.pipeline,
+                        &bind_group,
+                        groups_x,
+                    )?;
+                }
+            }
+
+            Ok((out_buffer, out_shape))
+        })??;
         self.register_existing_buffer(out_buffer, out_shape, cols)
     }
 
@@ -323,142 +337,170 @@ impl WgpuProvider {
             return Err(anyhow!("reduce_moments_nd: tensor exceeds GPU limits"));
         }
 
-        // Allocate outputs
-        let mean_out = self.create_storage_buffer(cols, "runmat-reduce-nd-moments-mean");
-        let ex2_out = self.create_storage_buffer(cols, "runmat-reduce-nd-moments-ex2");
-        let mut out_shape = entry.shape.clone();
-        for &d in &reduce {
-            out_shape[d] = 1;
-        }
+        let (mean_out, ex2_out, out_shape) =
+            self.with_emission(|emission, pending| -> Result<_> {
+                // Allocate outputs
+                let mean_out =
+                    self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-mean")?;
+                let ex2_out =
+                    self.create_storage_buffer(emission, cols, "runmat-reduce-nd-moments-ex2")?;
+                let mut out_shape = entry.shape.clone();
+                for &d in &reduce {
+                    out_shape[d] = 1;
+                }
 
-        match entry.precision {
-            NumericPrecision::F64 => {
-                let mut params = crate::backend::wgpu::params::ReduceNdParams {
-                    rank: rank as u32,
-                    kept_count: kept.len() as u32,
-                    reduce_count: reduce.len() as u32,
-                    _pad: 0,
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    _pad2: [0; 2],
-                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                };
-                for (i, v) in kept_sizes.iter().enumerate() {
-                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
+                match entry.precision {
+                    NumericPrecision::F64 => {
+                        let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                            rank: rank as u32,
+                            kept_count: kept.len() as u32,
+                            reduce_count: reduce.len() as u32,
+                            _pad: 0,
+                            rows: rows as u32,
+                            cols: cols as u32,
+                            _pad2: [0; 2],
+                            kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        };
+                        for (i, v) in kept_sizes.iter().enumerate() {
+                            params.kept_sizes[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in reduce_sizes.iter().enumerate() {
+                            params.reduce_sizes[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in kept_strides.iter().enumerate() {
+                            params.kept_strides[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in reduce_strides.iter().enumerate() {
+                            params.reduce_strides[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        let pbuf = self.uniform_buffer(
+                            emission,
+                            &params,
+                            "runmat-reduce-nd-moments-params-f64",
+                        )?;
+                        let bind_group =
+                            emission
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-reduce-nd-moments-bind-f64"),
+                                    layout: &self.pipelines.reduce_nd_moments.get(emission)?.layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: entry.buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: mean_out.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: ex2_out.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: pbuf.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        // One workgroup per output column (kept slice)
+                        let groups_x = cols as u32;
+                        crate::backend::wgpu::dispatch::elementwise::run(
+                            emission,
+                            pending,
+                            &self.pipelines.reduce_nd_moments.get(emission)?.pipeline,
+                            &bind_group,
+                            groups_x,
+                        )?;
+                    }
+                    NumericPrecision::F32 => {
+                        let mut params = crate::backend::wgpu::params::ReduceNdParams {
+                            rank: rank as u32,
+                            kept_count: kept.len() as u32,
+                            reduce_count: reduce.len() as u32,
+                            _pad: 0,
+                            rows: rows as u32,
+                            cols: cols as u32,
+                            _pad2: [0; 2],
+                            kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                            reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
+                                crate::backend::wgpu::params::BCAST_MAX_RANK],
+                        };
+                        for (i, v) in kept_sizes.iter().enumerate() {
+                            params.kept_sizes[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in reduce_sizes.iter().enumerate() {
+                            params.reduce_sizes[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in kept_strides.iter().enumerate() {
+                            params.kept_strides[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        for (i, v) in reduce_strides.iter().enumerate() {
+                            params.reduce_strides[i] =
+                                crate::backend::wgpu::params::AlignedU32::new(*v);
+                        }
+                        let pbuf = self.uniform_buffer(
+                            emission,
+                            &params,
+                            "runmat-reduce-nd-moments-params-f32",
+                        )?;
+                        let bind_group =
+                            emission
+                                .device()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-reduce-nd-moments-bind-f32"),
+                                    layout: &self.pipelines.reduce_nd_moments.get(emission)?.layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: entry.buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: mean_out.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: ex2_out.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 3,
+                                            resource: pbuf.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        let groups_x = cols as u32;
+                        crate::backend::wgpu::dispatch::elementwise::run(
+                            emission,
+                            pending,
+                            &self.pipelines.reduce_nd_moments.get(emission)?.pipeline,
+                            &bind_group,
+                            groups_x,
+                        )?;
+                    }
                 }
-                for (i, v) in reduce_sizes.iter().enumerate() {
-                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in kept_strides.iter().enumerate() {
-                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_strides.iter().enumerate() {
-                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-moments-params-f64");
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-nd-moments-bind-f64"),
-                    layout: &self.pipelines.reduce_nd_moments.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: mean_out.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: ex2_out.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: pbuf.as_entire_binding(),
-                        },
-                    ],
-                });
-                // One workgroup per output column (kept slice)
-                let groups_x = cols as u32;
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.reduce_nd_moments.pipeline,
-                    &bind_group,
-                    groups_x,
-                );
-            }
-            NumericPrecision::F32 => {
-                let mut params = crate::backend::wgpu::params::ReduceNdParams {
-                    rank: rank as u32,
-                    kept_count: kept.len() as u32,
-                    reduce_count: reduce.len() as u32,
-                    _pad: 0,
-                    rows: rows as u32,
-                    cols: cols as u32,
-                    _pad2: [0; 2],
-                    kept_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_sizes: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    kept_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                    reduce_strides: [crate::backend::wgpu::params::AlignedU32::default();
-                        crate::backend::wgpu::params::BCAST_MAX_RANK],
-                };
-                for (i, v) in kept_sizes.iter().enumerate() {
-                    params.kept_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_sizes.iter().enumerate() {
-                    params.reduce_sizes[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in kept_strides.iter().enumerate() {
-                    params.kept_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                for (i, v) in reduce_strides.iter().enumerate() {
-                    params.reduce_strides[i] = crate::backend::wgpu::params::AlignedU32::new(*v);
-                }
-                let pbuf = self.uniform_buffer(&params, "runmat-reduce-nd-moments-params-f32");
-                let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-reduce-nd-moments-bind-f32"),
-                    layout: &self.pipelines.reduce_nd_moments.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: mean_out.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: ex2_out.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: pbuf.as_entire_binding(),
-                        },
-                    ],
-                });
-                let groups_x = cols as u32;
-                crate::backend::wgpu::dispatch::elementwise::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.reduce_nd_moments.pipeline,
-                    &bind_group,
-                    groups_x,
-                );
-            }
-        }
 
+                Ok((mean_out, ex2_out, out_shape))
+            })??;
         let mean_handle = self.register_existing_buffer(mean_out, out_shape.clone(), cols)?;
         let ex2_handle = self.register_existing_buffer(ex2_out, out_shape, cols)?;
         Ok(runmat_accelerate_api::ProviderMoments2 {

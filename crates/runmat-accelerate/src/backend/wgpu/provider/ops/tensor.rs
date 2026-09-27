@@ -369,9 +369,17 @@ impl WgpuProvider {
         // Use checked allocation so we fail with a clear error instead of
         // creating an invalid WebGPU buffer (which later triggers a validation error).
         let out_buffer = if integer_type.is_some() {
-            self.create_integer_word_buffer(storage_total, "runmat-integer-repmat-out")?
+            self.with_emission(|emission, _| {
+                self.create_integer_word_buffer(
+                    emission,
+                    storage_total,
+                    "runmat-integer-repmat-out",
+                )
+            })??
         } else {
-            self.create_storage_buffer_checked(storage_total, "runmat-repmat-out")?
+            self.with_emission(|emission, _| {
+                self.create_storage_buffer_checked(emission, storage_total, "runmat-repmat-out")
+            })??
         };
         let out_shape = new_shape.clone();
         if storage_total == 0 {
@@ -382,9 +390,10 @@ impl WgpuProvider {
             };
         }
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-repmat-noop"),
                     });
@@ -393,80 +402,87 @@ impl WgpuProvider {
                 timestamp_writes: None,
             });
             pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_repmat.pipeline
+                &self.pipelines.integer_repmat.get(emission)?.pipeline
             } else {
-                &self.pipelines.repmat.pipeline
+                &self.pipelines.repmat.get(emission)?.pipeline
             });
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-repmat-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-repmat-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < storage_total {
-            let remaining = storage_total - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::RepmatParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                rank: rank as u32,
-                storage_factor: word_factor as u32,
-                base_shape: base_shape_arr,
-                new_shape: new_shape_arr,
-                base_strides: strides_arr,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-repmat-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-repmat-bind"),
-                    layout: if integer_type.is_some() {
-                        &self.pipelines.integer_repmat.layout
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < storage_total {
+                let remaining = storage_total - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::RepmatParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    rank: rank as u32,
+                    storage_factor: word_factor as u32,
+                    base_shape: base_shape_arr,
+                    new_shape: new_shape_arr,
+                    base_strides: strides_arr,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-repmat-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-repmat-bind"),
+                        layout: if integer_type.is_some() {
+                            &self.pipelines.integer_repmat.get(emission)?.layout
+                        } else {
+                            &self.pipelines.repmat.get(emission)?.layout
+                        },
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::repmat::run(
+                    emission,
+                    pending,
+                    if integer_type.is_some() {
+                        &self.pipelines.integer_repmat.get(emission)?.pipeline
                     } else {
-                        &self.pipelines.repmat.layout
+                        &self.pipelines.repmat.get(emission)?.pipeline
                     },
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::repmat::run(
-                self.device_ref(),
-                self.queue_ref(),
-                if integer_type.is_some() {
-                    &self.pipelines.integer_repmat.pipeline
-                } else {
-                    &self.pipelines.repmat.pipeline
-                },
-                &bind_group,
-                workgroups,
-            );
-            offset += chunk_len;
-        }
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         if let Some(element_type) = integer_type {
             self.register_integer_buffer(
@@ -573,7 +589,9 @@ impl WgpuProvider {
 
         let normalized_shape = normalize_concat_shape(output_shape.clone(), dim_zero);
 
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-cat-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-cat-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, normalized_shape, 0);
         }
@@ -583,50 +601,54 @@ impl WgpuProvider {
         let outer = product_checked(&output_shape[dim_zero + 1..])
             .ok_or_else(|| anyhow!("cat: internal dimension overflow"))?;
 
-        let mut encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-cat-encoder"),
-                });
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut encoder =
+                emission
+                    .device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-cat-encoder"),
+                    });
 
-        let mut dst_offset_elems = 0usize;
-        for outer_idx in 0..outer {
-            for (entry, shape) in entries.iter().zip(shapes.iter()) {
-                let mid = shape[dim_zero];
-                let chunk = mid
-                    .checked_mul(inner)
-                    .ok_or_else(|| anyhow!("cat: chunk size overflow"))?;
-                if chunk == 0 {
-                    continue;
+            let mut dst_offset_elems = 0usize;
+            for outer_idx in 0..outer {
+                for (entry, shape) in entries.iter().zip(shapes.iter()) {
+                    let mid = shape[dim_zero];
+                    let chunk = mid
+                        .checked_mul(inner)
+                        .ok_or_else(|| anyhow!("cat: chunk size overflow"))?;
+                    if chunk == 0 {
+                        continue;
+                    }
+                    let src_offset = outer_idx
+                        .checked_mul(chunk)
+                        .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
+                    let bytes = chunk
+                        .checked_mul(self.element_size)
+                        .ok_or_else(|| anyhow!("cat: copy size overflow"))?;
+                    let src_bytes = src_offset
+                        .checked_mul(self.element_size)
+                        .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
+                    let dst_bytes = dst_offset_elems
+                        .checked_mul(self.element_size)
+                        .ok_or_else(|| anyhow!("cat: destination offset overflow"))?;
+                    encoder.copy_buffer_to_buffer(
+                        entry.buffer.as_ref(),
+                        src_bytes as u64,
+                        out_buffer.as_ref(),
+                        dst_bytes as u64,
+                        bytes as u64,
+                    );
+                    dst_offset_elems = dst_offset_elems
+                        .checked_add(chunk)
+                        .ok_or_else(|| anyhow!("cat: destination offset overflow"))?;
                 }
-                let src_offset = outer_idx
-                    .checked_mul(chunk)
-                    .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
-                let bytes = chunk
-                    .checked_mul(self.element_size)
-                    .ok_or_else(|| anyhow!("cat: copy size overflow"))?;
-                let src_bytes = src_offset
-                    .checked_mul(self.element_size)
-                    .ok_or_else(|| anyhow!("cat: source offset overflow"))?;
-                let dst_bytes = dst_offset_elems
-                    .checked_mul(self.element_size)
-                    .ok_or_else(|| anyhow!("cat: destination offset overflow"))?;
-                encoder.copy_buffer_to_buffer(
-                    entry.buffer.as_ref(),
-                    src_bytes as u64,
-                    out_buffer.as_ref(),
-                    dst_bytes as u64,
-                    bytes as u64,
-                );
-                dst_offset_elems = dst_offset_elems
-                    .checked_add(chunk)
-                    .ok_or_else(|| anyhow!("cat: destination offset overflow"))?;
             }
-        }
 
-        debug_assert_eq!(dst_offset_elems, total_len);
+            debug_assert_eq!(dst_offset_elems, total_len);
 
-        self.submit(encoder);
+            self.submit(emission, pending, encoder)?;
+            Ok(())
+        })??;
 
         self.register_existing_buffer(out_buffer, normalized_shape, total_len)
     }
@@ -684,7 +706,9 @@ impl WgpuProvider {
         );
 
         if len_out == 0 {
-            let out_buffer = self.create_storage_buffer(0, "runmat-kron-out");
+            let out_buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "runmat-kron-out")
+            })??;
             return self.register_existing_buffer(out_buffer, shape_out, 0);
         }
 
@@ -751,12 +775,15 @@ impl WgpuProvider {
             stride_b_arr[i] = crate::backend::wgpu::params::AlignedU32::new(strides_b[i] as u32);
         }
 
-        let out_buffer = self.create_storage_buffer_checked(len_out, "runmat-kron-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, len_out, "runmat-kron-out")
+        })??;
         let out_shape = shape_out.clone();
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-kron-noop"),
                     });
@@ -764,75 +791,81 @@ impl WgpuProvider {
                 label: Some("runmat-kron-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.kron.pipeline);
+            pass.set_pipeline(&self.pipelines.kron.get(emission)?.pipeline);
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-kron-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-kron-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < len_out {
-            let remaining = len_out - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::KronParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                rank: rank as u32,
-                _pad: 0,
-                shape_a: shape_a_arr,
-                shape_b: shape_b_arr,
-                shape_out: shape_out_arr,
-                stride_a: stride_a_arr,
-                stride_b: stride_b_arr,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-kron-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-kron-bind"),
-                    layout: &self.pipelines.kron.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry_a.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: entry_b.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::kron::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.kron.pipeline,
-                &bind_group,
-                workgroups,
-            );
-            offset += chunk_len;
-        }
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < len_out {
+                let remaining = len_out - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::KronParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    rank: rank as u32,
+                    _pad: 0,
+                    shape_a: shape_a_arr,
+                    shape_b: shape_b_arr,
+                    shape_out: shape_out_arr,
+                    stride_a: stride_a_arr,
+                    stride_b: stride_b_arr,
+                };
+                let params_buffer = self.uniform_buffer(emission, &params, "runmat-kron-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-kron-bind"),
+                        layout: &self.pipelines.kron.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry_a.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: entry_b.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::kron::run(
+                    emission,
+                    pending,
+                    &self.pipelines.kron.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         self.register_existing_buffer(out_buffer, out_shape, len_out)
     }
@@ -1010,15 +1043,24 @@ impl WgpuProvider {
             .checked_mul(word_factor)
             .ok_or_else(|| anyhow!("circshift: tensor storage length exceeds GPU limits"))?;
         let out_buffer = if integer_type.is_some() {
-            self.create_integer_word_buffer(storage_len, "runmat-integer-circshift-out")?
+            self.with_emission(|emission, _| {
+                self.create_integer_word_buffer(
+                    emission,
+                    storage_len,
+                    "runmat-integer-circshift-out",
+                )
+            })??
         } else {
-            self.create_storage_buffer(entry.len, "runmat-circshift-out")
+            self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, entry.len, "runmat-circshift-out")
+            })??
         };
         let out_shape = entry.shape.clone();
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-circshift-noop"),
                     });
@@ -1027,80 +1069,87 @@ impl WgpuProvider {
                 timestamp_writes: None,
             });
             pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_circshift.pipeline
+                &self.pipelines.integer_circshift.get(emission)?.pipeline
             } else {
-                &self.pipelines.circshift.pipeline
+                &self.pipelines.circshift.get(emission)?.pipeline
             });
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-circshift-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-circshift-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < entry.len {
-            let remaining = entry.len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::CircshiftParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                rank: rank as u32,
-                _pad: word_factor as u32,
-                shape: shape_arr,
-                strides: strides_arr,
-                shifts: shifts_arr,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-circshift-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-circshift-bind"),
-                    layout: if integer_type.is_some() {
-                        &self.pipelines.integer_circshift.layout
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < entry.len {
+                let remaining = entry.len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::CircshiftParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    rank: rank as u32,
+                    _pad: word_factor as u32,
+                    shape: shape_arr,
+                    strides: strides_arr,
+                    shifts: shifts_arr,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-circshift-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-circshift-bind"),
+                        layout: if integer_type.is_some() {
+                            &self.pipelines.integer_circshift.get(emission)?.layout
+                        } else {
+                            &self.pipelines.circshift.get(emission)?.layout
+                        },
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::circshift::run(
+                    emission,
+                    pending,
+                    if integer_type.is_some() {
+                        &self.pipelines.integer_circshift.get(emission)?.pipeline
                     } else {
-                        &self.pipelines.circshift.layout
+                        &self.pipelines.circshift.get(emission)?.pipeline
                     },
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::circshift::run(
-                self.device_ref(),
-                self.queue_ref(),
-                if integer_type.is_some() {
-                    &self.pipelines.integer_circshift.pipeline
-                } else {
-                    &self.pipelines.circshift.pipeline
-                },
-                &bind_group,
-                workgroups,
-            );
-            offset += chunk_len;
-        }
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         if let Some(element_type) = integer_type {
             self.register_integer_buffer(
@@ -1158,12 +1207,15 @@ impl WgpuProvider {
             offset as i32
         };
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-tril-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-tril-out")
+        })??;
         let out_shape = entry.shape.clone();
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-tril-noop"),
                     });
@@ -1171,73 +1223,79 @@ impl WgpuProvider {
                 label: Some("runmat-tril-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.tril.pipeline);
+            pass.set_pipeline(&self.pipelines.tril.get(emission)?.pipeline);
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-tril-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-tril-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let rows_u32 = rows as u32;
-        let cols_u32 = cols as u32;
-        let plane_u32 = plane as u32;
-        let mut offset_idx = 0usize;
-        while offset_idx < entry.len {
-            let remaining = entry.len - offset_idx;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::TrilParams {
-                len: chunk_len as u32,
-                start: offset_idx as u32,
-                rows: rows_u32,
-                cols: cols_u32,
-                plane: plane_u32,
-                diag_offset,
-                _pad0: 0,
-                _pad1: 0,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-tril-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-tril-bind"),
-                    layout: &self.pipelines.tril.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::tril::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.tril.pipeline,
-                &bind_group,
-                workgroups,
-            );
-            offset_idx += chunk_len;
-        }
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let rows_u32 = rows as u32;
+            let cols_u32 = cols as u32;
+            let plane_u32 = plane as u32;
+            let mut offset_idx = 0usize;
+            while offset_idx < entry.len {
+                let remaining = entry.len - offset_idx;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::TrilParams {
+                    len: chunk_len as u32,
+                    start: offset_idx as u32,
+                    rows: rows_u32,
+                    cols: cols_u32,
+                    plane: plane_u32,
+                    diag_offset,
+                    _pad0: 0,
+                    _pad1: 0,
+                };
+                let params_buffer = self.uniform_buffer(emission, &params, "runmat-tril-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-tril-bind"),
+                        layout: &self.pipelines.tril.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::tril::run(
+                    emission,
+                    pending,
+                    &self.pipelines.tril.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset_idx += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len)?;
 
@@ -1300,12 +1358,15 @@ impl WgpuProvider {
             offset as i32
         };
 
-        let out_buffer = self.create_storage_buffer(entry.len, "runmat-triu-out");
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer(emission, entry.len, "runmat-triu-out")
+        })??;
         let out_shape = entry.shape.clone();
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-triu-noop"),
                     });
@@ -1313,73 +1374,79 @@ impl WgpuProvider {
                 label: Some("runmat-triu-noop-pass"),
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipelines.triu.pipeline);
+            pass.set_pipeline(&self.pipelines.triu.get(emission)?.pipeline);
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-triu-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-triu-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let rows_u32 = rows as u32;
-        let cols_u32 = cols as u32;
-        let plane_u32 = plane as u32;
-        let mut offset_idx = 0usize;
-        while offset_idx < entry.len {
-            let remaining = entry.len - offset_idx;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::TriuParams {
-                len: chunk_len as u32,
-                start: offset_idx as u32,
-                rows: rows_u32,
-                cols: cols_u32,
-                plane: plane_u32,
-                diag_offset,
-                _pad0: 0,
-                _pad1: 0,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-triu-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-triu-bind"),
-                    layout: &self.pipelines.triu.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::triu::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.triu.pipeline,
-                &bind_group,
-                workgroups,
-            );
-            offset_idx += chunk_len;
-        }
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let rows_u32 = rows as u32;
+            let cols_u32 = cols as u32;
+            let plane_u32 = plane as u32;
+            let mut offset_idx = 0usize;
+            while offset_idx < entry.len {
+                let remaining = entry.len - offset_idx;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::TriuParams {
+                    len: chunk_len as u32,
+                    start: offset_idx as u32,
+                    rows: rows_u32,
+                    cols: cols_u32,
+                    plane: plane_u32,
+                    diag_offset,
+                    _pad0: 0,
+                    _pad1: 0,
+                };
+                let params_buffer = self.uniform_buffer(emission, &params, "runmat-triu-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-triu-bind"),
+                        layout: &self.pipelines.triu.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::triu::run(
+                    emission,
+                    pending,
+                    &self.pipelines.triu.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset_idx += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len)?;
 
@@ -1526,9 +1593,13 @@ impl WgpuProvider {
         }
 
         let out_buffer = if integer_type.is_some() {
-            self.create_integer_word_buffer(storage_total, "runmat-integer-flip-out")?
+            self.with_emission(|emission, _| {
+                self.create_integer_word_buffer(emission, storage_total, "runmat-integer-flip-out")
+            })??
         } else {
-            self.create_storage_buffer(entry.len, "runmat-flip-out")
+            self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, entry.len, "runmat-flip-out")
+            })??
         };
         let out_shape = entry.shape.clone();
         if storage_total == 0 {
@@ -1539,9 +1610,10 @@ impl WgpuProvider {
             };
         }
 
-        {
+        self.with_emission(|emission, pending| -> Result<()> {
             let mut enc =
-                self.device_ref()
+                emission
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("runmat-flip-noop"),
                     });
@@ -1550,80 +1622,86 @@ impl WgpuProvider {
                 timestamp_writes: None,
             });
             pass.set_pipeline(if integer_type.is_some() {
-                &self.pipelines.integer_flip.pipeline
+                &self.pipelines.integer_flip.get(emission)?.pipeline
             } else {
-                &self.pipelines.flip.pipeline
+                &self.pipelines.flip.get(emission)?.pipeline
             });
             drop(pass);
-            self.submit(enc);
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        {
-            let enc = self
-                .device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-flip-flush-gap"),
-                });
-            self.submit(enc);
-        }
+            self.submit(emission, pending, enc)?;
+            Ok(())
+        })??;
+        self.access.poll(wgpu::Maintain::Poll);
+        self.with_emission(|emission, pending| -> Result<()> {
+            {
+                let enc =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-flip-flush-gap"),
+                        });
+                self.submit(emission, pending, enc)?;
+            }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < storage_total {
-            let remaining = storage_total - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let params = crate::backend::wgpu::params::FlipParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                rank: rank as u32,
-                _pad: 0,
-                shape: shape_arr,
-                strides: strides_arr,
-                flags: flags_arr,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-flip-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-flip-bind"),
-                    layout: if integer_type.is_some() {
-                        &self.pipelines.integer_flip.layout
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < storage_total {
+                let remaining = storage_total - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let params = crate::backend::wgpu::params::FlipParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    rank: rank as u32,
+                    _pad: 0,
+                    shape: shape_arr,
+                    strides: strides_arr,
+                    flags: flags_arr,
+                };
+                let params_buffer = self.uniform_buffer(emission, &params, "runmat-flip-params")?;
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-flip-bind"),
+                        layout: if integer_type.is_some() {
+                            &self.pipelines.integer_flip.get(emission)?.layout
+                        } else {
+                            &self.pipelines.flip.get(emission)?.layout
+                        },
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::flip::run(
+                    emission,
+                    pending,
+                    if integer_type.is_some() {
+                        &self.pipelines.integer_flip.get(emission)?.pipeline
                     } else {
-                        &self.pipelines.flip.layout
+                        &self.pipelines.flip.get(emission)?.pipeline
                     },
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::flip::run(
-                self.device_ref(),
-                self.queue_ref(),
-                if integer_type.is_some() {
-                    &self.pipelines.integer_flip.pipeline
-                } else {
-                    &self.pipelines.flip.pipeline
-                },
-                &bind_group,
-                workgroups,
-            );
-            offset += chunk_len;
-        }
+                    &bind_group,
+                    workgroups,
+                )?;
+                offset += chunk_len;
+            }
+
+            Ok(())
+        })??;
 
         let handle = if let Some(element_type) = integer_type {
             self.register_integer_buffer(

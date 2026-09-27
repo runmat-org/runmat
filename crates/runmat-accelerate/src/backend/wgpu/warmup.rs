@@ -1,31 +1,17 @@
-use std::panic::{self, AssertUnwindSafe};
-use std::path::Path;
-use std::sync::Arc;
-
-use super::bindings::build_bgl_for_layout_tag;
 use super::cache::persist::PipelineMeta;
 use super::cache::persist::PIPELINE_CACHE_VERSION;
 use super::types::NumericPrecision;
+use std::panic::{self, AssertUnwindSafe};
+use std::path::Path;
 
-pub fn warmup_from_disk<FHash, FCreate, FNoop>(
-    device: &wgpu::Device,
+pub fn warmup_from_disk<FHash, FCompile>(
     cache_dir: Option<&Path>,
     target_precision: NumericPrecision,
     compute_hash: FHash,
-    get_or_create: FCreate,
-    after_create_noop: FNoop,
+    compile: FCompile,
 ) where
     FHash: Fn(&[u8], &str, Option<u32>) -> u64,
-    FCreate: Fn(
-        u64,
-        &wgpu::PipelineLayout,
-        &wgpu::ShaderModule,
-        &str,
-        Option<&[u8]>,
-        Option<&str>,
-        Option<u32>,
-    ) -> Arc<wgpu::ComputePipeline>,
-    FNoop: Fn(&wgpu::ComputePipeline),
+    FCompile: Fn(u64, &str, &str, &[u8], Option<u32>) -> anyhow::Result<bool>,
 {
     let Some(dir) = cache_dir else {
         return;
@@ -88,38 +74,17 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
             let _ = std::fs::remove_file(&wgsl_path);
             continue;
         }
-        let bgl = match build_bgl_for_layout_tag(device, layout_tag) {
-            Some(b) => b,
-            None => continue,
-        };
-        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("warmup-pipeline-layout"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
-        });
-        // Apply the @WG@ substitution used by regular pipeline creation
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            device,
-            "warmup-shader-module",
-            wgsl_str,
-        );
+        // Parsing/IO stay outside device access. The owner encloses one complete
+        // compile+submit transaction and releases access before progress waits.
         let compiled_pipeline = panic::catch_unwind(AssertUnwindSafe(|| {
-            let pipeline = get_or_create(
-                key,
-                &pl,
-                &module,
-                "warmup-precompiled-pipeline",
-                Some(&wgsl_bytes),
-                Some(layout_tag),
-                meta.workgroup_size,
-            );
-            after_create_noop(&pipeline);
+            compile(key, layout_tag, wgsl_str, &wgsl_bytes, meta.workgroup_size)
         }));
         match compiled_pipeline {
-            Ok(_) => {
+            Ok(Ok(true)) => {
                 compiled += 1;
             }
-            Err(_) => {
+            Ok(Ok(false)) => continue,
+            Ok(Err(_)) | Err(_) => {
                 log::warn!(
                     "warmup: failed to precompile pipeline {}; removing incompatible cache entry",
                     stem
@@ -138,14 +103,16 @@ pub fn warmup_from_disk<FHash, FCreate, FNoop>(
     }
 }
 
-pub fn noop_after_create(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+pub(crate) fn noop_after_create(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    pending: &mut super::dispatch::observation::PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
-) {
-    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("warmup-noop-precompiled-enc"),
-    });
+) -> anyhow::Result<()> {
+    let mut enc = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("warmup-noop-precompiled-enc"),
+        });
     {
         let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("warmup-noop-precompiled-pass"),
@@ -153,6 +120,6 @@ pub fn noop_after_create(
         });
         pass.set_pipeline(pipeline);
     }
-    super::dispatch::observation::submit(device, queue, enc);
-    device.poll(wgpu::Maintain::Wait);
+    super::dispatch::common::submit(emission, pending, enc)?;
+    Ok(())
 }

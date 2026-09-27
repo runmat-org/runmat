@@ -1,4 +1,4 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, cast_slice, Pod};
 use num_complex::Complex;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
@@ -83,6 +83,7 @@ fn fft_factor_smooth_235(mut len: usize) -> Option<Vec<u32>> {
     }
 }
 
+mod emission;
 mod fallback;
 mod helpers;
 mod kernels;

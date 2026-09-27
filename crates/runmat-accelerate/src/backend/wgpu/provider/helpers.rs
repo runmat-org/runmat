@@ -2,7 +2,7 @@ use runmat_accelerate_api::AccelProvider;
 
 use anyhow::{ensure, Result};
 use log::{debug, info};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, WgpuEmission};
 use std::borrow::Cow;
 use std::sync::Arc;
 
@@ -51,6 +51,7 @@ impl WgpuProvider {
 
     pub(super) fn create_storage_buffer_checked_with_usage(
         &self,
+        emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
         usage: BufferUsageClass,
@@ -64,7 +65,7 @@ impl WgpuProvider {
                 self.adapter_limits.max_buffer_size,
             ));
         }
-        let (buffer, reused) = self.create_storage_buffer_for_usage(usage, len, label);
+        let (buffer, reused) = self.create_storage_buffer_for_usage(emission, usage, len, label)?;
         if reused && std::env::var("RUNMAT_DEBUG_RESIDENCY").is_ok() {
             log::debug!(
                 "[residency_debug] reused buffer label={} usage={:?} len={} ptr={:p}",
@@ -87,10 +88,16 @@ impl WgpuProvider {
 
     pub(super) fn create_storage_buffer_checked(
         &self,
+        emission: &WgpuEmission<'_>,
         len: usize,
         label: &str,
     ) -> Result<Arc<wgpu::Buffer>> {
-        self.create_storage_buffer_checked_with_usage(len, label, BufferUsageClass::Generic)
+        self.create_storage_buffer_checked_with_usage(
+            emission,
+            len,
+            label,
+            BufferUsageClass::Generic,
+        )
     }
 
     pub(super) fn image_normalize_vector_width(&self) -> u32 {
@@ -241,8 +248,10 @@ impl WgpuProvider {
 
     pub(super) fn image_normalize_pipeline(
         &self,
+        emission: &WgpuEmission<'_>,
         tuning: &ImageNormalizeTuning,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
+        emission.ensure_device(&self.access)?;
         let observation = super::pipeline_observation::PipelineObservation::begin();
         let cached = self
             .image_norm_pipeline_cache
@@ -253,6 +262,7 @@ impl WgpuProvider {
             observation.finish(runmat_execution::CandidatePreparationState::Warm);
             return Ok(existing);
         }
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
         info!(
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
             tuning.batch_tile, tuning.values_per_thread, tuning.lane_count, tuning.spatial_tile
@@ -267,19 +277,19 @@ impl WgpuProvider {
             .replace("@WG@", &tuning.lane_count.to_string())
             .replace("@ST@", &tuning.spatial_tile.to_string())
             .replace("@BV@", &self.image_normalize_vector_width().to_string());
-        let module = self
-            .device_ref()
+        let module = emission
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("runmat-image-normalize-shader-dyn"),
                 source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader_src)),
             });
         let pipeline_layout = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
-            self.device_ref(),
+            emission,
             "runmat-image-normalize-pipeline-dyn",
-            &self.pipelines.image_normalize.layout,
+            &self.pipelines.image_normalize.get(emission)?.layout,
         );
         let pipeline = crate::backend::wgpu::cache::factory::create_compute_pipeline(
-            self.device_ref(),
+            emission,
             "runmat-image-normalize-pipeline-dyn",
             &pipeline_layout,
             &module,
@@ -306,33 +316,60 @@ impl WgpuProvider {
             return;
         }
         crate::backend::wgpu::warmup::warmup_from_disk(
-            &self.device,
             self.pipeline_cache_dir.as_deref(),
             self.precision,
             |bytes, tag, wg| self.compute_pipeline_hash_bytes(bytes, tag, wg),
-            |key, pl, module, label, src, tag, wg| {
-                self.get_or_create_pipeline(key, pl, module, label, src, tag, wg)
-            },
-            |pipeline| {
-                crate::backend::wgpu::warmup::noop_after_create(&self.device, &self.queue, pipeline)
+            |key, tag, src, bytes, wg| {
+                self.with_emission(|emission, pending| -> Result<bool> {
+                    let Some(bgl) =
+                        crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
+                    else {
+                        return Ok(false);
+                    };
+                    let pl = crate::backend::wgpu::cache::factory::create_pipeline_layout_single(
+                        emission,
+                        "warmup-pipeline-layout",
+                        &bgl,
+                    );
+                    let module = crate::backend::wgpu::pipelines::create_shader_module(
+                        emission,
+                        "warmup-shader-module",
+                        src,
+                    );
+                    let pipeline = self.get_or_create_pipeline(
+                        emission,
+                        key,
+                        &pl,
+                        &module,
+                        "warmup-precompiled-pipeline",
+                        Some(bytes),
+                        Some(tag),
+                        wg,
+                    )?;
+                    crate::backend::wgpu::warmup::noop_after_create(emission, pending, &pipeline)?;
+                    Ok(true)
+                })?
             },
         );
     }
 
     pub(super) fn cached_bind_group_layout<F>(
         &self,
+        emission: &WgpuEmission<'_>,
         key: &str,
         build: F,
-    ) -> Arc<wgpu::BindGroupLayout>
+    ) -> Result<Arc<wgpu::BindGroupLayout>>
     where
-        F: FnOnce(&wgpu::Device) -> wgpu::BindGroupLayout,
+        F: FnOnce(&WgpuEmission<'_>) -> wgpu::BindGroupLayout,
     {
+        emission.ensure_device(&self.access)?;
         if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(key).cloned() {
-                return layout;
+                return Ok(layout);
             }
         }
-        let layout = Arc::new(build(self.device_ref()));
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let layout = Arc::new(build(emission));
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
         if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
             tags.entry(ptr).or_insert_with(|| key.to_string());
@@ -340,20 +377,25 @@ impl WgpuProvider {
         if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(key.to_string(), layout.clone());
         }
-        layout
+        Ok(layout)
     }
 
     pub(super) fn cached_bind_group_layout_for_tag(
         &self,
+        emission: &WgpuEmission<'_>,
         tag: &str,
-    ) -> Option<Arc<wgpu::BindGroupLayout>> {
+    ) -> Result<Option<Arc<wgpu::BindGroupLayout>>> {
+        emission.ensure_device(&self.access)?;
         if let Ok(cache) = self.bind_group_layout_cache.lock() {
             if let Some(layout) = cache.get(tag).cloned() {
-                return Some(layout);
+                return Ok(Some(layout));
             }
         }
-        let layout =
-            crate::backend::wgpu::bindings::build_bgl_for_layout_tag(self.device_ref(), tag)?;
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
+        let Some(layout) = crate::backend::wgpu::bindings::build_bgl_for_layout_tag(emission, tag)
+        else {
+            return Ok(None);
+        };
         let layout = Arc::new(layout);
         let ptr = layout.as_ref() as *const wgpu::BindGroupLayout as usize;
         if let Ok(mut tags) = self.bind_group_layout_tags.lock() {
@@ -362,32 +404,33 @@ impl WgpuProvider {
         if let Ok(mut cache) = self.bind_group_layout_cache.lock() {
             cache.insert(tag.to_string(), layout.clone());
         }
-        Some(layout)
+        Ok(Some(layout))
     }
 
     pub(super) fn cached_fusion_bind_group_layout(
         &self,
+        emission: &WgpuEmission<'_>,
         inputs_len: usize,
-    ) -> Arc<wgpu::BindGroupLayout> {
+    ) -> Result<Arc<wgpu::BindGroupLayout>> {
         let key = format!("runmat-fusion-layout-{}", inputs_len);
-        self.cached_bind_group_layout(&key, |device| {
-            crate::backend::wgpu::bindings::build_fusion_bgl(device, inputs_len)
+        self.cached_bind_group_layout(emission, &key, |emission| {
+            crate::backend::wgpu::bindings::build_fusion_bgl(emission, inputs_len)
         })
     }
 
     pub fn try_compile_kernel(&self, label: &str, wgsl_src: &str) -> Result<()> {
-        crate::backend::wgpu::debug::try_compile_kernel(&self.device, label, wgsl_src);
+        self.with_emission(|emission, _| {
+            crate::backend::wgpu::debug::try_compile_kernel(emission, label, wgsl_src)
+        })?;
         Ok(())
     }
 
     pub fn probe_kernel_with_buffers(&self, label: &str, wgsl_src: &str, wg: u32) -> Result<()> {
-        crate::backend::wgpu::debug::probe_kernel_with_buffers(
-            &self.device,
-            &self.queue,
-            label,
-            wgsl_src,
-            wg,
-        );
+        self.with_emission(|emission, pending| {
+            crate::backend::wgpu::debug::probe_kernel_with_buffers(
+                emission, pending, label, wgsl_src, wg,
+            )
+        })??;
         Ok(())
     }
 
@@ -497,6 +540,7 @@ impl WgpuProvider {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn get_or_create_pipeline(
         &self,
+        emission: &WgpuEmission<'_>,
         hash_key: u64,
         pipeline_layout: &wgpu::PipelineLayout,
         module: &wgpu::ShaderModule,
@@ -504,10 +548,12 @@ impl WgpuProvider {
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
-    ) -> Arc<wgpu::ComputePipeline> {
+    ) -> Result<Arc<wgpu::ComputePipeline>> {
+        emission.ensure_device(&self.access)?;
         self.get_or_create_pipeline_with(
+            emission,
             hash_key, label, persist_wgsl_src, persist_layout_tag, persist_workgroup_size,
-            || self.device.create_compute_pipeline(
+            || emission.device().create_compute_pipeline(
                 &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                     label: Some(label), layout: Some(pipeline_layout), module: module, entry_point: "main",
                 },
@@ -517,17 +563,19 @@ impl WgpuProvider {
 
     pub(super) fn recipe_pipeline(
         &self,
+        emission: &WgpuEmission<'_>,
         recipe: &super::pipeline_recipe::PipelineRecipe,
         bindings: &wgpu::BindGroupLayout,
         label: &str,
-    ) -> Arc<wgpu::ComputePipeline> {
-        self.get_or_create_pipeline_with(recipe.key(), label, Some(recipe.shader.as_bytes()),
+    ) -> Result<Arc<wgpu::ComputePipeline>> {
+        emission.ensure_device(&self.access)?;
+        self.get_or_create_pipeline_with(emission, recipe.key(), label, Some(recipe.shader.as_bytes()),
             Some(&recipe.layout), Some(recipe.workgroup), || {
                 let layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-                    self.device_ref(), label, bindings);
+                    emission, label, bindings);
                 let module = crate::backend::wgpu::pipelines::create_shader_module(
-                    self.device_ref(), label, &recipe.shader);
-                self.device.create_compute_pipeline(
+                    emission, label, &recipe.shader);
+                emission.device().create_compute_pipeline(
                     &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
                         label: Some(label), layout: Some(&layout), module: &module, entry_point: "main",
                     },
@@ -535,15 +583,17 @@ impl WgpuProvider {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn get_or_create_pipeline_with(
         &self,
+        emission: &WgpuEmission<'_>,
         hash_key: u64,
         label: &str,
         persist_wgsl_src: Option<&[u8]>,
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
         create: impl FnOnce() -> wgpu::ComputePipeline,
-    ) -> Arc<wgpu::ComputePipeline> {
+    ) -> Result<Arc<wgpu::ComputePipeline>> {
         let observation = super::pipeline_observation::PipelineObservation::begin();
         let cached = match self.fused_pipeline_cache.lock() {
             Ok(guard) => guard.get(&hash_key).cloned(),
@@ -556,8 +606,9 @@ impl WgpuProvider {
         if let Some(p) = cached {
             self.metrics.inc_hit();
             observation.finish(runmat_execution::CandidatePreparationState::Warm);
-            return p;
+            return Ok(p);
         }
+        crate::backend::wgpu::cache::scope::allow_creation(emission.mode())?;
         self.metrics.inc_miss();
         // Persist WGSL + meta for warmup on next run
         self.persist_pipeline_meta(
@@ -579,7 +630,7 @@ impl WgpuProvider {
             }
         }
         observation.finish(runmat_execution::CandidatePreparationState::Cold);
-        p
+        Ok(p)
     }
 
     pub fn compute_pipeline_hash_bytes(

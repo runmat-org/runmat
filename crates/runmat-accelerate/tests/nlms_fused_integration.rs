@@ -525,7 +525,7 @@ fn nlms_two_fused_reductions_integration() {
         let mse = execute_reduction(req, cols, 1, 0).expect("fused mean(all)");
         match mse {
             Value::GpuTensor(h) => {
-                assert_eq!(h.shape, vec![1], "mean(all) should return scalar shape [1]");
+                assert_eq!(h.shape(), vec![1], "mean(all) should return scalar shape [1]");
             }
             _ => panic!("expected GPU tensor for mse"),
         }

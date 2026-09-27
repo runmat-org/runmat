@@ -1,4 +1,6 @@
 #![cfg(feature = "wgpu")]
+#[path = "support/retirement.rs"]
+mod retirement;
 use runmat_accelerate_api::{
     AccelProvider, HostTensorView, MatmulEpilogue, MatmulOffset, ProviderPrecision,
 };
@@ -41,8 +43,8 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
         .unwrap();
     let host = provider.download(&result).await.unwrap();
     assert!(host.data.iter().all(|x| x.to_bits() == (-0.0f64).to_bits()));
-    provider.free(&result).unwrap();
-    provider.free(&zero).unwrap();
+    retirement::release_all([result]);
+    retirement::release_all([zero]);
 
     let input = provider
         .upload(&HostTensorView {
@@ -61,7 +63,7 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
             .await
             .unwrap();
         assert_eq!(provider.download(&result).await.unwrap().data, expected);
-        provider.free(&result).unwrap();
+        retirement::release_all([result]);
     }
     ep = MatmulEpilogue::noop();
     ep.pow_exponent = Some(2.);
@@ -83,13 +85,13 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
         );
     }
     let diagonal = provider.diag_extract(&result, 0).unwrap();
-    assert_eq!(diagonal.shape, [2, 1]);
+    assert_eq!(diagonal.shape(), [2, 1]);
     for value in provider.download(&diagonal).await.unwrap().data {
         assert!((value - 4.).abs() < 4e-6);
     }
-    provider.free(&diagonal).unwrap();
-    provider.free(&result).unwrap();
-    provider.free(&input).unwrap();
+    retirement::release_all([diagonal]);
+    retirement::release_all([result]);
+    retirement::release_all([input]);
 
     let input = provider
         .upload(&HostTensorView {
@@ -107,9 +109,9 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
     assert!(data[0].is_nan() && data[2].is_nan());
     assert_eq!(data[1], 1.);
     assert_eq!(data[3], 1.);
-    provider.free(&result).unwrap();
-    provider.free(&input).unwrap();
-    provider.free(&identity).unwrap();
+    retirement::release_all([result]);
+    retirement::release_all([input]);
+    retirement::release_all([identity]);
 
     // Cross the actual provider's diagonal lane boundary and both matrix tile
     // boundaries. With RUNMAT_WG=64 the former fixed-512 dispatch left the
@@ -142,9 +144,7 @@ async fn ordered_matmul_hardware_preserves_domains_orientation_and_diagonal() {
         assert_eq!(actual_column, column.as_slice());
     }
     let diagonal = provider.diag_extract(&product, 0).unwrap();
-    assert_eq!(diagonal.shape, [n, 1]);
+    assert_eq!(diagonal.shape(), [n, 1]);
     assert_eq!(provider.download(&diagonal).await.unwrap().data, column);
-    for handle in [&diagonal, &product, &left, &right] {
-        provider.free(handle).unwrap();
-    }
+    retirement::release_all([diagonal, product, left, right]);
 }

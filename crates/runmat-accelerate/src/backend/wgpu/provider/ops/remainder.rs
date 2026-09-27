@@ -71,8 +71,11 @@ impl WgpuProvider {
             )?;
         }
         if count == 0 {
+            let buffer = self.with_emission(|emission, _| {
+                self.create_storage_buffer(emission, 0, "remainder-empty")
+            })??;
             return self.register_existing_buffer_with_storage(
-                self.create_storage_buffer(0, "remainder-empty"),
+                buffer,
                 shape,
                 0,
                 GpuTensorStorage::Real,

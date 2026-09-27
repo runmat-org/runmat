@@ -382,10 +382,13 @@ async fn hilbert_gpu_tensor(
                 ));
             }
             Err(err) => {
-                if !hilbert_provider_operation_unsupported(&err, "signal_hilbert") {
-                    return Err(hilbert_terminal_error(
-                        &HILBERT_ERROR_INTERNAL,
-                        format!("provider signal_hilbert failed: {err}"),
+                if !err.is_unsupported() {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        hilbert_terminal_error(
+                            &HILBERT_ERROR_INTERNAL,
+                            format!("provider signal_hilbert failed: {err}"),
+                        ),
+                        err,
                     ));
                 }
             }
@@ -418,12 +421,6 @@ async fn hilbert_gpu_tensor(
         }
     };
     restore_hilbert_gpu_output(provider, &handle, host)
-}
-
-fn hilbert_provider_operation_unsupported(error: &anyhow::Error, operation: &str) -> bool {
-    error
-        .chain()
-        .any(|cause| cause.to_string() == format!("{operation} not supported by provider"))
 }
 
 fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()> {

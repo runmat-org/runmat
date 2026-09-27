@@ -148,16 +148,14 @@ impl QuiverPlot {
                     .to_string()
             })?;
             let u = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.u_buffer,
                 source.count,
                 source.scalar,
             )
             .await?;
             let v = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.v_buffer,
                 source.count,
                 source.scalar,
@@ -175,11 +173,11 @@ impl QuiverPlot {
             };
             let x_axis = source
                 .x_data
-                .export_f64(&context.device, &context.queue, x_axis_len, source.scalar)
+                .export_f64(&context.access, x_axis_len, source.scalar)
                 .await?;
             let y_axis = source
                 .y_data
-                .export_f64(&context.device, &context.queue, y_axis_len, source.scalar)
+                .export_f64(&context.access, y_axis_len, source.scalar)
                 .await?;
             let (x, y) = match source.xy_mode {
                 0 => {

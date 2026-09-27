@@ -112,22 +112,12 @@ impl ScatterPlot {
                     .to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             let shape = vec![1, len];
             let (x, y) = match inputs.scalar {
                 crate::gpu::ScalarType::F64 => (

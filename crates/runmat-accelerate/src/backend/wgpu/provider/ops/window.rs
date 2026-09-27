@@ -26,61 +26,67 @@ impl WgpuProvider {
                 shape: &[1, 1],
             });
         }
-        let out_buffer = self.create_storage_buffer_checked(len, "runmat-window-out")?;
-        if len == 0 {
-            return self.register_existing_buffer(out_buffer, shape_vec, 0);
-        }
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, len, "runmat-window-out")?;
+            if len == 0 {
+                return Ok(out_buffer);
+            }
+            let pipeline = self.pipelines.window.get(emission)?;
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut offset = 0usize;
-        while offset < len {
-            let chunk_len = (len - offset).min(chunk_capacity).max(1);
-            let params = crate::backend::wgpu::params::WindowParams {
-                len: logical_u32,
-                total: total_u32,
-                chunk: chunk_len as u32,
-                offset: offset as u32,
-                kind: kind as u32,
-                _pad0: 0,
-                _pad1: 0,
-                _pad2: 0,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-window-params");
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut offset = 0usize;
+            while offset < len {
+                let chunk_len = (len - offset).min(chunk_capacity).max(1);
+                let params = crate::backend::wgpu::params::WindowParams {
+                    len: logical_u32,
+                    total: total_u32,
+                    chunk: chunk_len as u32,
+                    offset: offset as u32,
+                    kind: kind as u32,
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-window-params")?;
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-window-bind"),
-                    layout: &self.pipelines.window.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-window-bind"),
+                        layout: &pipeline.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.window.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-window-encoder",
-                "runmat-window-pass",
-            );
-            offset += chunk_len;
-        }
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &pipeline.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-window-encoder",
+                    "runmat-window-pass",
+                )?;
+                offset += chunk_len;
+            }
 
+            Ok(out_buffer)
+        })??;
         self.register_existing_buffer(out_buffer, shape_vec, len)
     }
 }

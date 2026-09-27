@@ -232,7 +232,10 @@ impl PlotRenderer {
     /// On wasm the canvas is often created at a tiny size and resized shortly after; some
     /// CPU-generated geometry (like thick 2D lines) depends on viewport pixels, so we rebuild
     /// the scene when the surface extent changes.
-    pub fn on_surface_config_updated(&mut self) {
+    pub fn on_surface_config_updated(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) {
         let current = (
             self.wgpu_renderer.surface_config.width.max(1),
             self.wgpu_renderer.surface_config.height.max(1),
@@ -245,11 +248,12 @@ impl PlotRenderer {
             return;
         };
         // Rebuild scene using the updated surface extent.
-        self.set_figure(figure);
+        self.set_figure(emission, figure);
     }
 
     fn prepare_buffers_for_render_data(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         node_id: u64,
         render_data: &crate::core::RenderData,
     ) -> Option<(Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>)> {
@@ -271,13 +275,15 @@ impl PlotRenderer {
             }
         }
 
-        let vertex_buffer = self
-            .wgpu_renderer
-            .vertex_buffer_from_sources(render_data.gpu_vertices.as_ref(), &render_data.vertices)?;
+        let vertex_buffer = self.wgpu_renderer.vertex_buffer_from_sources(
+            emission,
+            render_data.gpu_vertices.as_ref(),
+            &render_data.vertices,
+        )?;
         let index_buffer = render_data
             .indices
             .as_ref()
-            .map(|indices| Arc::new(self.wgpu_renderer.create_index_buffer(indices)));
+            .map(|indices| Arc::new(self.wgpu_renderer.create_index_buffer(emission, indices)));
 
         cache.insert(
             node_id,
@@ -302,11 +308,11 @@ impl PlotRenderer {
 
     /// Create a new plot renderer
     pub async fn new(
-        device: Arc<wgpu::Device>,
-        queue: Arc<wgpu::Queue>,
+        access: runmat_accelerate_api::WgpuDeviceAccess,
         surface_config: wgpu::SurfaceConfiguration,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let wgpu_renderer = WgpuRenderer::new(device, queue, surface_config).await;
+        let wgpu_renderer =
+            access.with_shared(|emission| WgpuRenderer::new(emission, surface_config))?;
         let scene = Scene::new();
         let theme = crate::styling::PlotThemeConfig::default();
 
@@ -455,7 +461,11 @@ impl PlotRenderer {
     }
 
     /// Set the figure to render
-    pub fn set_figure(&mut self, figure: Figure) {
+    pub fn set_figure(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        figure: Figure,
+    ) {
         self.last_geometry_scene_key = None;
         self.geometry_overlay = None;
         self.geometry_xray_enabled = false;
@@ -523,7 +533,7 @@ impl PlotRenderer {
             }
         }
 
-        self.add_figure_to_scene(figure);
+        self.add_figure_to_scene(emission, figure);
 
         // Mark for update
         self.needs_update = true;
@@ -653,12 +663,17 @@ impl PlotRenderer {
     }
 
     /// Add a figure to the current scene
-    fn add_figure_to_scene(&mut self, figure: Figure) {
-        self.add_figure_to_scene_with_axes_plot_sizes(figure, None);
+    fn add_figure_to_scene(
+        &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+        figure: Figure,
+    ) {
+        self.add_figure_to_scene_with_axes_plot_sizes(emission, figure, None);
     }
 
     fn add_figure_to_scene_with_axes_plot_sizes(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         mut figure: Figure,
         axes_plot_sizes_px: Option<&[(u32, u32)]>,
     ) {
@@ -674,10 +689,7 @@ impl PlotRenderer {
             self.wgpu_renderer.surface_config.height.max(1),
         );
         self.last_scene_viewport_px = Some(viewport_px);
-        let gpu = crate::core::GpuPackContext {
-            device: &self.wgpu_renderer.device,
-            queue: &self.wgpu_renderer.queue,
-        };
+        let gpu = crate::core::GpuPackContext { emission };
         let axes_count = figure.axes_count();
         let view_bounds = self.axes_view_bounds_for_count(axes_count);
         let viewport_hint = if axes_plot_sizes_px.is_some() || rows.max(1) * cols.max(1) <= 1 {
@@ -723,6 +735,7 @@ impl PlotRenderer {
 
     pub fn ensure_scene_viewport_dependent_geometry_for_axes(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         axes_plot_sizes_px: &[(u32, u32)],
     ) {
         let mut normalized: Vec<(u32, u32)> = axes_plot_sizes_px
@@ -766,7 +779,7 @@ impl PlotRenderer {
         }
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
-        self.add_figure_to_scene_with_axes_plot_sizes(figure, Some(&normalized));
+        self.add_figure_to_scene_with_axes_plot_sizes(emission, figure, Some(&normalized));
         log::debug!(
             target: "runmat_plot.viewport_rebuild",
             "rebuilt viewport-dependent scene geometry axes_count={} viewport_sizes={:?}",
@@ -1324,6 +1337,7 @@ impl PlotRenderer {
     /// Render the current scene to a specific viewport within a texture/surface
     pub fn render_to_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         _viewport: (f32, f32, f32, f32), // (x, y, width, height) in framebuffer coordinates
@@ -1340,11 +1354,12 @@ impl PlotRenderer {
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some(vertex_buffer) = self.wgpu_renderer.vertex_buffer_from_sources(
+                    emission,
                     render_data.gpu_vertices.as_ref(),
                     &render_data.vertices,
                 ) {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
 
                     log::trace!(
                         target: "runmat_plot",
@@ -1369,28 +1384,25 @@ impl PlotRenderer {
 
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, model_matrix);
+            .update_uniforms(emission, view_proj_matrix, model_matrix);
 
         // Create render pass (respect MSAA)
         let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
         let msaa_view_opt = if use_msaa {
-            let tex = self
-                .wgpu_renderer
-                .device
-                .create_texture(&wgpu::TextureDescriptor {
-                    label: Some("runmat_msaa_color_camera"),
-                    size: wgpu::Extent3d {
-                        width: self.wgpu_renderer.surface_config.width,
-                        height: self.wgpu_renderer.surface_config.height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: self.wgpu_renderer.msaa_sample_count,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: self.wgpu_renderer.surface_config.format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    view_formats: &[],
-                });
+            let tex = emission.device().create_texture(&wgpu::TextureDescriptor {
+                label: Some("runmat_msaa_color_camera"),
+                size: wgpu::Extent3d {
+                    width: self.wgpu_renderer.surface_config.width,
+                    height: self.wgpu_renderer.surface_config.height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: self.wgpu_renderer.msaa_sample_count,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.wgpu_renderer.surface_config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
             Some(tex.create_view(&wgpu::TextureViewDescriptor::default()))
         } else {
             None
@@ -1439,15 +1451,17 @@ impl PlotRenderer {
 
         // data_bounds passed in from caller: (x_min, y_min, x_max, y_max)
         let (x_min, y_min, x_max, y_max) = (0.0_f64, 0.0_f64, 1.0_f64, 1.0_f64);
-        self.wgpu_renderer
-            .update_direct_uniforms(DirectUniforms::new(
+        self.wgpu_renderer.update_direct_uniforms(
+            emission,
+            DirectUniforms::new(
                 [x_min as f32, y_min as f32],
                 [x_max as f32, y_max as f32],
                 [ndc_left, ndc_bottom],
                 [ndc_right, ndc_top],
                 [sw, sh],
                 [0, 0],
-            ));
+            ),
+        );
 
         // Continue with specific pipelines below (implementation omitted here)
         drop(render_pass);
@@ -1472,6 +1486,7 @@ impl PlotRenderer {
     /// Render the current scene to a texture/surface
     pub fn render(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target: RenderTarget<'_>,
         config: &PlotRenderConfig,
@@ -1487,7 +1502,7 @@ impl PlotRenderer {
         let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = self.axes_model_matrix(0);
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, model_matrix);
+            .update_uniforms(emission, view_proj_matrix, model_matrix);
 
         // Collect all render data and create vertex buffers first (outside render pass)
         let mut render_items = Vec::new();
@@ -1497,10 +1512,10 @@ impl PlotRenderer {
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some((vertex_buffer, index_buffer)) =
-                    self.prepare_buffers_for_render_data(node.id, render_data)
+                    self.prepare_buffers_for_render_data(emission, node.id, render_data)
                 {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
                     render_items.push((render_data, vertex_buffer, index_buffer));
 
                     total_vertices += render_data.vertex_count();
@@ -1519,7 +1534,7 @@ impl PlotRenderer {
         });
         if has_textured_items {
             // Ensure image pipeline once to avoid mutable borrow during pass.
-            self.wgpu_renderer.ensure_image_pipeline();
+            self.wgpu_renderer.ensure_image_pipeline(emission);
             let mut inferred_bounds: Option<(f64, f64, f64, f64)> = None;
             for (render_data, _, _) in &render_items {
                 let Some(bounds) = render_data.bounds.as_ref() else {
@@ -1561,15 +1576,17 @@ impl PlotRenderer {
                 config.height
             );
             let (ndc_y_min, ndc_y_max) = self.overlay_y_direction_for_axes(0).ndc_endpoints();
-            self.wgpu_renderer
-                .update_direct_uniforms(DirectUniforms::new(
+            self.wgpu_renderer.update_direct_uniforms(
+                emission,
+                DirectUniforms::new(
                     [x_min as f32, y_min as f32],
                     [x_max as f32, y_max as f32],
                     [-1.0, ndc_y_min],
                     [1.0, ndc_y_max],
                     [config.width as f32, config.height as f32],
                     [0, 0],
-                ));
+                ),
+            );
         }
         for (render_data, _vb, _ib) in &render_items {
             if render_data.pipeline_type == crate::core::PipelineType::Textured {
@@ -1581,7 +1598,7 @@ impl PlotRenderer {
                 {
                     let (_tex, _view, img_bg) = self
                         .wgpu_renderer
-                        .create_image_texture_and_bind_group(*width, *height, data);
+                        .create_image_texture_and_bind_group(emission, *width, *height, data);
                     image_bind_groups.push(Some(img_bg));
                 } else {
                     image_bind_groups.push(None);
@@ -1604,7 +1621,9 @@ impl PlotRenderer {
                     marker_shape: render_data.material.metallic as u32,
                     _pad: [0.0, 0.0],
                 };
-                let (_buf, bg) = self.wgpu_renderer.create_point_style_bind_group(style);
+                let (_buf, bg) = self
+                    .wgpu_renderer
+                    .create_point_style_bind_group(emission, style);
                 point_style_bind_groups.push(Some(bg));
             } else {
                 point_style_bind_groups.push(None);
@@ -1622,20 +1641,20 @@ impl PlotRenderer {
                 let expanded = self
                     .wgpu_renderer
                     .create_direct_point_vertices(&render_data.vertices, 0.0);
-                let buffer = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                let buffer = self.wgpu_renderer.create_vertex_buffer(emission, &expanded);
                 point_buffers.push(Some((buffer, expanded.len())));
             } else {
                 point_buffers.push(None);
             }
         }
-        self.wgpu_renderer.update_marker_screen_uniforms([
-            config.width.max(1) as f32,
-            config.height.max(1) as f32,
-        ]);
+        self.wgpu_renderer.update_marker_screen_uniforms(
+            emission,
+            [config.width.max(1) as f32, config.height.max(1) as f32],
+        );
 
         // Create render pass
         {
-            let depth_view = self.wgpu_renderer.ensure_depth_view();
+            let depth_view = self.wgpu_renderer.ensure_depth_view(emission);
             let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
             let mut cached_msaa_view: Option<Arc<wgpu::TextureView>> = None;
 
@@ -1643,7 +1662,7 @@ impl PlotRenderer {
                 if let Some(explicit_resolve_target) = target.resolve_target {
                     (target.view, Some(explicit_resolve_target))
                 } else {
-                    cached_msaa_view = Some(self.wgpu_renderer.ensure_msaa_color_view());
+                    cached_msaa_view = Some(self.wgpu_renderer.ensure_msaa_color_view(emission));
                     (
                         cached_msaa_view
                             .as_ref()
@@ -1831,6 +1850,7 @@ impl PlotRenderer {
     /// For subplot grids, it renders each axes into a deterministic tiled viewport layout.
     pub fn render_scene_to_target(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         config: &PlotRenderConfig,
@@ -1849,6 +1869,7 @@ impl PlotRenderer {
         if axes_count <= 1 && !self.axes_position_explicit_for_axes(0) {
             log::debug!("runmat-plot: renderer.scene_to_target.branch_single_axes");
             return self.render(
+                emission,
                 encoder,
                 RenderTarget {
                     view: target_view,
@@ -1864,6 +1885,7 @@ impl PlotRenderer {
             viewports.len()
         );
         self.render_axes_to_viewports(
+            emission,
             encoder,
             target_view,
             &viewports,
@@ -1984,6 +2006,7 @@ impl PlotRenderer {
     #[allow(clippy::too_many_arguments)]
     pub fn render_camera_to_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         viewport_scissor: (u32, u32, u32, u32),
@@ -2004,7 +2027,7 @@ impl PlotRenderer {
         let use_msaa = config.msaa_samples.max(1) > 1;
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
         let msaa_view_keepalive = if use_msaa {
-            Some(self.wgpu_renderer.ensure_msaa_color_view())
+            Some(self.wgpu_renderer.ensure_msaa_color_view(emission))
         } else {
             None
         };
@@ -2020,6 +2043,7 @@ impl PlotRenderer {
             }
         };
         self.render_camera_to_target_viewport(
+            emission,
             encoder,
             render_target,
             viewport_scissor,
@@ -2033,6 +2057,7 @@ impl PlotRenderer {
     #[allow(clippy::too_many_arguments)]
     fn render_camera_to_target_viewport(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target: RenderTarget<'_>,
         viewport_scissor: (u32, u32, u32, u32),
@@ -2050,7 +2075,7 @@ impl PlotRenderer {
         // Ensure a depth attachment exists for camera-based 3D rendering.
         // This is a no-op for pure 2D direct-mapped pipelines, but is required for correct
         // occlusion in 3D plots (surf/mesh/scatter3).
-        let depth_view = self.wgpu_renderer.ensure_depth_view();
+        let depth_view = self.wgpu_renderer.ensure_depth_view(emission);
 
         // Update standard uniforms from the provided camera
         let aspect_ratio = (config.width.max(1)) as f32 / (config.height.max(1)) as f32;
@@ -2081,8 +2106,12 @@ impl PlotRenderer {
         }
         let view_proj_matrix = cam.view_proj_matrix();
         let model_matrix = self.axes_model_matrix(axes_index);
-        self.wgpu_renderer
-            .update_uniforms_for_axes(axes_index, view_proj_matrix, model_matrix);
+        self.wgpu_renderer.update_uniforms_for_axes(
+            emission,
+            axes_index,
+            view_proj_matrix,
+            model_matrix,
+        );
         log::debug!(
             "runmat-plot: renderer.camera_to_target_viewport.uniforms_updated axes_index={}",
             axes_index
@@ -2183,9 +2212,11 @@ impl PlotRenderer {
                         render_data.gpu_vertices.is_some()
                     );
                 }
-                if let Some((vb, ib)) = self.prepare_buffers_for_render_data(node.id, render_data) {
+                if let Some((vb, ib)) =
+                    self.prepare_buffers_for_render_data(emission, node.id, render_data)
+                {
                     self.wgpu_renderer
-                        .ensure_pipeline(render_data.pipeline_type);
+                        .ensure_pipeline(emission, render_data.pipeline_type);
                     total_vertices += render_data.vertex_count();
                     if let Some(indices) = &render_data.indices {
                         total_triangles += indices.len() / 3;
@@ -2381,8 +2412,9 @@ impl PlotRenderer {
                 if !show_minor_grid {
                     minor_alpha = 0.0;
                 }
-                self.wgpu_renderer.ensure_grid_plane_pipeline();
+                self.wgpu_renderer.ensure_grid_plane_pipeline(emission);
                 self.wgpu_renderer.update_grid_uniforms_for_axes(
+                    emission,
                     axes_index,
                     crate::core::renderer::GridUniforms {
                         major_step: major_step as f32,
@@ -2405,8 +2437,12 @@ impl PlotRenderer {
                     Vertex::new(Vec3::new(min_x, max_y, z_grid), Vec4::ONE),
                 ];
                 let quad_indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
-                let vb = self.wgpu_renderer.create_vertex_buffer(&quad_vertices);
-                let ib = self.wgpu_renderer.create_index_buffer(&quad_indices);
+                let vb = self
+                    .wgpu_renderer
+                    .create_vertex_buffer(emission, &quad_vertices);
+                let ib = self
+                    .wgpu_renderer
+                    .create_index_buffer(emission, &quad_indices);
                 grid_plane_buffers = Some((vb, ib));
             }
 
@@ -2476,7 +2512,7 @@ impl PlotRenderer {
                 }
                 let vb = Arc::new(
                     self.wgpu_renderer
-                        .create_vertex_buffer(&owned_render_data[idx].vertices),
+                        .create_vertex_buffer(emission, &owned_render_data[idx].vertices),
                 );
                 // Draw helpers first (under data, depth-tested).
                 let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
@@ -2498,7 +2534,7 @@ impl PlotRenderer {
                     .wgpu_renderer
                     // size_px=0.0 => use per-vertex normal.z sizes
                     .create_direct_point_vertices(&render_data.vertices, 0.0);
-                let buf = self.wgpu_renderer.create_vertex_buffer(&expanded);
+                let buf = self.wgpu_renderer.create_vertex_buffer(emission, &expanded);
                 point_buffers.push(Some((buf, expanded.len())));
             } else {
                 point_buffers.push(None);
@@ -2509,7 +2545,7 @@ impl PlotRenderer {
             render_data.pipeline_type == crate::core::PipelineType::Textured
         });
         if has_textured_items {
-            self.wgpu_renderer.ensure_image_pipeline();
+            self.wgpu_renderer.ensure_image_pipeline(emission);
         }
         let mut image_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
@@ -2524,7 +2560,7 @@ impl PlotRenderer {
                 {
                     let (_t, _v, bg) = self
                         .wgpu_renderer
-                        .create_image_texture_and_bind_group(*width, *height, data);
+                        .create_image_texture_and_bind_group(emission, *width, *height, data);
                     image_bind_groups.push(Some(bg));
                 } else {
                     image_bind_groups.push(None);
@@ -2548,7 +2584,9 @@ impl PlotRenderer {
                     marker_shape: render_data.material.metallic as u32,
                     _pad: [0.0, 0.0],
                 };
-                let (_buf, bg) = self.wgpu_renderer.create_point_style_bind_group(style);
+                let (_buf, bg) = self
+                    .wgpu_renderer
+                    .create_point_style_bind_group(emission, style);
                 point_style_bind_groups.push(Some(bg));
             } else {
                 point_style_bind_groups.push(None);
@@ -2576,6 +2614,7 @@ impl PlotRenderer {
                     .ndc_endpoints();
                 // Update direct uniforms mapping for viewport
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    emission,
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
@@ -2586,7 +2625,7 @@ impl PlotRenderer {
                         log_flags,
                     ),
                 );
-                self.wgpu_renderer.ensure_direct_line_pipeline();
+                self.wgpu_renderer.ensure_direct_line_pipeline(emission);
 
                 let x_range = (r - l).max(1e-6);
                 let y_range = (t - b).max(1e-6);
@@ -2653,7 +2692,10 @@ impl PlotRenderer {
                     }
                 }
                 if !grid_vertices.is_empty() {
-                    grid_vb_opt = Some(self.wgpu_renderer.create_vertex_buffer(&grid_vertices));
+                    grid_vb_opt = Some(
+                        self.wgpu_renderer
+                            .create_vertex_buffer(emission, &grid_vertices),
+                    );
                 }
             }
         }
@@ -2679,6 +2721,7 @@ impl PlotRenderer {
                     .overlay_y_direction_for_axes(axes_index)
                     .ndc_endpoints();
                 self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    emission,
                     axes_index,
                     DirectUniforms::new(
                         [l as f32, b as f32],
@@ -2690,21 +2733,22 @@ impl PlotRenderer {
                     ),
                 );
             }
-            self.wgpu_renderer.ensure_direct_triangle_pipeline();
-            self.wgpu_renderer.ensure_direct_line_pipeline();
-            self.wgpu_renderer.ensure_direct_point_pipeline();
+            self.wgpu_renderer.ensure_direct_triangle_pipeline(emission);
+            self.wgpu_renderer.ensure_direct_line_pipeline(emission);
+            self.wgpu_renderer.ensure_direct_point_pipeline(emission);
         } else {
             // 3D: ensure camera-based pipelines exist so surfaces rotate with the camera.
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Triangles);
+                .ensure_pipeline(emission, crate::core::PipelineType::Triangles);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Lines);
+                .ensure_pipeline(emission, crate::core::PipelineType::Lines);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::LinesNoDepth);
+                .ensure_pipeline(emission, crate::core::PipelineType::LinesNoDepth);
             self.wgpu_renderer
-                .ensure_pipeline(crate::core::PipelineType::Points);
+                .ensure_pipeline(emission, crate::core::PipelineType::Points);
         }
         self.wgpu_renderer.update_marker_screen_uniforms_for_axes(
+            emission,
             axes_index,
             [sw.max(1) as f32, sh.max(1) as f32],
         );
@@ -3065,6 +3109,7 @@ impl PlotRenderer {
     /// `axes_viewports` is a vector of (x, y, w, h) in physical pixels, length equals rows*cols.
     pub fn render_axes_to_viewports(
         &mut self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         encoder: &mut wgpu::CommandEncoder,
         target_view: &wgpu::TextureView,
         axes_viewports: &[(u32, u32, u32, u32)],
@@ -3092,7 +3137,7 @@ impl PlotRenderer {
             self.axes_cameras.push(Self::create_default_camera());
         }
         self.wgpu_renderer
-            .ensure_axes_uniform_capacity(axes_viewports.len().max(1));
+            .ensure_axes_uniform_capacity(emission, axes_viewports.len().max(1));
 
         // Pre-collect all node ids
         let all_ids: Vec<crate::core::scene::NodeId> = self
@@ -3118,7 +3163,7 @@ impl PlotRenderer {
 
         self.wgpu_renderer.ensure_msaa(msaa_samples.max(1));
         let shared_msaa_view = if self.wgpu_renderer.msaa_sample_count > 1 {
-            Some(self.wgpu_renderer.ensure_msaa_color_view())
+            Some(self.wgpu_renderer.ensure_msaa_color_view(emission))
         } else {
             None
         };
@@ -3191,6 +3236,7 @@ impl PlotRenderer {
                 }
             };
             let _ = self.render_camera_to_target_viewport(
+                emission,
                 encoder,
                 render_target,
                 *viewport,

@@ -113,12 +113,13 @@ impl BindGroupCache {
 
     pub fn get_or_create<F>(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         layout: &wgpu::BindGroupLayout,
         entries: &[wgpu::BindGroupEntry],
         create: F,
-    ) -> Arc<wgpu::BindGroup>
+    ) -> anyhow::Result<Arc<wgpu::BindGroup>>
     where
-        F: FnOnce() -> Arc<wgpu::BindGroup>,
+        F: FnOnce(&runmat_accelerate_api::WgpuEmission<'_>) -> Arc<wgpu::BindGroup>,
     {
         match Self::make_key(layout, entries) {
             Some(key) => {
@@ -134,9 +135,10 @@ impl BindGroupCache {
                         let entry = per.entry(key.layout_ptr).or_insert((0, 0));
                         entry.0 = entry.0.saturating_add(1);
                     }
-                    return existing;
+                    return Ok(existing);
                 }
-                let bind_group = create();
+                super::scope::allow_creation(emission.mode())?;
+                let bind_group = create(emission);
                 let layout_ptr = key.layout_ptr;
                 let replaced = self
                     .inner
@@ -150,11 +152,13 @@ impl BindGroupCache {
                     let entry = per.entry(layout_ptr).or_insert((0, 0));
                     entry.1 = entry.1.saturating_add(1);
                 }
-                bind_group
+                Ok(bind_group)
             }
             None => {
                 self.misses.fetch_add(1, Ordering::Relaxed);
-                create()
+                // Unkeyed resources are returned to the transaction owner, not
+                // published in this cache before detached scope resolution.
+                Ok(create(emission))
             }
         }
     }

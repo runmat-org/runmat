@@ -1,6 +1,6 @@
 pub use runmat_async::{
     runtime_error as build_runtime_error, CallFrame, ErrorContext, GpuGatherRetry, RuntimeError,
-    RuntimeErrorBuilder,
+    RuntimeErrorBuilder, RuntimeErrorSourceBound,
 };
 
 #[cfg(test)]
@@ -112,7 +112,7 @@ pub fn replay_error(kind: ReplayErrorKind, message: impl Into<String>) -> Runtim
 pub fn replay_error_with_source(
     kind: ReplayErrorKind,
     message: impl Into<String>,
-    source: impl std::error::Error + Send + Sync + 'static,
+    source: impl crate::runtime_error::RuntimeErrorSourceBound,
 ) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin("replay")

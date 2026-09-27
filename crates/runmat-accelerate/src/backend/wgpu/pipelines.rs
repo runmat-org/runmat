@@ -1,8 +1,7 @@
 use crate::backend::wgpu::bindings::{storage_read_entry, storage_read_write_entry, uniform_entry};
 use crate::backend::wgpu::types::NumericPrecision;
 use std::borrow::Cow;
-use std::ops::Deref;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 // Shader aliases
 const BINARY_SHADER_F64: &str = crate::backend::wgpu::shaders::elementwise::BINARY_SHADER_F64;
@@ -225,7 +224,7 @@ pub struct CompiledPipelineBundle {
 /// invoked, and [`OnceLock`] coalesces concurrent first use.
 pub struct PipelineBundle {
     compiled: OnceLock<CompiledPipelineBundle>,
-    device: Arc<wgpu::Device>,
+    access: runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
     shader_label: &'static str,
     pipeline_label: &'static str,
@@ -233,20 +232,26 @@ pub struct PipelineBundle {
     shader_source: Cow<'static, str>,
 }
 
-impl Deref for PipelineBundle {
-    type Target = CompiledPipelineBundle;
-
-    fn deref(&self) -> &Self::Target {
-        self.compiled.get_or_init(|| {
-            compile_pipeline(
-                &self.device,
-                self.layout_label,
-                self.shader_label,
-                self.pipeline_label,
-                &self.entries,
-                &self.shader_source,
-            )
-        })
+impl PipelineBundle {
+    pub fn get(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> anyhow::Result<&CompiledPipelineBundle> {
+        emission.ensure_device(&self.access)?;
+        Ok(crate::backend::wgpu::cache::scope::get_or_init(
+            &self.compiled,
+            emission.mode(),
+            || {
+                compile_pipeline(
+                    emission,
+                    self.layout_label,
+                    self.shader_label,
+                    self.pipeline_label,
+                    &self.entries,
+                    &self.shader_source,
+                )
+            },
+        )?)
     }
 }
 
@@ -344,7 +349,7 @@ pub struct WgpuPipelines {
 
 impl WgpuPipelines {
     pub fn new(
-        device: &Arc<wgpu::Device>,
+        access: &runmat_accelerate_api::WgpuDeviceAccess,
         precision: NumericPrecision,
         image_norm_bootstrap: ImageNormalizeBootstrap,
         scalar_workgroup: u32,
@@ -353,7 +358,7 @@ impl WgpuPipelines {
         #[cfg(target_os = "windows")]
         let _ = &image_norm_bootstrap;
         let binary = create_pipeline(
-            device,
+            access,
             "runmat-binary-layout",
             "runmat-binary-shader",
             "runmat-binary-pipeline",
@@ -370,7 +375,7 @@ impl WgpuPipelines {
         );
 
         let binary_broadcast = create_pipeline(
-            device,
+            access,
             "runmat-binary-broadcast-layout",
             "runmat-binary-broadcast-shader",
             "runmat-binary-broadcast-pipeline",
@@ -393,7 +398,7 @@ impl WgpuPipelines {
             precision,
         );
         let unary = create_pipeline(
-            device,
+            access,
             "runmat-unary-layout",
             "runmat-unary-shader",
             "runmat-unary-pipeline",
@@ -406,7 +411,7 @@ impl WgpuPipelines {
         );
 
         let scalar = create_pipeline(
-            device,
+            access,
             "runmat-scalar-layout",
             "runmat-scalar-shader",
             "runmat-scalar-pipeline",
@@ -422,7 +427,7 @@ impl WgpuPipelines {
         );
 
         let transpose = create_pipeline(
-            device,
+            access,
             "runmat-transpose-layout",
             "runmat-transpose-shader",
             "runmat-transpose-pipeline",
@@ -438,7 +443,7 @@ impl WgpuPipelines {
         );
 
         let permute = create_pipeline(
-            device,
+            access,
             "runmat-permute-layout",
             "runmat-permute-shader",
             "runmat-permute-pipeline",
@@ -455,7 +460,7 @@ impl WgpuPipelines {
         );
         let integer_permute_shader = crate::backend::wgpu::shaders::permute::permute_shader_u32();
         let integer_permute = create_pipeline(
-            device,
+            access,
             "runmat-integer-permute-layout",
             "runmat-integer-permute-shader",
             "runmat-integer-permute-pipeline",
@@ -468,7 +473,7 @@ impl WgpuPipelines {
         );
 
         let flip = create_pipeline(
-            device,
+            access,
             "runmat-flip-layout",
             "runmat-flip-shader",
             "runmat-flip-pipeline",
@@ -484,7 +489,7 @@ impl WgpuPipelines {
         );
         let integer_flip_shader = crate::backend::wgpu::shaders::flip::flip_shader_u32();
         let integer_flip = create_pipeline(
-            device,
+            access,
             "runmat-integer-flip-layout",
             "runmat-integer-flip-shader",
             "runmat-integer-flip-pipeline",
@@ -497,7 +502,7 @@ impl WgpuPipelines {
         );
 
         let conv1d = create_pipeline(
-            device,
+            access,
             "runmat-conv1d-layout",
             "runmat-conv1d-shader",
             "runmat-conv1d-pipeline",
@@ -514,7 +519,7 @@ impl WgpuPipelines {
         );
 
         let filter = create_pipeline(
-            device,
+            access,
             "runmat-iir-filter-layout",
             "runmat-iir-filter-shader",
             "runmat-iir-filter-pipeline",
@@ -535,7 +540,7 @@ impl WgpuPipelines {
         );
 
         let moving_window = create_pipeline(
-            device,
+            access,
             "runmat-moving-window-layout",
             "runmat-moving-window-shader",
             "runmat-moving-window-pipeline",
@@ -551,7 +556,7 @@ impl WgpuPipelines {
         );
 
         let diff = create_pipeline(
-            device,
+            access,
             "runmat-diff-layout",
             "runmat-diff-shader",
             "runmat-diff-pipeline",
@@ -567,7 +572,7 @@ impl WgpuPipelines {
         );
 
         let gradient = create_pipeline(
-            device,
+            access,
             "runmat-gradient-layout",
             "runmat-gradient-shader",
             "runmat-gradient-pipeline",
@@ -583,7 +588,7 @@ impl WgpuPipelines {
         );
 
         let gradient_coordinates = create_pipeline(
-            device,
+            access,
             "runmat-gradient-coordinates-layout",
             "runmat-gradient-coordinates-shader",
             "runmat-gradient-coordinates-pipeline",
@@ -600,7 +605,7 @@ impl WgpuPipelines {
         );
 
         let cumsum = create_pipeline(
-            device,
+            access,
             "runmat-cumsum-layout",
             "runmat-cumsum-shader",
             "runmat-cumsum-pipeline",
@@ -616,7 +621,7 @@ impl WgpuPipelines {
         );
 
         let trapezoid = create_pipeline(
-            device,
+            access,
             "runmat-trapezoid-layout",
             "runmat-trapezoid-shader",
             "runmat-trapezoid-pipeline",
@@ -633,7 +638,7 @@ impl WgpuPipelines {
         );
 
         let cumprod = create_pipeline(
-            device,
+            access,
             "runmat-cumprod-layout",
             "runmat-cumprod-shader",
             "runmat-cumprod-pipeline",
@@ -649,7 +654,7 @@ impl WgpuPipelines {
         );
 
         let cummin = create_pipeline(
-            device,
+            access,
             "runmat-cummin-layout",
             "runmat-cummin-shader",
             "runmat-cummin-pipeline",
@@ -666,7 +671,7 @@ impl WgpuPipelines {
         );
 
         let cummax = create_pipeline(
-            device,
+            access,
             "runmat-cummax-layout",
             "runmat-cummax-shader",
             "runmat-cummax-pipeline",
@@ -683,7 +688,7 @@ impl WgpuPipelines {
         );
 
         let tril = create_pipeline(
-            device,
+            access,
             "runmat-tril-layout",
             "runmat-tril-shader",
             "runmat-tril-pipeline",
@@ -699,7 +704,7 @@ impl WgpuPipelines {
         );
 
         let triu = create_pipeline(
-            device,
+            access,
             "runmat-triu-layout",
             "runmat-triu-shader",
             "runmat-triu-pipeline",
@@ -715,7 +720,7 @@ impl WgpuPipelines {
         );
 
         let circshift = create_pipeline(
-            device,
+            access,
             "runmat-circshift-layout",
             "runmat-circshift-shader",
             "runmat-circshift-pipeline",
@@ -732,7 +737,7 @@ impl WgpuPipelines {
         let integer_circshift_shader =
             crate::backend::wgpu::shaders::circshift::circshift_shader_u32();
         let integer_circshift = create_pipeline(
-            device,
+            access,
             "runmat-integer-circshift-layout",
             "runmat-integer-circshift-shader",
             "runmat-integer-circshift-pipeline",
@@ -745,7 +750,7 @@ impl WgpuPipelines {
         );
 
         let fft_init = create_pipeline(
-            device,
+            access,
             "runmat-fft-init-layout",
             "runmat-fft-init-shader",
             "runmat-fft-init-pipeline",
@@ -761,7 +766,7 @@ impl WgpuPipelines {
         );
 
         let fft_stage = create_pipeline(
-            device,
+            access,
             "runmat-fft-stage-layout",
             "runmat-fft-stage-shader",
             "runmat-fft-stage-pipeline",
@@ -777,7 +782,7 @@ impl WgpuPipelines {
         );
 
         let fft_reorder = create_pipeline(
-            device,
+            access,
             "runmat-fft-reorder-layout",
             "runmat-fft-reorder-shader",
             "runmat-fft-reorder-pipeline",
@@ -793,7 +798,7 @@ impl WgpuPipelines {
         );
 
         let fft_direct = create_pipeline(
-            device,
+            access,
             "runmat-fft-direct-layout",
             "runmat-fft-direct-shader",
             "runmat-fft-direct-pipeline",
@@ -809,7 +814,7 @@ impl WgpuPipelines {
         );
 
         let fft_extract_real = create_pipeline(
-            device,
+            access,
             "runmat-fft-extract-real-layout",
             "runmat-fft-extract-real-shader",
             "runmat-fft-extract-real-pipeline",
@@ -825,7 +830,7 @@ impl WgpuPipelines {
         );
 
         let fft_stage3 = create_pipeline(
-            device,
+            access,
             "runmat-fft-stage3-layout",
             "runmat-fft-stage3-shader",
             "runmat-fft-stage3-pipeline",
@@ -842,7 +847,7 @@ impl WgpuPipelines {
         );
 
         let fft_reorder3 = create_pipeline(
-            device,
+            access,
             "runmat-fft-reorder3-layout",
             "runmat-fft-reorder3-shader",
             "runmat-fft-reorder3-pipeline",
@@ -858,7 +863,7 @@ impl WgpuPipelines {
         );
 
         let fft_stage5 = create_pipeline(
-            device,
+            access,
             "runmat-fft-stage5-layout",
             "runmat-fft-stage5-shader",
             "runmat-fft-stage5-pipeline",
@@ -875,7 +880,7 @@ impl WgpuPipelines {
         );
 
         let fft_reorder5 = create_pipeline(
-            device,
+            access,
             "runmat-fft-reorder5-layout",
             "runmat-fft-reorder5-shader",
             "runmat-fft-reorder5-pipeline",
@@ -891,7 +896,7 @@ impl WgpuPipelines {
         );
 
         let fft_reorder_mixed = create_pipeline(
-            device,
+            access,
             "runmat-fft-reorder-mixed-layout",
             "runmat-fft-reorder-mixed-shader",
             "runmat-fft-reorder-mixed-pipeline",
@@ -907,7 +912,7 @@ impl WgpuPipelines {
         );
 
         let fft_bluestein_prep = create_pipeline(
-            device,
+            access,
             "runmat-fft-bluestein-prep-layout",
             "runmat-fft-bluestein-prep-shader",
             "runmat-fft-bluestein-prep-pipeline",
@@ -924,7 +929,7 @@ impl WgpuPipelines {
         );
 
         let fft_bluestein_kernel = create_pipeline(
-            device,
+            access,
             "runmat-fft-bluestein-kernel-layout",
             "runmat-fft-bluestein-kernel-shader",
             "runmat-fft-bluestein-kernel-pipeline",
@@ -940,7 +945,7 @@ impl WgpuPipelines {
         );
 
         let fft_pointwise_broadcast = create_pipeline(
-            device,
+            access,
             "runmat-fft-pointwise-broadcast-layout",
             "runmat-fft-pointwise-broadcast-shader",
             "runmat-fft-pointwise-broadcast-pipeline",
@@ -957,7 +962,7 @@ impl WgpuPipelines {
         );
 
         let fft_bluestein_finalize = create_pipeline(
-            device,
+            access,
             "runmat-fft-bluestein-finalize-layout",
             "runmat-fft-bluestein-finalize-shader",
             "runmat-fft-bluestein-finalize-pipeline",
@@ -974,7 +979,7 @@ impl WgpuPipelines {
         );
 
         let repmat = create_pipeline(
-            device,
+            access,
             "runmat-repmat-layout",
             "runmat-repmat-shader",
             "runmat-repmat-pipeline",
@@ -990,7 +995,7 @@ impl WgpuPipelines {
         );
         let integer_repmat_shader = crate::backend::wgpu::shaders::repmat::repmat_shader_u32();
         let integer_repmat = create_pipeline(
-            device,
+            access,
             "runmat-integer-repmat-layout",
             "runmat-integer-repmat-shader",
             "runmat-integer-repmat-pipeline",
@@ -1003,7 +1008,7 @@ impl WgpuPipelines {
         );
 
         let kron = create_pipeline(
-            device,
+            access,
             "runmat-kron-layout",
             "runmat-kron-shader",
             "runmat-kron-pipeline",
@@ -1020,7 +1025,7 @@ impl WgpuPipelines {
         );
 
         let matmul = create_pipeline(
-            device,
+            access,
             "runmat-matmul-layout",
             "runmat-matmul-shader",
             "runmat-matmul-pipeline",
@@ -1037,7 +1042,7 @@ impl WgpuPipelines {
         );
 
         let matmul_vec4 = create_pipeline(
-            device,
+            access,
             "runmat-matmul-vec4-layout",
             "runmat-matmul-vec4-shader",
             "runmat-matmul-vec4-pipeline",
@@ -1054,7 +1059,7 @@ impl WgpuPipelines {
         );
 
         let matmul_smallk = create_pipeline(
-            device,
+            access,
             "runmat-matmul-smallk-layout",
             "runmat-matmul-smallk-shader",
             "runmat-matmul-smallk-pipeline",
@@ -1071,7 +1076,7 @@ impl WgpuPipelines {
         );
 
         let matmul_tall_skinny = create_pipeline(
-            device,
+            access,
             "runmat-matmul-tall-skinny-layout",
             "runmat-matmul-tall-skinny-shader",
             "runmat-matmul-tall-skinny-pipeline",
@@ -1088,7 +1093,7 @@ impl WgpuPipelines {
         );
 
         let matmul_epilogue = create_pipeline(
-            device,
+            access,
             "runmat-matmul-epilogue-layout",
             "runmat-matmul-epilogue-shader",
             "runmat-matmul-epilogue-pipeline",
@@ -1111,7 +1116,7 @@ impl WgpuPipelines {
         );
 
         let centered_gram = create_pipeline(
-            device,
+            access,
             "runmat-centered-gram-layout",
             "runmat-centered-gram-shader",
             "runmat-centered-gram-pipeline",
@@ -1128,7 +1133,7 @@ impl WgpuPipelines {
         );
 
         let qr_power_iter = create_pipeline(
-            device,
+            access,
             "runmat-qr-power-layout",
             "runmat-qr-power-shader",
             "runmat-qr-power-pipeline",
@@ -1142,7 +1147,7 @@ impl WgpuPipelines {
         );
 
         let syrk = create_pipeline(
-            device,
+            access,
             "runmat-syrk-layout",
             "runmat-syrk-shader",
             "runmat-syrk-pipeline",
@@ -1158,7 +1163,7 @@ impl WgpuPipelines {
         );
 
         let reduce_global = create_pipeline(
-            device,
+            access,
             "runmat-reduce-global-layout",
             "runmat-reduce-global-shader",
             "runmat-reduce-global-pipeline",
@@ -1174,7 +1179,7 @@ impl WgpuPipelines {
         );
 
         let reduce_dim_sum_mean = create_pipeline(
-            device,
+            access,
             "runmat-reduce-dim-layout",
             "runmat-reduce-dim-shader",
             "runmat-reduce-dim-pipeline",
@@ -1190,7 +1195,7 @@ impl WgpuPipelines {
         );
 
         let reduce_dim_minmax = create_pipeline(
-            device,
+            access,
             "runmat-reduce-dim-minmax-layout",
             "runmat-reduce-dim-minmax-shader",
             "runmat-reduce-dim-minmax-pipeline",
@@ -1208,7 +1213,7 @@ impl WgpuPipelines {
         );
 
         let eye = create_pipeline(
-            device,
+            access,
             "runmat-eye-layout",
             "runmat-eye-shader",
             "runmat-eye-pipeline",
@@ -1220,7 +1225,7 @@ impl WgpuPipelines {
         );
 
         let fill = create_pipeline(
-            device,
+            access,
             "runmat-fill-layout",
             "runmat-fill-shader",
             "runmat-fill-pipeline",
@@ -1232,7 +1237,7 @@ impl WgpuPipelines {
         );
 
         let linspace = create_pipeline(
-            device,
+            access,
             "runmat-linspace-layout",
             "runmat-linspace-shader",
             "runmat-linspace-pipeline",
@@ -1244,7 +1249,7 @@ impl WgpuPipelines {
         );
 
         let window = create_pipeline(
-            device,
+            access,
             "runmat-window-layout",
             "runmat-window-shader",
             "runmat-window-pipeline",
@@ -1256,7 +1261,7 @@ impl WgpuPipelines {
         );
 
         let random_uniform = create_pipeline(
-            device,
+            access,
             "runmat-random-uniform-layout",
             "runmat-random-uniform-shader",
             "runmat-random-uniform-pipeline",
@@ -1268,7 +1273,7 @@ impl WgpuPipelines {
         );
 
         let random_normal = create_pipeline(
-            device,
+            access,
             "runmat-random-normal-layout",
             "runmat-random-normal-shader",
             "runmat-random-normal-pipeline",
@@ -1280,7 +1285,7 @@ impl WgpuPipelines {
         );
 
         let random_exprnd = create_pipeline(
-            device,
+            access,
             "runmat-random-exprnd-layout",
             "runmat-random-exprnd-shader",
             "runmat-random-exprnd-pipeline",
@@ -1292,7 +1297,7 @@ impl WgpuPipelines {
         );
 
         let random_normrnd = create_pipeline(
-            device,
+            access,
             "runmat-random-normrnd-layout",
             "runmat-random-normrnd-shader",
             "runmat-random-normrnd-pipeline",
@@ -1304,7 +1309,7 @@ impl WgpuPipelines {
         );
 
         let random_unifrnd = create_pipeline(
-            device,
+            access,
             "runmat-random-unifrnd-layout",
             "runmat-random-unifrnd-shader",
             "runmat-random-unifrnd-pipeline",
@@ -1316,7 +1321,7 @@ impl WgpuPipelines {
         );
 
         let stochastic_evolution = create_pipeline(
-            device,
+            access,
             "runmat-stochastic-evolution-layout",
             "runmat-stochastic-evolution-shader",
             "runmat-stochastic-evolution-pipeline",
@@ -1332,7 +1337,7 @@ impl WgpuPipelines {
         );
 
         let randperm = create_pipeline(
-            device,
+            access,
             "runmat-randperm-layout",
             "runmat-randperm-shader",
             "runmat-randperm-pipeline",
@@ -1344,7 +1349,7 @@ impl WgpuPipelines {
         );
 
         let fspecial = create_pipeline(
-            device,
+            access,
             "runmat-fspecial-layout",
             "runmat-fspecial-shader",
             "runmat-fspecial-pipeline",
@@ -1356,7 +1361,7 @@ impl WgpuPipelines {
         );
 
         let peaks = create_pipeline(
-            device,
+            access,
             "runmat-peaks-layout",
             "runmat-peaks-shader",
             "runmat-peaks-pipeline",
@@ -1368,7 +1373,7 @@ impl WgpuPipelines {
         );
 
         let peaks_xy = create_pipeline(
-            device,
+            access,
             "runmat-peaks-xy-layout",
             "runmat-peaks-xy-shader",
             "runmat-peaks-xy-pipeline",
@@ -1385,7 +1390,7 @@ impl WgpuPipelines {
         );
 
         let imfilter = create_pipeline(
-            device,
+            access,
             "runmat-imfilter-layout",
             "runmat-imfilter-shader",
             "runmat-imfilter-pipeline",
@@ -1429,7 +1434,7 @@ impl WgpuPipelines {
         };
 
         let image_normalize = create_pipeline(
-            device,
+            access,
             "runmat-image-normalize-layout",
             "runmat-image-normalize-shader",
             "runmat-image-normalize-pipeline",
@@ -1444,7 +1449,7 @@ impl WgpuPipelines {
         );
 
         let polyval = create_pipeline(
-            device,
+            access,
             "runmat-polyval-layout",
             "runmat-polyval-shader",
             "runmat-polyval-pipeline",
@@ -1461,7 +1466,7 @@ impl WgpuPipelines {
         );
 
         let polyder = create_pipeline(
-            device,
+            access,
             "runmat-polyder-layout",
             "runmat-polyder-shader",
             "runmat-polyder-pipeline",
@@ -1477,7 +1482,7 @@ impl WgpuPipelines {
         );
 
         let polyint = create_pipeline(
-            device,
+            access,
             "runmat-polyint-layout",
             "runmat-polyint-shader",
             "runmat-polyint-pipeline",
@@ -1493,7 +1498,7 @@ impl WgpuPipelines {
         );
 
         let diag_from_vector = create_pipeline(
-            device,
+            access,
             "runmat-diag-from-vector-layout",
             "runmat-diag-from-vector-shader",
             "runmat-diag-from-vector-pipeline",
@@ -1510,7 +1515,7 @@ impl WgpuPipelines {
         );
 
         let diag_extract = create_pipeline(
-            device,
+            access,
             "runmat-diag-extract-layout",
             "runmat-diag-extract-shader",
             "runmat-diag-extract-pipeline",
@@ -1529,7 +1534,7 @@ impl WgpuPipelines {
         );
 
         let interp1 = create_pipeline(
-            device,
+            access,
             "runmat-interp1-layout",
             "runmat-interp1-shader",
             "runmat-interp1-pipeline",
@@ -1547,7 +1552,7 @@ impl WgpuPipelines {
         );
 
         let gather_linear = create_pipeline(
-            device,
+            access,
             "runmat-gather-linear-layout",
             "runmat-gather-linear-shader",
             "runmat-gather-linear-pipeline",
@@ -1565,7 +1570,7 @@ impl WgpuPipelines {
         );
 
         let scatter_linear = create_pipeline(
-            device,
+            access,
             "runmat-scatter-linear-layout",
             "runmat-scatter-linear-shader",
             "runmat-scatter-linear-pipeline",
@@ -1583,7 +1588,7 @@ impl WgpuPipelines {
         );
 
         let find = create_pipeline(
-            device,
+            access,
             "runmat-find-layout",
             "runmat-find-shader",
             "runmat-find-pipeline",
@@ -1603,7 +1608,7 @@ impl WgpuPipelines {
         );
 
         let bandwidth = create_pipeline(
-            device,
+            access,
             "runmat-bandwidth-layout",
             "runmat-bandwidth-shader",
             "runmat-bandwidth-pipeline",
@@ -1619,7 +1624,7 @@ impl WgpuPipelines {
         );
 
         let symmetry = create_pipeline(
-            device,
+            access,
             "runmat-symmetry-layout",
             "runmat-symmetry-shader",
             "runmat-symmetry-pipeline",
@@ -1635,7 +1640,7 @@ impl WgpuPipelines {
         );
 
         let reduce_nd_mean = create_pipeline(
-            device,
+            access,
             "runmat-reduce-nd-mean-layout",
             "runmat-reduce-nd-mean-shader",
             "runmat-reduce-nd-mean-pipeline",
@@ -1651,7 +1656,7 @@ impl WgpuPipelines {
         );
 
         let reduce_nd_moments = create_pipeline(
-            device,
+            access,
             "runmat-reduce-nd-moments-layout",
             "runmat-reduce-nd-moments-shader",
             "runmat-reduce-nd-moments-pipeline",
@@ -1765,7 +1770,7 @@ fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
 }
 
 fn create_pipeline(
-    device: &Arc<wgpu::Device>,
+    access: &runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
     shader_label: &'static str,
     pipeline_label: &'static str,
@@ -1774,7 +1779,7 @@ fn create_pipeline(
 ) -> PipelineBundle {
     PipelineBundle {
         compiled: OnceLock::new(),
-        device: Arc::clone(device),
+        access: access.clone(),
         layout_label,
         shader_label,
         pipeline_label,
@@ -1784,13 +1789,14 @@ fn create_pipeline(
 }
 
 fn compile_pipeline(
-    device: &wgpu::Device,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     layout_label: &str,
     shader_label: &str,
     pipeline_label: &str,
     entries: &[wgpu::BindGroupLayoutEntry],
     shader_source: &str,
 ) -> CompiledPipelineBundle {
+    let device = emission.device();
     let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some(layout_label),
         entries,
@@ -1821,7 +1827,12 @@ fn compile_pipeline(
     CompiledPipelineBundle { pipeline, layout }
 }
 
-pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> wgpu::ShaderModule {
+pub fn create_shader_module(
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    label: &str,
+    wgsl: &str,
+) -> wgpu::ShaderModule {
+    let device = emission.device();
     let wg = crate::backend::wgpu::config::effective_workgroup_size();
     let mt = crate::backend::wgpu::config::effective_matmul_tile();
     let patched = substitute_tokens(wgsl, wg, mt);
@@ -1832,10 +1843,11 @@ pub fn create_shader_module(device: &wgpu::Device, label: &str, wgsl: &str) -> w
 }
 
 pub fn create_pipeline_layout(
-    device: &wgpu::Device,
+    emission: &runmat_accelerate_api::WgpuEmission<'_>,
     label: &str,
     bgl: &wgpu::BindGroupLayout,
 ) -> wgpu::PipelineLayout {
+    let device = emission.device();
     device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(label),
         bind_group_layouts: &[bgl],

@@ -630,21 +630,26 @@ async fn build_stem_gpu_plot(
         len: x_ref.len as u32,
         scalar,
     };
-    let gpu_vertices = runmat_plot::gpu::stem::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &StemGpuParams {
-            color: parsed.appearance.color,
-            baseline_color: parsed.appearance.color,
-            baseline: parsed.baseline as f32,
-            baseline_visible: parsed.baseline_visible,
-            min_x,
-            max_x,
-            line_style: parsed.appearance.line_style,
-        },
-    )
-    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::stem::pack_vertices_from_xy(
+                emission,
+                &inputs,
+                &StemGpuParams {
+                    color: parsed.appearance.color,
+                    baseline_color: parsed.appearance.color,
+                    baseline: parsed.baseline as f32,
+                    baseline_visible: parsed.baseline_visible,
+                    min_x,
+                    max_x,
+                    line_style: parsed.appearance.line_style,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
     let mut plot = StemPlot::from_gpu_buffer(
         parsed.appearance.color,
         parsed.appearance.line_width,
@@ -663,34 +668,39 @@ async fn build_stem_gpu_plot(
         if parsed.filled {
             marker.filled = true;
         }
-        let marker_gpu = line::pack_marker_vertices_from_xy(
-            &context.device,
-            &context.queue,
-            &MarkerGpuInputs {
-                x_buffer: x_ref.clone().into(),
-                y_buffer: y_ref.clone().into(),
-                len: x_ref.len as u32,
-                scalar,
-            },
-            &MarkerGpuParams {
-                color: marker.face_color,
-                half_width_px: 0.0,
-                viewport_width_px: 1.0,
-                viewport_height_px: 1.0,
-                x_min: 0.0,
-                x_span: 1.0,
-                y_min: 0.0,
-                y_span: 1.0,
-                line_style: runmat_plot::plots::LineStyle::Solid,
-                marker_size: marker.size,
-            },
-        )
-        .map_err(|e| {
-            plotting_error(
-                name,
-                format!("{name}: failed to build marker vertices: {e}"),
-            )
-        })?;
+        let marker_gpu = context
+            .access
+            .with_shared(|emission| {
+                line::pack_marker_vertices_from_xy(
+                    emission,
+                    &MarkerGpuInputs {
+                        x_buffer: x_ref.clone().into(),
+                        y_buffer: y_ref.clone().into(),
+                        len: x_ref.len as u32,
+                        scalar,
+                    },
+                    &MarkerGpuParams {
+                        color: marker.face_color,
+                        half_width_px: 0.0,
+                        viewport_width_px: 1.0,
+                        viewport_height_px: 1.0,
+                        x_min: 0.0,
+                        x_span: 1.0,
+                        y_min: 0.0,
+                        y_span: 1.0,
+                        line_style: runmat_plot::plots::LineStyle::Solid,
+                        marker_size: marker.size,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     } else if parsed.filled {
@@ -701,34 +711,39 @@ async fn build_stem_gpu_plot(
             face_color: parsed.appearance.color,
             filled: true,
         };
-        let marker_gpu = line::pack_marker_vertices_from_xy(
-            &context.device,
-            &context.queue,
-            &MarkerGpuInputs {
-                x_buffer: x_ref.clone().into(),
-                y_buffer: y_ref.clone().into(),
-                len: x_ref.len as u32,
-                scalar,
-            },
-            &MarkerGpuParams {
-                color: marker.face_color,
-                half_width_px: 0.0,
-                viewport_width_px: 1.0,
-                viewport_height_px: 1.0,
-                x_min: 0.0,
-                x_span: 1.0,
-                y_min: 0.0,
-                y_span: 1.0,
-                line_style: runmat_plot::plots::LineStyle::Solid,
-                marker_size: marker.size,
-            },
-        )
-        .map_err(|e| {
-            plotting_error(
-                name,
-                format!("{name}: failed to build marker vertices: {e}"),
-            )
-        })?;
+        let marker_gpu = context
+            .access
+            .with_shared(|emission| {
+                line::pack_marker_vertices_from_xy(
+                    emission,
+                    &MarkerGpuInputs {
+                        x_buffer: x_ref.clone().into(),
+                        y_buffer: y_ref.clone().into(),
+                        len: x_ref.len as u32,
+                        scalar,
+                    },
+                    &MarkerGpuParams {
+                        color: marker.face_color,
+                        half_width_px: 0.0,
+                        viewport_width_px: 1.0,
+                        viewport_height_px: 1.0,
+                        x_min: 0.0,
+                        x_span: 1.0,
+                        y_min: 0.0,
+                        y_span: 1.0,
+                        line_style: runmat_plot::plots::LineStyle::Solid,
+                        marker_size: marker.size,
+                    },
+                )
+            })
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+            .map_err(|e| {
+                plotting_error(
+                    name,
+                    format!("{name}: failed to build marker vertices: {e}"),
+                )
+            })?;
         plot.set_marker(Some(marker));
         plot.set_marker_gpu_vertices(Some(marker_gpu));
     }

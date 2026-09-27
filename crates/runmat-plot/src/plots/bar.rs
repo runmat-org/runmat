@@ -90,8 +90,7 @@ impl BarChart {
             let source_row_count = source.source_row_count.max(row_count).max(1);
             let series_count = source.series_count.max(1);
             let all_values = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
+                &context.access,
                 &source.inputs.values_buffer,
                 source_row_count * series_count,
                 source.inputs.scalar,

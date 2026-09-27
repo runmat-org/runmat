@@ -166,30 +166,15 @@ impl Line3Plot {
                 "plot3 line has GPU source data but no shared WGPU context is installed".to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let z = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.z_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
+            let z =
+                readback_scalar_buffer_f64(&context.access, &inputs.z_buffer, len, inputs.scalar)
+                    .await?;
             let shape = vec![1, len];
             let wrap = |values: Vec<f64>| match inputs.scalar {
                 crate::gpu::ScalarType::F64 => {
@@ -440,8 +425,7 @@ impl Line3Plot {
             0.0
         };
         let packed = crate::gpu::line3::pack_vertices_from_xyz(
-            gpu.device,
-            gpu.queue,
+            gpu.emission,
             inputs,
             &Line3GpuParams {
                 color: self.color,
@@ -567,7 +551,7 @@ mod tests {
     use std::sync::Arc;
     use wgpu::util::DeviceExt;
 
-    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+    fn maybe_device() -> Option<runmat_accelerate_api::WgpuDeviceAccess> {
         if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
             || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
         {
@@ -592,7 +576,7 @@ mod tests {
             )
             .block_on()
             .ok()?;
-        Some((Arc::new(device), Arc::new(queue)))
+        Some(runmat_accelerate_api::WgpuDeviceAccess::new(device, queue))
     }
 
     #[test]
@@ -631,29 +615,47 @@ mod tests {
 
     #[test]
     fn line3_gpu_source_packs_default_width_as_thick_geometry() {
-        let Some((device, queue)) = maybe_device() else {
+        let Some(access) = maybe_device() else {
             return;
         };
         let x_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-x"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-x"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let y_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-y"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-y"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let z_buffer = Arc::new(
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("line3-test-z"),
-                contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
-                usage: wgpu::BufferUsages::STORAGE,
-            }),
+            access
+                .with_shared(|emission| {
+                    emission
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("line3-test-z"),
+                            contents: bytemuck::cast_slice(&[0.0f32, 1.0f32]),
+                            usage: wgpu::BufferUsages::STORAGE,
+                        })
+                })
+                .expect("test device access"),
         );
         let mut plot = Line3Plot::from_gpu_xyz(
             Line3GpuInputs {
@@ -668,11 +670,12 @@ mod tests {
             crate::plots::line::LineStyle::Solid,
             BoundingBox::new(Vec3::ZERO, Vec3::ONE),
         );
-        let gpu = GpuPackContext {
-            device: &device,
-            queue: &queue,
-        };
-        let render = plot.render_data_with_viewport_gpu(Some((800, 600)), None, Some(&gpu));
+        let render = access
+            .with_shared(|emission| {
+                let gpu = GpuPackContext { emission };
+                plot.render_data_with_viewport_gpu(Some((800, 600)), None, Some(&gpu))
+            })
+            .expect("test device access");
         assert_eq!(render.pipeline_type, PipelineType::Triangles);
         assert_eq!(render.vertices.len(), 0);
         assert!(render.gpu_vertices.is_some());

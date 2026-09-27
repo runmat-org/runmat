@@ -45,7 +45,7 @@ pub(in crate::builtins::fea) fn builtin_error_with_source<E>(
     source: E,
 ) -> RuntimeError
 where
-    E: std::error::Error + Send + Sync + 'static,
+    E: crate::runtime_error::RuntimeErrorSourceBound,
 {
     build_runtime_error(format!("{}: {}", error.message, message.into()))
         .with_builtin(builtin)

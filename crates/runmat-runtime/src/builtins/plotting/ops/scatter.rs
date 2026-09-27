@@ -974,13 +974,14 @@ fn build_scatter_gpu_plot(
         lod_stride,
     };
 
-    let gpu_vertices = runmat_plot::gpu::scatter2::pack_vertices_from_xy(
-        &context.device,
-        &context.queue,
-        &inputs,
-        &params,
-    )
-    .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
+    let gpu_vertices = context
+        .access
+        .with_shared(|emission| {
+            runmat_plot::gpu::scatter2::pack_vertices_from_xy(emission, &inputs, &params)
+        })
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .map_err(|e| scatter_err(format!("scatter: failed to build GPU vertices: {e}")))?;
     let drawn_points = gpu_vertices.vertex_count;
 
     let bounds = build_gpu_bounds(x, y)?;

@@ -1,20 +1,24 @@
 use super::common;
+use super::observation::PendingSubmissions;
+use runmat_accelerate_api::WgpuEmission;
 
-pub fn run(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+pub(crate) fn run(
+    emission: &WgpuEmission<'_>,
+    pending: &mut PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
     bind_group: &wgpu::BindGroup,
     batches: u32,
     batch_tile: u32,
-) {
+) -> anyhow::Result<()> {
     if batches == 0 {
-        return;
+        return Ok(());
     }
 
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("runmat-image-normalize-encoder"),
-    });
+    let mut encoder = emission
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("runmat-image-normalize-encoder"),
+        });
     {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("runmat-image-normalize-pass"),
@@ -26,6 +30,6 @@ pub fn run(
         pass.dispatch_workgroups(groups, 1, 1);
     }
 
-    super::observation::submit(device, queue, encoder);
-    device.poll(wgpu::Maintain::Wait);
+    super::common::submit(emission, pending, encoder)?;
+    Ok(())
 }

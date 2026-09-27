@@ -151,22 +151,12 @@ impl LinePlot {
                 "line plot has GPU source data but no shared WGPU context is installed".to_string()
             })?;
             let len = inputs.len as usize;
-            let x = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.x_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
-            let y = readback_scalar_buffer_f64(
-                &context.device,
-                &context.queue,
-                &inputs.y_buffer,
-                len,
-                inputs.scalar,
-            )
-            .await?;
+            let x =
+                readback_scalar_buffer_f64(&context.access, &inputs.x_buffer, len, inputs.scalar)
+                    .await?;
+            let y =
+                readback_scalar_buffer_f64(&context.access, &inputs.y_buffer, len, inputs.scalar)
+                    .await?;
             let shape = vec![1, len];
             let (x, y) = match inputs.scalar {
                 crate::gpu::ScalarType::F64 => (
@@ -664,9 +654,8 @@ impl LinePlot {
             line_style: self.line_style,
             marker_size: 1.0,
         };
-        let packed =
-            crate::gpu::line::pack_vertices_from_xy(gpu.device, gpu.queue, inputs, &params)
-                .map_err(|e| format!("gpu line packing failed: {e}"))?;
+        let packed = crate::gpu::line::pack_vertices_from_xy(gpu.emission, inputs, &params)
+            .map_err(|e| format!("gpu line packing failed: {e}"))?;
         trace!(
             target: "runmat_plot",
             "line-pack: complete max_vertices={} indirect_present={}",

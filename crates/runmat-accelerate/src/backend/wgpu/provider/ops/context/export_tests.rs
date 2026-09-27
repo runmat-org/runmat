@@ -2,19 +2,41 @@ use super::*;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
 };
-use std::sync::Arc;
+
+fn buffer_size(exported: &WgpuBufferRef) -> u64 {
+    exported
+        .access()
+        .with_shared(|permit| exported.buffer(permit).unwrap().size())
+        .unwrap()
+}
+
+fn same_buffer(left: &WgpuBufferRef, right: &WgpuBufferRef) -> bool {
+    left.access()
+        .with_shared(|permit| {
+            std::ptr::eq(left.buffer(permit).unwrap(), right.buffer(permit).unwrap())
+        })
+        .unwrap()
+}
 
 fn read_f32(provider: &WgpuProvider, exported: &WgpuBufferRef) -> Vec<u32> {
     let bytes = (exported.len * 4) as u64;
-    let staging = provider.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("logical-export-test-readback"),
-        size: bytes,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let mut encoder = provider.device.create_command_encoder(&Default::default());
-    encoder.copy_buffer_to_buffer(&exported.buffer, 0, &staging, 0, bytes);
-    provider.submit(encoder);
+    let staging = provider
+        .with_emission(|emission, pending| -> anyhow::Result<_> {
+            let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("logical-export-test-readback"),
+                size: bytes,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = emission
+                .device()
+                .create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(exported.buffer(emission)?, 0, &staging, 0, bytes);
+            provider.submit(emission, pending, encoder)?;
+            Ok(staging)
+        })
+        .unwrap()
+        .unwrap();
     let data = futures::executor::block_on(provider.map_readback_bytes(
         staging,
         bytes,
@@ -51,17 +73,20 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     let before = provider.telemetry_snapshot();
     let registered = provider.allocations.retained_bytes();
     let contiguous = provider.export_wgpu_buffer_exec(&input).unwrap();
-    assert!(Arc::ptr_eq(
-        &contiguous.buffer,
-        &provider.get_entry_raw(&input).unwrap().buffer
-    ));
+    assert!(provider
+        .access
+        .with_shared(|permit| std::ptr::eq(
+            contiguous.buffer(permit).unwrap(),
+            provider.get_entry_raw(&input).unwrap().buffer.as_ref()
+        ))
+        .unwrap());
     let exported = provider.export_wgpu_buffer_exec(&transposed).unwrap();
     assert_eq!(exported.shape, vec![3, 2]);
     assert_eq!(exported.len, 6);
     assert_eq!(exported.element_size, 4);
     assert_eq!(exported.precision, ProviderPrecision::F32);
-    assert_eq!(exported.buffer.size(), 24);
-    assert!(!Arc::ptr_eq(&exported.buffer, &contiguous.buffer));
+    assert_eq!(buffer_size(&exported), 24);
+    assert!(!same_buffer(&exported, &contiguous));
     assert_eq!(transposed, original);
     assert_eq!(
         runmat_accelerate_api::handle_transpose_info(&transposed),
@@ -88,7 +113,7 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     assert_eq!(after.download_bytes, before.download_bytes);
     assert_eq!(
         provider.allocations.retained_bytes(),
-        registered + exported.buffer.size(),
+        registered + buffer_size(&exported),
         "materialized export retains its own physical allocation accounting"
     );
     assert!(!exported
@@ -97,7 +122,7 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     drop((transposed, input, original));
     assert_eq!(
         provider.allocations.retained_bytes(),
-        registered + exported.buffer.size()
+        registered + buffer_size(&exported)
     );
     // Both Arc exports, including the materialized independent allocation,
     // remain valid after source registration retirement and later allocation.
@@ -108,10 +133,17 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
             storage: GpuTensorStorage::Real,
         })
         .unwrap();
-    assert!(!Arc::ptr_eq(
-        &provider.get_entry_raw(&replacement).unwrap().buffer,
-        &contiguous.buffer
-    ));
+    assert!(!provider
+        .access
+        .with_shared(|permit| std::ptr::eq(
+            provider
+                .get_entry_raw(&replacement)
+                .unwrap()
+                .buffer
+                .as_ref(),
+            contiguous.buffer(permit).unwrap()
+        ))
+        .unwrap());
     assert_eq!(read_f32(&provider, &contiguous), values.map(f32::to_bits));
     assert_eq!(
         read_f32(&provider, &exported),
@@ -122,7 +154,7 @@ fn logical_wgpu_export_materializes_asymmetric_transpose_without_host_transfer_o
     drop(exported);
     assert_eq!(
         provider.allocations.retained_bytes(),
-        registered + export_clone.buffer.size()
+        registered + buffer_size(&export_clone)
     );
     drop(export_clone);
     assert_eq!(provider.allocations.retained_bytes(), registered);

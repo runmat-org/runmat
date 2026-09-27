@@ -20,12 +20,14 @@ impl WgpuProvider {
         match kind {
             AccelContextKind::Plotting => Some(AccelContextHandle::Wgpu(WgpuContextHandle {
                 instance: self.instance.clone(),
-                device: self.device.clone(),
-                queue: self.queue.clone(),
+                access: self.access.clone(),
                 adapter: self.adapter.clone(),
                 adapter_info: self.adapter_info.clone(),
                 limits: self.adapter_limits.clone(),
-                features: self.device.features(),
+                features: self
+                    .access
+                    .with_shared(|emission| emission.device().features())
+                    .ok()?,
             })),
         }
     }
@@ -62,9 +64,14 @@ impl WgpuProvider {
                     entry.allocated_bytes,
                 )
                 .ok()?;
-            return WgpuBufferRef::from_owned_buffer(entry.buffer, materialized).ok();
+            return WgpuBufferRef::from_owned_buffer(
+                entry.buffer,
+                materialized,
+                self.access.clone(),
+            )
+            .ok();
         }
-        WgpuBufferRef::from_owned_buffer(entry.buffer, handle.clone()).ok()
+        WgpuBufferRef::from_owned_buffer(entry.buffer, handle.clone(), self.access.clone()).ok()
     }
 
     pub(crate) fn provider_precision_exec(&self) -> ProviderPrecision {

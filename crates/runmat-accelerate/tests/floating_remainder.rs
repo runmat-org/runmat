@@ -1,3 +1,5 @@
+#[path = "support/retirement.rs"]
+mod retirement;
 use futures::executor::block_on;
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
 #[cfg(feature = "wgpu")]
@@ -28,14 +30,14 @@ async fn exercise(provider: &dyn AccelProvider) {
         }
         .await
         .unwrap();
-        assert_eq!(output.shape, vec![2, 3]);
-        assert_ne!(output.buffer_id, left.buffer_id);
-        assert_ne!(output.buffer_id, right.buffer_id);
+        assert_eq!(output.shape(), vec![2, 3]);
+        assert_ne!(output.buffer_id(), left.buffer_id());
+        assert_ne!(output.buffer_id(), right.buffer_id());
         assert_eq!(provider.download(&output).await.unwrap().data, expected);
-        provider.free(&output).unwrap();
+        retirement::release_all([output]);
     }
-    provider.free(&left).unwrap();
-    provider.free(&right).unwrap();
+    retirement::release_all([left]);
+    retirement::release_all([right]);
     let source = provider
         .upload(&HostTensorView {
             data: &[7.0, -7.0, 8.0, -8.0, 9.0, -9.0],
@@ -50,15 +52,21 @@ async fn exercise(provider: &dyn AccelProvider) {
         })
         .unwrap();
     let result = provider.elem_mod(&left, &right).await.unwrap();
-    assert_eq!(result.shape, vec![3, 2]);
+    assert_eq!(result.shape(), vec![3, 2]);
     assert_eq!(
         provider.download(&result).await.unwrap().data,
         vec![1.0, 2.0, 0.0, 2.0, 1.0, 0.0]
     );
-    provider.free(&result).unwrap();
-    provider.free(&left).unwrap();
-    provider.free(&source).unwrap();
-    provider.free(&right).unwrap();
+    retirement::release_all([result]);
+    let source_weak = source.allocation_lease().downgrade();
+    left.release().unwrap();
+    assert!(source_weak.acquire().is_some());
+    assert_eq!(
+        provider.download(&source).await.unwrap().data,
+        [7.0, -7.0, 8.0, -8.0, 9.0, -9.0]
+    );
+    retirement::release_all([source]);
+    retirement::release_all([right]);
 }
 
 #[test]
@@ -109,7 +117,7 @@ async fn wgpu_floating_remainder_executes_encoded_extremes_and_broadcasts() {
             &error
         ));
     }
-    provider.free(&mismatched).unwrap();
+    retirement::release_all([mismatched]);
     let (large, divisor, exact, maximum, tiny, tiny_divisor, tiny_exact) = if single {
         (
             1e9,
@@ -185,11 +193,14 @@ async fn wgpu_floating_remainder_executes_encoded_extremes_and_broadcasts() {
                 panic!("resident fused remainder result")
             };
             for handle in [&output, &fused] {
-                assert_eq!(handle.shape, vec![1, 1]);
-                assert_eq!(handle.device_id, left.device_id);
-                assert_eq!(handle.descriptor.element_type, left.descriptor.element_type);
-                assert_ne!(handle.buffer_id, left.buffer_id);
-                assert_ne!(handle.buffer_id, right.buffer_id);
+                assert_eq!(handle.shape(), vec![1, 1]);
+                assert_eq!(handle.device_id(), left.device_id());
+                assert_eq!(
+                    handle.descriptor().element_type,
+                    left.descriptor().element_type
+                );
+                assert_ne!(handle.buffer_id(), left.buffer_id());
+                assert_ne!(handle.buffer_id(), right.buffer_id());
                 let actual = provider.download(handle).await.unwrap().data;
                 assert_eq!(actual.len(), 1);
                 if expected.is_nan() {
@@ -202,10 +213,10 @@ async fn wgpu_floating_remainder_executes_encoded_extremes_and_broadcasts() {
                     );
                 }
             }
-            provider.free(&output).unwrap();
-            provider.free(&fused).unwrap();
+            retirement::release_all([output]);
+            retirement::release_all([fused]);
         }
-        provider.free(&left).unwrap();
-        provider.free(&right).unwrap();
+        retirement::release_all([left]);
+        retirement::release_all([right]);
     }
 }
