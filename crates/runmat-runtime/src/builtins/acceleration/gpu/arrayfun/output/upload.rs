@@ -1,4 +1,4 @@
-use crate::builtins::common::provider_restore;
+use crate::builtins::common::{gpu_helpers, provider_restore};
 use crate::BuiltinResult;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_value::Value;
@@ -12,7 +12,7 @@ pub(in crate::builtins::acceleration::gpu::arrayfun) fn maybe_upload_uniform(
     let Some(prototype) = resident_inputs.first() else {
         return Ok(value);
     };
-    let provider = runmat_accelerate_api::provider_for_handle(prototype)
+    let provider = gpu_helpers::exact_provider_for_handle(prototype)
         .ok_or_else(|| arrayfun_flow("arrayfun: input allocation provider unavailable"))?;
 
     match value {

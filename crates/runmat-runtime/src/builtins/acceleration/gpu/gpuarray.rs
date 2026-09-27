@@ -596,14 +596,6 @@ struct PreparedHandle {
 }
 
 fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHandle> {
-    #[cfg(all(test, feature = "wgpu"))]
-    {
-        if runmat_accelerate_api::provider().is_none() {
-            let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-            );
-        }
-    }
     let provider = runmat_accelerate_api::provider()
         .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
 
@@ -669,9 +661,7 @@ fn upload_real_host_value(
         let tensor = Tensor::new_integer(storage, shape).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
         })?;
-        let handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
+        let handle = upload_real_tensor(provider, &tensor, false, &[])?;
         return Ok(PreparedHandle {
             handle,
             provider,
@@ -781,7 +771,7 @@ async fn convert_device_value(
     handle: GpuTensorHandle,
     dtype: DataClass,
 ) -> BuiltinResult<PreparedHandle> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
+    let provider = gpu_helpers::exact_provider_for_handle(&handle)
         .ok_or_else(|| gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER))?;
     let was_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let was_complex = runmat_accelerate_api::handle_storage(&handle)

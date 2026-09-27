@@ -119,4 +119,38 @@ mod tests {
         assert_eq!(converted.identifier(), Some("RunMat:TestDownload"));
         assert_eq!(converted.message(), "download failed");
     }
+
+    #[test]
+    fn conversion_does_not_route_an_unregistered_owner_to_the_active_provider() {
+        test_support::with_test_provider(|_| {
+            let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+            let allocation = owner
+                .allocate_zeroed(
+                    vec![2, 1],
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            let result = futures::executor::block_on(convert_device_value(
+                allocation.handle.clone(),
+                DataClass::UInt32,
+            ));
+            let error = match result {
+                Ok(_) => panic!("unregistered owner must not use ambient provider"),
+                Err(error) => error,
+            };
+            assert_eq!(
+                error.identifier(),
+                gpu_array_error(&GPUARRAY_ERROR_NO_PROVIDER).identifier()
+            );
+            allocation
+                .handle
+                .allocation_lease()
+                .validate_live()
+                .unwrap();
+            assert_eq!(allocation.probe.retirements(), 0);
+            drop(allocation.handle);
+            assert_eq!(allocation.probe.retirements(), 1);
+        });
+    }
 }

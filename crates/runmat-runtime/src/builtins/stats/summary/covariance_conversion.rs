@@ -356,9 +356,12 @@ async fn covariance_tensor(
             format!("{name}: expected exactly one input argument"),
         ));
     }
-    let gathered = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| conversion_error(name, format!("{name}: unable to gather input: {err}")))?;
+    let gathered = gather_if_needed_async(&value).await.map_err(|err| {
+        crate::runtime_error::with_provider_execution_source(
+            conversion_error(name, format!("{name}: unable to gather input: {err}")),
+            runmat_accelerate_api::ProviderExecutionError::from_source(err),
+        )
+    })?;
     match gathered {
         Value::Tensor(tensor)
             if matches!(
