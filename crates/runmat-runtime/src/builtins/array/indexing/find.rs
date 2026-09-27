@@ -1543,14 +1543,13 @@ pub(crate) mod tests {
     #[test]
     fn find_resident_logical_value_output_stays_logical_and_resident() {
         test_support::with_test_provider(|provider| {
-            let values = [0.0, 1.0, 0.0, 1.0];
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &values,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 0, 1],
                     shape: &[2, 2],
                 })
                 .expect("upload logical input");
-            let input = gpu_helpers::logical_gpu_value(handle);
+            let input = gpu_helpers::logical_gpu_value(handle).expect("adopt logical producer");
 
             let eval = evaluate(input, &[]).expect("find logical fallback");
             let Value::GpuTensor(values_handle) = eval.values_value().expect("selected values")
@@ -1637,13 +1636,16 @@ pub(crate) mod tests {
         );
 
         let logical_input = owner
-            .upload(&HostTensorView {
-                data: &[0.0, 1.0],
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1],
                 shape: &[1, 2],
             })
             .expect("upload logical input");
-        let logical =
-            evaluate(gpu_helpers::logical_gpu_value(logical_input), &[]).expect("logical find");
+        let logical = evaluate(
+            gpu_helpers::logical_gpu_value(logical_input).expect("adopt logical producer"),
+            &[],
+        )
+        .expect("logical find");
         let Value::GpuTensor(logical_values) = logical.values_value().expect("logical values")
         else {
             panic!("expected resident logical values");

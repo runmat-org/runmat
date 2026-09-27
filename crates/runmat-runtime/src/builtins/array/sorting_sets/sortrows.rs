@@ -1813,16 +1813,32 @@ pub(crate) mod tests {
                 );
             }
 
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 1, 0, 1, 0],
+                    shape: &[3, 2],
+                })
+                .expect("logical producer upload");
+            let input_lease = handle.allocation_lease().downgrade();
             let logical =
-                Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 0.0], vec![3, 2]).expect("logical input");
-            let handle = gpu_helpers::upload_tensor(provider, &logical).expect("logical upload");
-            let logical = gpu_helpers::logical_gpu_value(handle);
+                gpu_helpers::logical_gpu_value(handle.clone()).expect("adopt logical producer");
             let Value::GpuTensor(output) =
                 builtin(logical, Vec::new()).expect("resident logical sortrows")
             else {
                 panic!("expected resident logical output");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
+            let output_lease = output.allocation_lease().downgrade();
+            let gathered = test_support::gather(Value::GpuTensor(output)).expect("logical payload");
+            assert_eq!(gathered.shape, vec![3, 2]);
+            assert_eq!(
+                gathered.materialize_f64(),
+                vec![0.0, 1.0, 1.0, 1.0, 0.0, 0.0]
+            );
+            assert!(input_lease.acquire().is_some());
+            drop(handle);
+            assert!(input_lease.acquire().is_none());
+            assert!(output_lease.acquire().is_none());
         });
 
         let _guard = crate::output_count::push_output_count(Some(3));

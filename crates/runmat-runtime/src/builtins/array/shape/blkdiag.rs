@@ -2088,16 +2088,15 @@ mod tests {
     #[test]
     fn gpu_logical_inputs_preserve_logical_metadata() {
         test_support::with_test_provider(|provider| {
-            let logical = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &logical.materialize_f64(),
-                    shape: &logical.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[2, 1],
                 })
                 .unwrap();
             let value = call(vec![
                 Value::Bool(true),
-                gpu_helpers::logical_gpu_value(handle),
+                gpu_helpers::logical_gpu_value(handle).expect("adopt logical producer"),
             ])
             .unwrap();
             let Value::GpuTensor(handle) = value else {

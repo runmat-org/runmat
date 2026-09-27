@@ -39,23 +39,35 @@ fn provider_outputs_restore_owner_class_and_explicit_residency() {
 #[test]
 fn logical_and_complex_provider_values_restore_their_storage() {
     test_support::with_test_provider(|provider| {
-        let logical = Tensor::new(vec![0.0, 1.0, 1.0], vec![1, 3]).expect("logical");
         let handle = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &logical.materialize_f64(),
-                shape: &logical.shape,
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1, 1],
+                shape: &[1, 3],
             })
             .expect("upload");
-        let output = call(gpu_helpers::logical_gpu_value(handle)).expect("logical perms");
-        let Value::GpuTensor(handle) = &output else {
+        let input_lease = handle.allocation_lease().downgrade();
+        let output =
+            call(gpu_helpers::logical_gpu_value(handle.clone()).expect("adopt logical producer"))
+                .expect("logical perms");
+        let Value::GpuTensor(logical_output) = &output else {
             panic!("expected resident logical output")
         };
-        assert!(runmat_accelerate_api::handle_is_logical(handle));
+        assert!(runmat_accelerate_api::handle_is_logical(logical_output));
+        let output_lease = logical_output.allocation_lease().downgrade();
+        let gathered = test_support::gather(output).expect("logical payload");
+        assert_eq!(gathered.shape, vec![6, 3]);
+        assert_eq!(tensor_rows(&gathered)[0], vec![1.0, 1.0, 0.0]);
+        assert!(input_lease.acquire().is_some());
+        drop(handle);
+        assert!(input_lease.acquire().is_none());
+        assert!(output_lease.acquire().is_none());
 
         let complex = ComplexTensor::new(vec![(1.0, 1.0), (2.0, -2.0), (3.0, 0.5)], vec![1, 3])
             .expect("complex");
         let handle = gpu_helpers::upload_complex_tensor(provider, &complex).expect("upload");
-        let output = call(gpu_helpers::complex_gpu_value(handle)).expect("complex perms");
+        let input_lease = handle.allocation_lease().downgrade();
+        let output = call(gpu_helpers::complex_gpu_value(handle).expect("adopt complex producer"))
+            .expect("complex perms");
         let Value::GpuTensor(handle) = &output else {
             panic!("expected resident complex output")
         };
@@ -63,15 +75,19 @@ fn logical_and_complex_provider_values_restore_their_storage() {
             runmat_accelerate_api::handle_storage(handle),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         );
-        let Value::ComplexTensor(output) =
+        let output_lease = handle.allocation_lease().downgrade();
+        let Value::ComplexTensor(gathered) =
             block_on(gpu_helpers::gather_value_async(&output)).expect("gather")
         else {
             panic!("expected complex tensor")
         };
         assert_eq!(
-            complex_rows(&output)[0],
+            complex_rows(&gathered)[0],
             vec![(3.0, 0.5), (2.0, -2.0), (1.0, 1.0)]
         );
+        drop(output);
+        assert!(input_lease.acquire().is_none());
+        assert!(output_lease.acquire().is_none());
     });
 }
 
