@@ -118,5 +118,34 @@ pub(super) fn infer_numeric_component_call(
         output.residency = ResidencyFact::Unknown;
     }
 
+    // The admitted floating-tensor route may select a provider. Conversely, a
+    // resident operation may gather and retain a host result when automatic
+    // placement cannot restore its class. Call facts carry neither selection
+    // nor explicit-device intent, so neither direction proves residency.
+    let automatic_candidate = input.numeric().is_some_and(|numeric| {
+        matches!(numeric.class, NumericClass::Double | NumericClass::Single)
+            && numeric.domain != NumericDomain::Complex
+            && matches!(input.storage, StorageFact::Dense | StorageFact::Unknown)
+    });
+    let resident_identity = rule == NumericComponentRule::Conjugate
+        && (matches!(input.kind, ValueKindFact::Logical)
+            || input.numeric().is_some_and(|numeric| {
+                numeric.domain == NumericDomain::Real
+                    && !matches!(numeric.class, NumericClass::Double | NumericClass::Single)
+            }));
+    if automatic_candidate
+        || (matches!(input.residency, ResidencyFact::Device { .. }) && !resident_identity)
+    {
+        output.residency = ResidencyFact::Unknown;
+    }
+    if matches!(output.residency, ResidencyFact::Unknown) {
+        output.storage = StorageFact::Unknown;
+        output.layout = LayoutFact::Unknown;
+        output.contiguity = ContiguityFact::Unknown;
+        // In particular, real/conj may preserve an input allocation, whereas
+        // preparation can create another one. Do not retain an alias proof.
+        output.alias = AliasFact::Unknown;
+    }
+
     finish_fixed(entry, request, output, diagnostics)
 }

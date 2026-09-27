@@ -101,12 +101,12 @@ fn numeric_component_contracts_preserve_exact_facts_and_transform_only_the_compo
             "{name}"
         );
         assert_eq!(output.shape, input.shape, "{name}");
-        assert_eq!(output.storage, input.storage, "{name}");
-        assert_eq!(output.residency, input.residency, "{name}");
-        assert_eq!(output.layout, input.layout, "{name}");
-        assert_eq!(output.contiguity, input.contiguity, "{name}");
+        assert_eq!(output.storage, StorageFact::Unknown, "{name}");
+        assert_eq!(output.residency, ResidencyFact::Unknown, "{name}");
+        assert_eq!(output.layout, LayoutFact::Unknown, "{name}");
+        assert_eq!(output.contiguity, ContiguityFact::Unknown, "{name}");
         assert_eq!(output.view, ViewFact::Materialized, "{name}");
-        assert_eq!(output.alias, AliasFact::Unique, "{name}");
+        assert_eq!(output.alias, AliasFact::Unknown, "{name}");
         assert_eq!(output.mutation, MutationFact::ValueSemantics, "{name}");
     }
 
@@ -124,6 +124,42 @@ fn numeric_component_contracts_preserve_exact_facts_and_transform_only_the_compo
         },
     );
     assert_eq!(identity.outputs[0], real_input);
+}
+
+#[test]
+fn floating_tensor_components_do_not_promise_host_representation_after_preparation() {
+    use runmat_types::{
+        CallRequest, NumericClass, NumericDomain, NumericFact, OutputSelection,
+        RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    };
+    for name in ["conj", "real", "imag"] {
+        for class in [NumericClass::Double, NumericClass::Single] {
+            for shape in [vec![Some(1), Some(1)], vec![Some(2), Some(3)]] {
+                let input = ValueFact::proven(
+                    ValueKindFact::Numeric(NumericFact {
+                        class,
+                        domain: NumericDomain::Real,
+                    }),
+                    ShapeFact::from(shape),
+                    StorageFact::Dense,
+                );
+                let inferred = infer_catalog_call(
+                    builtin_catalog_entry_by_name(name).unwrap(),
+                    &CallRequest {
+                        arguments: vec![input.clone()],
+                        literals: Default::default(),
+                        outputs: OutputSelection::new(RequestedOutputCount::One),
+                    },
+                );
+                assert!(inferred.diagnostics.is_empty());
+                let output = &inferred.outputs[0];
+                assert_eq!(output.kind, input.kind);
+                assert_eq!(output.shape, input.shape);
+                assert_eq!(output.residency, ResidencyFact::Unknown);
+                assert_eq!(output.storage, StorageFact::Unknown);
+            }
+        }
+    }
 }
 
 #[test]
