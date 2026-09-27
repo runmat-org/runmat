@@ -251,11 +251,12 @@ async fn execute_script_request(
         } else {
             info!("Script executed successfully in {:?}", execution_time);
         }
-        if let RuntimeFlow::Single(value) = outcome.flow {
-            if config.runtime.verbose {
-                println!("{value:?}");
-            } else {
-                println!("{value}");
+        // The session has already rendered unsuppressed values (including their
+        // assignment labels) into streams. Flow is the structured return value,
+        // not an additional console event. Keep verbose inspection diagnostic-only.
+        if config.runtime.verbose {
+            if let RuntimeFlow::Single(value) = &outcome.flow {
+                eprintln!("Execution result: {value:?}");
             }
         }
     }
