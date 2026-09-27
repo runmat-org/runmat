@@ -81,6 +81,15 @@ async fn fallback_through_owner(
         gathered.map_err(|error| CastError::Internal(error.message().to_string()))?,
         target,
     )?;
+    // Host conversion collapses real singletons to Int. Resident conversion
+    // must retain the source's complete shape and restore native integer data.
+    let converted = match converted {
+        Value::Int(value) => Value::Tensor(
+            runmat_value::Tensor::new_integer(target.storage(vec![value]), handle.shape.clone())
+                .map_err(CastError::Internal)?,
+        ),
+        value => value,
+    };
     crate::builtins::common::gpu_helpers::restore_class_preserving_value(
         handle,
         converted,

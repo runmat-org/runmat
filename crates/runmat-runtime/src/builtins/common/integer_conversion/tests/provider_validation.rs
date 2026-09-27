@@ -221,3 +221,48 @@ fn only_typed_unsupported_permits_owner_download_fallback() {
         provider.free(&input).unwrap();
     }
 }
+
+#[test]
+fn unsupported_singleton_cast_retains_exact_class_shape_owner_and_intent() {
+    let _lock = test_support::accel_test_lock();
+    let provider = provider(ResultMode::Unsupported);
+    let _current = ThreadProviderGuard::set(Some(provider));
+    for shape in [vec![1, 1], vec![1, 1, 1, 1]] {
+        for target in [
+            IntegerClass::Int8,
+            IntegerClass::Int16,
+            IntegerClass::Int32,
+            IntegerClass::Int64,
+            IntegerClass::UInt8,
+            IntegerClass::UInt16,
+            IntegerClass::UInt32,
+            IntegerClass::UInt64,
+        ] {
+            let mut input = provider
+                .upload(&HostTensorView {
+                    data: &[7.0],
+                    shape: &shape,
+                })
+                .unwrap();
+            runmat_accelerate_api::set_handle_provenance(
+                &mut input,
+                runmat_accelerate_api::GpuHandleProvenance::Explicit,
+            );
+            let Value::GpuTensor(output) =
+                block_on(cast_value(Value::GpuTensor(input.clone()), target)).unwrap()
+            else {
+                panic!("singleton fallback must remain resident")
+            };
+            assert_eq!(output.device_id, input.device_id);
+            assert_eq!(output.shape, shape);
+            assert!(runmat_accelerate_api::handle_is_explicit(&output));
+            let downloaded = block_on(provider.inner.download_integer(&output)).unwrap();
+            assert_eq!(downloaded.shape, shape);
+            use super::super::class::IntegerClassExt;
+            assert_eq!(downloaded.data.element_type(), target.accelerator_type());
+            assert!(block_on(provider.inner.download(&input)).is_ok());
+            provider.free(&output).unwrap();
+            provider.free(&input).unwrap();
+        }
+    }
+}
