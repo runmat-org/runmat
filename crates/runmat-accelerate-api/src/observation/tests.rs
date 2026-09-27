@@ -47,6 +47,73 @@ fn completion_and_publication_both_required_total_excludes_drain_delay() {
 }
 
 #[test]
+fn callback_time_is_preserved_while_cleanup_keeps_evidence_pending() {
+    let clock = Arc::new(TestClock::default());
+    let mut receipt = ProviderOperationReceipt::with_clock(clock.clone());
+    let submitted = receipt.recorder().submission().unwrap();
+    clock.set(4);
+    receipt.publish().unwrap();
+    clock.set(9);
+    let completed = submitted.capture_completion();
+    assert_eq!(receipt.status(), ProviderObservationStatus::Pending);
+    clock.set(1000);
+    completed.complete();
+    assert_eq!(
+        receipt.take_completed().unwrap().status,
+        ProviderObservationStatus::Completed {
+            total_elapsed: Duration::from_nanos(9),
+            submissions: 1,
+        }
+    );
+    clock.set(2000);
+    let mut later_publication = ProviderOperationReceipt::with_clock(clock.clone());
+    let submitted = later_publication.recorder().submission().unwrap();
+    clock.set(2004);
+    let completed = submitted.capture_completion();
+    clock.set(2009);
+    later_publication.publish().unwrap();
+    clock.set(3000);
+    completed.complete();
+    assert_eq!(
+        later_publication.take_completed().unwrap().status,
+        ProviderObservationStatus::Completed {
+            total_elapsed: Duration::from_nanos(9),
+            submissions: 1,
+        }
+    );
+}
+
+#[test]
+fn deferred_cleanup_failure_drop_and_cancellation_cannot_publish_success() {
+    for mode in 0..3 {
+        let mut receipt = ProviderOperationReceipt::new();
+        let completed = receipt
+            .recorder()
+            .submission()
+            .unwrap()
+            .capture_completion();
+        receipt.publish().unwrap();
+        match mode {
+            0 => completed.fail(),
+            1 => drop(completed),
+            _ => {
+                receipt.fail(ProviderObservationFailure::Cancelled);
+                completed.complete();
+            }
+        }
+        let expected = match mode {
+            0 => ProviderObservationFailure::ProviderFailed,
+            1 => ProviderObservationFailure::Abandoned,
+            _ => ProviderObservationFailure::Cancelled,
+        };
+        assert_eq!(
+            receipt.take_completed().unwrap().status,
+            ProviderObservationStatus::Failed(expected)
+        );
+    }
+}
+
+#[test]
 fn publication_after_device_completion_and_empty_operation() {
     let clock = Arc::new(TestClock::default());
     let mut receipt = ProviderOperationReceipt::with_clock(clock.clone());

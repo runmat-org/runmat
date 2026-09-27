@@ -20,7 +20,10 @@ pub use activation::{
     current_provider_observation, observe_provider_future, with_provider_observation,
 };
 pub use budget::ProviderObservationBudget;
-pub use state::{ProviderOperationReceipt, ProviderOperationRecorder, ProviderSubmission};
+pub use state::{
+    ProviderCompletedSubmission, ProviderOperationReceipt, ProviderOperationRecorder,
+    ProviderSubmission,
+};
 
 use std::sync::Arc;
 use std::time::Duration;
