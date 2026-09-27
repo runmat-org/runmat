@@ -868,17 +868,16 @@ pub async fn global() -> Option<AutoOffloadHandle> {
             runmat_accelerate_api::same_provider_instance(offload.provider, active_provider)
         });
     }
-    let initialized = initialize_async().await;
+    let initialized = initialize_async(active_provider).await;
     state::initialize(initialized);
     state::cached().flatten()
 }
 
-async fn initialize_async() -> Option<NativeAutoOffload> {
+async fn initialize_async(provider: &'static dyn AccelProvider) -> Option<NativeAutoOffload> {
     if !auto_enabled() {
         clear_decisions();
         return None;
     }
-    let provider = runmat_accelerate_api::provider()?;
     let device_info = provider.device_info_struct();
     let mut config = ThresholdConfig::default();
     let mut base_source = ThresholdBase::BuiltInDefault;
