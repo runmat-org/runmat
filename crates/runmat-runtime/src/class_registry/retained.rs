@@ -113,6 +113,7 @@ pub(super) fn note_default_roots(class: &RuntimeClass) {
         // A GC-owned default may acquire resident children later. Reuse the
         // registry's existing thread-presence guard for those identities too.
         if gc.0 || crate::dispatcher::value_contains_gpu(value) {
+            ensure_gc_root_provider();
             mark_static_values_thread_active();
             break;
         }
