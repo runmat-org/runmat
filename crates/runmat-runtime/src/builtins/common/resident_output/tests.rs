@@ -72,7 +72,9 @@ fn unknown_source_owner_never_uses_current_provider() {
     let provider = provider();
     let _provider = ThreadProviderGuard::set(Some(provider));
     let source = GpuTensorHandle::new(vec![1, 1], u32::MAX, 777);
-    assert!(restore_to_source_provider(Value::Num(1.0), Some(&source)).is_err());
+    assert!(
+        restore_to_source_provider_protecting(Value::Num(1.0), Some(&source), &[&source]).is_err()
+    );
     assert_eq!(provider.uploads.load(Ordering::Relaxed), 0);
     assert_eq!(provider.frees.load(Ordering::Relaxed), 0);
 }
@@ -134,11 +136,13 @@ fn default_wrapper_protects_source_and_preserves_explicit_provenance() {
         .unwrap();
     runmat_accelerate_api::mark_handle_explicit(&mut source);
     *provider.alias.lock().unwrap() = Some(source.clone());
-    assert!(restore_to_source_provider(Value::Num(2.0), Some(&source)).is_err());
+    assert!(
+        restore_to_source_provider_protecting(Value::Num(2.0), Some(&source), &[&source]).is_err()
+    );
     assert_eq!(provider.frees.load(Ordering::Relaxed), 0);
     *provider.alias.lock().unwrap() = None;
     let Value::GpuTensor(output) =
-        restore_to_source_provider(Value::Num(2.0), Some(&source)).unwrap()
+        restore_to_source_provider_protecting(Value::Num(2.0), Some(&source), &[&source]).unwrap()
     else {
         panic!("resident result")
     };

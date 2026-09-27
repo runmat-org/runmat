@@ -11,14 +11,6 @@ pub(crate) use owned::ResidentResultGuard;
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn restore_to_source_provider(
-    value: Value,
-    source: Option<&GpuTensorHandle>,
-) -> Result<Value, String> {
-    let protected = source.into_iter().collect::<Vec<_>>();
-    restore_to_source_provider_protecting(value, source, &protected)
-}
-
 /// The domain supplies every borrowed resident operand, including controls.
 /// A rejected upload must never free an alias of any of those inputs.
 pub(crate) fn restore_to_source_provider_protecting(

@@ -28,6 +28,7 @@ use host::*;
 use provider::*;
 #[cfg(test)]
 use runmat_builtins::POL2CART_DESCRIPTOR;
+#[cfg(target_arch = "wasm32")]
 pub use specs::{FUSION_SPEC, GPU_SPEC};
 const NAME: &str = "pol2cart";
 
