@@ -54,12 +54,12 @@ impl WgpuProvider {
         if target_len == 0 || num_slices == 0 {
             fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
             let buffer = self.create_storage_buffer(0, "runmat-fft-empty");
-            return Ok(self.register_existing_buffer_with_storage(
+            return self.register_existing_buffer_with_storage(
                 buffer,
                 out_shape,
                 0,
                 GpuTensorStorage::ComplexInterleaved,
-            ));
+            );
         }
 
         let total_elems = shape
@@ -141,11 +141,11 @@ impl WgpuProvider {
                     .write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
             }
         }
-        Ok(self.register_existing_buffer_with_storage(
+        self.register_existing_buffer_with_storage(
             buffer,
             out_shape,
             packed.len(),
             GpuTensorStorage::ComplexInterleaved,
-        ))
+        )
     }
 }

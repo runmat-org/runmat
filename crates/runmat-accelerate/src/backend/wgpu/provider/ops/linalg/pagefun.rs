@@ -74,11 +74,11 @@ impl WgpuProvider {
             self.create_storage_buffer_checked(total_len, "runmat-pagefun-mtimes-out")?;
 
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(
+            return self.register_existing_buffer(
                 out_buffer,
                 request.output_shape.clone(),
                 total_len,
-            ));
+            );
         }
 
         let m_u32 = u32::try_from(rows)
@@ -213,7 +213,7 @@ impl WgpuProvider {
         self.telemetry.record_matmul_duration(start.elapsed());
 
         let handle =
-            self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len);
+            self.register_existing_buffer(out_buffer, request.output_shape.clone(), total_len)?;
 
         Ok(handle)
     }

@@ -71,11 +71,11 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-interp1-out")?;
         if output_len == 0 {
-            return Ok(self.register_existing_buffer(
+            return self.register_existing_buffer(
                 out_buffer,
                 request.output_shape.to_vec(),
                 output_len,
-            ));
+            );
         }
 
         let method = match request.method {
@@ -165,7 +165,7 @@ impl WgpuProvider {
             "runmat-interp1-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, request.output_shape.to_vec(), output_len))
+        self.register_existing_buffer(out_buffer, request.output_shape.to_vec(), output_len)
     }
 }
 

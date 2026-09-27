@@ -64,7 +64,7 @@ impl WgpuProvider {
         let len = broadcast.len;
         if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-integer-compare-empty");
-            let handle = self.register_existing_buffer(out, broadcast.output_shape, 0);
+            let handle = self.register_existing_buffer(out, broadcast.output_shape, 0)?;
             runmat_accelerate_api::set_handle_logical(&handle, true);
             return Ok(handle);
         }
@@ -196,7 +196,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        let handle = self.register_existing_buffer(out_buffer, broadcast.output_shape, len);
+        let handle = self.register_existing_buffer(out_buffer, broadcast.output_shape, len)?;
         runmat_accelerate_api::set_handle_logical(&handle, true);
         Ok(handle)
     }
@@ -245,7 +245,7 @@ impl WgpuProvider {
                 entry.shape,
                 out_len,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            )
+            )?
         } else {
             let shader = complex_from_real_shader(self.precision);
             self.fused_elementwise_with_telemetry_and_storage_exec(
@@ -301,7 +301,7 @@ impl WgpuProvider {
                 out_shape,
                 out_len,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            )
+            )?
         } else {
             let shader = complex_from_real_imag_shader(self.precision, real_scalar, imag_scalar);
             self.fused_elementwise_with_telemetry_and_storage_exec(
@@ -390,7 +390,7 @@ impl WgpuProvider {
         if self.effective_storage_for_entry(a, &entry)
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         {
-            return Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len));
+            return self.register_existing_buffer(entry.buffer, entry.shape, entry.len);
         }
         self.complex_unary_exec(a, ComplexUnaryOp::Real, false)
     }
@@ -506,7 +506,7 @@ impl WgpuProvider {
                 entry.shape,
                 entry.len,
                 storage,
-            );
+            )?;
             if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
                 runmat_accelerate_api::record_handle_transpose(
                     &output,
@@ -612,7 +612,8 @@ impl WgpuProvider {
         } else {
             GpuTensorStorage::Real
         };
-        let out = self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage);
+        let out =
+            self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage)?;
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
             runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
         }
@@ -658,7 +659,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-eq-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_EQ_SHADER_F64,
@@ -693,7 +694,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-ne-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_NE_SHADER_F64,
@@ -727,7 +728,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-lt-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_LT_SHADER_F64,
@@ -762,7 +763,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-le-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_LE_SHADER_F64,
@@ -797,7 +798,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-gt-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_GT_SHADER_F64,
@@ -832,7 +833,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-elem-ge-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => ELEM_GE_SHADER_F64,
@@ -862,7 +863,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-and-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => LOGICAL_AND_SHADER_F64,
@@ -892,7 +893,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-or-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => LOGICAL_OR_SHADER_F64,
@@ -921,7 +922,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-xor-empty");
-            self.register_existing_buffer(out, entry_a.shape, 0)
+            self.register_existing_buffer(out, entry_a.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => LOGICAL_XOR_SHADER_F64,
@@ -943,7 +944,7 @@ impl WgpuProvider {
         let len = entry.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-not-empty");
-            self.register_existing_buffer(out, entry.shape, 0)
+            self.register_existing_buffer(out, entry.shape, 0)?
         } else {
             let shader = match self.precision {
                 NumericPrecision::F64 => LOGICAL_NOT_SHADER_F64,
@@ -965,7 +966,7 @@ impl WgpuProvider {
         let len = entry.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-isfinite-empty");
-            self.register_existing_buffer(out, entry.shape, 0)
+            self.register_existing_buffer(out, entry.shape, 0)?
         } else {
             let shader = classification_shader(
                 self.precision,
@@ -987,7 +988,7 @@ impl WgpuProvider {
         let len = entry.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-isnan-empty");
-            self.register_existing_buffer(out, entry.shape, 0)
+            self.register_existing_buffer(out, entry.shape, 0)?
         } else {
             let shader = classification_shader(
                 self.precision,
@@ -1009,7 +1010,7 @@ impl WgpuProvider {
         let len = entry.len;
         let handle = if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-logical-isinf-empty");
-            self.register_existing_buffer(out, entry.shape, 0)
+            self.register_existing_buffer(out, entry.shape, 0)?
         } else {
             let shader = classification_shader(
                 self.precision,
@@ -1104,7 +1105,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-scalar-out")?;
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
+            return self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len);
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("scalar_op", len));
@@ -1193,7 +1194,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len)?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
@@ -1257,7 +1258,7 @@ impl WgpuProvider {
         let len = entry_a.len;
         if len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-binary-out");
-            return Ok(self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len));
+            return self.register_existing_buffer(out_buffer, entry_a.shape, entry_a.len);
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("binary_op", len));
@@ -1344,7 +1345,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len);
+        let handle = self.register_existing_buffer(out_buffer, entry_a.shape, len)?;
         if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
             runmat_accelerate_api::record_handle_transpose(&handle, info.base_rows, info.base_cols);
         }
@@ -1402,7 +1403,7 @@ impl WgpuProvider {
                 entry_a.shape.clone(),
                 0,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            )
+            )?
         } else {
             let shader =
                 complex_binary_shader(complex_op, self.precision, lhs_complex, rhs_complex);
@@ -1474,12 +1475,12 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("complex broadcast output length overflow"))?;
         if out_len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-complex-bcast-out");
-            return Ok(self.register_existing_buffer_with_storage(
+            return self.register_existing_buffer_with_storage(
                 out_buffer,
                 out_shape,
                 0,
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
-            ));
+            );
         }
         if out_len > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error(
@@ -1540,7 +1541,7 @@ impl WgpuProvider {
             .fold(1usize, |a, b| a.saturating_mul(b));
         if len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-binary-bcast-out");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("binary_op_broadcast", len));
@@ -1637,7 +1638,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        let handle = self.register_existing_buffer(out_buffer, out_shape, len);
+        let handle = self.register_existing_buffer(out_buffer, out_shape, len)?;
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(handle)
@@ -1946,7 +1947,7 @@ impl WgpuProvider {
             len,
             output_storage,
             BufferUsageClass::FusionOut,
-        );
+        )?;
         log::trace!(
             "fusion elementwise complete buffer_id={} out_ptr=0x{:x} len={} chunks={} last_submission_id={:?}",
             handle.buffer_id,
@@ -1968,157 +1969,161 @@ impl WgpuProvider {
         len: usize,
         num_outputs: usize,
     ) -> Result<Vec<GpuTensorHandle>> {
-        if inputs.is_empty() {
-            return Err(anyhow!("fused_elementwise_multi: no inputs"));
-        }
-        if num_outputs == 0 {
-            return Err(anyhow!("fused_elementwise_multi: num_outputs is zero"));
-        }
-        if len > u32::MAX as usize {
-            return Err(anyhow!("fused_elementwise_multi: tensor too large"));
-        }
-        let workgroup_size = self.workgroup_config.scalar;
-        let chunk_capacity =
-            crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
-                .ok_or_else(|| anyhow!("fused_elementwise_multi: workgroup size is zero"))?
-                as usize;
-        let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
-            shader,
-            inputs.len(),
-            super::pipeline_recipe::FusionPipelineLayout::Multiple(num_outputs),
-            workgroup_size,
-        );
-        let storage_bindings =
-            checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
-        let total_bindings = checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
-        validate_compute_binding_counts(
-            "fused_elementwise_multi",
-            storage_bindings,
-            total_bindings,
-            &self.adapter_limits,
-        )?;
-
-        let entries = inputs
-            .iter()
-            .map(|h| self.get_entry(h))
-            .collect::<Result<Vec<_>>>()?;
-        let layouts = inputs
-            .iter()
-            .zip(&entries)
-            .map(|(handle, entry)| {
-                super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let output_buffers: Vec<_> = (0..num_outputs)
-            .map(|_| {
-                self.create_storage_buffer_for_usage(
-                    BufferUsageClass::FusionOut,
-                    len,
-                    "runmat-fusion-multi-output",
-                )
-            })
-            .collect();
-
-        let bind_group_layout = {
-            let key = format!(
-                "runmat-fusion-multi-layout-{}-{}",
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            if inputs.is_empty() {
+                return Err(anyhow!("fused_elementwise_multi: no inputs"));
+            }
+            if num_outputs == 0 {
+                return Err(anyhow!("fused_elementwise_multi: num_outputs is zero"));
+            }
+            if len > u32::MAX as usize {
+                return Err(anyhow!("fused_elementwise_multi: tensor too large"));
+            }
+            let workgroup_size = self.workgroup_config.scalar;
+            let chunk_capacity =
+                crate::backend::wgpu::config::elementwise_chunk_capacity(workgroup_size)
+                    .ok_or_else(|| anyhow!("fused_elementwise_multi: workgroup size is zero"))?
+                    as usize;
+            let recipe = super::pipeline_recipe::PipelineRecipe::fusion(
+                shader,
                 inputs.len(),
-                num_outputs
+                super::pipeline_recipe::FusionPipelineLayout::Multiple(num_outputs),
+                workgroup_size,
             );
-            self.cached_bind_group_layout(&key, |device| {
-                crate::backend::wgpu::bindings::build_fusion_multi_bgl(
-                    device,
+            let storage_bindings =
+                checked_binding_count("fused_elementwise_multi", inputs.len(), num_outputs)?;
+            let total_bindings =
+                checked_binding_count("fused_elementwise_multi", storage_bindings, 1)?;
+            validate_compute_binding_counts(
+                "fused_elementwise_multi",
+                storage_bindings,
+                total_bindings,
+                &self.adapter_limits,
+            )?;
+
+            let entries = inputs
+                .iter()
+                .map(|h| self.get_entry(h))
+                .collect::<Result<Vec<_>>>()?;
+            let layouts = inputs
+                .iter()
+                .zip(&entries)
+                .map(|(handle, entry)| {
+                    super::backend_shared::fusion_operand_layout(handle, entry, output_shape)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let output_buffers: Vec<_> = (0..num_outputs)
+                .map(|_| {
+                    self.create_storage_buffer_for_usage(
+                        BufferUsageClass::FusionOut,
+                        len,
+                        "runmat-fusion-multi-output",
+                    )
+                })
+                .collect();
+
+            let bind_group_layout = {
+                let key = format!(
+                    "runmat-fusion-multi-layout-{}-{}",
                     inputs.len(),
-                    num_outputs,
-                )
-            })
-        };
-        let pipeline = self.recipe_pipeline(
-            &recipe,
-            bind_group_layout.as_ref(),
-            "runmat-fusion-multi-pipeline",
-        );
-        crate::backend::wgpu::dispatch::elementwise::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-        );
-        self.device_ref().poll(wgpu::Maintain::Poll);
+                    num_outputs
+                );
+                self.cached_bind_group_layout(&key, |device| {
+                    crate::backend::wgpu::bindings::build_fusion_multi_bgl(
+                        device,
+                        inputs.len(),
+                        num_outputs,
+                    )
+                })
+            };
+            let pipeline = self.recipe_pipeline(
+                &recipe,
+                bind_group_layout.as_ref(),
+                "runmat-fusion-multi-pipeline",
+            );
+            crate::backend::wgpu::dispatch::elementwise::warmup_noop(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+            );
+            self.device_ref().poll(wgpu::Maintain::Poll);
 
-        struct BroadcastUniformState {
-            buffer: Arc<wgpu::Buffer>,
-            template: Vec<u8>,
-        }
-        impl BroadcastUniformState {
-            fn update(&mut self, queue: &wgpu::Queue, len: u32, offset: u32) {
-                self.template[..4].copy_from_slice(&len.to_ne_bytes());
-                self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
-                queue.write_buffer(self.buffer.as_ref(), 0, &self.template);
+            struct BroadcastUniformState {
+                buffer: Arc<wgpu::Buffer>,
+                template: Vec<u8>,
             }
-        }
-
-        let rank = output_shape.len();
-        let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
-        let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
-        let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
-        write_u32(&mut bytes, 0); // len placeholder
-        write_u32(&mut bytes, 0); // offset placeholder
-        write_u32(&mut bytes, rank as u32);
-        write_u32(&mut bytes, 0);
-        let write_packed_array = |buf: &mut Vec<u8>, vals: &[u32]| {
-            for &val in vals.iter() {
-                write_u32(buf, val);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
+            impl BroadcastUniformState {
+                fn update(&mut self, queue: &wgpu::Queue, len: u32, offset: u32) {
+                    self.template[..4].copy_from_slice(&len.to_ne_bytes());
+                    self.template[4..8].copy_from_slice(&offset.to_ne_bytes());
+                    queue.write_buffer(self.buffer.as_ref(), 0, &self.template);
+                }
             }
-            for _ in vals.len()..max_rank {
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
-                write_u32(buf, 0);
+
+            let rank = output_shape.len();
+            let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
+            let mut bytes: Vec<u8> = Vec::with_capacity(4 * 4 + (max_rank * 4 * 4));
+            let write_u32 = |buf: &mut Vec<u8>, v: u32| buf.extend_from_slice(&v.to_ne_bytes());
+            write_u32(&mut bytes, 0); // len placeholder
+            write_u32(&mut bytes, 0); // offset placeholder
+            write_u32(&mut bytes, rank as u32);
+            write_u32(&mut bytes, 0);
+            let write_packed_array = |buf: &mut Vec<u8>, vals: &[u32]| {
+                for &val in vals.iter() {
+                    write_u32(buf, val);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                }
+                for _ in vals.len()..max_rank {
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                    write_u32(buf, 0);
+                }
+            };
+            let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
+            write_packed_array(&mut bytes, &out_shape_u32);
+            for (shape_u32, strides) in &layouts {
+                write_packed_array(&mut bytes, shape_u32);
+                write_packed_array(&mut bytes, strides);
             }
-        };
-        let out_shape_u32: Vec<u32> = output_shape.iter().map(|&d| d as u32).collect();
-        write_packed_array(&mut bytes, &out_shape_u32);
-        for (shape_u32, strides) in &layouts {
-            write_packed_array(&mut bytes, shape_u32);
-            write_packed_array(&mut bytes, strides);
-        }
-        let uniform_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-fusion-multi-params"),
-            size: bytes.len() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        }));
-        self.queue.write_buffer(uniform_buffer.as_ref(), 0, &bytes);
+            let uniform_buffer = Arc::new(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-fusion-multi-params"),
+                size: bytes.len() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.queue.write_buffer(uniform_buffer.as_ref(), 0, &bytes);
 
-        let mut uniform_state = BroadcastUniformState {
-            buffer: uniform_buffer.clone(),
-            template: bytes,
-        };
+            let mut uniform_state = BroadcastUniformState {
+                buffer: uniform_buffer.clone(),
+                template: bytes,
+            };
 
-        let mut bind_entries = Vec::with_capacity(total_bindings);
-        for (idx, entry) in entries.iter().enumerate() {
+            let mut bind_entries = Vec::with_capacity(total_bindings);
+            for (idx, entry) in entries.iter().enumerate() {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: idx as u32,
+                    resource: entry.buffer.as_ref().as_entire_binding(),
+                });
+            }
+            for (k, (out_buf, _)) in output_buffers.iter().enumerate() {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: (inputs.len() + k) as u32,
+                    resource: out_buf.as_ref().as_entire_binding(),
+                });
+            }
             bind_entries.push(wgpu::BindGroupEntry {
-                binding: idx as u32,
-                resource: entry.buffer.as_ref().as_entire_binding(),
+                binding: storage_bindings as u32,
+                resource: uniform_buffer.as_ref().as_entire_binding(),
             });
-        }
-        for (k, (out_buf, _)) in output_buffers.iter().enumerate() {
-            bind_entries.push(wgpu::BindGroupEntry {
-                binding: (inputs.len() + k) as u32,
-                resource: out_buf.as_ref().as_entire_binding(),
-            });
-        }
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: storage_bindings as u32,
-            resource: uniform_buffer.as_ref().as_entire_binding(),
-        });
 
-        let bind_group =
-            self.bind_group_cache
-                .get_or_create(bind_group_layout.as_ref(), &bind_entries, || {
+            let bind_group = self.bind_group_cache.get_or_create(
+                bind_group_layout.as_ref(),
+                &bind_entries,
+                || {
                     Arc::new(
                         self.device_ref()
                             .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -2127,53 +2132,60 @@ impl WgpuProvider {
                                 entries: &bind_entries,
                             }),
                     )
-                });
-
-        let mut offset_elems = 0usize;
-        let mut last_submission_id = None;
-        while offset_elems < len {
-            let remaining = len - offset_elems;
-            let chunk_len = remaining.min(chunk_capacity);
-            uniform_state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32);
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                workgroup_size,
+                },
             );
-            let mut enc =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("runmat-fusion-multi-elementwise-encoder"),
+
+            let mut offset_elems = 0usize;
+            let mut last_submission_id = None;
+            while offset_elems < len {
+                let remaining = len - offset_elems;
+                let chunk_len = remaining.min(chunk_capacity);
+                uniform_state.update(self.queue_ref(), chunk_len as u32, offset_elems as u32);
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    workgroup_size,
+                );
+                let mut enc =
+                    self.device_ref()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("runmat-fusion-multi-elementwise-encoder"),
+                        });
+                {
+                    let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                        label: Some("runmat-fusion-multi-elementwise-pass"),
+                        timestamp_writes: None,
                     });
-            {
-                let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("runmat-fusion-multi-elementwise-pass"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(&pipeline);
-                pass.set_bind_group(0, bind_group.as_ref(), &[]);
-                if workgroups > 0 {
-                    pass.dispatch_workgroups(workgroups, 1, 1);
+                    pass.set_pipeline(&pipeline);
+                    pass.set_bind_group(0, bind_group.as_ref(), &[]);
+                    if workgroups > 0 {
+                        pass.dispatch_workgroups(workgroups, 1, 1);
+                    }
                 }
+                let submission_id = self.submit(enc);
+                last_submission_id = Some(submission_id);
+                offset_elems += chunk_len;
             }
-            let submission_id = self.submit(enc);
-            last_submission_id = Some(submission_id);
-            offset_elems += chunk_len;
-        }
 
-        let mut handles = Vec::with_capacity(num_outputs);
-        for (out_buf, _) in output_buffers {
-            let handle = self.register_existing_buffer_with_usage(
-                out_buf,
-                output_shape.to_vec(),
-                len,
-                BufferUsageClass::FusionOut,
-            );
-            if let Some(submission_id) = last_submission_id {
-                self.record_buffer_submission(handle.buffer_id, submission_id);
+            let mut handles = Vec::with_capacity(num_outputs);
+            for (out_buf, _) in output_buffers {
+                let handle = registrations.track(self.register_existing_buffer_with_usage(
+                    out_buf,
+                    output_shape.to_vec(),
+                    len,
+                    BufferUsageClass::FusionOut,
+                ))?;
+                if let Some(submission_id) = last_submission_id {
+                    self.record_buffer_submission(handle.buffer_id, submission_id);
+                }
+                handles.push(handle);
             }
-            handles.push(handle);
-        }
-        Ok(handles)
+            Ok(handles)
+        })();
+        registrations.finish(result, |batch, out| {
+            for handle in out {
+                batch.publish(handle);
+            }
+        })
     }
 }
 

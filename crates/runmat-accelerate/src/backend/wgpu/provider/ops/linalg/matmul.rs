@@ -370,7 +370,7 @@ impl WgpuProvider {
         let len = m * n;
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-matmul-epilogue-out")?;
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, len));
+            return self.register_existing_buffer(out_buffer, out_shape, len);
         }
 
         let start = Instant::now();
@@ -599,7 +599,7 @@ impl WgpuProvider {
             out_shape,
             len,
             BufferUsageClass::FusionOut,
-        );
+        )?;
 
         self.telemetry.record_matmul_duration(start.elapsed());
 
@@ -713,12 +713,12 @@ impl WgpuProvider {
             "runmat-syrk-out-scratch",
         );
         if len == 0 {
-            return Ok(self.register_existing_buffer_with_usage(
+            return self.register_existing_buffer_with_usage(
                 out_buffer,
                 out_shape,
                 0,
                 BufferUsageClass::SyrkOut,
-            ));
+            );
         }
 
         let rows_u32 =
@@ -807,12 +807,12 @@ impl WgpuProvider {
             first_chunk = false;
         }
 
-        Ok(self.register_existing_buffer_with_usage(
+        self.register_existing_buffer_with_usage(
             out_buffer,
             out_shape,
             len,
             BufferUsageClass::SyrkOut,
-        ))
+        )
     }
 
     pub(crate) fn matmul_exec(
@@ -828,147 +828,151 @@ impl WgpuProvider {
         b: &GpuTensorHandle,
         out_usage: BufferUsageClass,
     ) -> Result<GpuTensorHandle> {
-        let entry_a = self.get_entry(a)?;
-        let entry_b = self.get_entry(b)?;
-        if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
-            return Err(anyhow!("matmul: only 2D tensors supported"));
-        }
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry_a = self.get_entry(a)?;
+            let entry_b = self.get_entry(b)?;
+            if entry_a.shape.len() != 2 || entry_b.shape.len() != 2 {
+                return Err(anyhow!("matmul: only 2D tensors supported"));
+            }
 
-        let view_a = build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul: {e}"))?;
-        let view_b = build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul: {e}"))?;
+            let view_a =
+                build_matrix_operand_view(a, &entry_a).map_err(|e| anyhow!("matmul: {e}"))?;
+            let view_b =
+                build_matrix_operand_view(b, &entry_b).map_err(|e| anyhow!("matmul: {e}"))?;
 
-        if view_a.cols != view_b.rows {
-            return Err(anyhow!("matmul: inner dimensions must match"));
-        }
+            if view_a.cols != view_b.rows {
+                return Err(anyhow!("matmul: inner dimensions must match"));
+            }
 
-        let m = view_a.rows;
-        let n = view_b.cols;
-        let k = view_a.cols;
+            let m = view_a.rows;
+            let n = view_b.cols;
+            let k = view_a.cols;
 
-        let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
-        if debug_matmul {
-            log::debug!(
-                "[matmul_debug] ptr_a={:p} ptr_b={:p}",
-                entry_a.buffer.as_ref(),
-                entry_b.buffer.as_ref()
-            );
-            log::debug!(
-                "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
-                m,
-                n,
-                k,
-                view_a.lda,
-                view_b.lda,
-                view_a.transpose,
-                view_b.transpose
-            );
-        }
-
-        let out_shape = vec![m, n];
-        let len = m * n;
-        if len == 0 {
-            let (out_buffer, _) =
-                self.create_storage_buffer_for_usage(out_usage, 0, "runmat-matmul-out");
-            return Ok(
-                self.register_existing_buffer_with_usage(out_buffer, out_shape, 0, out_usage)
-            );
-        }
-
-        let m_u32 = u32::try_from(m).map_err(|_| anyhow!("matmul: m exceeds GPU limits"))?;
-        let n_u32 = u32::try_from(n).map_err(|_| anyhow!("matmul: n exceeds GPU limits"))?;
-        let k_u32 = u32::try_from(k).map_err(|_| anyhow!("matmul: k exceeds GPU limits"))?;
-
-        const K_CHUNK: usize = 8192;
-        const K_CHUNK_SWITCH: usize = 65536; // only chunk for very large k to avoid regressions
-
-        let can_vec4 = self.precision == NumericPrecision::F32
-            && !view_a.transpose
-            && !view_b.transpose
-            && m % 4 == 0
-            && m >= 4
-            && n > 0;
-        let disable_vec4 = std::env::var("RUNMAT_DISABLE_VEC4")
-            .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
-            .unwrap_or(false);
-        let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
-        let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
-        if debug_matmul {
-            log::debug!(
-                "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
-                can_vec4,
-                use_vec4,
-                enable_chunk,
-                out_usage
-            );
-        }
-
-        let start = Instant::now();
-
-        if enable_chunk {
-            self.prepare_matmul_pipeline();
-            self.device_ref().poll(wgpu::Maintain::Poll);
-            let lda_u32 = view_a.lda;
-            let ldb_u32 = view_b.lda;
-            // Accumulator handle across chunks
-            let mut acc: Option<GpuTensorHandle> = None;
-            let mut k_off: usize = 0;
-            let partial_storage = self.create_storage_buffer_checked_with_usage(
-                len,
-                "runmat-matmul-partial",
-                BufferUsageClass::MatmulPartial,
-            )?;
-            while k_off < k {
-                let k_sub = std::cmp::min(K_CHUNK, k - k_off);
-                // Create partial output buffer and bind group
-                let partial_buffer = partial_storage.clone();
-                let offset_a_elems = k_off
-                    .checked_mul(view_a.rows)
-                    .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
-                let offset_a_u32 = u32::try_from(offset_a_elems)
-                    .map_err(|_| anyhow!("matmul: A offset exceeds GPU limits"))?;
-                let offset_b_u32 = u32::try_from(k_off)
-                    .map_err(|_| anyhow!("matmul: B offset exceeds GPU limits"))?;
-                let params = crate::backend::wgpu::params::MatmulParams {
-                    m: m_u32,
-                    n: n_u32,
-                    k: k_sub as u32,
-                    lda: lda_u32,
-                    ldb: ldb_u32,
-                    ldc: m_u32,
-                    offset_a: offset_a_u32,
-                    offset_b: offset_b_u32,
-                    offset_out: 0,
-                    flags: 0,
-                };
-                let params_buffer = self.kernel_resources.uniform_buffer(
-                    self.device_ref(),
-                    UniformBufferKey::MatmulParams,
-                    std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
-                    "runmat-matmul-params",
+            let debug_matmul = std::env::var("RUNMAT_DEBUG_MATMUL").is_ok();
+            if debug_matmul {
+                log::debug!(
+                    "[matmul_debug] ptr_a={:p} ptr_b={:p}",
+                    entry_a.buffer.as_ref(),
+                    entry_b.buffer.as_ref()
                 );
-                self.queue
-                    .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-                let bind_entries = [
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry_a.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: entry_b.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: partial_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ];
-                let layout = &self.pipelines.matmul.layout;
-                let bg =
-                    self.bind_group_cache
+                log::debug!(
+                    "[matmul_debug] m={} n={} k={} lda={} ldb={} transpose_a={} transpose_b={}",
+                    m,
+                    n,
+                    k,
+                    view_a.lda,
+                    view_b.lda,
+                    view_a.transpose,
+                    view_b.transpose
+                );
+            }
+
+            let out_shape = vec![m, n];
+            let len = m * n;
+            if len == 0 {
+                let (out_buffer, _) =
+                    self.create_storage_buffer_for_usage(out_usage, 0, "runmat-matmul-out");
+                return registrations.track(
+                    self.register_existing_buffer_with_usage(out_buffer, out_shape, 0, out_usage),
+                );
+            }
+
+            let m_u32 = u32::try_from(m).map_err(|_| anyhow!("matmul: m exceeds GPU limits"))?;
+            let n_u32 = u32::try_from(n).map_err(|_| anyhow!("matmul: n exceeds GPU limits"))?;
+            let k_u32 = u32::try_from(k).map_err(|_| anyhow!("matmul: k exceeds GPU limits"))?;
+
+            const K_CHUNK: usize = 8192;
+            const K_CHUNK_SWITCH: usize = 65536; // only chunk for very large k to avoid regressions
+
+            let can_vec4 = self.precision == NumericPrecision::F32
+                && !view_a.transpose
+                && !view_b.transpose
+                && m % 4 == 0
+                && m >= 4
+                && n > 0;
+            let disable_vec4 = std::env::var("RUNMAT_DISABLE_VEC4")
+                .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "True"))
+                .unwrap_or(false);
+            let use_vec4 = can_vec4 && k < K_CHUNK_SWITCH && !disable_vec4;
+            let enable_chunk = !view_a.transpose && !view_b.transpose && k >= K_CHUNK_SWITCH;
+            if debug_matmul {
+                log::debug!(
+                    "[matmul_debug] can_vec4={} use_vec4={} enable_chunk={} usage={:?}",
+                    can_vec4,
+                    use_vec4,
+                    enable_chunk,
+                    out_usage
+                );
+            }
+
+            let start = Instant::now();
+
+            if enable_chunk {
+                self.prepare_matmul_pipeline();
+                self.device_ref().poll(wgpu::Maintain::Poll);
+                let lda_u32 = view_a.lda;
+                let ldb_u32 = view_b.lda;
+                // Accumulator handle across chunks
+                let mut acc: Option<GpuTensorHandle> = None;
+                let mut k_off: usize = 0;
+                let partial_storage = self.create_storage_buffer_checked_with_usage(
+                    len,
+                    "runmat-matmul-partial",
+                    BufferUsageClass::MatmulPartial,
+                )?;
+                while k_off < k {
+                    let k_sub = std::cmp::min(K_CHUNK, k - k_off);
+                    // Create partial output buffer and bind group
+                    let partial_buffer = partial_storage.clone();
+                    let offset_a_elems = k_off
+                        .checked_mul(view_a.rows)
+                        .ok_or_else(|| anyhow!("matmul: offset overflow"))?;
+                    let offset_a_u32 = u32::try_from(offset_a_elems)
+                        .map_err(|_| anyhow!("matmul: A offset exceeds GPU limits"))?;
+                    let offset_b_u32 = u32::try_from(k_off)
+                        .map_err(|_| anyhow!("matmul: B offset exceeds GPU limits"))?;
+                    let params = crate::backend::wgpu::params::MatmulParams {
+                        m: m_u32,
+                        n: n_u32,
+                        k: k_sub as u32,
+                        lda: lda_u32,
+                        ldb: ldb_u32,
+                        ldc: m_u32,
+                        offset_a: offset_a_u32,
+                        offset_b: offset_b_u32,
+                        offset_out: 0,
+                        flags: 0,
+                    };
+                    let params_buffer = self.kernel_resources.uniform_buffer(
+                        self.device_ref(),
+                        UniformBufferKey::MatmulParams,
+                        std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+                        "runmat-matmul-params",
+                    );
+                    self.queue
+                        .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+                    let bind_entries = [
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry_a.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: entry_b.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: partial_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ];
+                    let layout = &self.pipelines.matmul.layout;
+                    let bg = self
+                        .bind_group_cache
                         .get_or_create(layout, &bind_entries, || {
                             Arc::new(self.device_ref().create_bind_group(
                                 &wgpu::BindGroupDescriptor {
@@ -978,160 +982,165 @@ impl WgpuProvider {
                                 },
                             ))
                         });
-                let tile = crate::backend::wgpu::config::effective_matmul_tile();
-                let groups_x =
-                    crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
-                let groups_y =
-                    crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
-                crate::backend::wgpu::dispatch::matmul::run(
-                    self.device_ref(),
-                    self.queue_ref(),
-                    &self.pipelines.matmul.pipeline,
-                    bg.as_ref(),
-                    groups_x,
-                    groups_y,
-                );
-                // Wrap partial buffer into handle
-                let partial = self.register_existing_buffer_with_usage(
-                    partial_buffer,
-                    out_shape.clone(),
-                    len,
-                    BufferUsageClass::MatmulPartial,
-                );
-                acc = match acc {
-                    None => Some(partial),
-                    Some(prev) => {
-                        let sum = self.binary_op_exec(
-                            crate::backend::wgpu::types::BinaryOpCode::Add,
-                            &prev,
-                            &partial,
-                        )?;
-                        self.free_exec(&prev).ok();
-                        self.free_exec(&partial).ok();
-                        Some(sum)
-                    }
-                };
-                k_off += k_sub;
+                    let tile = crate::backend::wgpu::config::effective_matmul_tile();
+                    let groups_x =
+                        crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+                    let groups_y =
+                        crate::backend::wgpu::dispatch::common::dispatch_size_dim(m_u32, tile);
+                    crate::backend::wgpu::dispatch::matmul::run(
+                        self.device_ref(),
+                        self.queue_ref(),
+                        &self.pipelines.matmul.pipeline,
+                        bg.as_ref(),
+                        groups_x,
+                        groups_y,
+                    );
+                    // Wrap partial buffer into handle
+                    let partial = registrations.track(self.register_existing_buffer_with_usage(
+                        partial_buffer,
+                        out_shape.clone(),
+                        len,
+                        BufferUsageClass::MatmulPartial,
+                    ))?;
+                    acc = match acc {
+                        None => Some(partial),
+                        Some(prev) => {
+                            let sum = registrations.track(self.binary_op_exec(
+                                crate::backend::wgpu::types::BinaryOpCode::Add,
+                                &prev,
+                                &partial,
+                            ))?;
+                            self.free_exec(&prev).ok();
+                            self.free_exec(&partial).ok();
+                            Some(sum)
+                        }
+                    };
+                    k_off += k_sub;
+                }
+                let handle = acc.expect("matmul chunking produced no output");
+                self.remember_matmul_sources(&handle, a, b);
+                self.mark_buffer_usage(&handle, out_usage);
+                self.telemetry.record_matmul_duration(start.elapsed());
+                self.record_matmul_kernel_launch(m, n, k, use_vec4, true);
+                return Ok(handle);
             }
-            let handle = acc.expect("matmul chunking produced no output");
-            self.remember_matmul_sources(&handle, a, b);
-            self.mark_buffer_usage(&handle, out_usage);
-            self.telemetry.record_matmul_duration(start.elapsed());
-            self.record_matmul_kernel_launch(m, n, k, use_vec4, true);
-            return Ok(handle);
-        }
 
-        // Default single-dispatch path
-        let out_buffer =
-            self.create_storage_buffer_checked_with_usage(len, "runmat-matmul-out", out_usage)?;
-        if use_vec4 {
-            self.prepare_matmul_vec4_pipeline();
-        } else {
-            self.prepare_matmul_pipeline();
-        }
-        self.device_ref().poll(wgpu::Maintain::Poll);
-        let mut flags = 0u32;
-        if view_a.transpose {
-            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
-        }
-        if view_b.transpose {
-            flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
-        }
-        let params = crate::backend::wgpu::params::MatmulParams {
-            m: m_u32,
-            n: n_u32,
-            k: k_u32,
-            lda: view_a.lda,
-            ldb: view_b.lda,
-            ldc: m_u32,
-            offset_a: 0,
-            offset_b: 0,
-            offset_out: 0,
-            flags,
-        };
-        let params_buffer = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            UniformBufferKey::MatmulParams,
-            std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
-            "runmat-matmul-params",
-        );
-        self.queue
-            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
-        let layout = if use_vec4 {
-            &self.pipelines.matmul_vec4.layout
-        } else {
-            &self.pipelines.matmul.layout
-        };
-        let pipeline = if use_vec4 {
-            &self.pipelines.matmul_vec4.pipeline
-        } else {
-            &self.pipelines.matmul.pipeline
-        };
-        let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: entry_a.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: entry_b.buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: out_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ];
-        let bg = if out_usage == BufferUsageClass::MatmulOut {
-            Arc::new(
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-matmul-bind"),
-                        layout,
-                        entries: &bind_entries,
-                    }),
-            )
-        } else {
-            self.bind_group_cache
-                .get_or_create(layout, &bind_entries, || {
-                    Arc::new(
-                        self.device_ref()
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-matmul-bind"),
-                                layout,
-                                entries: &bind_entries,
-                            }),
-                    )
-                })
-        };
-        let tile = crate::backend::wgpu::config::effective_matmul_tile();
-        let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
-        let groups_y = if use_vec4 {
-            let rows_vec = (m as u32) / 4;
-            crate::backend::wgpu::dispatch::common::dispatch_size_dim(rows_vec, tile)
-        } else {
-            crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile)
-        };
-        crate::backend::wgpu::dispatch::matmul::run(
-            self.device_ref(),
-            self.queue_ref(),
-            pipeline,
-            bg.as_ref(),
-            groups_x,
-            groups_y,
-        );
-        let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer;
-        let handle =
-            self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage);
-        if debug_matmul {
-            log::debug!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
-        }
-        self.remember_matmul_sources(&handle, a, b);
-        self.telemetry.record_matmul_duration(start.elapsed());
-        self.record_matmul_kernel_launch(m, n, k, use_vec4, false);
-        Ok(handle)
+            // Default single-dispatch path
+            let out_buffer =
+                self.create_storage_buffer_checked_with_usage(len, "runmat-matmul-out", out_usage)?;
+            if use_vec4 {
+                self.prepare_matmul_vec4_pipeline();
+            } else {
+                self.prepare_matmul_pipeline();
+            }
+            self.device_ref().poll(wgpu::Maintain::Poll);
+            let mut flags = 0u32;
+            if view_a.transpose {
+                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_A;
+            }
+            if view_b.transpose {
+                flags |= crate::backend::wgpu::params::MATMUL_FLAG_TRANSPOSE_B;
+            }
+            let params = crate::backend::wgpu::params::MatmulParams {
+                m: m_u32,
+                n: n_u32,
+                k: k_u32,
+                lda: view_a.lda,
+                ldb: view_b.lda,
+                ldc: m_u32,
+                offset_a: 0,
+                offset_b: 0,
+                offset_out: 0,
+                flags,
+            };
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                self.device_ref(),
+                UniformBufferKey::MatmulParams,
+                std::mem::size_of::<crate::backend::wgpu::params::MatmulParams>() as u64,
+                "runmat-matmul-params",
+            );
+            self.queue
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let layout = if use_vec4 {
+                &self.pipelines.matmul_vec4.layout
+            } else {
+                &self.pipelines.matmul.layout
+            };
+            let pipeline = if use_vec4 {
+                &self.pipelines.matmul_vec4.pipeline
+            } else {
+                &self.pipelines.matmul.pipeline
+            };
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: entry_a.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: entry_b.buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: out_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let bg = if out_usage == BufferUsageClass::MatmulOut {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-matmul-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            } else {
+                self.bind_group_cache
+                    .get_or_create(layout, &bind_entries, || {
+                        Arc::new(
+                            self.device_ref()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-matmul-bind"),
+                                    layout,
+                                    entries: &bind_entries,
+                                }),
+                        )
+                    })
+            };
+            let tile = crate::backend::wgpu::config::effective_matmul_tile();
+            let groups_x = crate::backend::wgpu::dispatch::common::dispatch_size_dim(n_u32, tile);
+            let groups_y = if use_vec4 {
+                let rows_vec = (m as u32) / 4;
+                crate::backend::wgpu::dispatch::common::dispatch_size_dim(rows_vec, tile)
+            } else {
+                crate::backend::wgpu::dispatch::common::dispatch_size_dim(m as u32, tile)
+            };
+            crate::backend::wgpu::dispatch::matmul::run(
+                self.device_ref(),
+                self.queue_ref(),
+                pipeline,
+                bg.as_ref(),
+                groups_x,
+                groups_y,
+            );
+            let out_ptr = out_buffer.as_ref() as *const wgpu::Buffer;
+            let handle = registrations.track(
+                self.register_existing_buffer_with_usage(out_buffer, out_shape, len, out_usage),
+            )?;
+            if debug_matmul {
+                log::debug!("[matmul_debug] out_ptr={:p} len={}", out_ptr, len);
+            }
+            self.remember_matmul_sources(&handle, a, b);
+            self.telemetry.record_matmul_duration(start.elapsed());
+            self.record_matmul_kernel_launch(m, n, k, use_vec4, false);
+            Ok(handle)
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(out);
+        })
     }
 }

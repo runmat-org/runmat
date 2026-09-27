@@ -167,7 +167,7 @@ impl WgpuProvider {
         if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
             let out_len = num_slices.max(1);
             let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
-            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
+            return self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
         }
         let key =
             self.compute_pipeline_hash_bytes(shader.as_bytes(), layout_tag, Some(workgroup_size));
@@ -365,7 +365,7 @@ impl WgpuProvider {
         if std::env::var("RUNMAT_DEBUG_REDUCTION").is_ok() {
             log::debug!("[fused-reduction] single-pass dispatch complete");
         }
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len))
+        self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -428,7 +428,7 @@ impl WgpuProvider {
         if std::env::var("RUNMAT_DEBUG_PIPELINE_ONLY").is_ok() {
             let out_len = num_slices.max(1);
             let out_buffer = self.create_storage_buffer_checked(out_len, "runmat-reduction-out")?;
-            return Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len));
+            return self.register_existing_buffer(out_buffer, output_shape.to_vec(), out_len);
         }
         let p2_key = self.compute_pipeline_hash_bytes(
             pass2.as_bytes(),
@@ -690,7 +690,7 @@ impl WgpuProvider {
             g1,
             g2,
         );
-        Ok(self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1)))
+        self.register_existing_buffer(out_buffer, output_shape.to_vec(), num_slices.max(1))
     }
 
     fn reduction_partials_budget_bytes(&self) -> u64 {

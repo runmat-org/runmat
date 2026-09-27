@@ -23,14 +23,14 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("eye: tensor size exceeds GPU limits"))?;
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-eye-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+            return self.register_existing_buffer(out_buffer, normalized, total_len);
         }
 
         let rows = normalized[0];
         let cols = normalized[1];
         let diag_len = rows.min(cols);
         if diag_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+            return self.register_existing_buffer(out_buffer, normalized, total_len);
         }
         let slice_stride = rows
             .checked_mul(cols)
@@ -45,7 +45,7 @@ impl WgpuProvider {
             .checked_mul(slices)
             .ok_or_else(|| anyhow!("eye: diagonal count exceeds GPU limits"))?;
         if diag_total == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, normalized, total_len));
+            return self.register_existing_buffer(out_buffer, normalized, total_len);
         }
         if rows > (u32::MAX as usize)
             || cols > (u32::MAX as usize)
@@ -111,7 +111,7 @@ impl WgpuProvider {
             "runmat-eye-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, normalized, total_len))
+        self.register_existing_buffer(out_buffer, normalized, total_len)
     }
     pub(crate) fn fill_exec(&self, shape: &[usize], value: f64) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
@@ -119,7 +119,7 @@ impl WgpuProvider {
         let shape_vec = shape.to_vec();
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-fill-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -196,7 +196,7 @@ impl WgpuProvider {
             processed += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+        self.register_existing_buffer(out_buffer, shape_vec, total_len)
     }
 
     pub(crate) fn zeros_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -224,7 +224,7 @@ impl WgpuProvider {
             let zero_bytes = vec![0u8; size_bytes as usize];
             self.queue.write_buffer(buffer.as_ref(), 0, &zero_bytes);
         }
-        Ok(self.register_existing_buffer_with_storage(buffer, shape.to_vec(), raw_len, storage))
+        self.register_existing_buffer_with_storage(buffer, shape.to_vec(), raw_len, storage)
     }
 
     pub(crate) fn meshgrid_exec(
@@ -314,197 +314,199 @@ impl WgpuProvider {
         &self,
         request: &ProviderNdgridRequest<'_>,
     ) -> Result<ProviderNdgridResult> {
-        ensure!(request.output_count > 0, "ndgrid: missing outputs");
-        ensure!(
-            request.output_count <= request.axes.len(),
-            "ndgrid: too many outputs for axes"
-        );
-        ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            ensure!(request.output_count > 0, "ndgrid: missing outputs");
+            ensure!(
+                request.output_count <= request.axes.len(),
+                "ndgrid: too many outputs for axes"
+            );
+            ensure!(!request.output_shape.is_empty(), "ndgrid: missing shape");
 
-        let total_len = product_checked(request.output_shape)
-            .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds GPU limits"))?;
-        ensure!(
-            total_len <= u32::MAX as usize,
-            "ndgrid: tensor length exceeds GPU dispatch limits"
-        );
-        let total_u32 = total_len as u32;
-        let strides = column_major_strides_checked(request.output_shape)?;
-        let expected_element_type = match self.precision {
-            NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-            NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-        };
-        let entries = {
-            let guard = self
-                .allocations
-                .lock_entries()
-                .expect("buffer mutex poisoned");
-            let mut entries = Vec::with_capacity(request.output_count);
-            for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
-                ensure!(
-                    axis.handle.device_id == self.runtime_device_id,
-                    "ndgrid: axis belongs to a different device"
-                );
-                let entry = guard
-                    .get(&axis.handle.buffer_id)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("ndgrid: unknown buffer {}", axis.handle.buffer_id))?;
-                ensure!(
-                    entry.storage != GpuTensorStorage::ComplexInterleaved,
-                    "ndgrid: complex axes are not supported"
-                );
-                ensure!(
-                    entry.element_type == expected_element_type,
-                    "ndgrid: axis physical type {} does not match provider type {}",
-                    entry.element_type.class_name(),
-                    expected_element_type.class_name()
-                );
-                let expected = request.output_shape.get(dim).copied().unwrap_or(1);
-                ensure!(
-                    entry.len == expected,
-                    "ndgrid: axis {} length {} does not match output extent {}",
-                    dim + 1,
-                    entry.len,
-                    expected
-                );
-                ensure!(
-                    entry.len <= u32::MAX as usize && strides[dim] <= u32::MAX as usize,
-                    "ndgrid: axis dimensions exceed GPU dispatch limits"
-                );
-                entries.push(entry);
-            }
-            entries
-        };
+            let total_len = product_checked(request.output_shape)
+                .ok_or_else(|| anyhow!("ndgrid: tensor size exceeds GPU limits"))?;
+            ensure!(
+                total_len <= u32::MAX as usize,
+                "ndgrid: tensor length exceeds GPU dispatch limits"
+            );
+            let total_u32 = total_len as u32;
+            let strides = column_major_strides_checked(request.output_shape)?;
+            let expected_element_type = match self.precision {
+                NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
+                NumericPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
+            };
+            let entries = {
+                let mut entries = Vec::with_capacity(request.output_count);
+                for (dim, axis) in request.axes.iter().take(request.output_count).enumerate() {
+                    ensure!(
+                        axis.handle.device_id == self.runtime_device_id,
+                        "ndgrid: axis belongs to a different device"
+                    );
+                    let entry = self.allocations.live_entry(axis.handle.buffer_id)?;
+                    ensure!(
+                        entry.storage != GpuTensorStorage::ComplexInterleaved,
+                        "ndgrid: complex axes are not supported"
+                    );
+                    ensure!(
+                        entry.element_type == expected_element_type,
+                        "ndgrid: axis physical type {} does not match provider type {}",
+                        entry.element_type.class_name(),
+                        expected_element_type.class_name()
+                    );
+                    let expected = request.output_shape.get(dim).copied().unwrap_or(1);
+                    ensure!(
+                        entry.len == expected,
+                        "ndgrid: axis {} length {} does not match output extent {}",
+                        dim + 1,
+                        entry.len,
+                        expected
+                    );
+                    ensure!(
+                        entry.len <= u32::MAX as usize && strides[dim] <= u32::MAX as usize,
+                        "ndgrid: axis dimensions exceed GPU dispatch limits"
+                    );
+                    entries.push(entry);
+                }
+                entries
+            };
 
-        let shader = ndgrid_shader(self.precision);
-        let shader_module = self
-            .device_ref()
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("runmat-ndgrid-shader"),
-                source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
-            });
-        let bind_layout =
-            self.device_ref()
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    label: Some("runmat-ndgrid-layout"),
-                    entries: &[
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: true },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
+            let shader = ndgrid_shader(self.precision);
+            let shader_module =
+                self.device_ref()
+                    .create_shader_module(wgpu::ShaderModuleDescriptor {
+                        label: Some("runmat-ndgrid-shader"),
+                        source: wgpu::ShaderSource::Wgsl(Cow::Owned(shader)),
+                    });
+            let bind_layout =
+                self.device_ref()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-ndgrid-layout"),
+                        entries: &[
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 0,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
                             },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Storage { read_only: false },
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 1,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
                             },
-                            count: None,
-                        },
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::COMPUTE,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
+                            wgpu::BindGroupLayoutEntry {
+                                binding: 2,
+                                visibility: wgpu::ShaderStages::COMPUTE,
+                                ty: wgpu::BindingType::Buffer {
+                                    ty: wgpu::BufferBindingType::Uniform,
+                                    has_dynamic_offset: false,
+                                    min_binding_size: None,
+                                },
+                                count: None,
                             },
-                            count: None,
-                        },
-                    ],
-                });
-        let pipeline_layout =
-            self.device_ref()
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("runmat-ndgrid-pipeline-layout"),
-                    bind_group_layouts: &[&bind_layout],
-                    push_constant_ranges: &[],
-                });
-        let pipeline = self.device_ref().create_compute_pipeline(
-            &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
-                label: Some("runmat-ndgrid-pipeline"),
-                layout: Some(&pipeline_layout),
-                module: &shader_module,
-                entry_point: "main",
-            },
-        );
+                        ],
+                    });
+            let pipeline_layout =
+                self.device_ref()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("runmat-ndgrid-pipeline-layout"),
+                        bind_group_layouts: &[&bind_layout],
+                        push_constant_ranges: &[],
+                    });
+            let pipeline = self.device_ref().create_compute_pipeline(
+                &crate::backend::wgpu::compat::wgpu_compute_pipeline_descriptor! {
+                    label: Some("runmat-ndgrid-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader_module,
+                    entry_point: "main",
+                },
+            );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
-        let mut outputs = Vec::with_capacity(request.output_count);
-        for dim in 0..request.output_count {
-            let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-ndgrid-out")?;
-            if total_len > 0 {
-                let mut offset = 0usize;
-                while offset < total_len {
-                    let chunk_len = (total_len - offset).min(chunk_capacity);
-                    let params = NdgridParams {
-                        total: total_u32,
-                        axis_len: entries[dim].len as u32,
-                        stride: strides[dim] as u32,
-                        offset: offset as u32,
-                        chunk: chunk_len as u32,
-                        _pad0: 0,
-                        _pad1: 0,
-                        _pad2: 0,
-                    };
-                    let params_buffer =
-                        self.device_ref()
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut outputs = Vec::with_capacity(request.output_count);
+            for dim in 0..request.output_count {
+                let out_buffer =
+                    self.create_storage_buffer_checked(total_len, "runmat-ndgrid-out")?;
+                if total_len > 0 {
+                    let mut offset = 0usize;
+                    while offset < total_len {
+                        let chunk_len = (total_len - offset).min(chunk_capacity);
+                        let params = NdgridParams {
+                            total: total_u32,
+                            axis_len: entries[dim].len as u32,
+                            stride: strides[dim] as u32,
+                            offset: offset as u32,
+                            chunk: chunk_len as u32,
+                            _pad0: 0,
+                            _pad1: 0,
+                            _pad2: 0,
+                        };
+                        let params_buffer = self.device_ref().create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-ndgrid-params"),
                                 contents: bytes_of(&params),
                                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                            });
-                    let bind_group =
-                        self.device_ref()
-                            .create_bind_group(&wgpu::BindGroupDescriptor {
-                                label: Some("runmat-ndgrid-bind"),
-                                layout: &bind_layout,
-                                entries: &[
-                                    wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: entries[dim].buffer.as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 1,
-                                        resource: out_buffer.as_ref().as_entire_binding(),
-                                    },
-                                    wgpu::BindGroupEntry {
-                                        binding: 2,
-                                        resource: params_buffer.as_entire_binding(),
-                                    },
-                                ],
-                            });
-                    let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                        chunk_len as u32,
-                        crate::backend::wgpu::config::WORKGROUP_SIZE,
-                    );
-                    crate::backend::wgpu::dispatch::creation::run(
-                        self.device_ref(),
-                        self.queue_ref(),
-                        &pipeline,
-                        &bind_group,
-                        workgroups,
-                        "runmat-ndgrid-encoder",
-                        "runmat-ndgrid-pass",
-                    );
-                    offset += chunk_len;
+                            },
+                        );
+                        let bind_group =
+                            self.device_ref()
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("runmat-ndgrid-bind"),
+                                    layout: &bind_layout,
+                                    entries: &[
+                                        wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: entries[dim].buffer.as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 1,
+                                            resource: out_buffer.as_ref().as_entire_binding(),
+                                        },
+                                        wgpu::BindGroupEntry {
+                                            binding: 2,
+                                            resource: params_buffer.as_entire_binding(),
+                                        },
+                                    ],
+                                });
+                        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                            chunk_len as u32,
+                            crate::backend::wgpu::config::WORKGROUP_SIZE,
+                        );
+                        crate::backend::wgpu::dispatch::creation::run(
+                            self.device_ref(),
+                            self.queue_ref(),
+                            &pipeline,
+                            &bind_group,
+                            workgroups,
+                            "runmat-ndgrid-encoder",
+                            "runmat-ndgrid-pass",
+                        );
+                        offset += chunk_len;
+                    }
                 }
+                outputs.push(registrations.track(self.register_existing_buffer(
+                    out_buffer,
+                    request.output_shape.to_vec(),
+                    total_len,
+                ))?);
             }
-            outputs.push(self.register_existing_buffer(
-                out_buffer,
-                request.output_shape.to_vec(),
-                total_len,
-            ));
-        }
 
-        Ok(ProviderNdgridResult { outputs })
+            Ok(ProviderNdgridResult { outputs })
+        })();
+        registrations.finish(result, |batch, out| {
+            for handle in &out.outputs {
+                batch.publish(handle);
+            }
+        })
     }
 
     pub(crate) fn fspecial_exec(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
@@ -565,7 +567,7 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("fspecial: tensor size exceeds GPU limits"))?;
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-fspecial-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -637,7 +639,7 @@ impl WgpuProvider {
             "runmat-fspecial-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+        self.register_existing_buffer(out_buffer, shape_vec, total_len)
     }
 
     pub(crate) fn peaks_exec(&self, n: usize) -> Result<GpuTensorHandle> {
@@ -654,7 +656,7 @@ impl WgpuProvider {
         let shape_vec = vec![n, n];
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-peaks-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
 
         let n_u32 = n as u32;
@@ -710,7 +712,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+        self.register_existing_buffer(out_buffer, shape_vec, total_len)
     }
 
     pub(crate) fn peaks_xy_exec(
@@ -731,7 +733,7 @@ impl WgpuProvider {
         let shape_vec = x.shape.clone();
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-peaks-xy-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
 
         let x_entry = self.get_entry(x)?;
@@ -798,7 +800,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+        self.register_existing_buffer(out_buffer, shape_vec, total_len)
     }
     pub(crate) fn linspace_exec(
         &self,
@@ -813,7 +815,7 @@ impl WgpuProvider {
         let shape = vec![1, count];
         let out_buffer = self.create_storage_buffer(count, "runmat-linspace-out");
         if count == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape, 0));
+            return self.register_existing_buffer(out_buffer, shape, 0);
         }
 
         {
@@ -908,7 +910,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape, count))
+        self.register_existing_buffer(out_buffer, shape, count)
     }
     pub(crate) fn diag_from_vector_exec(
         &self,
@@ -964,7 +966,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(total, "runmat-diag-vec-out");
         if len == 0 || total == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total));
+            return self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total);
         }
         {
             let mut enc =
@@ -1025,7 +1027,7 @@ impl WgpuProvider {
             "runmat-diag-vec-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total))
+        self.register_existing_buffer(out_buffer, vec![out_rows, out_cols], total)
     }
     pub(crate) fn diag_extract_exec(
         &self,
@@ -1042,7 +1044,7 @@ impl WgpuProvider {
         let diag_len = diag_length(rows, cols, offset);
         if diag_len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-diag-extract-empty");
-            return Ok(self.register_existing_buffer(out_buffer, vec![0, 1], 0));
+            return self.register_existing_buffer(out_buffer, vec![0, 1], 0);
         }
         ensure!(
             diag_len <= u32::MAX as usize,
@@ -1111,7 +1113,7 @@ impl WgpuProvider {
             "runmat-diag-extract-pass",
         );
 
-        Ok(self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len))
+        self.register_existing_buffer(out_buffer, vec![diag_len, 1], diag_len)
     }
 }
 

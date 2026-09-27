@@ -105,7 +105,7 @@ impl WgpuProvider {
         let len = entry.len;
         if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-nan-to-zero-empty");
-            return Ok(self.register_existing_buffer(out, entry.shape, 0));
+            return self.register_existing_buffer(out, entry.shape, 0);
         }
         let shader = match self.precision {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NAN_TO_ZERO_SHADER_F64,
@@ -124,7 +124,7 @@ impl WgpuProvider {
         let len = entry.len;
         if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-not-nan-mask-empty");
-            return Ok(self.register_existing_buffer(out, entry.shape, 0));
+            return self.register_existing_buffer(out, entry.shape, 0);
         }
         let shader = match self.precision {
             NumericPrecision::F64 => crate::backend::wgpu::shaders::nan::NOT_NAN_MASK_SHADER_F64,

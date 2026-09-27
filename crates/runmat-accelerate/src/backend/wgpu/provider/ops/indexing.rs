@@ -180,7 +180,7 @@ impl WgpuProvider {
             &bg,
             groups,
         );
-        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
+        self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
     }
     pub(crate) fn sub2ind_exec(
         &self,
@@ -206,7 +206,7 @@ impl WgpuProvider {
         }
         if len == 0 {
             let buffer = self.create_storage_buffer(0, "runmat-sub2ind-empty");
-            return Ok(self.register_existing_buffer(buffer, output_shape.to_vec(), 0));
+            return self.register_existing_buffer(buffer, output_shape.to_vec(), 0);
         }
         if dims.iter().any(|&d| d > u32::MAX as usize)
             || strides.iter().any(|&s| s > u32::MAX as usize)
@@ -373,12 +373,12 @@ impl WgpuProvider {
             return Err(err);
         }
 
-        Ok(self.register_existing_buffer_with_usage(
+        self.register_existing_buffer_with_usage(
             output_buffer,
             output_shape.to_vec(),
             len,
             BufferUsageClass::FusionOut,
-        ))
+        )
     }
 
     pub(crate) fn ind2sub_exec(
@@ -390,187 +390,207 @@ impl WgpuProvider {
         len: usize,
         output_shape: &[usize],
     ) -> Result<Vec<GpuTensorHandle>> {
-        if dims.len() != strides.len() {
-            return Err(anyhow!("ind2sub: size vector mismatch"));
-        }
-        let expected_len: usize = output_shape.iter().copied().product();
-        if expected_len != len {
-            return Err(anyhow!("ind2sub: output shape does not match index tensor"));
-        }
-        if len == 0 {
-            let mut handles = Vec::with_capacity(dims.len());
-            for _ in 0..dims.len() {
-                let buffer = self.create_storage_buffer(0, "runmat-ind2sub-empty");
-                handles.push(self.register_existing_buffer(buffer, output_shape.to_vec(), 0));
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            if dims.len() != strides.len() {
+                return Err(anyhow!("ind2sub: size vector mismatch"));
             }
-            return Ok(handles);
-        }
-        if dims.iter().any(|&d| d > u32::MAX as usize)
-            || strides.iter().any(|&s| s > u32::MAX as usize)
-            || total > u32::MAX as usize
-            || len > u32::MAX as usize
-        {
-            return Err(anyhow!("ind2sub: dimensions exceed GPU kernel limits"));
-        }
-        let storage_bindings =
-            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 2)?;
-        let total_bindings =
-            super::backend_shared::checked_binding_count("ind2sub", dims.len(), 3)?;
-        super::backend_shared::validate_compute_binding_counts(
-            "ind2sub",
-            storage_bindings,
-            total_bindings,
-            &self.device_ref().limits(),
-        )?;
+            let expected_len: usize = output_shape.iter().copied().product();
+            if expected_len != len {
+                return Err(anyhow!("ind2sub: output shape does not match index tensor"));
+            }
+            if len == 0 {
+                let mut handles = Vec::with_capacity(dims.len());
+                for _ in 0..dims.len() {
+                    let buffer = self.create_storage_buffer(0, "runmat-ind2sub-empty");
+                    handles.push(registrations.track(self.register_existing_buffer(
+                        buffer,
+                        output_shape.to_vec(),
+                        0,
+                    ))?);
+                }
+                return Ok(handles);
+            }
+            if dims.iter().any(|&d| d > u32::MAX as usize)
+                || strides.iter().any(|&s| s > u32::MAX as usize)
+                || total > u32::MAX as usize
+                || len > u32::MAX as usize
+            {
+                return Err(anyhow!("ind2sub: dimensions exceed GPU kernel limits"));
+            }
+            let storage_bindings =
+                super::backend_shared::checked_binding_count("ind2sub", dims.len(), 2)?;
+            let total_bindings =
+                super::backend_shared::checked_binding_count("ind2sub", dims.len(), 3)?;
+            super::backend_shared::validate_compute_binding_counts(
+                "ind2sub",
+                storage_bindings,
+                total_bindings,
+                &self.device_ref().limits(),
+            )?;
 
-        let entry = self.get_entry(indices)?;
-        if entry.len != len {
-            return Err(anyhow!(
-                "ind2sub: index tensor length does not match provided shape"
+            let entry = self.get_entry(indices)?;
+            if entry.len != len {
+                return Err(anyhow!(
+                    "ind2sub: index tensor length does not match provided shape"
+                ));
+            }
+
+            let dims_u32: Vec<u32> = dims.iter().map(|&d| d as u32).collect();
+            let strides_u32: Vec<u32> = strides.iter().map(|&s| s as u32).collect();
+
+            let mut output_buffers = Vec::with_capacity(dims.len());
+            for _ in 0..dims.len() {
+                output_buffers.push(self.create_storage_buffer_checked(len, "runmat-ind2sub-out")?);
+            }
+
+            let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
+            let error_buffer = Arc::new(self.device.create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("runmat-ind2sub-error"),
+                    contents: &error_bytes,
+                    usage: wgpu::BufferUsages::STORAGE
+                        | wgpu::BufferUsages::COPY_SRC
+                        | wgpu::BufferUsages::COPY_DST,
+                },
             ));
-        }
 
-        let dims_u32: Vec<u32> = dims.iter().map(|&d| d as u32).collect();
-        let strides_u32: Vec<u32> = strides.iter().map(|&s| s as u32).collect();
-
-        let mut output_buffers = Vec::with_capacity(dims.len());
-        for _ in 0..dims.len() {
-            output_buffers.push(self.create_storage_buffer_checked(len, "runmat-ind2sub-out")?);
-        }
-
-        let error_bytes = vec![0u8; std::mem::size_of::<u32>() * 4];
-        let error_buffer = Arc::new(self.device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("runmat-ind2sub-error"),
-                contents: &error_bytes,
-                usage: wgpu::BufferUsages::STORAGE
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-            },
-        ));
-
-        let (scalar_ty, epsilon) = match self.provider_precision_exec() {
-            runmat_accelerate_api::ProviderPrecision::F64 => ("f64", "1.0e-12"),
-            runmat_accelerate_api::ProviderPrecision::F32 => ("f32", "1.0e-5"),
-        };
-        let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
-        let shader = crate::backend::wgpu::shaders::ind2sub::build_ind2sub_shader(
-            scalar_ty,
-            &dims_u32,
-            &strides_u32,
-            total as u32,
-            workgroup_size,
-            epsilon,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-ind2sub-module",
-            &shader,
-        );
-        let bgl = crate::backend::wgpu::bindings::build_ind2sub_bgl(self.device_ref(), dims.len());
-        let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-ind2sub-pl",
-            &bgl,
-        );
-        let layout_tag = format!("runmat-ind2sub-layout-{}", dims.len());
-        let key =
-            self.compute_pipeline_hash_bytes(shader.as_bytes(), &layout_tag, Some(workgroup_size));
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pl,
-            &module,
-            "runmat-ind2sub",
-            Some(shader.as_bytes()),
-            Some(layout_tag.as_str()),
-            Some(workgroup_size),
-        );
-
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            len: u32,
-            _pad0: u32,
-            _pad1: u32,
-            _pad2: u32,
-        }
-        let params = Params {
-            len: len as u32,
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-ind2sub-params");
-
-        let mut bind_entries = Vec::with_capacity(dims.len() + 3);
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: 0,
-            resource: entry.buffer.as_ref().as_entire_binding(),
-        });
-        for (idx, buffer) in output_buffers.iter().enumerate() {
-            bind_entries.push(wgpu::BindGroupEntry {
-                binding: (idx + 1) as u32,
-                resource: buffer.as_ref().as_entire_binding(),
-            });
-        }
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: (dims.len() + 1) as u32,
-            resource: error_buffer.as_ref().as_entire_binding(),
-        });
-        bind_entries.push(wgpu::BindGroupEntry {
-            binding: (dims.len() + 2) as u32,
-            resource: params_buffer.as_entire_binding(),
-        });
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-ind2sub-bg"),
-                layout: &bgl,
-                entries: &bind_entries,
-            });
-
-        let groups =
-            crate::backend::wgpu::dispatch::common::dispatch_size(len as u32, workgroup_size);
-        crate::backend::wgpu::dispatch::ind2sub::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &bind_group,
-            groups,
-        );
-
-        let error_size = (std::mem::size_of::<u32>() * 4) as u64;
-        let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-ind2sub-error-staging"),
-            size: error_size,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-ind2sub-error-copy"),
-            });
-        encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
-        self.submit(encoder);
-        let bytes = self.map_readback_bytes_sync(staging, error_size, "ind2sub")?;
-        let words: &[u32] = cast_slice(&bytes);
-        let code = words.first().copied().unwrap_or(0);
-
-        if code != 0 {
-            let err = match code {
-                1..=3 => anyhow!("Linear indices must be positive integers."),
-                4 => anyhow!("Linear index exceeds GPU kernel limits."),
-                _ => anyhow!("ind2sub: kernel reported error code {}", code),
+            let (scalar_ty, epsilon) = match self.provider_precision_exec() {
+                runmat_accelerate_api::ProviderPrecision::F64 => ("f64", "1.0e-12"),
+                runmat_accelerate_api::ProviderPrecision::F32 => ("f32", "1.0e-5"),
             };
-            return Err(err);
-        }
+            let workgroup_size = crate::backend::wgpu::config::WORKGROUP_SIZE;
+            let shader = crate::backend::wgpu::shaders::ind2sub::build_ind2sub_shader(
+                scalar_ty,
+                &dims_u32,
+                &strides_u32,
+                total as u32,
+                workgroup_size,
+                epsilon,
+            );
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                self.device_ref(),
+                "runmat-ind2sub-module",
+                &shader,
+            );
+            let bgl =
+                crate::backend::wgpu::bindings::build_ind2sub_bgl(self.device_ref(), dims.len());
+            let pl = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                self.device_ref(),
+                "runmat-ind2sub-pl",
+                &bgl,
+            );
+            let layout_tag = format!("runmat-ind2sub-layout-{}", dims.len());
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                &layout_tag,
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pl,
+                &module,
+                "runmat-ind2sub",
+                Some(shader.as_bytes()),
+                Some(layout_tag.as_str()),
+                Some(workgroup_size),
+            );
 
-        let mut handles = Vec::with_capacity(output_buffers.len());
-        for buffer in output_buffers {
-            handles.push(self.register_existing_buffer(buffer, output_shape.to_vec(), len));
-        }
-        Ok(handles)
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                len: u32,
+                _pad0: u32,
+                _pad1: u32,
+                _pad2: u32,
+            }
+            let params = Params {
+                len: len as u32,
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-ind2sub-params");
+
+            let mut bind_entries = Vec::with_capacity(dims.len() + 3);
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: 0,
+                resource: entry.buffer.as_ref().as_entire_binding(),
+            });
+            for (idx, buffer) in output_buffers.iter().enumerate() {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: (idx + 1) as u32,
+                    resource: buffer.as_ref().as_entire_binding(),
+                });
+            }
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: (dims.len() + 1) as u32,
+                resource: error_buffer.as_ref().as_entire_binding(),
+            });
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: (dims.len() + 2) as u32,
+                resource: params_buffer.as_entire_binding(),
+            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-ind2sub-bg"),
+                    layout: &bgl,
+                    entries: &bind_entries,
+                });
+
+            let groups =
+                crate::backend::wgpu::dispatch::common::dispatch_size(len as u32, workgroup_size);
+            crate::backend::wgpu::dispatch::ind2sub::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &bind_group,
+                groups,
+            );
+
+            let error_size = (std::mem::size_of::<u32>() * 4) as u64;
+            let staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-ind2sub-error-staging"),
+                size: error_size,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-ind2sub-error-copy"),
+                });
+            encoder.copy_buffer_to_buffer(error_buffer.as_ref(), 0, &staging, 0, error_size);
+            self.submit(encoder);
+            let bytes = self.map_readback_bytes_sync(staging, error_size, "ind2sub")?;
+            let words: &[u32] = cast_slice(&bytes);
+            let code = words.first().copied().unwrap_or(0);
+
+            if code != 0 {
+                let err = match code {
+                    1..=3 => anyhow!("Linear indices must be positive integers."),
+                    4 => anyhow!("Linear index exceeds GPU kernel limits."),
+                    _ => anyhow!("ind2sub: kernel reported error code {}", code),
+                };
+                return Err(err);
+            }
+
+            let mut handles = Vec::with_capacity(output_buffers.len());
+            for buffer in output_buffers {
+                handles.push(registrations.track(self.register_existing_buffer(
+                    buffer,
+                    output_shape.to_vec(),
+                    len,
+                ))?);
+            }
+            Ok(handles)
+        })();
+        registrations.finish(result, |batch, out| {
+            for handle in out {
+                batch.publish(handle);
+            }
+        })
     }
 
     pub(crate) fn scatter_row_exec(
@@ -723,7 +743,7 @@ impl WgpuProvider {
             &bg,
             groups,
         );
-        Ok(self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols))
+        self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
     }
 
     pub(crate) fn gather_linear_exec(
@@ -773,14 +793,14 @@ impl WgpuProvider {
         if expected == 0 {
             let out = self.create_storage_buffer(0, "runmat-gather-linear-empty");
             let handle = if let Some(element_type) = integer_type {
-                self.register_integer_buffer(out, output_shape.to_vec(), 0, element_type, 0)
+                self.register_integer_buffer(out, output_shape.to_vec(), 0, element_type, 0)?
             } else {
                 self.register_existing_buffer_with_storage(
                     out,
                     output_shape.to_vec(),
                     0,
                     entry.storage,
-                )
+                )?
             };
             if runmat_accelerate_api::handle_is_logical(source) {
                 runmat_accelerate_api::set_handle_logical(&handle, true);
@@ -880,14 +900,14 @@ impl WgpuProvider {
                 expected,
                 element_type,
                 (raw_output_len * std::mem::size_of::<u32>()) as u64,
-            )
+            )?
         } else {
             self.register_existing_buffer_with_storage(
                 out_buffer,
                 output_shape.to_vec(),
                 raw_output_len,
                 entry.storage,
-            )
+            )?
         };
         if runmat_accelerate_api::handle_is_logical(source) {
             runmat_accelerate_api::set_handle_logical(&handle, true);
@@ -1042,170 +1062,208 @@ impl WgpuProvider {
         limit: Option<usize>,
         direction: FindDirection,
     ) -> Result<ProviderFindResult> {
-        let entry = self.get_entry(a)?;
-        ensure!(
-            entry.precision == NumericPrecision::F64,
-            "find: exact double index outputs require f64 provider precision"
-        );
-        let total = entry.len;
-        if total == 0 {
-            let shape = vec![0, 1];
-            let indices = self.create_storage_buffer(0, "runmat-find-empty-indices");
-            let rows = self.create_storage_buffer(0, "runmat-find-empty-rows");
-            let cols = self.create_storage_buffer(0, "runmat-find-empty-cols");
-            let values = self.create_storage_buffer(0, "runmat-find-empty-values");
-            let linear = self.register_existing_buffer(indices, shape.clone(), 0);
-            let rows_handle = self.register_existing_buffer(rows, shape.clone(), 0);
-            let cols_handle = self.register_existing_buffer(cols, shape.clone(), 0);
-            let values_handle = self.register_existing_buffer(values, shape, 0);
-            return Ok(ProviderFindResult {
-                linear,
-                rows: rows_handle,
-                cols: cols_handle,
-                values: Some(values_handle),
-            });
-        }
-
-        ensure!(
-            total <= u32::MAX as usize,
-            "find: tensor length exceeds GPU support"
-        );
-
-        let rows_extent = entry.shape.first().copied().unwrap_or(1).max(1);
-        ensure!(
-            rows_extent <= u32::MAX as usize,
-            "find: row extent exceeds GPU support"
-        );
-
-        let raw_cap = match direction {
-            FindDirection::First => limit.unwrap_or(total),
-            FindDirection::Last => limit.unwrap_or(1),
-        };
-        let cap = raw_cap.min(total);
-
-        if cap == 0 {
-            let shape = vec![0, 1];
-            let indices = self.create_storage_buffer(0, "runmat-find-zero-limit-indices");
-            let rows = self.create_storage_buffer(0, "runmat-find-zero-limit-rows");
-            let cols = self.create_storage_buffer(0, "runmat-find-zero-limit-cols");
-            let values = self.create_storage_buffer(0, "runmat-find-zero-limit-values");
-            let linear = self.register_existing_buffer(indices, shape.clone(), 0);
-            let rows_handle = self.register_existing_buffer(rows, shape.clone(), 0);
-            let cols_handle = self.register_existing_buffer(cols, shape.clone(), 0);
-            let values_handle = self.register_existing_buffer(values, shape, 0);
-            return Ok(ProviderFindResult {
-                linear,
-                rows: rows_handle,
-                cols: cols_handle,
-                values: Some(values_handle),
-            });
-        }
-
-        ensure!(cap <= u32::MAX as usize, "find: limit exceeds GPU support");
-
-        let indices_buffer = self.create_storage_buffer(cap, "runmat-find-indices");
-        let rows_buffer = self.create_storage_buffer(cap, "runmat-find-rows");
-        let cols_buffer = self.create_storage_buffer(cap, "runmat-find-cols");
-        let values_buffer = self.create_storage_buffer(cap, "runmat-find-values");
-
-        let count_storage = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-find-count-storage"),
-            size: 8,
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_SRC
-                | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        self.queue
-            .write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
-        let count_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("runmat-find-count-staging"),
-            size: 8,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-
-        let params = crate::backend::wgpu::params::FindParams {
-            len: total as u32,
-            limit: cap as u32,
-            rows: rows_extent as u32,
-            direction: match direction {
-                FindDirection::First => 0,
-                FindDirection::Last => 1,
-            },
-            include_values: 1,
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-find-params");
-
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-find-bind"),
-                layout: &self.pipelines.find.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: rows_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: cols_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: count_storage.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
-
-        crate::backend::wgpu::dispatch::find::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.find.pipeline,
-            &bind_group,
-        );
-
-        let mut copy_encoder =
-            self.device_ref()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("runmat-find-copy-count"),
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry = self.get_entry(a)?;
+            ensure!(
+                entry.precision == NumericPrecision::F64,
+                "find: exact double index outputs require f64 provider precision"
+            );
+            let total = entry.len;
+            if total == 0 {
+                let shape = vec![0, 1];
+                let indices = self.create_storage_buffer(0, "runmat-find-empty-indices");
+                let rows = self.create_storage_buffer(0, "runmat-find-empty-rows");
+                let cols = self.create_storage_buffer(0, "runmat-find-empty-cols");
+                let values = self.create_storage_buffer(0, "runmat-find-empty-values");
+                let linear = registrations.track(self.register_existing_buffer(
+                    indices,
+                    shape.clone(),
+                    0,
+                ))?;
+                let rows_handle =
+                    registrations.track(self.register_existing_buffer(rows, shape.clone(), 0))?;
+                let cols_handle =
+                    registrations.track(self.register_existing_buffer(cols, shape.clone(), 0))?;
+                let values_handle =
+                    registrations.track(self.register_existing_buffer(values, shape, 0))?;
+                return Ok(ProviderFindResult {
+                    linear,
+                    rows: rows_handle,
+                    cols: cols_handle,
+                    values: Some(values_handle),
                 });
-        copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
-        self.submit(copy_encoder);
-        let bytes = self.map_readback_bytes_sync(count_staging, 8, "find")?;
-        let counts: &[u32] = cast_slice(&bytes);
-        let count = counts.first().copied().unwrap_or(0) as usize;
+            }
 
-        let shape = vec![count, 1];
-        let linear = self.register_existing_buffer(indices_buffer, shape.clone(), count);
-        let rows_handle = self.register_existing_buffer(rows_buffer, shape.clone(), count);
-        let cols_handle = self.register_existing_buffer(cols_buffer, shape.clone(), count);
-        let values_handle = self.register_existing_buffer(values_buffer, shape, count);
+            ensure!(
+                total <= u32::MAX as usize,
+                "find: tensor length exceeds GPU support"
+            );
 
-        Ok(ProviderFindResult {
-            linear,
-            rows: rows_handle,
-            cols: cols_handle,
-            values: Some(values_handle),
+            let rows_extent = entry.shape.first().copied().unwrap_or(1).max(1);
+            ensure!(
+                rows_extent <= u32::MAX as usize,
+                "find: row extent exceeds GPU support"
+            );
+
+            let raw_cap = match direction {
+                FindDirection::First => limit.unwrap_or(total),
+                FindDirection::Last => limit.unwrap_or(1),
+            };
+            let cap = raw_cap.min(total);
+
+            if cap == 0 {
+                let shape = vec![0, 1];
+                let indices = self.create_storage_buffer(0, "runmat-find-zero-limit-indices");
+                let rows = self.create_storage_buffer(0, "runmat-find-zero-limit-rows");
+                let cols = self.create_storage_buffer(0, "runmat-find-zero-limit-cols");
+                let values = self.create_storage_buffer(0, "runmat-find-zero-limit-values");
+                let linear = registrations.track(self.register_existing_buffer(
+                    indices,
+                    shape.clone(),
+                    0,
+                ))?;
+                let rows_handle =
+                    registrations.track(self.register_existing_buffer(rows, shape.clone(), 0))?;
+                let cols_handle =
+                    registrations.track(self.register_existing_buffer(cols, shape.clone(), 0))?;
+                let values_handle =
+                    registrations.track(self.register_existing_buffer(values, shape, 0))?;
+                return Ok(ProviderFindResult {
+                    linear,
+                    rows: rows_handle,
+                    cols: cols_handle,
+                    values: Some(values_handle),
+                });
+            }
+
+            ensure!(cap <= u32::MAX as usize, "find: limit exceeds GPU support");
+
+            let indices_buffer = self.create_storage_buffer(cap, "runmat-find-indices");
+            let rows_buffer = self.create_storage_buffer(cap, "runmat-find-rows");
+            let cols_buffer = self.create_storage_buffer(cap, "runmat-find-cols");
+            let values_buffer = self.create_storage_buffer(cap, "runmat-find-values");
+
+            let count_storage = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-find-count-storage"),
+                size: 8,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.queue
+                .write_buffer(&count_storage, 0, bytemuck::cast_slice(&[0u32, 0u32]));
+            let count_staging = self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("runmat-find-count-staging"),
+                size: 8,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+
+            let params = crate::backend::wgpu::params::FindParams {
+                len: total as u32,
+                limit: cap as u32,
+                rows: rows_extent as u32,
+                direction: match direction {
+                    FindDirection::First => 0,
+                    FindDirection::Last => 1,
+                },
+                include_values: 1,
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-find-params");
+
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-find-bind"),
+                    layout: &self.pipelines.find.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: rows_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: cols_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 5,
+                            resource: count_storage.as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 6,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            crate::backend::wgpu::dispatch::find::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.find.pipeline,
+                &bind_group,
+            );
+
+            let mut copy_encoder =
+                self.device_ref()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("runmat-find-copy-count"),
+                    });
+            copy_encoder.copy_buffer_to_buffer(&count_storage, 0, &count_staging, 0, 8);
+            self.submit(copy_encoder);
+            let bytes = self.map_readback_bytes_sync(count_staging, 8, "find")?;
+            let counts: &[u32] = cast_slice(&bytes);
+            let count = counts.first().copied().unwrap_or(0) as usize;
+
+            let shape = vec![count, 1];
+            let linear = registrations.track(self.register_existing_buffer(
+                indices_buffer,
+                shape.clone(),
+                count,
+            ))?;
+            let rows_handle = registrations.track(self.register_existing_buffer(
+                rows_buffer,
+                shape.clone(),
+                count,
+            ))?;
+            let cols_handle = registrations.track(self.register_existing_buffer(
+                cols_buffer,
+                shape.clone(),
+                count,
+            ))?;
+            let values_handle =
+                registrations.track(self.register_existing_buffer(values_buffer, shape, count))?;
+
+            Ok(ProviderFindResult {
+                linear,
+                rows: rows_handle,
+                cols: cols_handle,
+                values: Some(values_handle),
+            })
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.linear);
+            batch.publish(&out.rows);
+            batch.publish(&out.cols);
+            if let Some(handle) = &out.values {
+                batch.publish(handle);
+            }
         })
     }
 }

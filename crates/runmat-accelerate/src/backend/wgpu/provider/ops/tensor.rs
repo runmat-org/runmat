@@ -196,7 +196,7 @@ impl WgpuProvider {
             );
 
             let canonical =
-                self.register_storage_move_alias(&entry, vec![info.base_rows, info.base_cols]);
+                self.register_storage_move_alias(&entry, vec![info.base_rows, info.base_cols])?;
             let materialized = match self.permute_exec(&canonical, &[1, 0]) {
                 Ok(handle) => handle,
                 Err(err) => {
@@ -214,13 +214,7 @@ impl WgpuProvider {
             };
             return Ok(reshaped);
         }
-        let mut buffers = self
-            .allocations
-            .lock_entries()
-            .expect("buffer mutex poisoned");
-        let entry = buffers
-            .get_mut(&handle.buffer_id)
-            .ok_or_else(|| anyhow!("reshape: unknown buffer {}", handle.buffer_id))?;
+        let entry = self.allocations.live_entry(handle.buffer_id)?;
         let storage = if runmat_accelerate_api::handle_storage(handle)
             == GpuTensorStorage::ComplexInterleaved
         {
@@ -241,12 +235,11 @@ impl WgpuProvider {
             new_len,
             entry.len / lane_factor
         );
-        entry.shape = new_shape.to_vec();
-        entry.storage = storage;
+        self.allocations
+            .reshape(handle.buffer_id, new_shape.to_vec(), expected_len, storage)?;
         let mut updated = handle.clone();
         updated.shape = new_shape.to_vec();
         updated.descriptor.storage = Some(storage);
-        drop(buffers);
         runmat_accelerate_api::clear_handle_transpose(&updated);
         Ok(updated)
     }
@@ -398,9 +391,9 @@ impl WgpuProvider {
         let out_shape = new_shape.clone();
         if storage_total == 0 {
             return if let Some(element_type) = integer_type {
-                Ok(self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0))
+                self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0)
             } else {
-                Ok(self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage))
+                self.register_existing_buffer_with_storage(out_buffer, out_shape, 0, storage)
             };
         }
 
@@ -491,20 +484,20 @@ impl WgpuProvider {
         }
 
         if let Some(element_type) = integer_type {
-            Ok(self.register_integer_buffer(
+            self.register_integer_buffer(
                 out_buffer,
                 out_shape,
                 new_total,
                 element_type,
                 (storage_total as u64) * std::mem::size_of::<u32>() as u64,
-            ))
+            )
         } else {
-            Ok(self.register_existing_buffer_with_storage(
+            self.register_existing_buffer_with_storage(
                 out_buffer,
                 out_shape,
                 storage_total,
                 storage,
-            ))
+            )
         }
     }
     pub(crate) fn cat_exec(
@@ -597,7 +590,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-cat-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, normalized_shape, 0));
+            return self.register_existing_buffer(out_buffer, normalized_shape, 0);
         }
 
         let inner = product_checked(&output_shape[..dim_zero])
@@ -650,7 +643,7 @@ impl WgpuProvider {
 
         self.submit(encoder);
 
-        Ok(self.register_existing_buffer(out_buffer, normalized_shape, total_len))
+        self.register_existing_buffer(out_buffer, normalized_shape, total_len)
     }
     pub(crate) fn kron_exec(
         &self,
@@ -707,7 +700,7 @@ impl WgpuProvider {
 
         if len_out == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-kron-out");
-            return Ok(self.register_existing_buffer(out_buffer, shape_out, 0));
+            return self.register_existing_buffer(out_buffer, shape_out, 0);
         }
 
         if len_out > u32::MAX as usize {
@@ -856,7 +849,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, len_out))
+        self.register_existing_buffer(out_buffer, out_shape, len_out)
     }
 
     pub(crate) fn transpose_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -881,13 +874,13 @@ impl WgpuProvider {
             let base_rows = info.base_rows;
             let base_cols = info.base_cols;
             let shape = vec![base_rows, base_cols];
-            let handle = self.register_storage_move_alias(&entry, shape);
+            let handle = self.register_storage_move_alias(&entry, shape)?;
             runmat_accelerate_api::clear_handle_transpose(&handle);
             return Ok(handle);
         }
 
         let shape = vec![cols, rows];
-        let handle = self.register_storage_move_alias(&entry, shape);
+        let handle = self.register_storage_move_alias(&entry, shape)?;
         runmat_accelerate_api::record_handle_transpose(&handle, rows, cols);
         Ok(handle)
     }
@@ -1057,13 +1050,13 @@ impl WgpuProvider {
         };
         let out_shape = dst_shape;
         if storage_total == 0 {
-            return Ok(self.register_storage_move_buffer(
+            return self.register_storage_move_buffer(
                 out_buffer.clone(),
                 &entry,
                 out_shape,
                 0,
                 out_buffer.size(),
-            ));
+            );
         }
 
         {
@@ -1143,13 +1136,13 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_storage_move_buffer(
+        self.register_storage_move_buffer(
             out_buffer.clone(),
             &entry,
             out_shape,
             entry.len,
             out_buffer.size(),
-        ))
+        )
     }
     pub(crate) fn circshift_exec(
         &self,
@@ -1358,15 +1351,15 @@ impl WgpuProvider {
         }
 
         if let Some(element_type) = integer_type {
-            Ok(self.register_integer_buffer(
+            self.register_integer_buffer(
                 out_buffer,
                 out_shape,
                 entry.len,
                 element_type,
                 (storage_len as u64) * std::mem::size_of::<u32>() as u64,
-            ))
+            )
         } else {
-            Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
+            self.register_existing_buffer(out_buffer, out_shape, entry.len)
         }
     }
 
@@ -1494,7 +1487,7 @@ impl WgpuProvider {
             offset_idx += chunk_len;
         }
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len)?;
 
         Ok(handle)
     }
@@ -1636,7 +1629,7 @@ impl WgpuProvider {
             offset_idx += chunk_len;
         }
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len);
+        let handle = self.register_existing_buffer(out_buffer, out_shape, entry.len)?;
 
         Ok(handle)
     }
@@ -1779,9 +1772,9 @@ impl WgpuProvider {
         let out_shape = entry.shape.clone();
         if storage_total == 0 {
             return if let Some(element_type) = integer_type {
-                Ok(self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0))
+                self.register_integer_buffer(out_buffer, out_shape, 0, element_type, 0)
             } else {
-                Ok(self.register_existing_buffer(out_buffer, out_shape, 0))
+                self.register_existing_buffer(out_buffer, out_shape, 0)
             };
         }
 
@@ -1878,9 +1871,9 @@ impl WgpuProvider {
                 logical_total,
                 element_type,
                 (storage_total as u64) * std::mem::size_of::<u32>() as u64,
-            )
+            )?
         } else {
-            self.register_existing_buffer(out_buffer, out_shape, entry.len)
+            self.register_existing_buffer(out_buffer, out_shape, entry.len)?
         };
 
         Ok(handle)

@@ -28,7 +28,7 @@ impl WgpuProvider {
         }
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-window-out")?;
         if len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
 
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
@@ -81,7 +81,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, len))
+        self.register_existing_buffer(out_buffer, shape_vec, len)
     }
 }
 

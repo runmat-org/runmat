@@ -22,7 +22,7 @@ impl WgpuProvider {
         &self,
         entry: &BufferEntry,
         shape: Vec<usize>,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_storage_move_buffer(
             entry.buffer.clone(),
             entry,
@@ -39,7 +39,7 @@ impl WgpuProvider {
         shape: Vec<usize>,
         len: usize,
         allocated_bytes: u64,
-    ) -> GpuTensorHandle {
+    ) -> Result<GpuTensorHandle> {
         self.register_numeric_buffer(
             buffer,
             NumericBufferRegistration {

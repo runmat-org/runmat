@@ -29,7 +29,7 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("exprnd: tensor size exceeds GPU limits"))?;
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-exprnd-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+            return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -119,7 +119,7 @@ impl WgpuProvider {
         *rng_guard = chunk_state;
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+        self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
     }
 
     pub(crate) fn random_normrnd_exec(
@@ -132,7 +132,7 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("normrnd: tensor size exceeds GPU limits"))?;
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normrnd-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+            return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -224,7 +224,7 @@ impl WgpuProvider {
         *rng_guard = chunk_state;
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+        self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
     }
 
     pub(crate) fn random_unifrnd_exec(
@@ -237,7 +237,7 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("unifrnd: tensor size exceeds GPU limits"))?;
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-unifrnd-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+            return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -327,7 +327,7 @@ impl WgpuProvider {
         *rng_guard = chunk_state;
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+        self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
     }
     pub(crate) fn random_uniform_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
@@ -347,7 +347,7 @@ impl WgpuProvider {
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+            return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -418,7 +418,7 @@ impl WgpuProvider {
         *rng_guard = chunk_state;
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+        self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
     }
 
     pub(crate) fn random_normal_exec(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
@@ -453,7 +453,7 @@ impl WgpuProvider {
         }
         let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), 0));
+            return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -525,7 +525,7 @@ impl WgpuProvider {
         *rng_guard = chunk_state;
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape.to_vec(), total_len))
+        self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
     }
 
     pub(crate) fn stochastic_evolution_exec(
@@ -542,7 +542,7 @@ impl WgpuProvider {
         let out_buffer =
             self.create_storage_buffer_checked(total_len, "runmat-stochastic-evolution-out")?;
         if total_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), 0));
+            return self.register_existing_buffer(out_buffer, state_entry.shape.clone(), 0);
         }
         ensure!(
             total_len <= u32::MAX as usize,
@@ -651,7 +651,7 @@ impl WgpuProvider {
 
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
-        Ok(self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len))
+        self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len)
     }
 
     pub(crate) fn randperm_exec(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {
@@ -670,7 +670,7 @@ impl WgpuProvider {
         let shape_vec = vec![1, effective_k];
         let out_buffer = self.create_storage_buffer_checked(effective_k, "runmat-randperm-out")?;
         if effective_k == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+            return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
         let mut rng_guard = rng_state()
             .lock()
@@ -715,6 +715,6 @@ impl WgpuProvider {
         *rng_guard = advance_rng_state(*rng_guard, effective_k as u64);
         drop(rng_guard);
 
-        Ok(self.register_existing_buffer(out_buffer, shape_vec, effective_k))
+        self.register_existing_buffer(out_buffer, shape_vec, effective_k)
     }
 }

@@ -105,7 +105,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, complex_len))
+        self.register_existing_buffer(out_buffer, out_shape, complex_len)
     }
 
     fn try_fft_dim_exec_native(
@@ -163,7 +163,7 @@ impl WgpuProvider {
                 out_shape,
                 0,
                 GpuTensorStorage::ComplexInterleaved,
-            )));
+            )?));
         }
 
         let total_out = target_len.saturating_mul(num_slices);
@@ -516,7 +516,7 @@ impl WgpuProvider {
             out_shape,
             out_scalar_len,
             GpuTensorStorage::ComplexInterleaved,
-        )))
+        )?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -536,326 +536,345 @@ impl WgpuProvider {
         complex_axis: bool,
         inverse: bool,
     ) -> Result<Option<GpuTensorHandle>> {
-        let two_n_minus_1 = target_len
-            .checked_mul(2)
-            .and_then(|v| v.checked_sub(1))
-            .ok_or_else(|| anyhow!("fft_dim: bluestein length overflow"))?;
-        let m_len = two_n_minus_1.next_power_of_two();
-        if m_len <= target_len {
-            return Ok(None);
-        }
-        if m_len > u32::MAX as usize || target_len > u32::MAX as usize {
-            return Ok(None);
-        }
-
-        let mut ext_shape = shape.clone();
-        ext_shape[dim] = m_len;
-
-        let m_total = m_len
-            .checked_mul(num_slices)
-            .ok_or_else(|| anyhow!("fft_dim: bluestein total overflow"))?;
-        let m_out_scalar_len = m_total
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("fft_dim: bluestein buffer overflow"))?;
-
-        let chirp_scalar_len = target_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("fft_dim: chirp buffer overflow"))?;
-        let chirp_buffer =
-            self.create_storage_buffer(chirp_scalar_len, "runmat-fft-bluestein-chirp");
-        let pi = std::f64::consts::PI;
-        let sign = if inverse { 1.0 } else { -1.0 };
-        match self.precision {
-            NumericPrecision::F64 => {
-                let mut chirp = Vec::with_capacity(chirp_scalar_len);
-                for n in 0..target_len {
-                    let angle = sign * pi * (n as f64) * (n as f64) / (target_len as f64);
-                    chirp.push(angle.cos());
-                    chirp.push(angle.sin());
-                }
-                self.queue_ref()
-                    .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp));
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let two_n_minus_1 = target_len
+                .checked_mul(2)
+                .and_then(|v| v.checked_sub(1))
+                .ok_or_else(|| anyhow!("fft_dim: bluestein length overflow"))?;
+            let m_len = two_n_minus_1.next_power_of_two();
+            if m_len <= target_len {
+                return Ok(None);
             }
-            NumericPrecision::F32 => {
-                let mut chirp = Vec::with_capacity(chirp_scalar_len);
-                for n in 0..target_len {
-                    let angle = sign * pi * (n as f64) * (n as f64) / (target_len as f64);
-                    chirp.push(angle.cos() as f32);
-                    chirp.push(angle.sin() as f32);
-                }
-                self.queue_ref()
-                    .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp));
+            if m_len > u32::MAX as usize || target_len > u32::MAX as usize {
+                return Ok(None);
             }
-        }
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+            let mut ext_shape = shape.clone();
+            ext_shape[dim] = m_len;
 
-        let a_buffer = self.create_storage_buffer(m_out_scalar_len, "runmat-fft-bluestein-a");
-        let mut offset = 0usize;
-        while offset < m_total {
-            let chunk_len = (m_total - offset).min(chunk_capacity);
-            let params = crate::backend::wgpu::params::FftBluesteinPrepParams {
-                len: chunk_len as u32,
-                offset: offset as u32,
-                total: m_total as u32,
-                target_len: m_len as u32,
-                inner_stride: inner_stride as u32,
-                current_len: current_len as u32,
-                copy_len: copy_len as u32,
-                input_complex: if complex_axis { 1 } else { 0 },
+            let m_total = m_len
+                .checked_mul(num_slices)
+                .ok_or_else(|| anyhow!("fft_dim: bluestein total overflow"))?;
+            let m_out_scalar_len = m_total
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("fft_dim: bluestein buffer overflow"))?;
+
+            let chirp_scalar_len = target_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("fft_dim: chirp buffer overflow"))?;
+            let chirp_buffer =
+                self.create_storage_buffer(chirp_scalar_len, "runmat-fft-bluestein-chirp");
+            let pi = std::f64::consts::PI;
+            let sign = if inverse { 1.0 } else { -1.0 };
+            match self.precision {
+                NumericPrecision::F64 => {
+                    let mut chirp = Vec::with_capacity(chirp_scalar_len);
+                    for n in 0..target_len {
+                        let angle = sign * pi * (n as f64) * (n as f64) / (target_len as f64);
+                        chirp.push(angle.cos());
+                        chirp.push(angle.sin());
+                    }
+                    self.queue_ref()
+                        .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp));
+                }
+                NumericPrecision::F32 => {
+                    let mut chirp = Vec::with_capacity(chirp_scalar_len);
+                    for n in 0..target_len {
+                        let angle = sign * pi * (n as f64) * (n as f64) / (target_len as f64);
+                        chirp.push(angle.cos() as f32);
+                        chirp.push(angle.sin() as f32);
+                    }
+                    self.queue_ref()
+                        .write_buffer(chirp_buffer.as_ref(), 0, cast_slice(&chirp));
+                }
+            }
+
+            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+
+            let a_buffer = self.create_storage_buffer(m_out_scalar_len, "runmat-fft-bluestein-a");
+            let mut offset = 0usize;
+            while offset < m_total {
+                let chunk_len = (m_total - offset).min(chunk_capacity);
+                let params = crate::backend::wgpu::params::FftBluesteinPrepParams {
+                    len: chunk_len as u32,
+                    offset: offset as u32,
+                    total: m_total as u32,
+                    target_len: m_len as u32,
+                    inner_stride: inner_stride as u32,
+                    current_len: current_len as u32,
+                    copy_len: copy_len as u32,
+                    input_complex: if complex_axis { 1 } else { 0 },
+                };
+                let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-prep-params");
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft-blue-prep-bind"),
+                        layout: &self.pipelines.fft_bluestein_prep.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: in_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: a_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: chirp_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::fft::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.fft_bluestein_prep.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-fft-blue-prep-encoder",
+                );
+                offset += chunk_len;
+            }
+
+            let b_scalar_len = m_len
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("fft_dim: bluestein kernel buffer overflow"))?;
+            let b_buffer = self.create_storage_buffer(b_scalar_len, "runmat-fft-bluestein-b");
+            let mut boff = 0usize;
+            while boff < m_len {
+                let chunk_len = (m_len - boff).min(chunk_capacity);
+                let params = crate::backend::wgpu::params::FftBluesteinKernelParams {
+                    len: chunk_len as u32,
+                    offset: boff as u32,
+                    total: m_len as u32,
+                    target_len: target_len as u32,
+                    m_len: m_len as u32,
+                    inverse: if inverse { 1 } else { 0 },
+                    _pad0: 0,
+                    _pad1: 0,
+                };
+                let params_buffer =
+                    self.fft_uniform_buffer(&params, "runmat-fft-blue-kernel-params");
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft-blue-kernel-bind"),
+                        layout: &self.pipelines.fft_bluestein_kernel.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: b_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: chirp_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::fft::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.fft_bluestein_kernel.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-fft-blue-kernel-encoder",
+                );
+                boff += chunk_len;
+            }
+
+            let a_handle = registrations.track(self.register_existing_buffer_with_storage(
+                a_buffer,
+                ext_shape.clone(),
+                m_out_scalar_len,
+                GpuTensorStorage::ComplexInterleaved,
+            ))?;
+            let b_handle = registrations.track(self.register_existing_buffer_with_storage(
+                b_buffer,
+                vec![m_len],
+                b_scalar_len,
+                GpuTensorStorage::ComplexInterleaved,
+            ))?;
+            let Some(a_fft) = self.try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)?
+            else {
+                return Ok(None);
             };
-            let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-prep-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft-blue-prep-bind"),
-                    layout: &self.pipelines.fft_bluestein_prep.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: in_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: a_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: chirp_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::fft::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.fft_bluestein_prep.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-fft-blue-prep-encoder",
-            );
-            offset += chunk_len;
-        }
-
-        let b_scalar_len = m_len
-            .checked_mul(2)
-            .ok_or_else(|| anyhow!("fft_dim: bluestein kernel buffer overflow"))?;
-        let b_buffer = self.create_storage_buffer(b_scalar_len, "runmat-fft-bluestein-b");
-        let mut boff = 0usize;
-        while boff < m_len {
-            let chunk_len = (m_len - boff).min(chunk_capacity);
-            let params = crate::backend::wgpu::params::FftBluesteinKernelParams {
-                len: chunk_len as u32,
-                offset: boff as u32,
-                total: m_len as u32,
-                target_len: target_len as u32,
-                m_len: m_len as u32,
-                inverse: if inverse { 1 } else { 0 },
-                _pad0: 0,
-                _pad1: 0,
+            let a_fft = registrations.track(Ok(a_fft))?;
+            let Some(b_fft) = self.try_fft_dim_exec_native(&b_handle, Some(m_len), 0, false)?
+            else {
+                return Ok(None);
             };
-            let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-kernel-params");
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft-blue-kernel-bind"),
-                    layout: &self.pipelines.fft_bluestein_kernel.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: b_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: chirp_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::fft::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.fft_bluestein_kernel.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-fft-blue-kernel-encoder",
-            );
-            boff += chunk_len;
-        }
+            let b_fft = registrations.track(Ok(b_fft))?;
 
-        let a_handle = self.register_existing_buffer_with_storage(
-            a_buffer,
-            ext_shape.clone(),
-            m_out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        );
-        let b_handle = self.register_existing_buffer_with_storage(
-            b_buffer,
-            vec![m_len],
-            b_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        );
-        let Some(a_fft) = self.try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)? else {
-            return Ok(None);
-        };
-        let Some(b_fft) = self.try_fft_dim_exec_native(&b_handle, Some(m_len), 0, false)? else {
-            return Ok(None);
-        };
+            let c_fft_buf =
+                self.create_storage_buffer(m_out_scalar_len, "runmat-fft-bluestein-cfft");
+            let mut poff = 0usize;
+            while poff < m_total {
+                let chunk_len = (m_total - poff).min(chunk_capacity);
+                let params = crate::backend::wgpu::params::FftPointwiseBroadcastParams {
+                    len: chunk_len as u32,
+                    offset: poff as u32,
+                    total: m_total as u32,
+                    m_len: m_len as u32,
+                    inner_stride: inner_stride as u32,
+                    _pad0: 0,
+                    _pad1: 0,
+                    _pad2: 0,
+                };
+                let params_buffer =
+                    self.fft_uniform_buffer(&params, "runmat-fft-blue-pointwise-params");
+                let a_entry = self.get_entry(&a_fft)?;
+                let b_entry = self.get_entry(&b_fft)?;
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft-blue-pointwise-bind"),
+                        layout: &self.pipelines.fft_pointwise_broadcast.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: a_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: b_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: c_fft_buf.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::fft::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.fft_pointwise_broadcast.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-fft-blue-pointwise-encoder",
+                );
+                poff += chunk_len;
+            }
 
-        let c_fft_buf = self.create_storage_buffer(m_out_scalar_len, "runmat-fft-bluestein-cfft");
-        let mut poff = 0usize;
-        while poff < m_total {
-            let chunk_len = (m_total - poff).min(chunk_capacity);
-            let params = crate::backend::wgpu::params::FftPointwiseBroadcastParams {
-                len: chunk_len as u32,
-                offset: poff as u32,
-                total: m_total as u32,
-                m_len: m_len as u32,
-                inner_stride: inner_stride as u32,
-                _pad0: 0,
-                _pad1: 0,
-                _pad2: 0,
+            let c_fft_handle = registrations.track(self.register_existing_buffer_with_storage(
+                c_fft_buf,
+                ext_shape.clone(),
+                m_out_scalar_len,
+                GpuTensorStorage::ComplexInterleaved,
+            ))?;
+            let Some(c_time) =
+                self.try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)?
+            else {
+                return Ok(None);
             };
-            let params_buffer =
-                self.fft_uniform_buffer(&params, "runmat-fft-blue-pointwise-params");
-            let a_entry = self.get_entry(&a_fft)?;
-            let b_entry = self.get_entry(&b_fft)?;
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft-blue-pointwise-bind"),
-                    layout: &self.pipelines.fft_pointwise_broadcast.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: a_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: b_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: c_fft_buf.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::fft::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.fft_pointwise_broadcast.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-fft-blue-pointwise-encoder",
-            );
-            poff += chunk_len;
-        }
+            let c_time = registrations.track(Ok(c_time))?;
 
-        let c_fft_handle = self.register_existing_buffer_with_storage(
-            c_fft_buf,
-            ext_shape.clone(),
-            m_out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        );
-        let Some(c_time) = self.try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)?
-        else {
-            return Ok(None);
-        };
+            let out_buffer = self.create_storage_buffer(out_scalar_len, "runmat-fft-bluestein-out");
+            let mut foff = 0usize;
+            while foff < total_out {
+                let chunk_len = (total_out - foff).min(chunk_capacity);
+                let params = crate::backend::wgpu::params::FftBluesteinFinalizeParams {
+                    len: chunk_len as u32,
+                    offset: foff as u32,
+                    total: total_out as u32,
+                    target_len: target_len as u32,
+                    m_len: m_len as u32,
+                    inner_stride: inner_stride as u32,
+                    inverse: if inverse { 1 } else { 0 },
+                    _pad0: 0,
+                };
+                let params_buffer =
+                    self.fft_uniform_buffer(&params, "runmat-fft-blue-finalize-params");
+                let c_entry = self.get_entry(&c_time)?;
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft-blue-finalize-bind"),
+                        layout: &self.pipelines.fft_bluestein_finalize.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: c_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: chirp_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_len as u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::fft::run(
+                    self.device_ref(),
+                    self.queue_ref(),
+                    &self.pipelines.fft_bluestein_finalize.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-fft-blue-finalize-encoder",
+                );
+                foff += chunk_len;
+            }
 
-        let out_buffer = self.create_storage_buffer(out_scalar_len, "runmat-fft-bluestein-out");
-        let mut foff = 0usize;
-        while foff < total_out {
-            let chunk_len = (total_out - foff).min(chunk_capacity);
-            let params = crate::backend::wgpu::params::FftBluesteinFinalizeParams {
-                len: chunk_len as u32,
-                offset: foff as u32,
-                total: total_out as u32,
-                target_len: target_len as u32,
-                m_len: m_len as u32,
-                inner_stride: inner_stride as u32,
-                inverse: if inverse { 1 } else { 0 },
-                _pad0: 0,
-            };
-            let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-finalize-params");
-            let c_entry = self.get_entry(&c_time)?;
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft-blue-finalize-bind"),
-                    layout: &self.pipelines.fft_bluestein_finalize.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: c_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: chirp_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::fft::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.fft_bluestein_finalize.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-fft-blue-finalize-encoder",
-            );
-            foff += chunk_len;
-        }
+            self.free_exec(&a_handle).ok();
+            self.free_exec(&b_handle).ok();
+            self.free_exec(&a_fft).ok();
+            self.free_exec(&b_fft).ok();
+            self.free_exec(&c_fft_handle).ok();
+            self.free_exec(&c_time).ok();
 
-        self.free_exec(&a_handle).ok();
-        self.free_exec(&b_handle).ok();
-        self.free_exec(&a_fft).ok();
-        self.free_exec(&b_fft).ok();
-        self.free_exec(&c_fft_handle).ok();
-        self.free_exec(&c_time).ok();
-
-        let mut out_shape = shape;
-        out_shape[dim] = target_len;
-        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        Ok(Some(self.register_existing_buffer_with_storage(
-            out_buffer,
-            out_shape,
-            out_scalar_len,
-            GpuTensorStorage::ComplexInterleaved,
-        )))
+            let mut out_shape = shape;
+            out_shape[dim] = target_len;
+            fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
+            Ok(Some(registrations.track(
+                self.register_existing_buffer_with_storage(
+                    out_buffer,
+                    out_shape,
+                    out_scalar_len,
+                    GpuTensorStorage::ComplexInterleaved,
+                ),
+            )?))
+        })();
+        registrations.finish(result, |batch, out| {
+            if let Some(handle) = out {
+                batch.publish(handle);
+            }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1194,7 +1213,7 @@ impl WgpuProvider {
             shape,
             out_scalar_len,
             GpuTensorStorage::ComplexInterleaved,
-        )))
+        )?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1413,7 +1432,7 @@ impl WgpuProvider {
             shape,
             out_scalar_len,
             GpuTensorStorage::ComplexInterleaved,
-        )))
+        )?))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1612,6 +1631,6 @@ impl WgpuProvider {
             shape,
             out_scalar_len,
             GpuTensorStorage::ComplexInterleaved,
-        )))
+        )?))
     }
 }

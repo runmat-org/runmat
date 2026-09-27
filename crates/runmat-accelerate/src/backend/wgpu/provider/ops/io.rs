@@ -320,7 +320,7 @@ impl WgpuProvider {
             };
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
-        Ok(self.register_existing_buffer(buffer, shape, len))
+        self.register_existing_buffer(buffer, shape, len)
     }
 
     pub(crate) fn upload_integer_exec(
@@ -399,7 +399,7 @@ impl WgpuProvider {
         };
         self.telemetry.record_upload_bytes(bytes);
         record_provider_copy(runmat_value::HostCopyReason::ProviderUpload, bytes);
-        Ok(self.register_numeric_buffer(
+        self.register_numeric_buffer(
             buffer,
             NumericBufferRegistration {
                 shape: host.shape.to_vec(),
@@ -409,7 +409,7 @@ impl WgpuProvider {
                 allocated_bytes: bytes,
                 usage: crate::backend::wgpu::residency::BufferUsageClass::Generic,
             },
-        ))
+        )
     }
 
     pub(crate) async fn download_integer_exec(

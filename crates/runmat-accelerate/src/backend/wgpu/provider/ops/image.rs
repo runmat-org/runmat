@@ -137,7 +137,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-imfilter-out")?;
         if output_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, plan.final_shape.clone(), 0));
+            return self.register_existing_buffer(out_buffer, plan.final_shape.clone(), 0);
         }
 
         let mut image_shape_arr = [crate::backend::wgpu::params::AlignedU32::default();
@@ -290,7 +290,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, plan.final_shape.clone(), output_len))
+        self.register_existing_buffer(out_buffer, plan.final_shape.clone(), output_len)
     }
 
     pub(crate) async fn image_normalize_exec(
@@ -479,12 +479,12 @@ impl WgpuProvider {
                     offset += chunk;
                 }
 
-                Ok(self.register_existing_buffer_with_usage(
+                self.register_existing_buffer_with_usage(
                     out_buffer,
                     entry.shape.clone(),
                     entry.len,
                     BufferUsageClass::FusionOut,
-                ))
+                )
             }
         }
     }

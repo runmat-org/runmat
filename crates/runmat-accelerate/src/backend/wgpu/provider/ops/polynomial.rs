@@ -67,7 +67,7 @@ impl WgpuProvider {
         let shape = points_entry.shape.clone();
         if len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-polyval-out");
-            return Ok(self.register_existing_buffer(out_buffer, shape, 0));
+            return self.register_existing_buffer(out_buffer, shape, 0);
         }
 
         ensure!(
@@ -182,7 +182,7 @@ impl WgpuProvider {
             offset += chunk_len;
         }
 
-        Ok(self.register_existing_buffer(out_buffer, shape, len))
+        self.register_existing_buffer(out_buffer, shape, len)
     }
 
     pub(crate) fn polyint_exec(
@@ -251,9 +251,7 @@ impl WgpuProvider {
                         ))
                     }
                 };
-            return Ok(
-                self.register_existing_buffer_with_storage(buffer, shape, output_len, storage)
-            );
+            return self.register_existing_buffer_with_storage(buffer, shape, output_len, storage);
         }
 
         ensure!(
@@ -336,7 +334,7 @@ impl WgpuProvider {
         self.submit(encoder);
 
         let out_shape = shape_for_orientation(orientation, output_logical_len);
-        Ok(self.register_existing_buffer_with_storage(out_buffer, out_shape, output_len, storage))
+        self.register_existing_buffer_with_storage(out_buffer, out_shape, output_len, storage)
     }
     pub(crate) async fn polyder_exec(
         &self,
@@ -374,7 +372,7 @@ impl WgpuProvider {
                     )
                 }
             };
-            return Ok(self.register_existing_buffer(buffer, shape, 1));
+            return self.register_existing_buffer(buffer, shape, 1);
         }
 
         ensure!(
@@ -429,7 +427,7 @@ impl WgpuProvider {
         self.submit(encoder);
 
         let out_shape = shape_for_orientation(orientation, output_len);
-        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len);
+        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
         self.trim_polynomial_handle(handle, orientation).await
     }
 
@@ -532,7 +530,7 @@ impl WgpuProvider {
                 self.create_storage_buffer(0, "runmat-polyder-trim-empty"),
                 shape_vec,
                 0,
-            )
+            )?
         } else {
             match self.precision {
                 NumericPrecision::F64 => {
@@ -545,7 +543,7 @@ impl WgpuProvider {
                                 | wgpu::BufferUsages::COPY_SRC,
                         },
                     ));
-                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())
+                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())?
                 }
                 NumericPrecision::F32 => {
                     let data_f32: Vec<f32> = trimmed.iter().map(|v| *v as f32).collect();
@@ -558,7 +556,7 @@ impl WgpuProvider {
                                 | wgpu::BufferUsages::COPY_SRC,
                         },
                     ));
-                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())
+                    self.register_existing_buffer(buffer, shape_vec, trimmed.len())?
                 }
             }
         };

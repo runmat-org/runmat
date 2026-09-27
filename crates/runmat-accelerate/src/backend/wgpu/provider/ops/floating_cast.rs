@@ -65,7 +65,7 @@ impl WgpuProvider {
                     allocated_bytes: entry.allocated_bytes,
                     usage: entry.usage,
                 },
-            );
+            )?;
             return self.finish_floating_cast_view(output, transpose);
         }
         let len = entry.len;
@@ -161,7 +161,7 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
-        );
+        )?;
         self.finish_floating_cast_view(output, transpose)
     }
 

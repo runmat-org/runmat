@@ -727,7 +727,7 @@ impl WgpuProvider {
         if output_len == 0 {
             let out_shape = conv1d_output_shape(0, options.orientation);
             let out_buffer = self.create_storage_buffer(0, "runmat-conv1d-empty");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
         ensure!(
@@ -786,7 +786,7 @@ impl WgpuProvider {
             workgroups,
         );
 
-        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len);
+        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
 
         Ok(handle)
     }
@@ -797,6 +797,8 @@ impl WgpuProvider {
         x: &GpuTensorHandle,
         options: ProviderIirFilterOptions,
     ) -> Result<ProviderIirFilterResult> {
+        let mut registrations = self.registration_batch();
+        let result = async {
         let ProviderIirFilterOptions {
             dim,
             zi,
@@ -1054,12 +1056,10 @@ impl WgpuProvider {
             "iir_filter: filter state size exceeds GPU limits"
         );
 
-        let mut cleanup_handles: Vec<GpuTensorHandle> = Vec::new();
         let result = (|| -> Result<ProviderIirFilterResult> {
             let (b_norm_handle, a_norm_handle) = match &coefficient_plan {
                 IirCoefficientPlan::UnitDenominatorFir => {
-                    let a_norm_handle = self.zeros_exec(&[order, 1usize])?;
-                    cleanup_handles.push(a_norm_handle.clone());
+                    let a_norm_handle = registrations.track(self.zeros_exec(&[order, 1usize]))?;
                     (b.clone(), a_norm_handle)
                 }
                 IirCoefficientPlan::Normalized { b, a } => {
@@ -1068,16 +1068,14 @@ impl WgpuProvider {
                         data: b,
                         shape: &b_shape,
                     };
-                    let b_norm_handle = self.upload_exec(&b_view)?;
-                    cleanup_handles.push(b_norm_handle.clone());
+                    let b_norm_handle = registrations.track(self.upload_exec(&b_view))?;
 
                     let a_shape = [order, 1usize];
                     let a_view = HostTensorView {
                         data: a,
                         shape: &a_shape,
                     };
-                    let a_norm_handle = self.upload_exec(&a_view)?;
-                    cleanup_handles.push(a_norm_handle.clone());
+                    let a_norm_handle = registrations.track(self.upload_exec(&a_view))?;
                     (b_norm_handle, a_norm_handle)
                 }
             };
@@ -1186,18 +1184,18 @@ impl WgpuProvider {
                 workgroups,
             );
 
-            let output_handle = self.register_existing_buffer_with_storage(
+            let output_handle = registrations.track(self.register_existing_buffer_with_storage(
                 out_buffer,
                 entry_x.shape.clone(),
                 entry_x.len,
                 x_storage,
-            );
-            let final_state_handle = self.register_existing_buffer_with_storage(
+            ))?;
+            let final_state_handle = registrations.track(self.register_existing_buffer_with_storage(
                 final_state_buffer,
                 state_shape.clone(),
                 state_total_raw,
                 x_storage,
-            );
+            ))?;
 
             Ok(ProviderIirFilterResult {
                 output: output_handle,
@@ -1205,11 +1203,14 @@ impl WgpuProvider {
             })
         })();
 
-        for handle in cleanup_handles {
-            let _ = self.free_exec(&handle);
-        }
-
         result
+    }.await;
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.output);
+            if let Some(handle) = &out.final_state {
+                batch.publish(handle);
+            }
+        })
     }
 
     pub(crate) fn moving_window_exec(
@@ -1314,7 +1315,7 @@ impl WgpuProvider {
         let out_buffer =
             self.create_storage_buffer_checked(output_len, "runmat-moving-window-out")?;
         if output_len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+            return self.register_existing_buffer(out_buffer, out_shape, 0);
         }
 
         let op = moving_window_op_code(request.op);
@@ -1455,7 +1456,7 @@ impl WgpuProvider {
             workgroups,
         );
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, output_len))
+        self.register_existing_buffer(out_buffer, out_shape, output_len)
     }
 
     pub(crate) fn diff_once_exec(
@@ -1489,7 +1490,7 @@ impl WgpuProvider {
             out_shape[dim] = out_shape[dim].saturating_sub(1);
             let out_len = product_checked(&out_shape).unwrap_or(0);
             let out_buffer = self.create_storage_buffer(out_len, "runmat-diff-empty");
-            return Ok(self.register_existing_buffer(out_buffer, out_shape, out_len));
+            return self.register_existing_buffer(out_buffer, out_shape, out_len);
         }
 
         let stride_before = if dim == 0 {
@@ -1588,7 +1589,7 @@ impl WgpuProvider {
             workgroups,
         );
 
-        Ok(self.register_existing_buffer(out_buffer, out_shape, out_len))
+        self.register_existing_buffer(out_buffer, out_shape, out_len)
     }
 
     pub(crate) fn diff_exec(
@@ -1695,7 +1696,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer_with_storage(
+            return self.register_existing_buffer_with_storage(
                 out_buffer,
                 out_shape,
                 0,
@@ -1704,7 +1705,7 @@ impl WgpuProvider {
                 } else {
                     GpuTensorStorage::Real
                 },
-            ));
+            );
         }
 
         let stride_before = if dim == 0 {
@@ -1854,7 +1855,7 @@ impl WgpuProvider {
             workgroups,
         );
 
-        Ok(self.register_existing_buffer_with_storage(
+        self.register_existing_buffer_with_storage(
             out_buffer,
             out_shape,
             entry.len,
@@ -1863,7 +1864,7 @@ impl WgpuProvider {
             } else {
                 GpuTensorStorage::Real
             },
-        ))
+        )
     }
 
     pub(crate) fn cumsum_exec(
@@ -1905,7 +1906,7 @@ impl WgpuProvider {
         let segment_len = work_shape[dim];
         if segment_len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-cumsum-empty");
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let stride_before = if dim == 0 {
@@ -1953,7 +1954,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumsum-out");
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let mut flags = 0u32;
@@ -2005,7 +2006,7 @@ impl WgpuProvider {
             "runmat-cumsum-encoder",
             "runmat-cumsum-pass",
         );
-        Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
+        self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
 
     pub(crate) fn trapz_exec(
@@ -2245,12 +2246,12 @@ impl WgpuProvider {
             "runmat-trapezoid-encoder",
             "runmat-trapezoid-pass",
         );
-        Ok(self.register_existing_buffer_with_storage(
+        self.register_existing_buffer_with_storage(
             out_buffer,
             output_shape,
             output_raw_len,
             entry.storage,
-        ))
+        )
     }
     pub(crate) fn cumprod_exec(
         &self,
@@ -2291,7 +2292,7 @@ impl WgpuProvider {
         let segment_len = work_shape[dim];
         if segment_len == 0 {
             let out_buffer = self.create_storage_buffer(0, "runmat-cumprod-empty");
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let stride_before = if dim == 0 {
@@ -2339,7 +2340,7 @@ impl WgpuProvider {
 
         let out_buffer = self.create_storage_buffer(entry.len, "runmat-cumprod-out");
         if entry.len == 0 {
-            return Ok(self.register_existing_buffer(out_buffer, entry.shape, 0));
+            return self.register_existing_buffer(out_buffer, entry.shape, 0);
         }
 
         let mut flags = 0u32;
@@ -2391,7 +2392,7 @@ impl WgpuProvider {
             "runmat-cumprod-encoder",
             "runmat-cumprod-pass",
         );
-        Ok(self.register_existing_buffer(out_buffer, entry.shape, entry.len))
+        self.register_existing_buffer(out_buffer, entry.shape, entry.len)
     }
     pub(crate) fn cummin_exec(
         &self,
@@ -2400,150 +2401,177 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<ProviderCumminResult> {
-        let entry = self.get_entry(handle)?;
-        if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
-            let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-            let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-            return Ok(ProviderCumminResult { values, indices });
-        }
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry = self.get_entry(handle)?;
+            if entry.len == 0 {
+                let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
+                let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+                let values = registrations.track(self.register_existing_buffer(
+                    values_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                let indices = registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                return Ok(ProviderCumminResult { values, indices });
+            }
 
-        let work_shape = if entry.shape.is_empty() {
-            vec![entry.len]
-        } else {
-            entry.shape.clone()
-        };
+            let work_shape = if entry.shape.is_empty() {
+                vec![entry.len]
+            } else {
+                entry.shape.clone()
+            };
 
-        if dim >= work_shape.len() {
-            return Err(anyhow!(
-                "cummin: dimension {} exceeds tensor rank {}",
-                dim + 1,
-                work_shape.len()
-            ));
-        }
+            if dim >= work_shape.len() {
+                return Err(anyhow!(
+                    "cummin: dimension {} exceeds tensor rank {}",
+                    dim + 1,
+                    work_shape.len()
+                ));
+            }
 
-        let segment_len = work_shape[dim];
-        if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
-            let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-            let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-            return Ok(ProviderCumminResult { values, indices });
-        }
+            let segment_len = work_shape[dim];
+            if segment_len == 0 {
+                let values_buffer = self.create_storage_buffer(0, "runmat-cummin-values-empty");
+                let indices_buffer = self.create_storage_buffer(0, "runmat-cummin-indices-empty");
+                let values = registrations.track(self.register_existing_buffer(
+                    values_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                let indices = registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                return Ok(ProviderCumminResult { values, indices });
+            }
 
-        let stride_before = if dim == 0 {
-            1usize
-        } else {
-            work_shape[..dim].iter().copied().product::<usize>().max(1)
-        };
-        let stride_after = if dim + 1 >= work_shape.len() {
-            1usize
-        } else {
-            work_shape[dim + 1..]
-                .iter()
-                .copied()
-                .product::<usize>()
-                .max(1)
-        };
+            let stride_before = if dim == 0 {
+                1usize
+            } else {
+                work_shape[..dim].iter().copied().product::<usize>().max(1)
+            };
+            let stride_after = if dim + 1 >= work_shape.len() {
+                1usize
+            } else {
+                work_shape[dim + 1..]
+                    .iter()
+                    .copied()
+                    .product::<usize>()
+                    .max(1)
+            };
 
-        let segments = stride_before
-            .checked_mul(stride_after)
-            .ok_or_else(|| anyhow!("cummin: segment count exceeds GPU limits"))?;
-        let block = stride_before
-            .checked_mul(segment_len)
-            .ok_or_else(|| anyhow!("cummin: segment stride exceeds GPU limits"))?;
+            let segments = stride_before
+                .checked_mul(stride_after)
+                .ok_or_else(|| anyhow!("cummin: segment count exceeds GPU limits"))?;
+            let block = stride_before
+                .checked_mul(segment_len)
+                .ok_or_else(|| anyhow!("cummin: segment stride exceeds GPU limits"))?;
 
-        ensure!(
-            segment_len <= u32::MAX as usize,
-            "cummin: dimension length exceeds GPU kernel limits"
-        );
-        ensure!(
-            stride_before <= u32::MAX as usize,
-            "cummin: stride_before exceeds GPU kernel limits"
-        );
-        ensure!(
-            segments <= u32::MAX as usize,
-            "cummin: segment count exceeds GPU limits"
-        );
-        ensure!(
-            block <= u32::MAX as usize,
-            "cummin: block size exceeds GPU limits"
-        );
-        ensure!(
-            entry.len <= u32::MAX as usize,
-            "cummin: tensor too large for GPU kernel"
-        );
+            ensure!(
+                segment_len <= u32::MAX as usize,
+                "cummin: dimension length exceeds GPU kernel limits"
+            );
+            ensure!(
+                stride_before <= u32::MAX as usize,
+                "cummin: stride_before exceeds GPU kernel limits"
+            );
+            ensure!(
+                segments <= u32::MAX as usize,
+                "cummin: segment count exceeds GPU limits"
+            );
+            ensure!(
+                block <= u32::MAX as usize,
+                "cummin: block size exceeds GPU limits"
+            );
+            ensure!(
+                entry.len <= u32::MAX as usize,
+                "cummin: tensor too large for GPU kernel"
+            );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-indices");
+            let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-values");
+            let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummin-indices");
 
-        let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
-        if matches!(nan_mode, ProviderNanMode::Omit) {
-            flags |= 2;
-        }
+            let mut flags = 0u32;
+            if matches!(direction, ProviderScanDirection::Reverse) {
+                flags |= 1;
+            }
+            if matches!(nan_mode, ProviderNanMode::Omit) {
+                flags |= 2;
+            }
 
-        let params = CumminParams {
-            segment_len: segment_len as u32,
-            segments: segments as u32,
-            stride_before: stride_before as u32,
-            block: block as u32,
-            flags,
-            total_len: entry.len as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummin-params");
+            let params = CumminParams {
+                segment_len: segment_len as u32,
+                segments: segments as u32,
+                stride_before: stride_before as u32,
+                block: block as u32,
+                flags,
+                total_len: entry.len as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-cummin-params");
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummin-bind"),
-                layout: &self.pipelines.cummin.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummin-bind"),
+                    layout: &self.pipelines.cummin.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummin.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummin-encoder",
-            "runmat-cummin-pass",
-        );
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.cummin.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummin-encoder",
+                "runmat-cummin-pass",
+            );
 
-        let values = self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-        let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-        Ok(ProviderCumminResult { values, indices })
+            let values = registrations.track(self.register_existing_buffer(
+                values_buffer,
+                entry.shape.clone(),
+                entry.len,
+            ))?;
+            let indices = registrations.track(self.register_existing_buffer(
+                indices_buffer,
+                entry.shape.clone(),
+                entry.len,
+            ))?;
+            Ok(ProviderCumminResult { values, indices })
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.values);
+            batch.publish(&out.indices);
+        })
     }
     pub(crate) fn cummax_exec(
         &self,
@@ -2552,150 +2580,177 @@ impl WgpuProvider {
         direction: ProviderScanDirection,
         nan_mode: ProviderNanMode,
     ) -> Result<ProviderCummaxResult> {
-        let entry = self.get_entry(handle)?;
-        if entry.len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
-            let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-            let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-            return Ok(ProviderCummaxResult { values, indices });
-        }
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry = self.get_entry(handle)?;
+            if entry.len == 0 {
+                let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
+                let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+                let values = registrations.track(self.register_existing_buffer(
+                    values_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                let indices = registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                return Ok(ProviderCummaxResult { values, indices });
+            }
 
-        let work_shape = if entry.shape.is_empty() {
-            vec![entry.len]
-        } else {
-            entry.shape.clone()
-        };
+            let work_shape = if entry.shape.is_empty() {
+                vec![entry.len]
+            } else {
+                entry.shape.clone()
+            };
 
-        if dim >= work_shape.len() {
-            return Err(anyhow!(
-                "cummax: dimension {} exceeds tensor rank {}",
-                dim + 1,
-                work_shape.len()
-            ));
-        }
+            if dim >= work_shape.len() {
+                return Err(anyhow!(
+                    "cummax: dimension {} exceeds tensor rank {}",
+                    dim + 1,
+                    work_shape.len()
+                ));
+            }
 
-        let segment_len = work_shape[dim];
-        if segment_len == 0 {
-            let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
-            let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
-            let values =
-                self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-            let indices =
-                self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-            return Ok(ProviderCummaxResult { values, indices });
-        }
+            let segment_len = work_shape[dim];
+            if segment_len == 0 {
+                let values_buffer = self.create_storage_buffer(0, "runmat-cummax-values-empty");
+                let indices_buffer = self.create_storage_buffer(0, "runmat-cummax-indices-empty");
+                let values = registrations.track(self.register_existing_buffer(
+                    values_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                let indices = registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    entry.shape.clone(),
+                    entry.len,
+                ))?;
+                return Ok(ProviderCummaxResult { values, indices });
+            }
 
-        let stride_before = if dim == 0 {
-            1usize
-        } else {
-            work_shape[..dim].iter().copied().product::<usize>().max(1)
-        };
-        let stride_after = if dim + 1 >= work_shape.len() {
-            1usize
-        } else {
-            work_shape[dim + 1..]
-                .iter()
-                .copied()
-                .product::<usize>()
-                .max(1)
-        };
+            let stride_before = if dim == 0 {
+                1usize
+            } else {
+                work_shape[..dim].iter().copied().product::<usize>().max(1)
+            };
+            let stride_after = if dim + 1 >= work_shape.len() {
+                1usize
+            } else {
+                work_shape[dim + 1..]
+                    .iter()
+                    .copied()
+                    .product::<usize>()
+                    .max(1)
+            };
 
-        let segments = stride_before
-            .checked_mul(stride_after)
-            .ok_or_else(|| anyhow!("cummax: segment count exceeds GPU limits"))?;
-        let block = stride_before
-            .checked_mul(segment_len)
-            .ok_or_else(|| anyhow!("cummax: segment stride exceeds GPU limits"))?;
+            let segments = stride_before
+                .checked_mul(stride_after)
+                .ok_or_else(|| anyhow!("cummax: segment count exceeds GPU limits"))?;
+            let block = stride_before
+                .checked_mul(segment_len)
+                .ok_or_else(|| anyhow!("cummax: segment stride exceeds GPU limits"))?;
 
-        ensure!(
-            segment_len <= u32::MAX as usize,
-            "cummax: dimension length exceeds GPU kernel limits"
-        );
-        ensure!(
-            stride_before <= u32::MAX as usize,
-            "cummax: stride_before exceeds GPU kernel limits"
-        );
-        ensure!(
-            segments <= u32::MAX as usize,
-            "cummax: segment count exceeds GPU limits"
-        );
-        ensure!(
-            block <= u32::MAX as usize,
-            "cummax: block size exceeds GPU limits"
-        );
-        ensure!(
-            entry.len <= u32::MAX as usize,
-            "cummax: tensor too large for GPU kernel"
-        );
+            ensure!(
+                segment_len <= u32::MAX as usize,
+                "cummax: dimension length exceeds GPU kernel limits"
+            );
+            ensure!(
+                stride_before <= u32::MAX as usize,
+                "cummax: stride_before exceeds GPU kernel limits"
+            );
+            ensure!(
+                segments <= u32::MAX as usize,
+                "cummax: segment count exceeds GPU limits"
+            );
+            ensure!(
+                block <= u32::MAX as usize,
+                "cummax: block size exceeds GPU limits"
+            );
+            ensure!(
+                entry.len <= u32::MAX as usize,
+                "cummax: tensor too large for GPU kernel"
+            );
 
-        let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-values");
-        let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-indices");
+            let values_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-values");
+            let indices_buffer = self.create_storage_buffer(entry.len, "runmat-cummax-indices");
 
-        let mut flags = 0u32;
-        if matches!(direction, ProviderScanDirection::Reverse) {
-            flags |= 1;
-        }
-        if matches!(nan_mode, ProviderNanMode::Omit) {
-            flags |= 2;
-        }
+            let mut flags = 0u32;
+            if matches!(direction, ProviderScanDirection::Reverse) {
+                flags |= 1;
+            }
+            if matches!(nan_mode, ProviderNanMode::Omit) {
+                flags |= 2;
+            }
 
-        let params = CummaxParams {
-            segment_len: segment_len as u32,
-            segments: segments as u32,
-            stride_before: stride_before as u32,
-            block: block as u32,
-            flags,
-            total_len: entry.len as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-cummax-params");
+            let params = CummaxParams {
+                segment_len: segment_len as u32,
+                segments: segments as u32,
+                stride_before: stride_before as u32,
+                block: block as u32,
+                flags,
+                total_len: entry.len as u32,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let params_buffer = self.uniform_buffer(&params, "runmat-cummax-params");
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-cummax-bind"),
-                layout: &self.pipelines.cummax.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-cummax-bind"),
+                    layout: &self.pipelines.cummax.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            segments as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        crate::backend::wgpu::dispatch::scan::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.cummax.pipeline,
-            &bind_group,
-            groups,
-            "runmat-cummax-encoder",
-            "runmat-cummax-pass",
-        );
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::scan::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.cummax.pipeline,
+                &bind_group,
+                groups,
+                "runmat-cummax-encoder",
+                "runmat-cummax-pass",
+            );
 
-        let values = self.register_existing_buffer(values_buffer, entry.shape.clone(), entry.len);
-        let indices = self.register_existing_buffer(indices_buffer, entry.shape.clone(), entry.len);
-        Ok(ProviderCummaxResult { values, indices })
+            let values = registrations.track(self.register_existing_buffer(
+                values_buffer,
+                entry.shape.clone(),
+                entry.len,
+            ))?;
+            let indices = registrations.track(self.register_existing_buffer(
+                indices_buffer,
+                entry.shape.clone(),
+                entry.len,
+            ))?;
+            Ok(ProviderCummaxResult { values, indices })
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.values);
+            batch.publish(&out.indices);
+        })
     }
 }
 

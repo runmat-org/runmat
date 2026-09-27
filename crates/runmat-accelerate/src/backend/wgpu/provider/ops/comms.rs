@@ -69,12 +69,12 @@ impl WgpuProvider {
             }
         };
         self.telemetry.record_upload_bytes(bytes);
-        Ok(self.register_existing_buffer_with_storage(
+        self.register_existing_buffer_with_storage(
             buffer,
             shape,
             len,
             GpuTensorStorage::ComplexInterleaved,
-        ))
+        )
     }
 
     pub(crate) async fn modulate_constellation_exec(
@@ -122,7 +122,7 @@ impl WgpuProvider {
                 entry.shape,
                 0,
                 GpuTensorStorage::ComplexInterleaved,
-            );
+            )?;
             return Ok(handle);
         }
 
@@ -326,7 +326,7 @@ impl WgpuProvider {
             entry.shape,
             out_len,
             GpuTensorStorage::ComplexInterleaved,
-        );
+        )?;
         Ok(handle)
     }
 
@@ -415,7 +415,7 @@ impl WgpuProvider {
                 output_shape,
                 0,
                 GpuTensorStorage::ComplexInterleaved,
-            );
+            )?;
             return Ok(handle);
         }
 
@@ -625,7 +625,7 @@ impl WgpuProvider {
             output_shape,
             out_len,
             GpuTensorStorage::ComplexInterleaved,
-        );
+        )?;
         Ok(handle)
     }
 }

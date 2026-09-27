@@ -197,212 +197,227 @@ impl WgpuProvider {
         dim: usize,
         direction: runmat_accelerate_api::ProviderScanDirection,
     ) -> Result<(GpuTensorHandle, Option<GpuTensorHandle>)> {
-        let entry = self.get_entry_raw(a)?;
-        let integer_type = entry
-            .integer_type()
-            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
-        ensure!(
-            entry.storage == GpuTensorStorage::Real,
-            "{operation_name}: complex integer gpuArray scan is not supported"
-        );
-        let rank = entry.shape.len();
-        ensure!(rank > 0, "{operation_name}: rank must be greater than zero");
-        ensure!(dim < rank, "{operation_name}: dimension out of bounds");
-        ensure!(op <= 3, "{operation_name}: unsupported integer scan opcode");
-        if entry.len == 0 {
-            let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
-                entry.shape.clone(),
-                0,
-                integer_type,
-                0,
-            );
-            let indices = if op >= 2 {
-                Some(self.register_existing_buffer(
-                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
-                    entry.shape.clone(),
-                    0,
-                ))
-            } else {
-                None
-            };
-            return Ok((values, indices));
-        }
-
-        let segment_len = entry.shape[dim];
-        if segment_len == 0 {
-            let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
-                entry.shape.clone(),
-                0,
-                integer_type,
-                0,
-            );
-            let indices = if op >= 2 {
-                Some(self.register_existing_buffer(
-                    self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
-                    entry.shape.clone(),
-                    0,
-                ))
-            } else {
-                None
-            };
-            return Ok((values, indices));
-        }
-
-        let stride_before = entry.shape[..dim].iter().try_fold(1usize, |acc, &value| {
-            acc.checked_mul(value.max(1))
-                .ok_or_else(|| anyhow!("{operation_name}: stride_before overflow"))
-        })?;
-        let stride_after = entry.shape[dim + 1..]
-            .iter()
-            .try_fold(1usize, |acc, &value| {
-                acc.checked_mul(value.max(1))
-                    .ok_or_else(|| anyhow!("{operation_name}: stride_after overflow"))
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry = self.get_entry_raw(a)?;
+            let integer_type = entry.integer_type().ok_or_else(|| {
+                anyhow!("{operation_name}: expected native integer gpuArray input")
             })?;
-        let segments = stride_before
-            .checked_mul(stride_after)
-            .ok_or_else(|| anyhow!("{operation_name}: segment count exceeds GPU limits"))?;
-        let block = stride_before
-            .checked_mul(segment_len)
-            .ok_or_else(|| anyhow!("{operation_name}: segment stride exceeds GPU limits"))?;
-        ensure!(
-            segment_len <= u32::MAX as usize
-                && stride_before <= u32::MAX as usize
-                && segments <= u32::MAX as usize
-                && block <= u32::MAX as usize
-                && entry.len <= u32::MAX as usize,
-            "{operation_name}: tensor too large for GPU kernel"
-        );
+            ensure!(
+                entry.storage == GpuTensorStorage::Real,
+                "{operation_name}: complex integer gpuArray scan is not supported"
+            );
+            let rank = entry.shape.len();
+            ensure!(rank > 0, "{operation_name}: rank must be greater than zero");
+            ensure!(dim < rank, "{operation_name}: dimension out of bounds");
+            ensure!(op <= 3, "{operation_name}: unsupported integer scan opcode");
+            if entry.len == 0 {
+                let values = registrations.track(self.register_integer_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                    entry.shape.clone(),
+                    0,
+                    integer_type,
+                    0,
+                ))?;
+                let indices = if op >= 2 {
+                    Some(registrations.track(self.register_existing_buffer(
+                        self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                        entry.shape.clone(),
+                        0,
+                    ))?)
+                } else {
+                    None
+                };
+                return Ok((values, indices));
+            }
 
-        let words = integer_word_count(integer_type, entry.len)?;
-        let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
-        let values_buffer =
-            self.create_storage_buffer_checked(words, "runmat-integer-cumulative-values")?;
-        let indices_buffer = if op >= 2 {
-            self.create_storage_buffer(entry.len, "runmat-integer-cumulative-indices")
-        } else {
-            values_buffer.clone()
-        };
+            let segment_len = entry.shape[dim];
+            if segment_len == 0 {
+                let values = registrations.track(self.register_integer_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-cumulative-empty"),
+                    entry.shape.clone(),
+                    0,
+                    integer_type,
+                    0,
+                ))?;
+                let indices = if op >= 2 {
+                    Some(registrations.track(self.register_existing_buffer(
+                        self.create_storage_buffer(0, "runmat-integer-cumulative-indices-empty"),
+                        entry.shape.clone(),
+                        0,
+                    ))?)
+                } else {
+                    None
+                };
+                return Ok((values, indices));
+            }
 
-        let scalar_type = match self.precision {
-            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
-            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
-        };
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader = crate::backend::wgpu::shaders::integer::cumulative_scan_shader(
-            scalar_type,
-            workgroup_size,
-        );
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-cumulative-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                    crate::backend::wgpu::bindings::uniform_entry(3),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-cumulative-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-cumulative-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-cumulative-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-cumulative",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-cumulative-bgl"),
-            Some(workgroup_size),
-        );
+            let stride_before = entry.shape[..dim].iter().try_fold(1usize, |acc, &value| {
+                acc.checked_mul(value.max(1))
+                    .ok_or_else(|| anyhow!("{operation_name}: stride_before overflow"))
+            })?;
+            let stride_after = entry.shape[dim + 1..]
+                .iter()
+                .try_fold(1usize, |acc, &value| {
+                    acc.checked_mul(value.max(1))
+                        .ok_or_else(|| anyhow!("{operation_name}: stride_after overflow"))
+                })?;
+            let segments = stride_before
+                .checked_mul(stride_after)
+                .ok_or_else(|| anyhow!("{operation_name}: segment count exceeds GPU limits"))?;
+            let block = stride_before
+                .checked_mul(segment_len)
+                .ok_or_else(|| anyhow!("{operation_name}: segment stride exceeds GPU limits"))?;
+            ensure!(
+                segment_len <= u32::MAX as usize
+                    && stride_before <= u32::MAX as usize
+                    && segments <= u32::MAX as usize
+                    && block <= u32::MAX as usize
+                    && entry.len <= u32::MAX as usize,
+                "{operation_name}: tensor too large for GPU kernel"
+            );
 
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            segment_len: u32,
-            segments: u32,
-            stride_before: u32,
-            block: u32,
-            total_len: u32,
-            integer_type: u32,
-            op: u32,
-            direction: u32,
-        }
-        let params = Params {
-            segment_len: segment_len as u32,
-            segments: segments as u32,
-            stride_before: stride_before as u32,
-            block: block as u32,
-            total_len: entry.len as u32,
-            integer_type: integer_type_code(integer_type),
-            op,
-            direction: u32::from(matches!(
-                direction,
-                runmat_accelerate_api::ProviderScanDirection::Reverse
-            )),
-        };
-        let uniform = self.uniform_buffer(&params, "runmat-integer-cumulative-params");
-        let group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-integer-cumulative-bg"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: uniform.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups =
-            crate::backend::wgpu::dispatch::common::dispatch_size(segments as u32, workgroup_size);
-        crate::backend::wgpu::dispatch::elementwise::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &group,
-            groups,
-        );
+            let words = integer_word_count(integer_type, entry.len)?;
+            let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+            let values_buffer =
+                self.create_storage_buffer_checked(words, "runmat-integer-cumulative-values")?;
+            let indices_buffer = if op >= 2 {
+                self.create_storage_buffer(entry.len, "runmat-integer-cumulative-indices")
+            } else {
+                values_buffer.clone()
+            };
 
-        let values = self.register_integer_buffer(
-            values_buffer,
-            entry.shape.clone(),
-            entry.len,
-            integer_type,
-            value_bytes,
-        );
-        let indices = if op >= 2 {
-            Some(self.register_existing_buffer(indices_buffer, entry.shape, entry.len))
-        } else {
-            None
-        };
-        Ok((values, indices))
+            let scalar_type = match self.precision {
+                crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+                crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+            };
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let shader = crate::backend::wgpu::shaders::integer::cumulative_scan_shader(
+                scalar_type,
+                workgroup_size,
+            );
+            let layout =
+                self.device_ref()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-cumulative-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                            crate::backend::wgpu::bindings::uniform_entry(3),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                self.device_ref(),
+                "runmat-integer-cumulative-pl",
+                &layout,
+            );
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                self.device_ref(),
+                "runmat-integer-cumulative-module",
+                &shader,
+            );
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-cumulative-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-cumulative",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-cumulative-bgl"),
+                Some(workgroup_size),
+            );
+
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                segment_len: u32,
+                segments: u32,
+                stride_before: u32,
+                block: u32,
+                total_len: u32,
+                integer_type: u32,
+                op: u32,
+                direction: u32,
+            }
+            let params = Params {
+                segment_len: segment_len as u32,
+                segments: segments as u32,
+                stride_before: stride_before as u32,
+                block: block as u32,
+                total_len: entry.len as u32,
+                integer_type: integer_type_code(integer_type),
+                op,
+                direction: u32::from(matches!(
+                    direction,
+                    runmat_accelerate_api::ProviderScanDirection::Reverse
+                )),
+            };
+            let uniform = self.uniform_buffer(&params, "runmat-integer-cumulative-params");
+            let group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-cumulative-bg"),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                segments as u32,
+                workgroup_size,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &group,
+                groups,
+            );
+
+            let values = registrations.track(self.register_integer_buffer(
+                values_buffer,
+                entry.shape.clone(),
+                entry.len,
+                integer_type,
+                value_bytes,
+            ))?;
+            let indices = if op >= 2 {
+                Some(registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    entry.shape,
+                    entry.len,
+                ))?)
+            } else {
+                None
+            };
+            Ok((values, indices))
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.0);
+            if let Some(handle) = &out.1 {
+                batch.publish(handle);
+            }
+        })
     }
 
     pub(crate) fn integer_reduce_sum_prod_dim_exec(
@@ -457,13 +472,13 @@ impl WgpuProvider {
         let raw_words = integer_word_count(integer_type, out_len)?;
         let allocated_bytes = (raw_words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if out_len == 0 {
-            return Ok(self.register_integer_buffer(
+            return self.register_integer_buffer(
                 self.create_storage_buffer(0, "runmat-integer-reduce-empty"),
                 out_shape,
                 0,
                 integer_type,
                 0,
-            ));
+            );
         }
         if rows == 0 {
             return identity_integer_buffer(self, integer_type, out_len, &out_shape, is_product);
@@ -599,7 +614,7 @@ impl WgpuProvider {
             );
             offset += chunk;
         }
-        Ok(self.register_integer_buffer(out, out_shape, out_len, integer_type, allocated_bytes))
+        self.register_integer_buffer(out, out_shape, out_len, integer_type, allocated_bytes)
     }
 
     pub(crate) fn integer_reduce_sum_prod_global_exec(
@@ -718,13 +733,13 @@ impl WgpuProvider {
             return Err(anyhow!("{operation_name}: strides exceed GPU kernel limit"));
         }
         if cols == 0 {
-            return Ok(self.register_integer_buffer(
+            return self.register_integer_buffer(
                 self.create_storage_buffer(0, "runmat-integer-mean-empty"),
                 out_shape,
                 0,
                 integer_type,
                 0,
-            ));
+            );
         }
         if rows == 0 {
             return identity_integer_buffer(self, integer_type, cols, &out_shape, false);
@@ -864,7 +879,7 @@ impl WgpuProvider {
             );
             offset += chunk;
         }
-        Ok(self.register_integer_buffer(out, out_shape, cols, integer_type, allocated_bytes))
+        self.register_integer_buffer(out, out_shape, cols, integer_type, allocated_bytes)
     }
 
     pub(crate) fn integer_reduce_extrema_dim_exec(
@@ -874,165 +889,182 @@ impl WgpuProvider {
         operation_name: &str,
         a: &GpuTensorHandle,
     ) -> Result<runmat_accelerate_api::ReduceDimResult> {
-        let entry = self.get_entry_raw(a)?;
-        let integer_type = entry
-            .integer_type()
-            .ok_or_else(|| anyhow!("{operation_name}: expected native integer gpuArray input"))?;
-        ensure!(
-            entry.storage == GpuTensorStorage::Real,
-            "{operation_name}: complex integer gpuArray reduction is not supported"
-        );
-        ensure!(
-            entry.shape.len() == 2,
-            "{operation_name}: only 2D tensors are supported"
-        );
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        let (out_len, mut out_shape) = match dim {
-            0 => (cols, vec![1, cols]),
-            1 => (rows, vec![rows, 1]),
-            _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
-        };
-        if rows == 0 || cols == 0 {
-            if dim == 0 && rows == 0 {
-                out_shape[0] = 0;
+        let mut registrations = self.registration_batch();
+        let result = (|| {
+            let entry = self.get_entry_raw(a)?;
+            let integer_type = entry.integer_type().ok_or_else(|| {
+                anyhow!("{operation_name}: expected native integer gpuArray input")
+            })?;
+            ensure!(
+                entry.storage == GpuTensorStorage::Real,
+                "{operation_name}: complex integer gpuArray reduction is not supported"
+            );
+            ensure!(
+                entry.shape.len() == 2,
+                "{operation_name}: only 2D tensors are supported"
+            );
+            let rows = entry.shape[0];
+            let cols = entry.shape[1];
+            let (out_len, mut out_shape) = match dim {
+                0 => (cols, vec![1, cols]),
+                1 => (rows, vec![rows, 1]),
+                _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
+            };
+            if rows == 0 || cols == 0 {
+                if dim == 0 && rows == 0 {
+                    out_shape[0] = 0;
+                }
+                // Keep empty extrema device-resident rather than routing through
+                // the f64 host gather fallback, which cannot reconstruct wide
+                // integers.
+                let values = registrations.track(self.register_integer_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-values"),
+                    out_shape.clone(),
+                    0,
+                    integer_type,
+                    0,
+                ))?;
+                let indices = registrations.track(self.register_existing_buffer(
+                    self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-indices"),
+                    out_shape,
+                    0,
+                ))?;
+                return Ok(runmat_accelerate_api::ReduceDimResult { values, indices });
             }
-            // Keep empty extrema device-resident rather than routing through
-            // the f64 host gather fallback, which cannot reconstruct wide
-            // integers.
-            let values = self.register_integer_buffer(
-                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-values"),
-                out_shape.clone(),
-                0,
-                integer_type,
-                0,
-            );
-            let indices = self.register_existing_buffer(
-                self.create_storage_buffer(0, "runmat-integer-reduce-empty-extrema-indices"),
-                out_shape,
-                0,
-            );
-            return Ok(runmat_accelerate_api::ReduceDimResult { values, indices });
-        }
-        if rows > u32::MAX as usize || cols > u32::MAX as usize {
-            return Err(gpu_dispatch_length_limit_error(
-                operation_name,
-                rows.max(cols),
-            ));
-        }
-        let words = integer_word_count(integer_type, out_len)?;
-        let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
-        let values_buffer =
-            self.create_storage_buffer_checked(words, "runmat-integer-reduce-dim-extrema-values")?;
-        let indices_buffer = self
-            .create_storage_buffer_checked(out_len, "runmat-integer-reduce-dim-extrema-indices")?;
-        let scalar_type = match self.precision {
-            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
-            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
-        };
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
-        let shader =
-            crate::backend::wgpu::shaders::integer::extrema_dim_shader(scalar_type, workgroup_size);
-        let layout = self
-            .device_ref()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-integer-reduce-dim-extrema-bgl"),
-                entries: &[
-                    crate::backend::wgpu::bindings::storage_read_entry(0),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(1),
-                    crate::backend::wgpu::bindings::storage_read_write_entry(2),
-                    crate::backend::wgpu::bindings::uniform_entry(3),
-                ],
-            });
-        let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-extrema-pl",
-            &layout,
-        );
-        let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
-            "runmat-integer-reduce-dim-extrema-module",
-            &shader,
-        );
-        let key = self.compute_pipeline_hash_bytes(
-            shader.as_bytes(),
-            "runmat-integer-reduce-dim-extrema-bgl",
-            Some(workgroup_size),
-        );
-        let pipeline = self.get_or_create_pipeline(
-            key,
-            &pipeline_layout,
-            &module,
-            "runmat-integer-reduce-dim-extrema",
-            Some(shader.as_bytes()),
-            Some("runmat-integer-reduce-dim-extrema-bgl"),
-            Some(workgroup_size),
-        );
-        #[repr(C)]
-        #[derive(Clone, Copy, Pod, Zeroable)]
-        struct Params {
-            rows: u32,
-            cols: u32,
-            dim: u32,
-            select_min: u32,
-            integer_type: u32,
-            _pad0: u32,
-            _pad1: u32,
-            _pad2: u32,
-        }
-        let params = Params {
-            rows: rows as u32,
-            cols: cols as u32,
-            dim: dim as u32,
-            select_min: u32::from(select_min),
-            integer_type: integer_type_code(integer_type),
-            _pad0: 0,
-            _pad1: 0,
-            _pad2: 0,
-        };
-        let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-extrema-params");
-        let group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-integer-reduce-dim-extrema-bg"),
-                layout: &layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: values_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: indices_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: uniform.as_entire_binding(),
-                    },
-                ],
-            });
-        let groups =
-            crate::backend::wgpu::dispatch::common::dispatch_size(out_len as u32, workgroup_size);
-        crate::backend::wgpu::dispatch::elementwise::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-            &group,
-            groups,
-        );
-        Ok(runmat_accelerate_api::ReduceDimResult {
-            values: self.register_integer_buffer(
-                values_buffer,
-                out_shape.clone(),
+            if rows > u32::MAX as usize || cols > u32::MAX as usize {
+                return Err(gpu_dispatch_length_limit_error(
+                    operation_name,
+                    rows.max(cols),
+                ));
+            }
+            let words = integer_word_count(integer_type, out_len)?;
+            let value_bytes = (words as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
+            let values_buffer = self
+                .create_storage_buffer_checked(words, "runmat-integer-reduce-dim-extrema-values")?;
+            let indices_buffer = self.create_storage_buffer_checked(
                 out_len,
-                integer_type,
-                value_bytes,
-            ),
-            indices: self.register_existing_buffer(indices_buffer, out_shape, out_len),
+                "runmat-integer-reduce-dim-extrema-indices",
+            )?;
+            let scalar_type = match self.precision {
+                crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+                crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+            };
+            let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+            let shader = crate::backend::wgpu::shaders::integer::extrema_dim_shader(
+                scalar_type,
+                workgroup_size,
+            );
+            let layout =
+                self.device_ref()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("runmat-integer-reduce-dim-extrema-bgl"),
+                        entries: &[
+                            crate::backend::wgpu::bindings::storage_read_entry(0),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(1),
+                            crate::backend::wgpu::bindings::storage_read_write_entry(2),
+                            crate::backend::wgpu::bindings::uniform_entry(3),
+                        ],
+                    });
+            let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
+                self.device_ref(),
+                "runmat-integer-reduce-dim-extrema-pl",
+                &layout,
+            );
+            let module = crate::backend::wgpu::pipelines::create_shader_module(
+                self.device_ref(),
+                "runmat-integer-reduce-dim-extrema-module",
+                &shader,
+            );
+            let key = self.compute_pipeline_hash_bytes(
+                shader.as_bytes(),
+                "runmat-integer-reduce-dim-extrema-bgl",
+                Some(workgroup_size),
+            );
+            let pipeline = self.get_or_create_pipeline(
+                key,
+                &pipeline_layout,
+                &module,
+                "runmat-integer-reduce-dim-extrema",
+                Some(shader.as_bytes()),
+                Some("runmat-integer-reduce-dim-extrema-bgl"),
+                Some(workgroup_size),
+            );
+            #[repr(C)]
+            #[derive(Clone, Copy, Pod, Zeroable)]
+            struct Params {
+                rows: u32,
+                cols: u32,
+                dim: u32,
+                select_min: u32,
+                integer_type: u32,
+                _pad0: u32,
+                _pad1: u32,
+                _pad2: u32,
+            }
+            let params = Params {
+                rows: rows as u32,
+                cols: cols as u32,
+                dim: dim as u32,
+                select_min: u32::from(select_min),
+                integer_type: integer_type_code(integer_type),
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
+            };
+            let uniform = self.uniform_buffer(&params, "runmat-integer-reduce-dim-extrema-params");
+            let group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-integer-reduce-dim-extrema-bg"),
+                    layout: &layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: values_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                out_len as u32,
+                workgroup_size,
+            );
+            crate::backend::wgpu::dispatch::elementwise::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &pipeline,
+                &group,
+                groups,
+            );
+            Ok(runmat_accelerate_api::ReduceDimResult {
+                values: registrations.track(self.register_integer_buffer(
+                    values_buffer,
+                    out_shape.clone(),
+                    out_len,
+                    integer_type,
+                    value_bytes,
+                ))?,
+                indices: registrations.track(self.register_existing_buffer(
+                    indices_buffer,
+                    out_shape,
+                    out_len,
+                ))?,
+            })
+        })();
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.values);
+            batch.publish(&out.indices);
         })
     }
 
@@ -1072,13 +1104,13 @@ impl WgpuProvider {
         let raw_len = integer_word_count(integer_type, len)?;
         let bytes = (raw_len as u64).saturating_mul(4);
         if len == 0 {
-            return Ok(self.register_integer_buffer(
+            return self.register_integer_buffer(
                 self.create_storage_buffer(0, "runmat-integer-arithmetic-empty"),
                 broadcast.output_shape,
                 0,
                 integer_type,
                 0,
-            ));
+            );
         }
         if len > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error(operation_name, len));
@@ -1194,7 +1226,7 @@ impl WgpuProvider {
             );
             offset += chunk;
         }
-        Ok(self.register_integer_buffer(out, broadcast.output_shape, len, integer_type, bytes))
+        self.register_integer_buffer(out, broadcast.output_shape, len, integer_type, bytes)
     }
 
     pub(crate) fn integer_minmax_exec(
@@ -1229,13 +1261,7 @@ impl WgpuProvider {
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if len == 0 {
             let out = self.create_storage_buffer(0, "runmat-integer-minmax-empty");
-            return Ok(self.register_integer_buffer(
-                out,
-                broadcast.output_shape,
-                0,
-                integer_type,
-                0,
-            ));
+            return self.register_integer_buffer(out, broadcast.output_shape, 0, integer_type, 0);
         }
         if len > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error(operation_name, len));
@@ -1357,13 +1383,13 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_integer_buffer(
+        self.register_integer_buffer(
             out_buffer,
             broadcast.output_shape,
             len,
             integer_type,
             allocated_bytes,
-        ))
+        )
     }
 
     pub(crate) fn cast_to_integer_exec(
@@ -1389,7 +1415,7 @@ impl WgpuProvider {
         let allocated_bytes = (raw_len as u64).saturating_mul(std::mem::size_of::<u32>() as u64);
         if len == 0 {
             let out = self.create_integer_word_buffer(0, "runmat-integer-cast-empty")?;
-            return Ok(self.register_integer_buffer(out, entry.shape, 0, target_type, 0));
+            return self.register_integer_buffer(out, entry.shape, 0, target_type, 0);
         }
         if len > u32::MAX as usize {
             return Err(gpu_dispatch_length_limit_error("integer cast", len));
@@ -1499,7 +1525,7 @@ impl WgpuProvider {
             );
             offset += chunk_len;
         }
-        Ok(self.register_integer_buffer(raw_out, entry.shape, len, target_type, allocated_bytes))
+        self.register_integer_buffer(raw_out, entry.shape, len, target_type, allocated_bytes)
     }
 }
 

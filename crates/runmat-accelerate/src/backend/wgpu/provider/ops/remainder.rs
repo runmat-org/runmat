@@ -71,12 +71,12 @@ impl WgpuProvider {
             )?;
         }
         if count == 0 {
-            return Ok(self.register_existing_buffer_with_storage(
+            return self.register_existing_buffer_with_storage(
                 self.create_storage_buffer(0, "remainder-empty"),
                 shape,
                 0,
                 GpuTensorStorage::Real,
-            ));
+            );
         }
         self.fused_elementwise_with_telemetry_and_storage_exec(
             &crate::backend::wgpu::shaders::remainder::shader(self.precision, kind),
