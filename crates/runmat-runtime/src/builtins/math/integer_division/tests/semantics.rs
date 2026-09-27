@@ -207,13 +207,16 @@ fn resident_singleton_retains_full_nd_shape() {
         let Value::GpuTensor(output) = output else {
             panic!("resident singleton");
         };
-        assert_eq!(output.shape, vec![1, 1, 1]);
+        assert_eq!(output.shape(), &[1, 1, 1]);
         assert_eq!(
             block_on(provider.download_integer(&output)).unwrap().data,
             runmat_accelerate_api::HostIntegerDataOwned::U64(vec![(u64::MAX - 1) / 2])
         );
-        provider.free(&source).unwrap();
-        provider.free(&output).unwrap();
+        for handle in [source, output] {
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
+        }
     });
 }
 

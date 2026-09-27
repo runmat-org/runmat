@@ -7,12 +7,14 @@ use runmat_accelerate_api::{
 use runmat_value::{IntValue, IntegerStorage, Tensor, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct AdmissionProvider(AtomicUsize);
-static PROVIDER: AdmissionProvider = AdmissionProvider(AtomicUsize::new(0));
+struct AdmissionProvider {
+    downloads: AtomicUsize,
+    owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+}
 
 impl AccelProvider for AdmissionProvider {
     fn device_id(&self) -> u32 {
-        u32::MAX - 235
+        self.owner.device_id()
     }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -24,30 +26,28 @@ impl AccelProvider for AdmissionProvider {
         anyhow::bail!("unexpected upload")
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.0.fetch_add(1, Ordering::Relaxed);
+        self.downloads.fetch_add(1, Ordering::Relaxed);
         Box::pin(async { anyhow::bail!("unexpected download") })
     }
     fn download_numeric<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
-        self.0.fetch_add(1, Ordering::Relaxed);
+        self.downloads.fetch_add(1, Ordering::Relaxed);
         Box::pin(async { anyhow::bail!("unexpected numeric download") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        panic!("borrowed source must not be freed")
-    }
-}
-
-fn source() -> Value {
-    Value::GpuTensor(
-        GpuTensorHandle::new(vec![1, 2], PROVIDER.device_id(), 1)
-            .with_numeric_descriptor(NumericElementType::U8, GpuTensorStorage::Real),
-    )
 }
 
 #[test]
 fn invalid_options_operands_shapes_and_outputs_never_download() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
-    let _provider = ThreadProviderGuard::set(Some(&PROVIDER));
-    PROVIDER.0.store(0, Ordering::Relaxed);
+    let provider = Box::leak(Box::new(AdmissionProvider {
+        downloads: AtomicUsize::new(0),
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+    }));
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    let allocation = provider
+        .owner
+        .allocate_zeroed(vec![1, 2], NumericElementType::U8, GpuTensorStorage::Real)
+        .unwrap();
+    let source = || Value::GpuTensor(allocation.handle.clone());
     for arguments in [
         vec![
             source(),
@@ -63,11 +63,15 @@ fn invalid_options_operands_shapes_and_outputs_never_download() {
         ],
     ] {
         assert!(block_on(idivide_builtin(arguments)).is_err());
-        assert_eq!(PROVIDER.0.load(Ordering::Relaxed), 0);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+        assert_eq!(allocation.probe.retirements(), 0);
     }
     let _outputs = crate::output_count::push_output_count(Some(2));
     assert!(block_on(idivide_builtin(vec![source(), Value::Int(IntValue::U8(1))])).is_err());
-    assert_eq!(PROVIDER.0.load(Ordering::Relaxed), 0);
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
