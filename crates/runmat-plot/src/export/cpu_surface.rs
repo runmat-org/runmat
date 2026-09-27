@@ -579,23 +579,18 @@ fn axes_has_3d_content(figure: &Figure, axes_index: usize) -> bool {
 fn choose_axes_bounds(
     figure: &Figure,
     axes_index: usize,
-    render_data: &[(usize, RenderData)],
+    data_bounds: Option<crate::core::BoundingBox>,
 ) -> (f32, f32, f32, f32) {
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut min_y = f32::INFINITY;
     let mut max_y = f32::NEG_INFINITY;
 
-    for (ax, rd) in render_data {
-        if *ax != axes_index {
-            continue;
-        }
-        if let Some(bounds) = rd.bounds {
-            min_x = min_x.min(bounds.min.x);
-            max_x = max_x.max(bounds.max.x);
-            min_y = min_y.min(bounds.min.y);
-            max_y = max_y.max(bounds.max.y);
-        }
+    if let Some(bounds) = data_bounds {
+        min_x = bounds.min.x;
+        max_x = bounds.max.x;
+        min_y = bounds.min.y;
+        max_y = bounds.max.y;
     }
 
     if !min_x.is_finite() || !max_x.is_finite() || !min_y.is_finite() || !max_y.is_finite() {
@@ -650,20 +645,15 @@ fn data_aspect_adjusted_bounds(
 fn choose_axes_bounds_3d(
     figure: &Figure,
     axes_index: usize,
-    render_data: &[(usize, RenderData)],
+    data_bounds: Option<crate::core::BoundingBox>,
     bounds_2d: (f32, f32, f32, f32),
 ) -> (Vec3, Vec3) {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
 
-    for (ax, rd) in render_data {
-        if *ax != axes_index {
-            continue;
-        }
-        if let Some(bounds) = rd.bounds {
-            min = min.min(bounds.min);
-            max = max.max(bounds.max);
-        }
+    if let Some(bounds) = data_bounds {
+        min = bounds.min;
+        max = bounds.max;
     }
 
     let (min, max) = if !min.x.is_finite() || !max.x.is_finite() {
@@ -1760,12 +1750,7 @@ pub async fn render_figure_rgba_bytes(
         })
         .collect();
 
-    let render_items = figure.render_data_with_axes_with_viewport_and_gpu(
-        Some((width, height)),
-        Some(&axes_sizes),
-        None,
-        None,
-    );
+    let prepared = figure.prepare_axes_extents(&axes_sizes);
 
     let mut axes_views = Vec::with_capacity(axes_count);
     for axes_index in 0..axes_count {
@@ -1781,8 +1766,9 @@ pub async fn render_figure_rgba_bytes(
         if !has_3d && figure.axes_kind(axes_index) == AxesKind::Polar {
             plot_rect = square_plot_rect(plot_rect);
         }
-        let bounds_2d = choose_axes_bounds(&figure, axes_index, &render_items);
-        let (bmin, bmax) = choose_axes_bounds_3d(&figure, axes_index, &render_items, bounds_2d);
+        let bounds_2d = choose_axes_bounds(&figure, axes_index, prepared.bounds[axes_index]);
+        let (bmin, bmax) =
+            choose_axes_bounds_3d(&figure, axes_index, prepared.bounds[axes_index], bounds_2d);
         let camera_3d = if has_3d {
             Some(if axes_count == 1 {
                 camera.cloned().unwrap_or_else(|| {
@@ -1854,10 +1840,8 @@ pub async fn render_figure_rgba_bytes(
         });
     }
 
-    // The first pass supplies data extents for limit/aspect resolution. Stroke
-    // widths must then be tessellated in the same final data-to-pixel scale used
-    // below for projection, not in each individual series' (possibly
-    // degenerate) bounds. Keep direction separate: limits remain ordered.
+    // Resolve domain extents before the single geometry pass. Pixel-sized
+    // decorations use the final display scale; direction remains separate.
     let axes_view_bounds: Vec<_> = axes_views
         .iter()
         .map(|axes| {
@@ -2163,6 +2147,29 @@ mod tests {
     use crate::plots::{MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshScalarField};
     use glam::Vec3;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn cpu_export_large_line_tessellates_once_after_limit_resolution() {
+        let mut figure = Figure::new();
+        let n = 16_384;
+        figure.add_line_plot(
+            crate::plots::LinePlot::new(
+                (0..n).map(|i| i as f64 / (n - 1) as f64).collect(),
+                (0..n)
+                    .map(|i| 0.2 + 0.1 * (i as f64 * 0.001).sin())
+                    .collect(),
+            )
+            .unwrap(),
+        );
+        figure.set_axes_limits(0, Some((-1.0, 2.0)), Some((-1.0, 2.0)));
+        crate::plots::line::take_viewport_tessellations();
+        let output = pollster::block_on(render_figure_rgba_bytes(
+            figure, 160, 120, None, None, None, None,
+        ))
+        .unwrap();
+        assert_eq!(output.len(), 160 * 120 * 4);
+        assert_eq!(crate::plots::line::take_viewport_tessellations(), 1);
+    }
 
     #[test]
     fn cpu_export_y_direction_flips_asymmetric_data_with_ordered_limits() {

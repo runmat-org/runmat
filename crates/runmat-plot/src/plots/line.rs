@@ -577,7 +577,8 @@ impl LinePlot {
 
     /// Get the bounding box of the data
     pub fn bounds(&mut self) -> BoundingBox {
-        if self.bounds.is_some() && self.source_x.is_none() && self.source_y.is_none() {
+        // Source replacement invalidates bounds; style/geometry dirtiness does not.
+        if self.bounds.is_some() {
             return self.bounds.unwrap_or_default();
         }
         if self.source_x.is_none() && self.source_y.is_none() {
@@ -864,32 +865,11 @@ impl LinePlot {
         data_bounds: BoundingBox,
         view_bounds: Option<(f64, f64, f64, f64)>,
     ) -> BoundingBox {
-        let Some((left, right, bottom, top)) = view_bounds else {
-            return data_bounds;
-        };
-        if !(left.is_finite() && right.is_finite() && bottom.is_finite() && top.is_finite()) {
-            return data_bounds;
+        crate::core::ResolvedViewport {
+            pixels: None,
+            view: view_bounds,
         }
-        let (min_x, max_x) = if left <= right {
-            (left as f32, right as f32)
-        } else {
-            (right as f32, left as f32)
-        };
-        let (min_y, max_y) = if bottom <= top {
-            (bottom as f32, top as f32)
-        } else {
-            (top as f32, bottom as f32)
-        };
-        if !(min_x.is_finite() && max_x.is_finite() && min_y.is_finite() && max_y.is_finite())
-            || (max_x - min_x).abs() < 1e-12
-            || (max_y - min_y).abs() < 1e-12
-        {
-            return data_bounds;
-        }
-        BoundingBox {
-            min: Vec3::new(min_x, min_y, data_bounds.min.z),
-            max: Vec3::new(max_x, max_y, data_bounds.max.z),
-        }
+        .bounds(data_bounds)
     }
 
     fn build_viewport_stroke_vertices(
@@ -900,6 +880,8 @@ impl LinePlot {
     ) -> Vec<Vertex> {
         let x_span = (bounds.max.x - bounds.min.x).abs().max(1e-12);
         let y_span = (bounds.max.y - bounds.min.y).abs().max(1e-12);
+        #[cfg(test)]
+        VIEWPORT_TESSELLATIONS.with(|count| count.set(count.get() + 1));
         let vw = (viewport_px.0 as f32).max(1.0);
         let vh = (viewport_px.1 as f32).max(1.0);
         let sx = vw / x_span;
@@ -1149,8 +1131,31 @@ pub mod matlab_compat {
 }
 
 #[cfg(test)]
+thread_local! {
+    static VIEWPORT_TESSELLATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_viewport_tessellations() -> usize {
+    VIEWPORT_TESSELLATIONS.with(|count| count.replace(0))
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_data_bounds_survive_style_changes_but_not_source_replacement() {
+        let mut line = LinePlot::new(vec![0., 2.], vec![1., 3.]).unwrap();
+        let original = line.bounds();
+        line.set_line_width(8.);
+        assert_eq!(line.bounds().min, original.min);
+        assert_eq!(line.bounds().max, original.max);
+        line.update_data(vec![-5., 9.], vec![-2., 7.]).unwrap();
+        let updated = line.bounds();
+        assert_eq!(updated.min, Vec3::new(-5., -2., 0.));
+        assert_eq!(updated.max, Vec3::new(9., 7., 0.));
+    }
 
     #[test]
     fn test_line_plot_creation() {

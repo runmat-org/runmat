@@ -121,7 +121,52 @@ impl ContourPlot {
         self.vertices.as_deref()
     }
 
+    /// Preserve decorated auto-limit extents without generating a second vertex buffer.
+    /// Uses exactly the same segment corners as the rendering kernels.
+    pub(crate) fn prepared_bounds(&self, viewport: Option<(u32, u32)>) -> BoundingBox {
+        let mut bounds = self.bounds();
+        if self.gpu_vertices.is_some() || self.line_width <= 1.0 {
+            return bounds;
+        }
+        let width = viewport
+            .map(|vp| self.line_width.max(0.1) * crate::core::data_units_per_px(&bounds, vp))
+            .unwrap_or(self.line_width);
+        for segment in self.vertices.as_deref().unwrap_or_default().chunks_exact(2) {
+            let start = Vec3::from_array(segment[0].position);
+            let end = Vec3::from_array(segment[1].position);
+            let corners = if self.is_3d() {
+                let half = if viewport.is_some() {
+                    width * 0.5
+                } else {
+                    self.line_width.max(0.5) * 0.01
+                };
+                thick_segment_3d_corners(start, end, half)
+            } else {
+                vertex_utils::extruded_segment_corners(
+                    Vec3::new(start.x, start.y, 0.0),
+                    Vec3::new(end.x, end.y, 0.0),
+                    width,
+                )
+            };
+            for corner in corners {
+                bounds.expand(corner);
+            }
+        }
+        bounds
+    }
+
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        self.render_data_with_resolved_viewport(crate::core::ResolvedViewport {
+            pixels: viewport_px,
+            view: None,
+        })
+    }
+
+    pub(crate) fn render_data_with_resolved_viewport(
+        &mut self,
+        viewport: crate::core::ResolvedViewport,
+    ) -> RenderData {
+        let viewport_px = viewport.pixels;
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
@@ -131,7 +176,7 @@ impl ContourPlot {
             let Some(viewport_px) = viewport_px else {
                 return self.render_data();
             };
-            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+            let data_per_px = crate::core::data_units_per_px(&viewport.bounds(bounds), viewport_px);
             let width_data = self.line_width.max(0.1) * data_per_px;
             let verts = self.vertices().clone();
             let mut thick = Vec::new();
@@ -294,16 +339,7 @@ fn expanded_bounds_for_vertices(mut bounds: BoundingBox, vertices: &[Vertex]) ->
 }
 
 fn create_thick_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32) -> Vec<Vertex> {
-    let dir = (end - start).normalize_or_zero();
-    let mut normal = dir.cross(Vec3::Z);
-    if normal.length_squared() < 1e-6 {
-        normal = dir.cross(Vec3::X);
-    }
-    let normal = normal.normalize_or_zero() * half_width.max(0.0001);
-    let v0 = start + normal;
-    let v1 = end + normal;
-    let v2 = end - normal;
-    let v3 = start - normal;
+    let [v0, v1, v2, v3] = thick_segment_3d_corners(start, end, half_width);
     vec![
         Vertex::new(v0, color),
         Vertex::new(v1, color),
@@ -314,12 +350,47 @@ fn create_thick_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32)
     ]
 }
 
+fn thick_segment_3d_corners(start: Vec3, end: Vec3, half_width: f32) -> [Vec3; 4] {
+    let dir = (end - start).normalize_or_zero();
+    let mut normal = dir.cross(Vec3::Z);
+    if normal.length_squared() < 1e-6 {
+        normal = dir.cross(Vec3::X);
+    }
+    let normal = normal.normalize_or_zero() * half_width.max(0.0001);
+    let v0 = start + normal;
+    let v1 = end + normal;
+    let v2 = end - normal;
+    let v3 = start - normal;
+    [v0, v1, v2, v3]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn test_vertex(x: f32, y: f32, z: f32) -> Vertex {
         Vertex::new(Vec3::new(x, y, z), Vec4::ONE)
+    }
+
+    #[test]
+    fn prepared_extents_match_rendered_2d_and_3d_decoration_bounds() {
+        for is_3d in [false, true] {
+            for viewport in [None, Some((600, 400))] {
+                let start = Vec3::new(0., 0., if is_3d { 2. } else { 0. });
+                let end = Vec3::new(4., 3., if is_3d { 4. } else { 0. });
+                let mut plot = ContourPlot::from_vertices(
+                    vec![Vertex::new(start, Vec4::ONE), Vertex::new(end, Vec4::ONE)],
+                    0.,
+                    BoundingBox::new(start, end),
+                )
+                .with_line_width(5.);
+                plot.force_3d = is_3d;
+                let prepared = plot.prepared_bounds(viewport);
+                let rendered = plot.render_data_with_viewport(viewport).bounds.unwrap();
+                assert_eq!(prepared.min, rendered.min);
+                assert_eq!(prepared.max, rendered.max);
+            }
+        }
     }
 
     #[test]

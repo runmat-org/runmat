@@ -71,6 +71,35 @@ impl ReferenceLine {
         y_range: (f64, f64),
         viewport_px: Option<(u32, u32)>,
     ) -> RenderData {
+        self.render_data_with_resolved_range(
+            x_range,
+            y_range,
+            crate::core::ResolvedViewport {
+                pixels: viewport_px,
+                view: None,
+            },
+        )
+    }
+
+    pub(crate) fn range_bounds(&self, x_range: (f64, f64), y_range: (f64, f64)) -> BoundingBox {
+        match self.orientation {
+            ReferenceLineOrientation::Vertical => BoundingBox::new(
+                Vec3::new(self.value as f32, y_range.0 as f32, 0.0),
+                Vec3::new(self.value as f32, y_range.1 as f32, 0.0),
+            ),
+            ReferenceLineOrientation::Horizontal => BoundingBox::new(
+                Vec3::new(x_range.0 as f32, self.value as f32, 0.0),
+                Vec3::new(x_range.1 as f32, self.value as f32, 0.0),
+            ),
+        }
+    }
+
+    pub(crate) fn render_data_with_resolved_range(
+        &self,
+        x_range: (f64, f64),
+        y_range: (f64, f64),
+        viewport: crate::core::ResolvedViewport,
+    ) -> RenderData {
         let (x, y) = match self.orientation {
             ReferenceLineOrientation::Vertical => {
                 (vec![self.value, self.value], vec![y_range.0, y_range.1])
@@ -85,7 +114,7 @@ impl ReferenceLine {
         if let Some(label) = self.label_for_legend() {
             line = line.with_label(label);
         }
-        line.render_data_with_viewport(viewport_px)
+        line.render_data_with_viewport_and_view_bounds(viewport.pixels, viewport.view)
     }
 
     pub fn estimated_memory_usage(&self) -> usize {

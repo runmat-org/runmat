@@ -1721,23 +1721,8 @@ pub mod vertex_utils {
         if points.len() < 2 {
             return out;
         }
-        // `width` is expected to already be in data-space units. Do NOT clamp to 1.0 here:
-        // plot axes ranges are often small (e.g. y in [-1,1]), and clamping would explode
-        // thick line geometry into a huge filled shape.
-        let half_w = width.max(0.0) * 0.5;
         for i in 0..points.len() - 1 {
-            let p0 = points[i];
-            let p1 = points[i + 1];
-            let dir = (p1 - p0).truncate();
-            let len = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-6);
-            let nx = -dir.y / len;
-            let ny = dir.x / len;
-            let offset = Vec3::new(nx * half_w, ny * half_w, 0.0);
-            // Quad corners in CCW
-            let a = p0 - offset;
-            let b = p0 + offset;
-            let c = p1 + offset;
-            let d = p1 - offset;
+            let [a, b, c, d] = extruded_segment_corners(points[i], points[i + 1], width);
             // Two triangles: a-b-c and a-c-d
             out.push(Vertex::new(a, color));
             out.push(Vertex::new(b, color));
@@ -1747,6 +1732,16 @@ pub mod vertex_utils {
             out.push(Vertex::new(d, color));
         }
         out
+    }
+
+    /// Shared segment geometry for tessellation and allocation-free extent preparation.
+    /// Width is already in data units: never clamp it to a pixel-sized minimum.
+    pub(crate) fn extruded_segment_corners(p0: Vec3, p1: Vec3, width: f32) -> [Vec3; 4] {
+        let half_w = width.max(0.0) * 0.5;
+        let dir = (p1 - p0).truncate();
+        let len = (dir.x * dir.x + dir.y * dir.y).sqrt().max(1e-6);
+        let offset = Vec3::new(-dir.y / len * half_w, dir.x / len * half_w, 0.0);
+        [p0 - offset, p0 + offset, p1 + offset, p1 - offset]
     }
 
     fn line_intersection(p: Vec2, r: Vec2, q: Vec2, s: Vec2) -> Option<Vec2> {

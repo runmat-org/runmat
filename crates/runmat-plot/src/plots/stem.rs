@@ -428,6 +428,17 @@ impl StemPlot {
     }
 
     pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        self.render_data_with_resolved_viewport(crate::core::ResolvedViewport {
+            pixels: viewport_px,
+            view: None,
+        })
+    }
+
+    pub(crate) fn render_data_with_resolved_viewport(
+        &mut self,
+        viewport: crate::core::ResolvedViewport,
+    ) -> RenderData {
+        let viewport_px = viewport.pixels;
         if self.gpu_vertices.is_some() {
             return self.render_data();
         }
@@ -437,7 +448,7 @@ impl StemPlot {
             let Some(viewport_px) = viewport_px else {
                 return self.render_data();
             };
-            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+            let data_per_px = crate::core::data_units_per_px(&viewport.bounds(bounds), viewport_px);
             let width_data = self.line_width.max(0.1) * data_per_px;
             let verts = self.generate_vertices().clone();
             let mut thick = Vec::new();

@@ -26,6 +26,8 @@ pub use y_direction::YDirection;
 mod dimensionality;
 #[path = "figure/limits.rs"]
 mod limits;
+#[path = "figure/preparation.rs"]
+mod preparation;
 pub use limits::{display_bounds_3d, positive_log_bounds};
 
 type ViewBounds2D = (f64, f64, f64, f64);
@@ -1648,6 +1650,12 @@ impl Figure {
             let axes_view_bounds = axes_view_bounds
                 .and_then(|bounds| bounds.get(axes_index).copied())
                 .flatten();
+            let resolved_viewport = crate::core::ResolvedViewport {
+                pixels: axes_viewports_px
+                    .and_then(|viewports| viewports.get(axes_index).copied())
+                    .or(viewport_px),
+                view: axes_view_bounds,
+            };
             let hidden_line_removal = self
                 .axes_metadata
                 .get(axes_index)
@@ -1689,12 +1697,7 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport_gpu(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                            gpu,
-                        ),
+                        plot.render_data_with_resolved_viewport_gpu(resolved_viewport, gpu),
                         plot.marker_render_data(),
                     );
                 }
@@ -1702,11 +1705,7 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                        ),
+                        plot.render_data_with_resolved_viewport(resolved_viewport),
                         plot.marker_render_data(),
                     );
                 }
@@ -1714,21 +1713,13 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                        ),
+                        plot.render_data_with_resolved_viewport(resolved_viewport),
                         plot.marker_render_data(),
                     );
                 }
                 PlotElement::Contour(plot) => out.push((
                     axes_index,
-                    plot.render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ),
+                    plot.render_data_with_resolved_viewport(resolved_viewport),
                 )),
                 PlotElement::ReferenceLine(plot) => {
                     let (x_range, y_range) = Self::reference_line_ranges(
@@ -1740,22 +1731,14 @@ impl Figure {
                     );
                     out.push((
                         axes_index,
-                        plot.render_data_with_range(
-                            x_range,
-                            y_range,
-                            axes_viewports_px
-                                .and_then(|viewports| viewports.get(axes_index).copied())
-                                .or(viewport_px),
-                        ),
+                        plot.render_data_with_resolved_range(x_range, y_range, resolved_viewport),
                     ));
                 }
                 PlotElement::Patch(plot) => {
                     out.push((axes_index, plot.render_data()));
-                    if let Some(edge_data) = plot.edge_render_data_with_viewport(
-                        axes_viewports_px
-                            .and_then(|viewports| viewports.get(axes_index).copied())
-                            .or(viewport_px),
-                    ) {
+                    if let Some(edge_data) =
+                        plot.edge_render_data_with_resolved_viewport(resolved_viewport)
+                    {
                         out.push((axes_index, edge_data));
                     }
                 }

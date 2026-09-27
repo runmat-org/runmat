@@ -376,6 +376,17 @@ impl PatchPlot {
         &mut self,
         viewport_px: Option<(u32, u32)>,
     ) -> Option<RenderData> {
+        self.edge_render_data_with_resolved_viewport(crate::core::ResolvedViewport {
+            pixels: viewport_px,
+            view: None,
+        })
+    }
+
+    pub(crate) fn edge_render_data_with_resolved_viewport(
+        &mut self,
+        viewport: crate::core::ResolvedViewport,
+    ) -> Option<RenderData> {
+        let viewport_px = viewport.pixels;
         let bounds = self.bounds();
         let line_width = self.line_width.max(0.0);
         if line_width == 0.0 {
@@ -390,7 +401,7 @@ impl PatchPlot {
             let data_per_px = if has_3d_content {
                 crate::core::data_units_per_px_3d(&bounds, vp)
             } else {
-                crate::core::data_units_per_px(&bounds, vp)
+                crate::core::data_units_per_px(&viewport.bounds(bounds), vp)
             };
             let half_width_data = (width_px * 0.5) * data_per_px;
             let style = StrokeStyle3D::new(half_width_data, LineStyle::Solid, StrokeCap3D::Butt);
