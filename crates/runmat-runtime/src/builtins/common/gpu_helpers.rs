@@ -312,7 +312,9 @@ pub fn unary_gpu_output_matches(
     output.shape() == input.shape()
         && output.device_id() == input.device_id()
         && contract.alias.accepts(output, input)
-        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        // Device namespace was checked above and by exact_provider_for_handle.
+        // Compare the retained facade address, not codegen-dependent dyn vtables.
+        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::addr_eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision
         && runmat_accelerate_api::handle_integer_type(output) == contract.integer
@@ -346,7 +348,10 @@ pub fn binary_gpu_output_matches(
         && output.device_id() == provider.device_id()
         && contract.alias.accepts(output, left)
         && contract.alias.accepts(output, right)
-        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::eq(owner, provider))
+        // Registered live owners have distinct device namespaces. The address
+        // additionally rejects a substituted facade in that same namespace;
+        // dyn vtable equality is not stable across async/codegen boundaries.
+        && exact_provider_for_handle(output).is_some_and(|owner| std::ptr::addr_eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == contract.storage
         && runmat_accelerate_api::handle_precision(output) == contract.precision
         && runmat_accelerate_api::handle_integer_type(output) == contract.integer
