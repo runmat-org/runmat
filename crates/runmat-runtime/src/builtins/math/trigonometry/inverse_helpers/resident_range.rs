@@ -20,7 +20,6 @@ fn error(builtin: &str, detail: impl std::fmt::Display) -> RuntimeError {
 }
 
 struct Reductions<'a> {
-    provider: &'static dyn AccelProvider,
     input: &'a GpuTensorHandle,
     owned: Vec<GpuTensorHandle>,
 }
@@ -31,7 +30,7 @@ impl Reductions<'_> {
         provider: &'static dyn AccelProvider,
         output: GpuTensorHandle,
         builtin: &str,
-    ) -> BuiltinResult<GpuTensorHandle> {
+    ) -> BuiltinResult<()> {
         let protected: Vec<_> = std::iter::once(self.input).chain(&self.owned).collect();
         let contract = gpu_helpers::BinaryGpuOutputContract {
             shape: vec![1, 1],
@@ -39,11 +38,11 @@ impl Reductions<'_> {
             precision: runmat_accelerate_api::handle_precision(self.input),
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         };
         let valid = !protected
             .iter()
-            .any(|handle| gpu_helpers::same_gpu_handle(handle, &output))
+            .any(|handle| handle.shares_allocation_with(&output))
             && gpu_helpers::binary_gpu_output_matches(
                 &output, self.input, self.input, provider, &contract,
             )
@@ -51,26 +50,16 @@ impl Reductions<'_> {
                 gpu_helpers::numeric_descriptor_matches(&output, element, GpuTensorStorage::Real)
             });
         if !valid {
-            gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-            return Err(error(
-                builtin,
-                "provider returned malformed or aliased range reduction",
+            return Err(gpu_helpers::reject_gpu_output(
+                output,
+                error(
+                    builtin,
+                    "provider returned malformed or aliased range reduction",
+                ),
             ));
         }
-        self.owned.push(output.clone());
-        Ok(output)
-    }
-}
-
-impl Drop for Reductions<'_> {
-    fn drop(&mut self) {
-        for output in &self.owned {
-            // Every accepted result is distinct from the borrowed input and
-            // belongs to this retained authority, even after selection ends.
-            if self.provider.free(output).is_ok() {
-                runmat_accelerate_api::clear_handle_metadata(output);
-            }
-        }
+        self.owned.push(output);
+        Ok(())
     }
 }
 
@@ -100,14 +89,13 @@ pub(crate) async fn requires_complex(
         ));
     }
     let mut outputs = Reductions {
-        provider,
         input,
         owned: Vec::new(),
     };
     match provider.reduce_min(input).await {
         Ok(output) => outputs.adopt(provider, output, builtin)?,
         Err(failure) if gpu_helpers::provider_hook_is_unsupported(&failure) => return Ok(None),
-        Err(failure) => return Err(error(builtin, format!("reduce_min failed: {failure}"))),
+        Err(failure) => return Err(provider_error(builtin, "reduce_min", failure)),
     };
     if matches!(domain, RealDomain::ClosedUnitInterval) {
         match provider.reduce_max(input).await {
@@ -115,7 +103,7 @@ pub(crate) async fn requires_complex(
                 outputs.adopt(provider, output, builtin)?;
             }
             Err(failure) if gpu_helpers::provider_hook_is_unsupported(&failure) => return Ok(None),
-            Err(failure) => return Err(error(builtin, format!("reduce_max failed: {failure}"))),
+            Err(failure) => return Err(provider_error(builtin, "reduce_max", failure)),
         }
     }
     let mut outside = false;
@@ -157,4 +145,41 @@ pub(crate) async fn requires_complex(
         };
     }
     Ok(Some(outside))
+}
+
+fn provider_error(builtin: &str, operation: &str, source: anyhow::Error) -> RuntimeError {
+    let mut failure = error(builtin, format!("{operation} failed: {source}"));
+    failure.source = Some(source.into_boxed_dyn_error());
+    failure
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    use runmat_accelerate_api::{test_support::TestAllocationOwner, NumericElementType};
+
+    #[test]
+    fn reduction_container_owns_temporary_but_not_input_or_exported_alias() {
+        let owner = TestAllocationOwner::new();
+        let input = owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let temporary = owner
+            .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let alias = temporary.handle.clone();
+        let reductions = Reductions {
+            input: &input.handle,
+            owned: vec![temporary.handle],
+        };
+        drop(reductions);
+        assert_eq!(input.probe.retirements(), 0);
+        assert_eq!(temporary.probe.retirements(), 0);
+        alias.validate_live().unwrap();
+        drop(alias);
+        assert_eq!(temporary.probe.retirements(), 1);
+        input.handle.validate_live().unwrap();
+        drop(input.handle);
+        assert_eq!(input.probe.retirements(), 1);
+    }
 }
