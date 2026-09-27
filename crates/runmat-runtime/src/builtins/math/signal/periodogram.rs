@@ -949,7 +949,7 @@ mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::builtin_catalog_entry_by_name;
     use runmat_value::IntegerStorage;
 
     #[test]
@@ -1009,8 +1009,8 @@ mod tests {
 
     #[test]
     fn descriptor_is_registered() {
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("periodogram builtin");
-        let descriptor = builtin.descriptor.expect("descriptor");
+        let builtin = builtin_catalog_entry_by_name(BUILTIN_NAME).expect("periodogram builtin");
+        let descriptor = builtin.descriptor;
         assert!(descriptor
             .signatures
             .iter()
