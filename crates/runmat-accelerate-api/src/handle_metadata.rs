@@ -1,6 +1,12 @@
 //! Scoped preservation of mutable annotations on borrowed resident handles.
 use crate::*;
 
+mod cleanup;
+pub use cleanup::{
+    clear_handle_annotations_checked, clear_residency_checked, HandleAnnotationLock,
+    HandleAnnotationLockPoisoned,
+};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GpuHandleMetadataSnapshot {
     descriptor: GpuTensorDescriptor,

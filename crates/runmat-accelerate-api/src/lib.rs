@@ -24,6 +24,8 @@ mod power;
 mod numerical_domain;
 
 pub use handle_metadata::{
+    clear_handle_annotations_checked, clear_residency_checked, HandleAnnotationLock,
+    HandleAnnotationLockPoisoned,
     restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
     HandleMetadataRestoreGuard,
 };
