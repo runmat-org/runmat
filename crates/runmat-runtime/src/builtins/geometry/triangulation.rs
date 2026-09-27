@@ -865,7 +865,7 @@ fn numeric_tensor(value: &Value, builtin: &'static str) -> BuiltinResult<Tensor>
 
 fn looks_like_point_matrix(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if tensor.cols >= 2)
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.get(1).copied().unwrap_or(1) >= 2)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().get(1).copied().unwrap_or(1) >= 2)
 }
 
 fn looks_like_constraints(value: &Value) -> bool {
@@ -874,7 +874,7 @@ fn looks_like_constraints(value: &Value) -> bool {
 
 fn is_vector_value(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if is_vector(tensor))
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.first().copied().unwrap_or(1) == 1 || handle.shape.get(1).copied().unwrap_or(1) == 1)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().first().copied().unwrap_or(1) == 1 || handle.shape().get(1).copied().unwrap_or(1) == 1)
         || matches!(value, Value::Num(_) | Value::Int(_))
 }
 

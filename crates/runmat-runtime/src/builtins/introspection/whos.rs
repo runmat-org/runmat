@@ -659,7 +659,7 @@ fn value_memory_bytes(value: &Value, seen: &mut HashSet<usize>) -> BuiltinResult
                 gpu_element_size_bytes()
             };
             let count = handle
-                .shape
+                .shape()
                 .iter()
                 .fold(1usize, |acc, dim| acc.saturating_mul(*dim));
             count.saturating_mul(elem_size)

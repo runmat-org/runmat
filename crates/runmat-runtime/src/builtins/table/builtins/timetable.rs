@@ -411,7 +411,7 @@ fn ensure_numeric_row_times_extension(args: &[Value], builtin_name: &str) -> Bui
             .is_ok_and(|name| name.eq_ignore_ascii_case("RowTimes"))
             && match &pair[1] {
                 Value::Tensor(tensor) => tensor.len() != 1,
-                Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() != 1,
+                Value::GpuTensor(handle) => handle.shape().iter().any(|&dimension| dimension != 1),
                 _ => false,
             }
     });

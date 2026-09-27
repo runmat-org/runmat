@@ -86,7 +86,7 @@ async fn read_column(source: &Value, column: usize) -> Result<Value, RuntimeErro
             read_sparse_slice_from_plan(value, &column_plan(&value.shape(), column)?)
         }
         Value::GpuTensor(value) => {
-            read_gpu_slice_from_plan(value, &column_plan(&value.shape, column)?)
+            read_gpu_slice_from_plan(value, &column_plan(value.shape(), column)?)
         }
         Value::StringArray(value) => {
             gather_string_slice(value, &column_plan(&value.shape, column)?)

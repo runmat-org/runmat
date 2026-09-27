@@ -45,7 +45,11 @@ fn promote_field_to_device_ref(
                 .unwrap_or_else(|| "gpu".to_string());
             field.values = AnalysisFieldValues::DeviceRef(DeviceFieldRef {
                 backend,
-                token: format!("device:{}:buffer:{}", handle.device_id, handle.buffer_id),
+                token: format!(
+                    "device:{}:buffer:{}",
+                    handle.device_id(),
+                    handle.buffer_id()
+                ),
                 element_count: host_values.len(),
             });
         }

@@ -303,7 +303,7 @@ pub(super) fn is_public_duration_matrix(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor.shape.len() <= 2 && tensor.cols() == 3,
         Value::GpuTensor(handle) => {
-            handle.shape.len() <= 2 && handle.shape.get(1).copied().unwrap_or(1) == 3
+            handle.shape().len() <= 2 && handle.shape().get(1).copied().unwrap_or(1) == 3
         }
         _ => false,
     }

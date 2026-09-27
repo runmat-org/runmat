@@ -84,7 +84,7 @@ pub(super) fn ismissing_resident_integer(
         ));
     }
     Ok(Value::LogicalArray(LogicalArray::zeros(
-        handle.shape.clone(),
+        handle.shape().to_vec(),
     )))
 }
 

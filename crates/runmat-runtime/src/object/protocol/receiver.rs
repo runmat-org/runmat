@@ -63,7 +63,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Tensor(value) => value.shape.clone(),
         Value::ComplexTensor(value) => value.shape.clone(),
         Value::SparseTensor(value) => value.shape(),
-        Value::GpuTensor(value) => value.shape.clone(),
+        Value::GpuTensor(value) => value.shape().to_vec(),
         Value::StringArray(value) => value.shape.clone(),
         Value::LogicalArray(value) => value.shape.clone(),
         Value::CharArray(value) => value.shape().to_vec(),

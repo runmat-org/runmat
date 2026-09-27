@@ -341,7 +341,7 @@ fn is_scalar_system_value(value: &Value) -> bool {
         Value::Tensor(tensor) => tensor.len() == 1,
         Value::ComplexTensor(tensor) => tensor.len() == 1,
         Value::LogicalArray(logical) => logical.data.len() == 1,
-        Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() == 1,
+        Value::GpuTensor(handle) => handle.shape().iter().all(|&dimension| dimension == 1),
         _ => false,
     }
 }

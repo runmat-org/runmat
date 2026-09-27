@@ -107,13 +107,13 @@ pub fn value_fact(value: &Value) -> ValueFact {
             let kind = gpu_kind(value);
             ValueFact {
                 kind: kind.clone().unwrap_or(ValueKindFact::Unknown),
-                shape: shape(&value.shape),
+                shape: shape(value.shape()),
                 storage: StorageFact::Opaque,
                 layout: LayoutFact::Unknown,
                 contiguity: ContiguityFact::Unknown,
                 view: ViewFact::Unknown,
                 residency: ResidencyFact::Device {
-                    provider: Some(format!("device:{}", value.device_id)),
+                    provider: Some(format!("device:{}", value.device_id())),
                 },
                 alias: AliasFact::Identity,
                 mutation: MutationFact::HandleSemantics,

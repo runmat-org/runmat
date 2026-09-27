@@ -643,7 +643,7 @@ fn ensure_groupsummary_extensions(
 fn groupsummary_typed_integer_scalar(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.len() == 1 && tensor.integer_storage().is_some())
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 && runmat_accelerate_api::handle_integer_type(handle).is_some())
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().all(|&dimension| dimension == 1) && runmat_accelerate_api::handle_integer_type(handle).is_some())
         || matches!(value, Value::Cell(cell) if cell.data.len() == 1 && groupsummary_typed_integer_scalar(&cell.data[0]))
 }
 
