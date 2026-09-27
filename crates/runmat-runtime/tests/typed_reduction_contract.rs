@@ -42,7 +42,14 @@ fn receipt(
 fn host(name: &str, input: &Value, controls: &[Value]) -> BuiltinResult<Value> {
     let mut args = vec![input.clone()];
     args.extend_from_slice(controls);
-    block_on(call_builtin_async_with_outputs(name, &args, 1))
+    let result = block_on(call_builtin_async_with_outputs(name, &args, 1))?;
+    Ok(match result {
+        Value::OutputList(mut outputs) => {
+            assert_eq!(outputs.len(), 1, "{name}: exactly one requested result");
+            outputs.remove(0)
+        }
+        value => value,
+    })
 }
 fn array(single: bool, data: &[f64], shape: &[usize]) -> Value {
     if single {
@@ -78,7 +85,9 @@ fn compare(
     let actual = host(name, input, controls).unwrap();
     let fact = value_fact(&actual);
     assert_eq!(
-        fact.numeric().unwrap().class,
+        fact.numeric()
+            .unwrap_or_else(|| panic!("{name}: nonnumeric result {actual:?}"))
+            .class,
         contract.output_class,
         "{name} {controls:?}"
     );
