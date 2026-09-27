@@ -501,8 +501,7 @@ async fn gradient_gpu_outputs(
     all_spacings: &[GradientSpacing],
     requires_host_gpu: bool,
 ) -> BuiltinResult<Vec<Value>> {
-    let owner = runmat_accelerate_api::provider_for_handle(&handle)
-        .filter(|owner| owner.device_id() == handle.device_id());
+    let owner = gpu_helpers::exact_provider_for_handle(&handle);
     let complex_storage =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
 
@@ -529,7 +528,7 @@ async fn gradient_gpu_outputs(
                 GradientSpacing::Coordinates(_) => unreachable!("coordinates use host fallback"),
             };
             match device_result {
-                Ok(device_result)
+                Ok(mut device_result)
                     if valid_gradient_provider_result(
                         &device_result,
                         &handle,
@@ -538,25 +537,34 @@ async fn gradient_gpu_outputs(
                         complex_storage,
                     ) =>
                 {
+                    gpu_helpers::propagate_output_provenance(&mut device_result, [&handle])?;
                     if complex_storage
                         || runmat_accelerate_api::handle_storage(&device_result)
                             == GpuTensorStorage::ComplexInterleaved
                     {
-                        outputs.push(gpu_helpers::complex_gpu_value(device_result));
+                        outputs.push(gpu_helpers::complex_gpu_value(device_result)?);
                     } else {
-                        outputs.push(gpu_helpers::resident_gpu_value(device_result));
+                        outputs.push(gpu_helpers::resident_gpu_value(device_result)?);
                     }
                 }
                 Ok(device_result) => {
-                    free_gradient_handle_if_fresh(&device_result, &handle, &outputs);
-                    free_gradient_outputs(&outputs, &handle);
+                    let mut error = gradient_internal_error(
+                        "provider returned malformed or aliased gradient output",
+                    );
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(gpu_helpers::reject_gpu_output(device_result, error));
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                    drop(outputs);
                     return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
                         .await;
                 }
-                Err(_) => {
-                    free_gradient_outputs(&outputs, &handle);
-                    return gradient_host_fallback(&handle, owner, requested_dims, all_spacings)
-                        .await;
+                Err(source) => {
+                    let mut error =
+                        gradient_internal_error(format!("provider gradient failed: {source}"));
+                    error.source = Some(source.into_boxed_dyn_error());
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(error);
                 }
             }
         }
@@ -565,6 +573,10 @@ async fn gradient_gpu_outputs(
 
     gradient_host_fallback(&handle, None, requested_dims, all_spacings).await
 }
+
+#[cfg(test)]
+#[path = "gradient/owning_tests.rs"]
+mod owning_tests;
 
 async fn gradient_host_fallback(
     handle: &GpuTensorHandle,
@@ -578,7 +590,7 @@ async fn gradient_host_fallback(
 }
 
 fn gradient_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
+    lhs.shares_allocation_with(rhs)
 }
 
 fn gradient_output_handle(value: &Value) -> Option<&GpuTensorHandle> {
@@ -612,45 +624,8 @@ fn valid_gradient_provider_result(
             == runmat_accelerate_api::handle_precision(input)
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .filter(|owner| owner.device_id() == output.device_id())
+        && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_gradient_handle_if_fresh(
-    handle: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    protected_outputs: &[Value],
-) {
-    if gradient_handles_alias(handle, input)
-        || protected_outputs
-            .iter()
-            .filter_map(gradient_output_handle)
-            .any(|protected| gradient_handles_alias(handle, protected))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id())
-    {
-        let _ = owner.free(handle);
-    }
-}
-
-fn free_gradient_outputs(outputs: &[Value], input: &GpuTensorHandle) {
-    let mut freed = std::collections::BTreeSet::new();
-    for handle in outputs.iter().filter_map(gradient_output_handle) {
-        if gradient_handles_alias(handle, input)
-            || !freed.insert((handle.device_id(), handle.buffer_id()))
-        {
-            continue;
-        }
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle)
-            .filter(|owner| owner.device_id() == handle.device_id())
-        {
-            let _ = owner.free(handle);
-        }
-    }
 }
 
 fn restore_gradient_outputs_if_supported(
@@ -658,41 +633,19 @@ fn restore_gradient_outputs_if_supported(
     prototype: &GpuTensorHandle,
     outputs: Vec<Value>,
 ) -> BuiltinResult<Vec<Value>> {
-    let Some(provider) = provider else {
+    if provider.is_none() {
         return Ok(outputs);
-    };
+    }
     let mut restored = Vec::with_capacity(outputs.len());
-    for output in outputs.iter().cloned() {
-        let protected = std::iter::once(prototype.clone())
-            .chain(restored.iter().filter_map(gradient_output_handle).cloned())
+    for output in outputs {
+        let protected = restored
+            .iter()
+            .filter_map(gradient_output_handle)
             .collect::<Vec<_>>();
-        match crate::builtins::common::provider_restore::upload_value_protected(
-            provider, output, NAME, &protected,
-        ) {
-            Ok(output) => {
-                let valid = gradient_output_handle(&output).is_some_and(|handle| {
-                    handle.device_id() == prototype.device_id()
-                        && !gradient_handles_alias(handle, prototype)
-                        && restored
-                            .iter()
-                            .filter_map(gradient_output_handle)
-                            .all(|prior| !gradient_handles_alias(handle, prior))
-                });
-                if valid {
-                    restored.push(output);
-                    continue;
-                }
-                if let Some(handle) = gradient_output_handle(&output) {
-                    free_gradient_handle_if_fresh(handle, prototype, &restored);
-                }
-                free_gradient_outputs(&restored, prototype);
-                return Ok(outputs);
-            }
-            Err(_) => {
-                free_gradient_outputs(&restored, prototype);
-                return Ok(outputs);
-            }
-        }
+        let output = gpu_helpers::restore_class_preserving_value_protecting(
+            prototype, output, NAME, &protected,
+        )?;
+        restored.push(output);
     }
     Ok(restored)
 }
@@ -836,7 +789,7 @@ fn value_shape(value: &Value) -> &[usize] {
         Value::Tensor(tensor) => &tensor.shape,
         Value::LogicalArray(logical) => &logical.shape,
         Value::ComplexTensor(tensor) => &tensor.shape,
-        Value::GpuTensor(handle) => &handle.shape,
+        Value::GpuTensor(handle) => handle.shape(),
         _ => &[],
     }
 }
@@ -846,7 +799,7 @@ fn value_len(value: &Value) -> usize {
         Value::Tensor(tensor) => tensor_len(tensor),
         Value::LogicalArray(logical) => logical.data.len(),
         Value::ComplexTensor(tensor) => tensor.materialize_f64().len(),
-        Value::GpuTensor(handle) => product(&handle.shape),
+        Value::GpuTensor(handle) => product(handle.shape()),
         _ => 1,
     }
 }
