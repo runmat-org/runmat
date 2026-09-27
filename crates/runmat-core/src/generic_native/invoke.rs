@@ -83,6 +83,7 @@ pub(crate) async fn invoke(
     let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
     let semantic_unit = unit.clone();
+    let semantic_registry = Arc::clone(&registry);
     let invoker =
         user_functions::install_local_semantic_function_invoker(Rc::new(
             move |function, arguments, requested_outputs| {
@@ -92,6 +93,7 @@ pub(crate) async fn invoke(
                 let runtime = nested_runtime.clone();
                 let capture_bindings = Arc::clone(&semantic_capture_bindings);
                 let unit = semantic_unit.clone();
+                let registry = Arc::clone(&semantic_registry);
                 let is_native = u32::try_from(function)
                     .map(ProgramFunctionId)
                     .is_ok_and(|function| semantic_native_functions.contains(&function));
@@ -130,6 +132,18 @@ pub(crate) async fn invoke(
                         )
                         .await?;
                         normalize_outputs(execution.outputs, requested_outputs)
+                    } else if registry.get(runmat_hir::FunctionId(function)).is_some() {
+                        // A retained session closure need not belong to this
+                        // unit's native MIR. Its registry definition remains
+                        // authoritative; arguments still include its captures.
+                        runmat_vm::invoke_semantic_function_value_in_context(
+                            function,
+                            &arguments,
+                            requested_outputs,
+                            &registry,
+                            runtime,
+                        )
+                        .await
                     } else if let Some(previous_invoker) = previous_invoker {
                         runtime
                             .scope(previous_invoker(function, &arguments, requested_outputs))

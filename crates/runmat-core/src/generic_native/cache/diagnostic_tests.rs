@@ -6,14 +6,14 @@ fn repeated_anonymous_publication_preserves_session_catalog_dependency() {
         let mut session = crate::RunMatSession::with_options(false, false).unwrap();
         let source = "f = @(x) x + 1; y = f(2); assert(y == 3);";
         let first = session
-            .compile_input(source)
+            .compile_input_for_source_name("<test>", source)
             .unwrap()
             .bytecode
             .function_registry();
         let outcome = crate::execute_text_request_for_testing(&mut session, source).unwrap();
         assert!(outcome.error.is_none());
         let second = session
-            .compile_input(source)
+            .compile_input_for_source_name("<test>", source)
             .unwrap()
             .bytecode
             .function_registry();

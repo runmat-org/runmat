@@ -125,3 +125,44 @@ fn source_identity_includes_text_name_and_path() {
         pool.intern_with_fullpath("unit", Some("/other/unit.m"), "f; g;")
     );
 }
+
+#[test]
+fn repeated_captured_definition_survives_workspace_growth() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = crate::RunMatSession::with_options(false, false).unwrap();
+        let execute = |session: &mut crate::RunMatSession, source: &str| {
+            let outcome = crate::execute_text_request_for_testing(session, source).unwrap();
+            assert!(outcome.error.is_none(), "{source}: {:?}", outcome.error);
+        };
+        execute(&mut session, "offset = 1;");
+        let source = "f = @(x) x + offset; answer = f(2); assert(answer == offset + 2);";
+        execute(&mut session, source);
+        let first = session.function_registry.clone();
+        execute(&mut session, "saved = f;");
+        execute(&mut session, "offset = offset + 1;");
+        execute(&mut session, source);
+        let second = &session.function_registry;
+        for (name, id) in &first.names {
+            let original = first.get(*id).unwrap();
+            let next_id = second
+                .resolve_name(name)
+                .expect("definition remains published");
+            let mut next = second.get(next_id).unwrap().clone();
+            next.rebind_identity(*id, runmat_types::ProgramFunctionId(id.0 as u32));
+            let before = serde_json::to_value(original).unwrap();
+            let after = serde_json::to_value(&next).unwrap();
+            let differences: Vec<_> = before
+                .as_object()
+                .unwrap()
+                .iter()
+                .filter(|(field, value)| after.get(field.as_str()) != Some(*value))
+                .map(|(field, _)| field.as_str())
+                .collect();
+            assert_eq!(
+                *id, next_id,
+                "unchanged capture definition was retired; differing fields: {differences:?}"
+            );
+        }
+        execute(&mut session, "assert(saved(2) == 3);");
+    });
+}
