@@ -1208,12 +1208,12 @@ pub(crate) mod tests {
             runmat_accelerate_api::register_provider(producer);
             runmat_accelerate_api::register_provider(mislabeled_owner);
         }
-        let handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: mislabeled_owner.device_id(),
-            buffer_id: 991,
-            descriptor: Default::default(),
-        };
+        let handle = mislabeled_owner
+            .upload(&HostTensorView {
+                data: &[0.0],
+                shape: &[1, 1],
+            })
+            .unwrap();
 
         let error = validate_prepared_handle(
             &handle,
@@ -1229,7 +1229,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn gpu_array_ignores_stale_floating_annotation_on_durable_integer_handle() {
+    fn gpu_array_validates_native_integer_descriptor() {
         test_support::with_test_provider(|provider| {
             let values = [1_i32, 2_i32];
             let handle = provider
@@ -1246,8 +1246,7 @@ pub(crate) mod tests {
                 DataClass::Int32,
                 false,
             )
-            .expect("durable integer descriptor takes precedence over a stale annotation");
-            let _ = provider.free(&handle);
+            .expect("native integer descriptor validates");
         });
     }
 
@@ -1306,7 +1305,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(handle.shape, tensor.shape);
+            assert_eq!(handle.shape(), tensor.shape);
             assert!(runmat_accelerate_api::handle_is_explicit(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather values");
@@ -1383,7 +1382,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_identity(&handle)
             );
             assert_eq!(
-                identity.descriptor.provenance,
+                identity.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
             let gathered = test_support::gather(Value::GpuTensor(handle.clone()))
@@ -1408,7 +1407,7 @@ pub(crate) mod tests {
             };
             assert!(runmat_accelerate_api::handle_is_explicit(handle));
             assert_eq!(
-                handle.descriptor.provenance,
+                handle.view().provenance(),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
             assert_eq!(
@@ -1438,7 +1437,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(rewrapped) = rewrapped else {
                 panic!("expected rewrapped gpu tensor");
             };
-            assert_eq!(rewrapped.buffer_id, handle.buffer_id);
+            assert!(rewrapped.shares_allocation_with(&handle));
             assert_eq!(
                 runmat_accelerate_api::handle_class_identity(&rewrapped),
                 Some(runmat_types::standard::UINT64.owned())
@@ -1712,8 +1711,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(returned) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(returned.buffer_id, cloned.buffer_id);
-            assert_eq!(returned.shape, cloned.shape);
+            assert!(returned.shares_allocation_with(&cloned));
+            assert_eq!(returned.shape(), cloned.shape());
         });
     }
 
@@ -1728,7 +1727,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(returned) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(returned.buffer_id, handle.buffer_id);
+            assert!(returned.shares_allocation_with(&handle));
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&returned),
                 GpuTensorStorage::ComplexInterleaved
@@ -1884,8 +1883,7 @@ pub(crate) mod tests {
             let gathered =
                 test_support::gather(Value::GpuTensor(new_handle.clone())).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0]);
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            drop((handle, new_handle));
         });
     }
 
@@ -1893,13 +1891,15 @@ pub(crate) mod tests {
     #[test]
     fn gpu_array_gpu_logical_to_double_clears_flag() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 0.0], vec![2, 1]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[2, 1],
+                },
+                &[],
+            )
+            .expect("logical producer upload");
             let result = call(
                 Value::GpuTensor(handle.clone()),
                 vec![Value::from("double")],
@@ -1909,8 +1909,7 @@ pub(crate) mod tests {
                 panic!("expected gpu tensor");
             };
             assert!(!runmat_accelerate_api::handle_is_logical(&new_handle));
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            drop((handle, new_handle));
         });
     }
 
@@ -1927,7 +1926,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(handle.shape, vec![2, 2]);
+            assert_eq!(handle.shape(), &[2, 2]);
         });
     }
 
@@ -1949,9 +1948,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(new_handle) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(new_handle.shape, vec![2, 2]);
-            provider.free(&handle).ok();
-            provider.free(&new_handle).ok();
+            assert_eq!(new_handle.shape(), &[2, 2]);
+            drop((handle, new_handle));
         });
     }
 
@@ -2004,7 +2002,7 @@ pub(crate) mod tests {
                         .expect("wgpu integer gather");
                     assert_eq!(gathered.shape, vec![2, 1]);
                     assert_eq!(gathered.integer_storage(), Some(&expected));
-                    provider.free(&handle).expect("free integer gpu buffer");
+                    drop(handle);
                 }
             }
             Err(err) => {
@@ -2068,9 +2066,7 @@ pub(crate) mod tests {
             gathered.integer_storage(),
             Some(&IntegerStorage::U64(vec![u64::MAX, 0, 1_u64 << 63]))
         );
-        for handle in [&source, &selected, &target] {
-            provider.free(handle).expect("free gpu buffer");
-        }
+        drop((source, selected, target));
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }
 
@@ -2098,7 +2094,7 @@ pub(crate) mod tests {
                 let gathered = gather_complex(Value::GpuTensor(handle.clone()));
                 assert_eq!(gathered.shape, vec![1, 2]);
                 assert_complex_close(&gathered.materialize_f64(), &complex.materialize_f64());
-                provider.free(&handle).ok();
+                drop(handle);
 
                 let complex_integer = ComplexTensor::new_integer(
                     IntegerComplexStorage::new(
@@ -2122,7 +2118,7 @@ pub(crate) mod tests {
                     gather_complex(Value::GpuTensor(handle.clone())),
                     complex_integer
                 );
-                provider.free(&handle).ok();
+                drop(handle);
             }
             Err(err) => {
                 tracing::warn!("Skipping gpu_array_wgpu_complex_roundtrip: {err}");
