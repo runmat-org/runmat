@@ -5,6 +5,7 @@ mod admission;
 mod structural;
 mod epilogue;
 mod selected;
+mod registration_index;
 pub use admission::*;
 pub use canonical::{
     canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,
@@ -30,6 +31,8 @@ pub(crate) mod wasm_registry {
     static GPU_SPECS: Lazy<Mutex<Vec<GpuSpecRegistration>>> = Lazy::new(|| Mutex::new(Vec::new()));
     static FUSION_SPECS: Lazy<Mutex<Vec<FusionSpecRegistration>>> =
         Lazy::new(|| Mutex::new(Vec::new()));
+    static FUSION_INDEX: Lazy<Mutex<Vec<FusionSpecRegistration>>> =
+        Lazy::new(|| Mutex::new(Vec::new()));
     static RESIDENCY_POLICIES: Lazy<Mutex<HashMap<String, super::ResidencyPolicy>>> =
         Lazy::new(|| Mutex::new(HashMap::new()));
 
@@ -52,6 +55,13 @@ pub(crate) mod wasm_registry {
             .lock()
             .expect("fusion spec registry poisoned")
             .push(registration);
+        let mut index = FUSION_INDEX.lock().expect("fusion spec registry poisoned");
+        super::registration_index::insert(&mut index, registration);
+    }
+
+    pub(super) fn with_fusion_index<R>(visit: impl FnOnce(&[FusionSpecRegistration]) -> R) -> R {
+        let index = FUSION_INDEX.lock().expect("fusion spec registry poisoned");
+        visit(&index)
     }
 
     pub(crate) fn gpu_specs() -> std::vec::IntoIter<&'static BuiltinGpuSpec> {
@@ -332,6 +342,8 @@ pub fn builtin_fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> 
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = FusionSpecRegistration> {
+    #[cfg(test)]
+    registration_index::INVENTORY_TRAVERSALS.with(|count| count.set(count.get() + 1));
     inventory::iter::<FusionSpecInventory>().map(|entry| FusionSpecRegistration {
         spec: entry.spec,
         semantics: entry.semantics,

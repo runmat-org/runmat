@@ -1,12 +1,16 @@
 //! Request-local checks against the runtime's existing dispatch authority.
 use super::{
-    builtin_fusion_spec_registrations, canonical_fusion_declaration, FusionEpilogueOperation,
+    canonical_fusion_declaration, registration_index::with_registrations, FusionEpilogueOperation,
     FusionStructuralOperation,
 };
 use runmat_builtins::{
-    builtin_catalog_entry_by_name, builtin_functions, builtin_implementation_provenance,
-    BuiltinBindingIdentity, BuiltinImplementationAuthority,
+    builtin_catalog_entry_by_name, with_builtin_functions_by_exact_name,
+    with_builtin_implementation_provenance_by_name, BuiltinBindingIdentity,
+    BuiltinImplementationAuthority,
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Evidence for one selected implementation, not permission to skip operand,
 /// method-overload, output-count, or numerical-domain admission.
@@ -39,15 +43,17 @@ pub fn selected_fusion_binding(
         if expected.is_some_and(|expected| expected != identity) {
             return None;
         }
-        let compiled = crate::builtin::runtime_builtin_bindings_by_name(name);
-        let [compiled] = compiled.as_slice() else {
-            return None;
-        };
+        let compiled =
+            crate::builtin::with_runtime_builtin_bindings_by_name(
+                name,
+                |bindings| match bindings {
+                    [binding] => Some(*binding),
+                    _ => None,
+                },
+            )?;
         if compiled.identity != identity
             || (service.is_none()
-                && builtin_functions()
-                    .into_iter()
-                    .any(|legacy| legacy.name == name))
+                && with_builtin_functions_by_exact_name(name, |entries| !entries.is_empty()))
         {
             return None;
         }
@@ -74,28 +80,24 @@ pub fn selected_fusion_binding(
     if service.is_some() || expected.is_some() {
         return None;
     }
-    let mut runtime = builtin_functions()
-        .into_iter()
-        .filter(|binding| binding.name == name);
-    runtime.next()?;
-    if runtime.next().is_some() {
+    if !with_builtin_functions_by_exact_name(name, |entries| entries.len() == 1) {
         return None;
     }
-    let provenance = builtin_implementation_provenance();
-    let mut implementations = provenance.iter().filter(|implementation| {
-        implementation.name == name
-            && implementation.authority == BuiltinImplementationAuthority::LegacyFunction
-    });
-    let implementation = implementations.next()?;
-    if implementations.next().is_some() {
-        return None;
-    }
-    let mut declarations = builtin_fusion_spec_registrations()
-        .filter(|spec| spec.builtin_path == implementation.builtin_path && spec.spec.name == name);
-    let declaration = declarations.next()?;
-    if declarations.next().is_some() {
-        return None;
-    }
+    let implementation = with_builtin_implementation_provenance_by_name(name, |provenance| {
+        let mut implementations = provenance.iter().copied().filter(|implementation| {
+            implementation.authority == BuiltinImplementationAuthority::LegacyFunction
+        });
+        let implementation = implementations.next()?;
+        implementations.next().is_none().then_some(implementation)
+    })?;
+    let declaration = with_registrations(implementation.builtin_path, |registrations| {
+        let mut declarations = registrations
+            .iter()
+            .copied()
+            .filter(|spec| spec.spec.name == name);
+        let declaration = declarations.next()?;
+        declarations.next().is_none().then_some(declaration)
+    })?;
     Some(SelectedFusionBinding {
         identity: SelectedFusionIdentity::Legacy {
             physical_owner: implementation.builtin_path,

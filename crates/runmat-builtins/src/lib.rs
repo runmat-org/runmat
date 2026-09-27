@@ -1,5 +1,7 @@
 pub use inventory;
 mod class_declarations;
+mod legacy_index;
+pub use legacy_index::with_builtin_functions_by_exact_name;
 pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
 pub mod catalog;
 pub use catalog::*;
@@ -27,6 +29,7 @@ pub mod wasm_registry {
 
     thread_local! {
         static FUNCTIONS: RefCell<Vec<&'static BuiltinFunction>> = const { RefCell::new(Vec::new()) };
+        static FUNCTION_INDEX: RefCell<Vec<&'static BuiltinFunction>> = const { RefCell::new(Vec::new()) };
         static CONSTANTS: RefCell<Vec<&'static ConstantRegistration>> = const { RefCell::new(Vec::new()) };
         static DOCS: RefCell<Vec<&'static BuiltinDoc>> = const { RefCell::new(Vec::new()) };
         static IMPLEMENTATION_PROVENANCE: RefCell<Vec<&'static BuiltinImplementationProvenance>> = const { RefCell::new(Vec::new()) };
@@ -41,6 +44,13 @@ pub mod wasm_registry {
     pub fn submit_builtin_function(func: BuiltinFunction) {
         let leaked = leak(func);
         FUNCTIONS.with_borrow_mut(|functions| functions.push(leaked));
+        FUNCTION_INDEX.with_borrow_mut(|index| {
+            crate::legacy_index::insert(index, leaked);
+        });
+    }
+
+    pub(crate) fn with_function_index<R>(visit: impl FnOnce(&[&'static BuiltinFunction]) -> R) -> R {
+        FUNCTION_INDEX.with_borrow(|index| visit(index))
     }
 
     pub fn submit_constant(registration: ConstantRegistration) {
@@ -56,6 +66,7 @@ pub mod wasm_registry {
     pub fn submit_builtin_implementation_provenance(provenance: BuiltinImplementationProvenance) {
         let leaked = leak(provenance);
         IMPLEMENTATION_PROVENANCE.with_borrow_mut(|entries| entries.push(leaked));
+        crate::catalog::index_submitted_provenance(leaked);
     }
 
     pub fn submit_registration_manifest_entry(entry: RegistrationManifestEntry) {
@@ -754,6 +765,8 @@ inventory::collect!(RegistrationManifestEntry);
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn builtin_functions() -> Vec<&'static BuiltinFunction> {
+    #[cfg(test)]
+    legacy_index::INVENTORY_TRAVERSALS.with(|count| count.set(count.get() + 1));
     inventory::iter::<BuiltinFunction>().collect()
 }
 

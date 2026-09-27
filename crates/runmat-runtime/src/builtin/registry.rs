@@ -6,6 +6,8 @@ inventory::collect!(RuntimeBuiltinBinding);
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn runtime_builtin_bindings() -> Vec<RuntimeBuiltinBinding> {
+    #[cfg(test)]
+    INVENTORY_TRAVERSALS.with(|count| count.set(count.get() + 1));
     inventory::iter::<RuntimeBuiltinBinding>()
         .copied()
         .collect()
@@ -18,10 +20,18 @@ pub mod wasm_registry {
 
     thread_local! {
         static BINDINGS: RefCell<Vec<&'static RuntimeBuiltinBinding>> = const { RefCell::new(Vec::new()) };
+        static NAME_INDEX: RefCell<Vec<RuntimeBuiltinBinding>> = const { RefCell::new(Vec::new()) };
     }
 
     pub fn submit(binding: RuntimeBuiltinBinding) {
         BINDINGS.with_borrow_mut(|bindings| bindings.push(Box::leak(Box::new(binding))));
+        NAME_INDEX.with_borrow_mut(|entries| {
+            super::insert_binding(entries, binding);
+        });
+    }
+
+    pub(super) fn with_index<R>(visit: impl FnOnce(&[RuntimeBuiltinBinding]) -> R) -> R {
+        NAME_INDEX.with_borrow(|entries| visit(entries))
     }
 
     pub fn bindings() -> Vec<&'static RuntimeBuiltinBinding> {
@@ -35,10 +45,64 @@ pub fn runtime_builtin_bindings() -> Vec<RuntimeBuiltinBinding> {
 }
 
 pub fn runtime_builtin_bindings_by_name(name: &str) -> Vec<RuntimeBuiltinBinding> {
-    runtime_builtin_bindings()
-        .into_iter()
-        .filter(|binding| binding.identity.builtin.name.eq_ignore_ascii_case(name))
-        .collect()
+    with_runtime_builtin_bindings_by_name(name, |entries| entries.to_vec())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+static NAME_INDEX: std::sync::LazyLock<Vec<RuntimeBuiltinBinding>> =
+    std::sync::LazyLock::new(|| {
+        let mut entries = runtime_builtin_bindings();
+        // Stable sorting preserves dispatcher retry order among equal names.
+        entries.sort_by(|left, right| {
+            compare_names(left.identity.builtin.name, right.identity.builtin.name)
+        });
+        entries
+    });
+
+fn compare_names(left: &str, right: &str) -> std::cmp::Ordering {
+    left.bytes()
+        .map(|byte| byte.to_ascii_lowercase())
+        .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+}
+
+/// Borrow all compiled bindings for a public dispatch spelling, retaining
+/// duplicates and their registration order without allocating a result vector.
+pub fn with_runtime_builtin_bindings_by_name<R>(
+    name: &str,
+    visit: impl FnOnce(&[RuntimeBuiltinBinding]) -> R,
+) -> R {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        visit(matching_bindings(&NAME_INDEX, name))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_registry::with_index(|entries| visit(matching_bindings(entries, name)))
+    }
+}
+
+fn matching_bindings<'a>(
+    entries: &'a [RuntimeBuiltinBinding],
+    name: &str,
+) -> &'a [RuntimeBuiltinBinding] {
+    let first =
+        entries.partition_point(|entry| compare_names(entry.identity.builtin.name, name).is_lt());
+    let count = entries[first..]
+        .partition_point(|entry| entry.identity.builtin.name.eq_ignore_ascii_case(name));
+    &entries[first..first + count]
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+fn insert_binding(entries: &mut Vec<RuntimeBuiltinBinding>, binding: RuntimeBuiltinBinding) {
+    let at = entries.partition_point(|entry| {
+        !compare_names(entry.identity.builtin.name, binding.identity.builtin.name).is_gt()
+    });
+    entries.insert(at, binding);
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+thread_local! {
+    static INVENTORY_TRAVERSALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -119,5 +183,82 @@ mod tests {
         assert!(errors.is_empty(), "{errors:#?}");
         assert_eq!(runtime_builtin_bindings_by_name("full").len(), 1);
         assert!(runmat_builtins::builtin_function_by_name("full").is_none());
+    }
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn warm_binding_lookup_borrows_without_inventory_traversal() {
+        let first = with_runtime_builtin_bindings_by_name("sin", |entries| {
+            assert_eq!(entries.len(), 1);
+            entries.as_ptr()
+        });
+        let before = INVENTORY_TRAVERSALS.with(std::cell::Cell::get);
+        for _ in 0..64 {
+            with_runtime_builtin_bindings_by_name("SIN", |entries| {
+                assert_eq!(entries.as_ptr(), first);
+                assert_eq!(entries.len(), 1);
+            });
+        }
+        assert_eq!(INVENTORY_TRAVERSALS.with(std::cell::Cell::get), before);
+    }
+
+    #[test]
+    fn binding_range_retains_duplicates_and_retry_order() {
+        let binding = runtime_builtin_bindings_by_name("sin")[0];
+        let mut upper = binding;
+        upper.identity.builtin.name = "SIN";
+        let mut other = binding;
+        other.identity.builtin.name = "z_other";
+        let mut entries = vec![other, upper, binding, binding];
+        entries.sort_by(|left, right| {
+            compare_names(left.identity.builtin.name, right.identity.builtin.name)
+        });
+        let found = matching_bindings(&entries, "sIn");
+        assert_eq!(found.len(), 3);
+        assert_eq!(found[0].identity.builtin.name, "SIN");
+        assert_eq!(found[1].identity.builtin.name, "sin");
+        assert!(matching_bindings(&entries, "missing").is_empty());
+    }
+
+    #[test]
+    fn late_binding_registration_refreshes_early_miss_and_duplicates() {
+        let binding = runtime_builtin_bindings_by_name("sin")[0];
+        let mut entries = Vec::new();
+        assert!(matching_bindings(&entries, "SIN").is_empty());
+        insert_binding(&mut entries, binding);
+        assert_eq!(matching_bindings(&entries, "SIN").len(), 1);
+        insert_binding(&mut entries, binding);
+        assert_eq!(matching_bindings(&entries, "SIN").len(), 2);
+    }
+
+    #[test]
+    fn indexed_binding_lookup_matches_inventory_case_alias_and_order() {
+        let inventory = runtime_builtin_bindings();
+        let names = inventory
+            .iter()
+            .map(|entry| entry.identity.builtin.name)
+            .chain(
+                runmat_builtins::builtin_catalog_aliases()
+                    .iter()
+                    .map(|entry| entry.alias.name),
+            );
+        for name in names {
+            for spelling in [name.to_owned(), name.to_ascii_uppercase()] {
+                let expected: Vec<_> = inventory
+                    .iter()
+                    .filter(|entry| entry.identity.builtin.name.eq_ignore_ascii_case(&spelling))
+                    .collect();
+                with_runtime_builtin_bindings_by_name(&spelling, |actual| {
+                    assert_eq!(actual.len(), expected.len(), "{spelling}");
+                    for (actual, expected) in actual.iter().zip(&expected) {
+                        assert_eq!(actual.identity, expected.identity);
+                        assert!(std::ptr::fn_addr_eq(
+                            actual.implementation,
+                            expected.implementation
+                        ));
+                    }
+                });
+            }
+        }
     }
 }

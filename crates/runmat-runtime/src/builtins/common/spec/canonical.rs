@@ -1,10 +1,10 @@
 use super::{
-    builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionEpilogueOperation,
+    registration_index::with_registrations, BuiltinFusionSpec, FusionEpilogueOperation,
     FusionSemanticDeclaration, FusionStructuralOperation,
 };
 use runmat_builtins::{
-    builtin_catalog_entry_by_name, builtin_implementation_provenance, BuiltinBindingIdentity,
-    BuiltinImplementationAuthority,
+    builtin_catalog_entry_by_name, with_builtin_implementation_provenance_by_name,
+    BuiltinBindingIdentity, BuiltinImplementationAuthority,
 };
 
 /// Resolve a fusion declaration for an already selected canonical binding.
@@ -54,25 +54,27 @@ pub fn canonical_fusion_declaration(
     {
         return None;
     }
-    let provenance = builtin_implementation_provenance();
-    let mut implementations = provenance.iter().filter(|implementation| {
-        implementation.authority == BuiltinImplementationAuthority::CanonicalBinding
-            && implementation.name == identity.builtin.name
-            && implementation.binding_variant == Some(identity.variant)
-    });
-    let implementation = implementations.next()?;
-    if implementations.next().is_some() {
-        return None;
-    }
-    let mut candidates = builtin_fusion_spec_registrations().filter(|spec| {
-        spec.builtin_path == implementation.builtin_path
-            && match spec.semantics {
+    let implementation =
+        with_builtin_implementation_provenance_by_name(identity.builtin.name, |provenance| {
+            let mut implementations = provenance.iter().copied().filter(|implementation| {
+                implementation.authority == BuiltinImplementationAuthority::CanonicalBinding
+                    && implementation.binding_variant == Some(identity.variant)
+            });
+            let implementation = implementations.next()?;
+            implementations.next().is_none().then_some(implementation)
+        })?;
+    let registration = with_registrations(implementation.builtin_path, |registrations| {
+        let mut candidates = registrations
+            .iter()
+            .copied()
+            .filter(|spec| match spec.semantics {
                 Some(semantics) => semantics.binding == identity,
                 None => entry.bindings.len() == 1,
-            }
-    });
-    let registration = candidates.next()?;
-    if candidates.next().is_some() || registration.spec.name != identity.builtin.name {
+            });
+        let registration = candidates.next()?;
+        candidates.next().is_none().then_some(registration)
+    })?;
+    if registration.spec.name != identity.builtin.name {
         return None;
     }
     // A structural operation needs explicit binding authority and must not
