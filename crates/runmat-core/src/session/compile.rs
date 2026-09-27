@@ -1137,13 +1137,22 @@ impl RunMatSession {
             return (session_registry, next_semantic_function_id, HashMap::new());
         }
 
-        let mut remap = HashMap::new();
-        let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
-        ids.sort_by_key(|id| id.0);
-        for old_id in ids {
-            let new_id = runmat_hir::FunctionId(next_semantic_function_id);
-            next_semantic_function_id += 1;
-            remap.insert(old_id, new_id);
+        let reused = super::semantic_definition::unchanged_unit_remap(
+            bytecode,
+            &current_registry,
+            &session_registry,
+            private_companion_function_names,
+        );
+        let reuse_definitions = reused.is_some();
+        let mut remap = reused.unwrap_or_default();
+        if !reuse_definitions {
+            let mut ids: Vec<_> = current_registry.functions.keys().copied().collect();
+            ids.sort_by_key(|id| id.0);
+            for old_id in ids {
+                let new_id = runmat_hir::FunctionId(next_semantic_function_id);
+                next_semantic_function_id += 1;
+                remap.insert(old_id, new_id);
+            }
         }
 
         for instr in &mut bytecode.instructions {
@@ -1156,7 +1165,11 @@ impl RunMatSession {
             .collect();
 
         let mut replaced_sources = Vec::new();
-        for function in current_registry.functions.values() {
+        for function in current_registry
+            .functions
+            .values()
+            .filter(|_| !reuse_definitions)
+        {
             if private_companion_function_names.contains(&function.display_name) {
                 continue;
             }
@@ -1338,7 +1351,7 @@ fn executable_source_identity(
     (root.owner_identity.clone(), display_name.replace('\\', "/"))
 }
 
-fn remap_semantic_function_instr(
+pub(super) fn remap_semantic_function_instr(
     instr: &mut runmat_vm::Instr,
     remap: &HashMap<runmat_hir::FunctionId, runmat_hir::FunctionId>,
 ) {

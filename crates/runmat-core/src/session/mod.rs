@@ -50,6 +50,7 @@ fn runtime_language_mode(mode: CompatMode) -> runmat_runtime::context::RuntimeLa
 }
 
 mod compile;
+pub(crate) mod semantic_definition;
 mod config;
 mod dynamic;
 mod executable;

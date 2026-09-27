@@ -184,6 +184,11 @@ fn execute_inner(
         }
         if request.phase == NativeSitePhase::RVALUE {
             if let Some(outcome) = super::region::checkpoint(state, request, exit)? {
+                // The region completed this site's work without entering the
+                // ordinary instruction path. Release its expression scope and
+                // publish the updated roots before the next native site.
+                state.finish_contextual_site();
+                refresh_frame_roots(state, call)?;
                 return Ok(outcome);
             }
         }

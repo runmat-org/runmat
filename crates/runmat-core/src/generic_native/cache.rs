@@ -11,6 +11,9 @@ use runmat_jit::{
 };
 
 use crate::ExecutableUnit;
+mod diagnostics;
+#[cfg(test)]
+mod diagnostic_tests;
 
 /// Core-owned publication boundary for generic-native products in one session.
 /// JIT owns cells and dependency matching; Core supplies authoritative program,
@@ -123,7 +126,7 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        invocation_profile: &RepresentationProfile,
+        invocation_profile: Option<&RepresentationProfile>,
     ) -> Result<Option<PublishedEntry>, runmat_runtime::RuntimeError> {
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
@@ -133,10 +136,22 @@ impl GenericNativeCache {
         let availability = self
             .entries
             .availability(&key, &current, self.pending.len());
-        match self.tiering.decide(&site, &availability) {
-            TierDecision::Interpret => Ok(None),
-            TierDecision::ExecuteGeneric => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::ExecuteSpecialized { profile }
+        let decision = if invocation_profile.is_some() {
+            self.tiering.decide(&site, &availability)
+        } else {
+            self.tiering.decide_generic(&site, &availability)
+        };
+        diagnostics::decision(
+            &site,
+            &decision,
+            &availability,
+            invocation_profile.is_some(),
+            &self.tiering,
+        );
+        match (decision, invocation_profile) {
+            (TierDecision::Interpret, _) => Ok(None),
+            (TierDecision::ExecuteGeneric, _) => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::ExecuteSpecialized { profile }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 Ok(self
@@ -144,13 +159,16 @@ impl GenericNativeCache {
                     .resolve_specialized(&key, profile, &current)
                     .or_else(|| self.entries.resolve(&key, &current)))
             }
-            TierDecision::ExecuteSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
-            TierDecision::CompileGeneric { mode } => {
+            (TierDecision::ExecuteSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
+            (TierDecision::CompileGeneric { mode }, _) => {
                 let compilation = CompilationKey {
                     entry: key.clone(),
                     tier: CompilationTier::Generic,
                 };
                 if self.failed_compilations.contains(&compilation) {
+                    diagnostics::rejected(&compilation, "previous_compilation_failure", None);
                     return Ok(None);
                 }
                 match mode {
@@ -166,6 +184,11 @@ impl GenericNativeCache {
                         if !self
                             .code_budget_admits(compiled.executor.retained_code_bytes(), &current)
                         {
+                            diagnostics::rejected(
+                                &compilation,
+                                "code_budget",
+                                Some(compiled.executor.retained_code_bytes()),
+                            );
                             self.failed_compilations.insert(compilation);
                             return Ok(None);
                         }
@@ -194,7 +217,7 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { profile, mode }
+            (TierDecision::CompileSpecialized { profile, mode }, Some(invocation_profile))
                 if profile == invocation_profile.digest =>
             {
                 let compilation = CompilationKey {
@@ -234,7 +257,9 @@ impl GenericNativeCache {
                     }
                 }
             }
-            TierDecision::CompileSpecialized { .. } => Ok(self.entries.resolve(&key, &current)),
+            (TierDecision::CompileSpecialized { .. }, _) => {
+                Ok(self.entries.resolve(&key, &current))
+            }
         }
     }
 
@@ -242,14 +267,16 @@ impl GenericNativeCache {
         &self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
         elapsed_ns: u64,
     ) -> Result<(), runmat_runtime::RuntimeError> {
         let key = entry_key(unit, preferred_function);
         let site = tier_site(unit, preferred_function, &key)?;
-        self.tiering
-            .observe_invocation(site, profile, elapsed_ns)
-            .map_err(|error| super::error::stage("NativeTierFeedback", error))
+        match profile {
+            Some(profile) => self.tiering.observe_invocation(site, profile, elapsed_ns),
+            None => self.tiering.observe_unprofiled_invocation(site, elapsed_ns),
+        }
+        .map_err(|error| super::error::stage("NativeTierFeedback", error))
     }
 
     pub(crate) fn observe_loop_backedges(
@@ -285,9 +312,12 @@ impl GenericNativeCache {
         &mut self,
         unit: &ExecutableUnit,
         preferred_function: Option<&str>,
-        profile: &RepresentationProfile,
+        profile: Option<&RepresentationProfile>,
     ) -> Result<Option<(PublishedEntry, runmat_types::ProgramPointId)>, runmat_runtime::RuntimeError>
     {
+        let Some(profile) = profile else {
+            return Ok(None);
+        };
         let dependency_keys = self.observe_unit_dependencies(unit)?;
         let current = self.dependencies.snapshot_all();
         self.publish_completed(&current)?;
@@ -362,6 +392,7 @@ impl GenericNativeCache {
             return Ok(());
         }
         let prepared = super::compile::prepare(unit, preferred_function, specialization)?;
+        diagnostics::scheduled(&key, &dependencies);
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("runmat-jit-compile".into())
@@ -439,11 +470,12 @@ impl GenericNativeCache {
                 .pending
                 .remove(&key)
                 .expect("completed native compilation must remain pending");
-            let Some(Ok(compiled)) = result else {
+            let Some(compiled) = diagnostics::completed(&key, result) else {
                 self.failed_compilations.insert(key);
                 continue;
             };
             if !pending.dependencies.is_satisfied_by(current) {
+                diagnostics::stale(&key, &pending.dependencies, current);
                 continue;
             }
             let admitted = match key.tier {
@@ -462,6 +494,11 @@ impl GenericNativeCache {
                     .is_ok(),
             };
             if !admitted {
+                diagnostics::rejected(
+                    &key,
+                    "code_or_version_budget",
+                    Some(compiled.executor.retained_code_bytes()),
+                );
                 self.failed_compilations.insert(key);
                 continue;
             }
@@ -469,6 +506,7 @@ impl GenericNativeCache {
             {
                 self.compilations += 1;
             }
+            diagnostics::publishing(&key, compiled.executor.retained_code_bytes());
             let published = match key.tier {
                 CompilationTier::Generic => self.entries.publish(
                     key.entry,
@@ -522,9 +560,11 @@ impl GenericNativeCache {
                 continue;
             }
             changed = true;
+            diagnostics::dependency_changed(&DependencyKey::SessionFunction(name.clone()));
             self.observe(DependencyKey::SessionFunction(name.clone()), after_revision)?;
         }
         if changed {
+            diagnostics::dependency_changed(&DependencyKey::SessionCatalog);
             self.failed_compilations.clear();
             self.observe(
                 DependencyKey::SessionCatalog,
@@ -671,79 +711,8 @@ fn function_revision(
     let Some(function) = function.and_then(|function| registry.get(function)) else {
         return Ok("removed".to_string());
     };
-
-    // Spell out every semantic field so adding a new FunctionBytecode field makes this
-    // destructure fail to compile until its invalidation semantics are chosen. HashMap and
-    // HashSet iteration order is not stable, so canonicalize those fields explicitly.
-    let runmat_vm::FunctionBytecode {
-        function,
-        display_name,
-        class_method_owner,
-        private_owner_scope,
-        source_id,
-        capabilities,
-        instructions,
-        instr_spans,
-        call_arg_spans,
-        coverage_sites,
-        var_count,
-        input_slots,
-        varargin_slot,
-        implicit_nargin_slot,
-        output_slots,
-        varargout_slot,
-        implicit_nargout_slot,
-        capture_slots,
-        var_names,
-        initially_unassigned_slots,
-        argument_validations,
-        resume_points,
-        regions,
-        parfor_regions,
-        spmd_regions,
-        distributed_values,
-        collective_contracts,
-    } = function;
-    let var_names = var_names.iter().collect::<BTreeMap<_, _>>();
-    let initially_unassigned_slots = initially_unassigned_slots.iter().collect::<BTreeSet<_>>();
-    let resume_points = resume_points.iter().collect::<Vec<_>>();
-    let mut payload = Vec::new();
-    macro_rules! append {
-        ($value:expr) => {{
-            let bytes = serde_json::to_vec($value)
-                .map_err(|error| super::error::stage("NativeDependencyRevision", error))?;
-            payload.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
-            payload.extend_from_slice(&bytes);
-        }};
-    }
-    append!(function);
-    append!(display_name);
-    append!(class_method_owner);
-    append!(private_owner_scope);
-    append!(source_id);
-    append!(capabilities);
-    append!(instructions);
-    append!(instr_spans);
-    append!(call_arg_spans);
-    append!(coverage_sites);
-    append!(var_count);
-    append!(input_slots);
-    append!(varargin_slot);
-    append!(implicit_nargin_slot);
-    append!(output_slots);
-    append!(varargout_slot);
-    append!(implicit_nargout_slot);
-    append!(capture_slots);
-    append!(&var_names);
-    append!(&initially_unassigned_slots);
-    append!(argument_validations);
-    append!(&resume_points);
-    append!(regions);
-    append!(parfor_regions);
-    append!(spmd_regions);
-    append!(distributed_values);
-    append!(collective_contracts);
-    Ok(runmat_execution::Digest::sha256(&payload).to_string())
+    crate::session::semantic_definition::fingerprint(function)
+        .map_err(|error| super::error::stage("NativeDependencyRevision", error))
 }
 
 fn session_catalog_revision(

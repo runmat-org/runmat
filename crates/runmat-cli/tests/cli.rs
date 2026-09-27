@@ -76,6 +76,71 @@ provider = "inprocess"
     config_path
 }
 
+// Exercise the actual script command: the session returns both console streams
+// and a structured value, but only the streams are program output.
+fn run_output_contract_script(source: &str, verbose: bool) -> std::process::Output {
+    let directory = TempDir::new().unwrap();
+    let script = directory.path().join("output_contract.m");
+    fs::write(&script, source).unwrap();
+    let mut args = vec!["--no-jit"];
+    if verbose {
+        args.push("--verbose");
+    }
+    args.extend(["run", script.to_str().unwrap()]);
+    run_runmat(&args)
+}
+
+#[test]
+fn script_output_contract_values_are_rendered_once() {
+    for (source, expected) in [
+        ("x = 42", "x = 42\n"),
+        ("2 + 3", "ans = 5\n"),
+        (
+            "syms Y(X)\ncondition = eq(Y(0), 0)",
+            "condition = Y(0) == 0\n",
+        ),
+        ("disp(5); disp(5); 5", "5\n5\nans = 5\n"),
+        ("x = 42;", ""),
+        ("2 + 3;", ""),
+        ("disp(5); x = 42;", "5\n"),
+        ("fprintf('a'); fprintf('a');", "aa"),
+    ] {
+        let output = run_output_contract_script(source, false);
+        assert!(
+            output.status.success(),
+            "{source}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn script_output_contract_verbose_result_is_diagnostic_only() {
+    let output = run_output_contract_script("x = 42", true);
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "x = 42\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Execution result:"));
+
+    let suppressed = run_output_contract_script("x = 42;", true);
+    assert!(suppressed.status.success(), "{:?}", suppressed);
+    assert!(suppressed.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&suppressed.stderr).contains("Execution result:"));
+}
+
+#[test]
+fn script_output_contract_preserves_output_before_failure() {
+    let output =
+        run_output_contract_script("disp('before'); error('output-contract-failure');", false);
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("output-contract-failure"));
+}
+
 #[test]
 fn test_help_command() {
     let output = run_runmat(&["--help"]);
