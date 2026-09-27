@@ -1,6 +1,38 @@
 //! Shared numeric upload validation and rejection ownership.
 use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView};
 
+/// A validated upload may own a thread-affine failed-retirement authority.
+/// Keep this typed carrier through local error propagation; converting only its
+/// diagnostic to `anyhow` on WASM would discard the sole custom owner.
+#[derive(Debug)]
+pub enum NumericUploadError {
+    Provider(anyhow::Error),
+    Invalid(InvalidNumericUploadResult),
+}
+pub type NumericUploadResult<T> = Result<T, NumericUploadError>;
+
+impl From<anyhow::Error> for NumericUploadError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Provider(error)
+    }
+}
+impl std::fmt::Display for NumericUploadError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Provider(error) => std::fmt::Display::fmt(error, formatter),
+            Self::Invalid(error) => std::fmt::Display::fmt(error, formatter),
+        }
+    }
+}
+impl std::error::Error for NumericUploadError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(match self {
+            Self::Provider(error) => error.as_ref(),
+            Self::Invalid(error) => error,
+        })
+    }
+}
+
 /// A provider returned a malformed or borrowed numeric upload result.
 /// This is an execution failure, not an unsupported-representation signal.
 #[derive(Debug)]
@@ -9,9 +41,9 @@ pub struct InvalidNumericUploadResult {
     cleanup: Option<crate::allocation::GpuHandleReleaseError>,
 }
 impl InvalidNumericUploadResult {
-    pub(crate) fn reject(handle: GpuTensorHandle, detail: String) -> anyhow::Error {
+    pub(crate) fn reject(handle: GpuTensorHandle, detail: String) -> NumericUploadError {
         let cleanup = handle.release().err();
-        Self { detail, cleanup }.into()
+        NumericUploadError::Invalid(Self { detail, cleanup })
     }
     /// Failed retirement retains the exact owner through this error carrier.
     pub fn cleanup_error(&self) -> Option<&crate::allocation::GpuHandleReleaseError> {
@@ -30,8 +62,16 @@ impl std::fmt::Display for InvalidNumericUploadResult {
 }
 impl std::error::Error for InvalidNumericUploadResult {}
 
-pub fn is_invalid_numeric_upload_result(error: &anyhow::Error) -> bool {
-    error.is::<InvalidNumericUploadResult>()
+pub fn is_invalid_numeric_upload_result(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    loop {
+        if error.is::<InvalidNumericUploadResult>() {
+            return true;
+        }
+        let Some(source) = error.source() else {
+            return false;
+        };
+        error = source;
+    }
 }
 
 /// Validate an upload through the raw provider hook with borrowed-handle
@@ -41,7 +81,7 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     provider: &P,
     host: &HostNumericTensorView<'_>,
     protected: &[&GpuTensorHandle],
-) -> anyhow::Result<GpuTensorHandle> {
+) -> NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
     let _borrowed_metadata: Vec<_> = protected
         .iter()

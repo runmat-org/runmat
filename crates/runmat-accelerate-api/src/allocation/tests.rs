@@ -84,6 +84,9 @@ fn rejected_registration_never_retires_an_existing_allocation() {
 fn retirement_outcomes_remain_in_the_existing_owner_without_automatic_retry() {
     for outcome in [
         AllocationRetirementOutcome::Retired,
+        AllocationRetirementOutcome::RetainedFailure {
+            detail: "payload retained without retry admission".into(),
+        },
         AllocationRetirementOutcome::RetryableFailure {
             detail: "no release occurred".into(),
         },
@@ -107,6 +110,53 @@ fn retirement_outcomes_remain_in_the_existing_owner_without_automatic_retry() {
         );
         assert_eq!(owner.retire_calls.load(Ordering::SeqCst), 1);
     }
+}
+
+#[test]
+fn typed_upload_failure_keeps_the_last_custom_owner_until_error_drop() {
+    let owner = TestOwner::new(
+        ID,
+        AllocationRetirementOutcome::RetainedFailure {
+            detail: "bookkeeping rejected retirement".into(),
+        },
+    );
+    let weak_owner = Arc::downgrade(&owner);
+    let lease = AllocationLease::register(ID, owner.clone()).unwrap();
+    let handle =
+        GpuTensorHandle::from_allocation(lease, GpuTensorView::contiguous(vec![1])).unwrap();
+    drop(owner);
+    let error = crate::InvalidNumericUploadResult::reject(handle, "malformed output".into());
+    assert!(crate::is_invalid_numeric_upload_result(&error));
+    let crate::NumericUploadError::Invalid(invalid) = &error else {
+        panic!("invalid result was erased")
+    };
+    let failed = invalid
+        .cleanup_error()
+        .unwrap()
+        .physical
+        .as_ref()
+        .unwrap_err();
+    assert_eq!(failed.identity(), ID);
+    assert!(matches!(
+        failed.outcome(),
+        AllocationRetirementOutcome::RetainedFailure { .. }
+    ));
+    assert!(weak_owner.upgrade().is_some());
+    drop(error);
+    assert!(
+        weak_owner.upgrade().is_none(),
+        "caught/dropped error releases its owner without a cycle"
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_upload_error_preserves_thread_safe_error_transport() {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<crate::NumericUploadError>();
+    let error: anyhow::Error =
+        crate::NumericUploadError::Provider(anyhow::anyhow!("transport")).into();
+    assert_eq!(error.to_string(), "transport");
 }
 
 #[test]

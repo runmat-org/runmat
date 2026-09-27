@@ -225,7 +225,7 @@ impl AccelProvider for Native {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused") })
     }
-    fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric(&self, _: &HostNumericTensorView) -> NumericUploadResult<GpuTensorHandle> {
         panic!("validated free function must bypass convenience override")
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {

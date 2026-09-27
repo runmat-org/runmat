@@ -40,7 +40,7 @@ pub fn upload_logical_protecting<P: AccelProvider + ?Sized>(
     provider: &P,
     host: &HostLogicalTensorView<'_>,
     protected: &[&GpuTensorHandle],
-) -> anyhow::Result<GpuTensorHandle> {
+) -> crate::NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
     let _residency: Vec<_> = protected
         .iter()

@@ -30,6 +30,10 @@ impl std::error::Error for AllocationRegistrationError {}
 pub enum AllocationRetirementOutcome {
     /// Physical retirement completed; metadata/cache cleanup may complete.
     Retired,
+    /// Payload is known retained, but no ordinary retry transition is granted.
+    /// The existing owner retains failure bookkeeping until its explicit drain
+    /// or teardown. This is neither an uncertain free nor device-loss proof.
+    RetainedFailure { detail: String },
     /// Backend proves no release occurred and an explicit later retry is safe.
     /// The owner keeps the payload and failure record reachable.
     RetryableFailure { detail: String },

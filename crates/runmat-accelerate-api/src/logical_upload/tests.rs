@@ -29,7 +29,7 @@ impl AccelProvider for Provider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused") })
     }
-    fn upload_logical(&self, _: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_logical(&self, _: &HostLogicalTensorView) -> NumericUploadResult<GpuTensorHandle> {
         panic!("protected admission must bypass convenience override")
     }
     fn upload_logical_raw(&self, host: &HostLogicalTensorView) -> anyhow::Result<GpuTensorHandle> {

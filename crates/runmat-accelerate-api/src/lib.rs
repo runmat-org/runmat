@@ -35,6 +35,7 @@ pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
+    NumericUploadError, NumericUploadResult,
 };
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
@@ -1510,7 +1511,10 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: AcceleratorThreadBound {
     /// Upload a canonical host logical value through shared admission.
-    fn upload_logical(&self, host: &HostLogicalTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_logical(
+        &self,
+        host: &HostLogicalTensorView<'_>,
+    ) -> NumericUploadResult<GpuTensorHandle> {
         upload_logical_protecting(self, host, &[])
     }
 
@@ -1535,7 +1539,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
     fn upload_numeric(
         &self,
         host: &crate::HostNumericTensorView,
-    ) -> anyhow::Result<GpuTensorHandle> {
+    ) -> NumericUploadResult<GpuTensorHandle> {
         upload_numeric_protecting(self, host, &[])
     }
 
