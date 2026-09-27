@@ -600,15 +600,6 @@ pub(crate) fn host_tensor_from_value(label: &str, value: Value) -> Result<Tensor
     }
 }
 
-pub(super) fn median_from_slice(values: &[f64]) -> f64 {
-    if values.is_empty() || values.iter().any(|v| v.is_nan()) {
-        f64::NAN
-    } else {
-        let mut tmp = values.to_vec();
-        compute_median_inplace(&mut tmp)
-    }
-}
-
 pub(super) fn diag_offset_abs(offset: isize) -> usize {
     if offset >= 0 {
         offset as usize
