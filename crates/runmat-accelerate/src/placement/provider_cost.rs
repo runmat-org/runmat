@@ -174,6 +174,11 @@ pub(crate) fn wgpu_cost_estimate(
         CandidatePreparationState::Cold => 100_000,
         CandidatePreparationState::Preparing => 50_000,
     };
+    let compile_or_prepare_ns = if digit_work.as_ref().is_some_and(|work| work.dispatches == 0) {
+        0
+    } else {
+        compile_or_prepare_ns
+    };
     ProviderCostEstimate {
         cost: ExecutionCostEstimate {
             components: ExecutionCostComponents {

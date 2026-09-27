@@ -89,6 +89,7 @@ fn digit_work_counts_real_chunking_uniform_transfers_and_scaling_bound() {
     assert_eq!(work.scratch_bytes, 16);
     assert_eq!(work.extra_upload_bytes, 32);
     assert!(work.execution_units > (capacity as u64 + 1) * 96);
+    assert_eq!(work.execution_units, (capacity as u64 + 1) * (96 + 15 + 7));
     query.inputs[0].shape = vec![0, usize::MAX];
     let work = wgpu_work(ProviderPrecision::F64, &query).unwrap();
     assert_eq!(work.dispatches, 0);

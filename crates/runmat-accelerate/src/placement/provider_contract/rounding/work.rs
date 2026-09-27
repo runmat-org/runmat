@@ -72,8 +72,13 @@ pub(crate) fn wgpu_work(
     // This is a static prior, not GPU completion telemetry. The fixed work
     // includes bit classification, up to two logarithms, fraction rounding,
     // normalization/packing, and four residual-corrected divisions.
-    let units_per_element =
-        96_u64.checked_add(u64::from(power_steps(first) + power_steps(second)))?;
+    let steps = if mode == RoundDigitsMode::Significant {
+        (0..=maximum).map(power_steps).max().unwrap_or(0)
+            + (0..=tail).map(power_steps).max().unwrap_or(0)
+    } else {
+        power_steps(first) + power_steps(second)
+    };
+    let units_per_element = 96_u64.checked_add(u64::from(steps))?;
     Some(RoundDigitsWork {
         dispatches,
         queue_submissions: dispatches,
