@@ -23,10 +23,6 @@ impl runmat_accelerate_api::AccelProvider for MalformedRandomProvider {
         self.inner.download(handle)
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
-    }
-
     fn device_info(&self) -> String {
         self.inner.device_info()
     }

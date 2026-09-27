@@ -102,7 +102,7 @@ fn validate_explicit_restoration(parsed: &ParsedExprnd) -> BuiltinResult<()> {
         OutputPrecision::Single => ProviderPrecision::F32,
     };
     if runmat_accelerate_api::provider_for_handle(source).is_some_and(|owner| {
-        owner.device_id() == source.device_id && owner.precision() == precision
+        owner.device_id() == source.device_id() && owner.precision() == precision
     }) {
         return Ok(());
     }
@@ -163,7 +163,7 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
     .map_err(|e| exprnd_internal_error(format!("exprnd: {e}")))?;
     if let Some(source) = parsed.gpu_source {
         let Some(provider) = runmat_accelerate_api::provider_for_handle(&source)
-            .filter(|owner| owner.device_id() == source.device_id)
+            .filter(|owner| owner.device_id() == source.device_id())
         else {
             return Ok(exprnd_host_output(output, parsed.output_precision));
         };
@@ -175,8 +175,18 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
             return Ok(exprnd_host_output(output, parsed.output_precision));
         }
         let protected: Vec<_> = parsed.borrowed_gpu.iter().collect();
-        let mut handle = gpu_helpers::upload_tensor_protecting(provider, &output, &protected)
-            .map_err(|err| exprnd_internal_error(format!("exprnd: {err}")))?;
+        let mut handle = gpu_helpers::upload_tensor_protecting_typed(provider, &output, &protected)
+            .map_err(|err| {
+                build_runtime_error(format!("exprnd: {err}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_identifier(
+                        EXPRND_ERROR_INTERNAL
+                            .identifier
+                            .expect("internal identifier"),
+                    )
+                    .with_source(err)
+                    .build()
+            })?;
         if !valid_exprnd_gpu_output(
             &handle,
             &source,
@@ -184,14 +194,12 @@ fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
             &output.shape,
             required_precision,
         ) {
-            gpu_helpers::free_rejected_provider_output(&handle, &protected, provider);
-            return Err(exprnd_internal_error(
-                "exprnd: provider upload returned malformed resident output",
+            return Err(gpu_helpers::reject_gpu_output(
+                handle,
+                exprnd_internal_error("exprnd: provider upload returned malformed resident output"),
             ));
         }
-        if let Some(provenance) = runmat_accelerate_api::handle_provenance(&source) {
-            runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
-        }
+        gpu_helpers::propagate_output_provenance(&mut handle, [&source])?;
         return gpu_helpers::resident_gpu_value(handle);
     }
     Ok(exprnd_host_output(output, parsed.output_precision))

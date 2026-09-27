@@ -14,7 +14,7 @@ pub(super) fn try_gpu_exponential(
         Ok(handle)
             if !borrowed
                 .iter()
-                .any(|input| gpu_helpers::same_gpu_handle(&handle, input))
+                .any(|input| handle.shares_allocation_with(input))
                 && valid_new_exprnd_gpu_output(&handle, provider, shape) =>
         {
             let len = checked_element_count(shape)?;
@@ -28,9 +28,17 @@ pub(super) fn try_gpu_exponential(
             exprnd_internal_error("exprnd: provider random_exponential returned malformed output"),
         )),
         Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
-        Err(err) => Err(exprnd_internal_error(format!(
+        Err(err) => Err(build_runtime_error(format!(
             "exprnd: provider random_exponential failed: {err}"
-        ))),
+        ))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(
+            EXPRND_ERROR_INTERNAL
+                .identifier
+                .expect("internal identifier"),
+        )
+        .with_source(runmat_accelerate_api::ProviderExecutionError::from(err))
+        .build()),
     }
 }
 

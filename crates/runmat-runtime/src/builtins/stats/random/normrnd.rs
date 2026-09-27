@@ -505,14 +505,13 @@ fn try_gpu_normrnd(
     if provider.precision() != expected_precision {
         return Ok(None);
     }
-    let source_metadata = gpu_helpers::snapshot_handle_metadata(source);
+    let _source_residency = runmat_accelerate_api::ResidencyRestoreGuard::new(source);
     let provider_result = provider.random_normrnd(mu, sigma, shape);
-    gpu_helpers::restore_handle_metadata(source, &source_metadata);
     match provider_result {
         Ok(mut handle) => {
-            let valid = !gpu_helpers::same_gpu_handle(source, &handle)
-                && handle.shape == shape
-                && handle.device_id == provider.device_id()
+            let valid = !source.shares_allocation_with(&handle)
+                && handle.shape() == shape
+                && handle.device_id() == provider.device_id()
                 && gpu_helpers::exact_provider_for_handle(&handle)
                     .is_some_and(|owner| std::ptr::eq(owner, provider))
                 && runmat_accelerate_api::handle_storage(&handle)
@@ -527,29 +526,21 @@ fn try_gpu_normrnd(
                     false,
                 );
             if !valid {
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[source]);
-                return Err(normrnd_internal_error(
-                    "normrnd: provider returned a malformed, aliased, or foreign random result",
+                return Err(gpu_helpers::reject_gpu_output(
+                    handle,
+                    normrnd_internal_error(
+                        "normrnd: provider returned a malformed, aliased, or foreign random result",
+                    ),
                 ));
             }
             let len = tensor::element_count(shape);
             // Box-Muller emits two normals per two uniform samples.
             let uniform_count = len.saturating_add(1) / 2 * 2;
             random::skip_uniform(uniform_count, "normrnd")?;
-            runmat_accelerate_api::set_handle_provenance(
-                &mut handle,
-                runmat_accelerate_api::handle_provenance(source)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-            );
-            Ok(Some(gpu_helpers::resident_gpu_value(handle)))
+            gpu_helpers::propagate_output_provenance(&mut handle, [source])?;
+            Ok(Some(gpu_helpers::resident_gpu_value(handle)?))
         }
-        Err(error)
-            if error
-                .chain()
-                .any(|cause| cause.to_string() == "random_normrnd not supported by provider") =>
-        {
-            Ok(None)
-        }
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
         Err(error) => Err(build_runtime_error(format!(
             "normrnd: provider random generation failed: {error}"
         ))
@@ -560,6 +551,7 @@ fn try_gpu_normrnd(
                 .expect("normrnd internal descriptor identifier"),
         )
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(runmat_accelerate_api::ProviderExecutionError::from(error))
         .build()),
     }
 }
