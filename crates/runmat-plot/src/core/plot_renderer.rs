@@ -4195,8 +4195,14 @@ mod tests {
         let display = PlotRenderer::apply_3d_display_limits_to_bounds(bounds, Some(&figure), 0);
 
         assert!(PlotRenderer::bounds_are_finite(display));
-        assert_eq!(display.min.z, 0.0);
-        assert_eq!(display.max.z, 0.0);
+        // Shared display normalization gives collapsed dimensions a 0.1 span
+        // before camera/export/manual-limit capture, centered on the data.
+        assert_eq!(display.min.z, -0.05);
+        assert_eq!(display.max.z, 0.05);
+        assert_eq!(display.min.x, bounds.min.x);
+        assert_eq!(display.max.x, bounds.max.x);
+        assert_eq!(display.min.y, bounds.min.y);
+        assert_eq!(display.max.y, bounds.max.y);
     }
 
     #[test]

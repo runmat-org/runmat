@@ -61,12 +61,14 @@ mod tests {
         let metadata = figure.axes_metadata(0).unwrap().clone();
         let serialized = crate::event::SerializedAxesMetadata::from(metadata);
         let mut value = serde_json::to_value(serialized).unwrap();
-        assert_eq!(value["y_direction"], "reverse");
+        // The event transport's established serde contract is camelCase.
+        assert_eq!(value["yDirection"], "reverse");
+        assert!(value.get("y_direction").is_none());
         let restored: crate::event::SerializedAxesMetadata =
             serde_json::from_value(value.clone()).unwrap();
         let restored: super::super::AxesMetadata = restored.into();
         assert_eq!(restored.y_direction, YDirection::Reverse);
-        value.as_object_mut().unwrap().remove("y_direction");
+        value.as_object_mut().unwrap().remove("yDirection");
         let old: crate::event::SerializedAxesMetadata = serde_json::from_value(value).unwrap();
         assert_eq!(old.y_direction, YDirection::Normal);
     }

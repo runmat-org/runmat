@@ -1854,6 +1854,24 @@ pub async fn render_figure_rgba_bytes(
         });
     }
 
+    // The first pass supplies data extents for limit/aspect resolution. Stroke
+    // widths must then be tessellated in the same final data-to-pixel scale used
+    // below for projection, not in each individual series' (possibly
+    // degenerate) bounds. Keep direction separate: limits remain ordered.
+    let axes_view_bounds: Vec<_> = axes_views
+        .iter()
+        .map(|axes| {
+            let (left, right, bottom, top) = axes.bounds_2d;
+            (!axes.has_3d_content).then_some((left as f64, right as f64, bottom as f64, top as f64))
+        })
+        .collect();
+    let render_items = figure.render_data_with_axes_with_viewport_and_gpu(
+        Some((width, height)),
+        Some(&axes_sizes),
+        Some(&axes_view_bounds),
+        None,
+    );
+
     for axes in &axes_views {
         if axes.has_3d_content {
             draw_3d_axes_decorations(&mut canvas, axes);
