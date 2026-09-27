@@ -117,4 +117,5 @@ impl AllocationState {
 }
 
 #[cfg(test)]
+#[path = "allocation_state/tests.rs"]
 mod tests;
