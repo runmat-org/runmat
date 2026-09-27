@@ -1,0 +1,124 @@
+use super::*;
+use runmat_accelerate_api::{
+    test_support::{RetirementProbe, TestAllocationOwner},
+    AccelDownloadFuture, AccelProviderFuture, GpuTensorStorage, HostTensorView, NumericElementType,
+};
+use std::{
+    future::Future,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
+    task::{Context, Poll},
+};
+
+#[derive(Clone, Copy)]
+enum Fault {
+    Pending,
+    Failure,
+    WrongClass,
+}
+struct Provider {
+    owner: TestAllocationOwner,
+    fault: Fault,
+    calls: AtomicUsize,
+    outputs: Mutex<Vec<RetirementProbe>>,
+}
+
+impl AccelProvider for Provider {
+    fn device_id(&self) -> u32 {
+        self.owner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "arrayfun owning lifecycle fixture".into()
+    }
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("unexpected upload after admitted resident sin")
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        panic!("operational failure must not retry with download")
+    }
+    fn unary_sin<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match self.fault {
+                Fault::Pending => futures::future::pending().await,
+                Fault::Failure => anyhow::bail!("injected arrayfun sine device failure"),
+                Fault::WrongClass => {
+                    let output = self.owner.allocate_zeroed(
+                        input.shape().to_vec(),
+                        NumericElementType::I64,
+                        GpuTensorStorage::Real,
+                    )?;
+                    self.outputs.lock().unwrap().push(output.probe);
+                    Ok(output.handle)
+                }
+            }
+        })
+    }
+}
+
+#[test]
+fn pending_failed_and_invalid_batch_keep_true_lease_lifetimes() {
+    runmat_gc::gc_test_context(|| {
+        let original = runmat_runtime::builtin::runtime_builtin_bindings_by_name("sin");
+        assert_eq!(original.len(), 1);
+        assert!(
+            runmat_runtime::builtins::common::spec::selected_builtin_binding(
+                "sin",
+                Some(original[0].identity),
+                None
+            )
+            .is_some()
+        );
+        for fault in [Fault::Pending, Fault::Failure, Fault::WrongClass] {
+            let provider = Box::leak(Box::new(Provider {
+                owner: TestAllocationOwner::new(),
+                fault,
+                calls: AtomicUsize::new(0),
+                outputs: Mutex::new(Vec::new()),
+            }));
+            let _scope = ThreadProviderGuard::set(Some(provider));
+            let input = provider
+                .owner
+                .allocate_zeroed(vec![1, 2], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let input_probe = input.probe;
+            let mut future = Box::pin(async move {
+                let args = [
+                    Value::FunctionHandle("sin".into()),
+                    Value::GpuTensor(input.handle),
+                ];
+                call_builtin_async_with_outputs("arrayfun", &args, 1).await
+            });
+            let waker = futures::task::noop_waker();
+            let outcome = future.as_mut().poll(&mut Context::from_waker(&waker));
+            match fault {
+                Fault::Pending => {
+                    assert!(outcome.is_pending());
+                    assert_eq!(input_probe.retirements(), 0);
+                }
+                Fault::Failure | Fault::WrongClass => {
+                    let Poll::Ready(Err(error)) = outcome else {
+                        panic!("admitted provider failure must be retained")
+                    };
+                    assert!(error.message().starts_with("arrayfun:"), "{error:?}");
+                    assert!(std::error::Error::source(&error).is_some());
+                }
+            }
+            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+            drop(future);
+            assert_eq!(input_probe.retirements(), 1);
+            for output in provider.outputs.lock().unwrap().iter() {
+                assert_eq!(
+                    output.retirements(),
+                    1,
+                    "invalid owned output retires exactly once"
+                );
+            }
+        }
+    });
+}

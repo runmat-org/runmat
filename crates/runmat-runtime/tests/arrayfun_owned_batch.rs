@@ -8,6 +8,9 @@ use runmat_runtime::{builtins::common::gpu_helpers, call_builtin_async_with_outp
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 use std::sync::OnceLock;
 
+#[path = "arrayfun_owned_batch/lifecycle.rs"]
+mod lifecycle;
+
 fn provider() -> &'static InProcessProvider {
     static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
     PROVIDER.get_or_init(InProcessProvider::new)
@@ -255,6 +258,45 @@ fn stateful_scoped_service_cannot_replace_an_admitted_batch() {
             service.sin_lookups.get(),
             4,
             "next invocation re-admits and then invokes two scalar overrides"
+        );
+        source.allocation_lease().validate_live().unwrap();
+    });
+}
+
+#[test]
+fn empty_mapping_does_not_select_or_execute_the_callback() {
+    use runmat_runtime::{
+        builtin::RuntimeBuiltinBinding,
+        context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
+    };
+    use std::rc::Rc;
+    struct Service;
+    impl RuntimeBuiltinService for Service {
+        fn bindings_by_name(&self, name: &str) -> Vec<RuntimeBuiltinBinding> {
+            assert_ne!(
+                name, "log",
+                "empty mapping must not resolve an executable callback"
+            );
+            runmat_runtime::builtin::runtime_builtin_bindings_by_name(name)
+        }
+    }
+    runmat_gc::gc_test_context(|| {
+        let _provider = ThreadProviderGuard::set(Some(provider()));
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(Service)));
+        let source = upload(&Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()));
+        let args = [
+            Value::FunctionHandle("log".into()),
+            Value::GpuTensor(source.clone()),
+        ];
+        let output =
+            block_on(context.scope(call_builtin_async_with_outputs("arrayfun", &args, 1))).unwrap();
+        same_result(
+            output,
+            Value::Tensor(Tensor::new(vec![], vec![0, 3]).unwrap()),
+            "empty log",
         );
         source.allocation_lease().validate_live().unwrap();
     });
