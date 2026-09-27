@@ -46,6 +46,18 @@ fn evaluate(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     let reject = ProviderFeasibility::rejected;
+    match query.workload.numerical_domain {
+        runmat_accelerate_api::NumericalDomainEvidence::Unknown => {}
+        runmat_accelerate_api::NumericalDomainEvidence::RoundDigits { digits, mode }
+            if query.operation.0 == ROUND_CATALOG_ENTRY.identity.name
+                && (mode == runmat_accelerate_api::RoundDigitsMode::Decimals || digits > 0) => {}
+        _ => {
+            return reject(
+                ProviderRejectionCode::UnsupportedOperation,
+                "rounding.control_evidence.mismatch",
+            );
+        }
+    }
     if query.family != ProviderOperationFamily::Elementwise {
         return reject(
             ProviderRejectionCode::UnsupportedOperation,

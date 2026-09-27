@@ -56,3 +56,54 @@ fn declared_rounding_hooks_execute_the_admitted_representations() {
     }
     provider.free(&input).unwrap();
 }
+
+#[test]
+fn digit_capability_preserves_parsed_strategy_and_validates_evidence() {
+    use runmat_accelerate_api::{NumericalDomainEvidence, RoundDigitsMode};
+    let provider = InProcessProvider::new();
+    let input = provider
+        .upload(&HostTensorView {
+            data: &[23.75, 1253.0],
+            shape: &[1, 1, 2],
+        })
+        .unwrap();
+    let mut query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new(ROUND_CATALOG_ENTRY.identity.name),
+        family: ProviderOperationFamily::Elementwise,
+        inputs: vec![ProviderRepresentation {
+            element_type: ProviderElementType::F64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 1, 2],
+            residency: ProviderResidency::Device,
+        }],
+        outputs: vec![],
+        workload: ProviderWorkload::default(),
+    };
+    for (digits, mode, expected) in [
+        (20, RoundDigitsMode::Decimals, vec![23.75, 1253.0]),
+        (2, RoundDigitsMode::Significant, vec![24.0, 1300.0]),
+        (i32::MIN, RoundDigitsMode::Decimals, vec![0.0, 0.0]),
+    ] {
+        query.workload.numerical_domain = NumericalDomainEvidence::RoundDigits { digits, mode };
+        assert!(provider.query_feasibility(&query).is_supported());
+        let output =
+            block_on(provider.round_digits(&input, digits, mode == RoundDigitsMode::Significant))
+                .unwrap();
+        assert_eq!(output.shape, input.shape);
+        assert_eq!(block_on(provider.download(&output)).unwrap().data, expected);
+        provider.free(&output).unwrap();
+    }
+    query.workload.numerical_domain = NumericalDomainEvidence::RoundDigits {
+        digits: 0,
+        mode: RoundDigitsMode::Significant,
+    };
+    assert!(!provider.query_feasibility(&query).is_supported());
+    query.workload.numerical_domain = NumericalDomainEvidence::RoundDigits {
+        digits: 1,
+        mode: RoundDigitsMode::Decimals,
+    };
+    query.operation = ProviderOperationIdentity::new(CEIL_CATALOG_ENTRY.identity.name);
+    assert!(!provider.query_feasibility(&query).is_supported());
+    provider.free(&input).unwrap();
+}
