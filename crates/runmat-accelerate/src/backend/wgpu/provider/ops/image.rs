@@ -1,7 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::GpuTensorHandle;
 use std::sync::Arc;
-use wgpu::util::DeviceExt;
 
 use super::WgpuProvider;
 use crate::backend::wgpu::params::{
