@@ -773,8 +773,16 @@ async fn run_interpreter_inner(
     );
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let mut sequence_register = interp_dispatch::SequenceState::default();
-    let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
-    _gc_context.register_frame_values(&context.locals, &sequence_register)?;
+    // All owner objects stay at these frame addresses through the inner
+    // instruction future. Register them together before admitting mutations;
+    // the residency guard drops first, then these registrations, then owners.
+    let _gc_context = interp_engine::create_gc_context(
+        &stack,
+        &vars,
+        &context.locals,
+        &sequence_register,
+        thread_roots,
+    )?;
     #[cfg(feature = "native-accel")]
     // SAFETY: these frame owners stay pinned until the cleanup guard and then
     // their GC registrations are dropped. The inner async block drops first.

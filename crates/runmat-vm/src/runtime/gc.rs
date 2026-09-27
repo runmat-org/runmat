@@ -6,8 +6,15 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 mod sequence_roots;
+#[cfg(test)]
+mod frame_tests;
 
-type RootLifetime<'roots> = fn(&'roots Vec<Value>, &'roots Vec<Value>);
+type RootLifetime<'roots> = fn(
+    &'roots Vec<Value>,
+    &'roots Vec<Value>,
+    &'roots Vec<Value>,
+    &'roots crate::interpreter::dispatch::SequenceState,
+);
 
 /// RAII wrapper for GC root management during interpretation.
 pub struct InterpretContext<'roots> {
@@ -28,21 +35,31 @@ impl<'roots> InterpretContext<'roots> {
             .collect()
     }
 
-    pub(crate) fn register_frame_values(
-        &mut self,
+    /// Register the complete frame before returning its root owner. Like the
+    /// existing stack/vars constructor, this does not hold a shared Rust borrow
+    /// while the interpreter mutates the registered owners between scans.
+    pub(crate) fn new_frame(
+        stack: &'roots Vec<Value>,
+        vars: &'roots Vec<Value>,
         locals: &'roots Vec<Value>,
         sequence: &'roots crate::interpreter::dispatch::SequenceState,
-    ) -> Result<(), String> {
-        // SAFETY: the frame keeps both owners pinned until this context drops.
+    ) -> Result<Self, String> {
+        let mut context = Self::new(stack, vars)?;
+        // SAFETY: the runner keeps all four owner objects at stable frame
+        // addresses until this context drops. Vec backing storage may change;
+        // VariableArrayRoot follows the Vec owner, not its element pointer.
+        // Scans borrow owners synchronously and never overlap their mutation.
         let locals = Box::new(unsafe {
             VariableArrayRoot::new(NonNull::from(locals), "interpreter_locals".into())
         });
-        self.extra_root_ids
+        context
+            .extra_root_ids
             .push(gc_register_value_root(locals).map_err(|error| error.to_string())?);
         let sequence = Box::new(unsafe { sequence_roots::SequenceRoot::new(sequence) });
-        self.extra_root_ids
+        context
+            .extra_root_ids
             .push(gc_register_value_root(sequence).map_err(|error| error.to_string())?);
-        Ok(())
+        Ok(context)
     }
 
     pub fn new(stack: &'roots Vec<Value>, vars: &'roots Vec<Value>) -> Result<Self, String> {
