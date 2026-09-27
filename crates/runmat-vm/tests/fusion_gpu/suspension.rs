@@ -297,6 +297,90 @@ fn pending_typed_fusion_cancellation_preserves_borrowed_input() {
 }
 
 #[test]
+fn borrowed_initial_workspace_survives_pending_cancel_and_drop() {
+    for cancel in [false, true] {
+        gc_test_context(|| {
+            let _lock = accel_test_lock();
+            ensure_provider_registered();
+            let provider = PROVIDER.get().unwrap();
+            let bytecode = consumed_values::compile_borrowed_x("y = single(sin(x).*x+2);");
+            assert!(bytecode
+                .runtime_fusion_groups()
+                .iter()
+                .any(|group| group.kind == FusionKind::ElementwiseChain));
+            let input = provider.push((1..=4096).map(f64::from).collect(), vec![1, 4096]);
+            let baseline = provider.buffers.lock().unwrap().clone();
+            let slot = *bytecode
+                .var_names
+                .iter()
+                .find(|(_, name)| name.as_str() == "x")
+                .unwrap()
+                .0;
+            let mut initial = vec![Value::Num(0.0); bytecode.var_count];
+            initial[slot] = Value::GpuTensor(input.clone());
+            let source = runmat_execution::cancellation::CancellationSource::new();
+            let runtime = runmat_runtime::context::RuntimeContext::with_cancellation(
+                Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+                source.token(),
+            )
+            .with_service_ports(
+                runmat_runtime::context::RuntimeServicePorts::default().with_placement(Rc::new(
+                    runmat_accelerate::placement::PlacementSession::default(),
+                )),
+            );
+            let probe = Rc::new(Probe::default());
+            assert!(PENDING
+                .with(|slot| slot.replace(Some(probe.clone())))
+                .is_none());
+            let _scope = Scope;
+            let mut execution = Box::pin(runmat_vm::interpret_with_vars_in_context(
+                &bytecode,
+                &mut initial,
+                None,
+                runtime,
+            ));
+            let wakes = Arc::new(Wakes::default());
+            let waker = Waker::from(wakes.clone());
+            let mut cx = Context::from_waker(&waker);
+            match execution.as_mut().poll(&mut cx) {
+                Poll::Pending => {}
+                Poll::Ready(Err(error)) => panic!(
+                    "borrowed production fusion failed before suspension: {error:?}; provider={:?}",
+                    provider_error()
+                ),
+                Poll::Ready(Ok(_)) => panic!(
+                    "borrowed production fusion completed without suspension; provider={:?}",
+                    provider_error()
+                ),
+            }
+            assert_eq!(probe.polls.get(), 1);
+            if cancel {
+                source.cancel(runmat_execution::CancellationReason::User);
+                match execution.as_mut().poll(&mut cx) {
+                    Poll::Ready(Err(error)) => {
+                        assert!(error.to_string().to_lowercase().contains("cancel"))
+                    }
+                    Poll::Pending => panic!("cancelled borrowed execution remained pending"),
+                    Poll::Ready(Ok(_)) => {
+                        panic!("cancelled borrowed execution completed successfully")
+                    }
+                }
+            }
+            drop(execution);
+            assert_eq!(probe.drops.get(), 1);
+            assert_buffers_equal(provider, &baseline);
+            let Value::GpuTensor(retained) = &initial[slot] else {
+                panic!("caller input changed")
+            };
+            assert_eq!(retained.buffer_id, input.buffer_id);
+            assert_eq!(provider.pull(retained).unwrap().1, vec![1, 4096]);
+            assert_eq!(provider.frees.lock().unwrap().get(&input.buffer_id), None);
+            provider.free(&input).unwrap();
+        });
+    }
+}
+
+#[test]
 fn pending_typed_fusion_cancellation_releases_uploaded_input() {
     // This also exercises the shared fusion allocation owner: the cancellation
     // boundary alone cannot release raw handles allocated by a compound kernel.

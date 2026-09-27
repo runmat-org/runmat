@@ -111,6 +111,24 @@ pub(super) enum PreparedOutputTarget {
 }
 
 impl SequenceState {
+    /// Non-stack roots retained while an indexing destination spans calls.
+    pub(crate) fn visit_retained_values(&self, visit: &mut impl FnMut(&Value)) {
+        for target in &self.output_targets {
+            match target {
+                PreparedOutputTarget::Sequence { endpoint, .. } => {
+                    endpoint.visit_retained_values(visit)
+                }
+                PreparedOutputTarget::Fixed | PreparedOutputTarget::Discard => {}
+            }
+        }
+        if let Some((_, builder)) = &self.destination_builder {
+            builder.visit_retained_values(visit);
+        }
+        for (receiver, _, _) in &self.subscript_receivers {
+            visit(receiver.receiver());
+        }
+    }
+
     pub(super) fn begin_output_assignment(
         &mut self,
         target_count: usize,
@@ -607,80 +625,6 @@ fn pop_aggregate_literal_values(
     Ok(values)
 }
 
-#[cfg(feature = "native-accel")]
-fn clear_popped_value_residency_excluding_live_values(
-    popped: &Value,
-    stack: &[Value],
-    vars: &[Value],
-    context: &crate::bytecode::program::ExecutionContext,
-) {
-    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
-    live.extend(stack.iter().cloned());
-    live.extend(vars.iter().cloned());
-    live.extend(context.locals.iter().cloned());
-    if let Err(err) = crate::accel::residency::clear_value_excluding_values(popped, &live) {
-        log::warn!("failed to clear popped GPU residency: {err}");
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn clear_scope_value_residency_excluding_live_values(
-    dropped_local: &Value,
-    stack: &[Value],
-    vars: &[Value],
-    context: &crate::bytecode::program::ExecutionContext,
-) {
-    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
-    live.extend(stack.iter().cloned());
-    live.extend(vars.iter().cloned());
-    live.extend(context.locals.iter().cloned());
-    if let Err(err) = crate::accel::residency::clear_value_excluding_values(dropped_local, &live) {
-        log::warn!("failed to clear dropped local GPU residency: {err}");
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn clear_overwritten_var_residency_excluding_live_values(
-    overwritten: &Value,
-    overwritten_index: usize,
-    stack: &[Value],
-    vars: &[Value],
-    context: &crate::bytecode::program::ExecutionContext,
-) {
-    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
-    live.extend(stack.iter().cloned());
-    for (idx, value) in vars.iter().enumerate() {
-        if idx != overwritten_index {
-            live.push(value.clone());
-        }
-    }
-    live.extend(context.locals.iter().cloned());
-    if let Err(err) = crate::accel::residency::clear_value_excluding_values(overwritten, &live) {
-        log::warn!("failed to clear overwritten variable GPU residency: {err}");
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn clear_overwritten_local_residency_excluding_live_values(
-    overwritten: &Value,
-    overwritten_local_index: usize,
-    stack: &[Value],
-    vars: &[Value],
-    context: &crate::bytecode::program::ExecutionContext,
-) {
-    let mut live = Vec::with_capacity(stack.len() + vars.len() + context.locals.len());
-    live.extend(stack.iter().cloned());
-    live.extend(vars.iter().cloned());
-    for (idx, value) in context.locals.iter().enumerate() {
-        if idx != overwritten_local_index {
-            live.push(value.clone());
-        }
-    }
-    if let Err(err) = crate::accel::residency::clear_value_excluding_values(overwritten, &live) {
-        log::warn!("failed to clear overwritten local GPU residency: {err}");
-    }
-}
-
 pub async fn dispatch_instruction(
     meta: DispatchMeta<'_>,
     state: DispatchState<'_>,
@@ -946,16 +890,10 @@ pub async fn dispatch_instruction(
                     "stack underflow",
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
-            if *index < vars.len() {
-                #[cfg(feature = "native-accel")]
-                clear_overwritten_var_residency_excluding_live_values(
-                    &vars[*index],
-                    *index,
-                    stack,
-                    vars,
-                    context,
-                );
-            }
+            #[cfg(feature = "native-accel")]
+            let _retired = vars.get(*index).map(|value| {
+                super::resident_ownership::ConsumedValues::new(std::slice::from_ref(value))
+            });
             store_var(
                 stack,
                 vars,
@@ -970,31 +908,17 @@ pub async fn dispatch_instruction(
             )))
         }
         Instr::StoreLocal(offset) => {
-            if stack.last().is_some() {
-                if let Some(current_frame) = context.call_stack.last() {
-                    let local_index = current_frame.locals_start + *offset;
-                    if local_index < context.locals.len() {
-                        let current_value = context.locals[local_index].clone();
-                        #[cfg(feature = "native-accel")]
-                        clear_overwritten_local_residency_excluding_live_values(
-                            &current_value,
-                            local_index,
-                            stack,
-                            vars,
-                            context,
-                        );
-                    }
-                } else if *offset < vars.len() {
-                    #[cfg(feature = "native-accel")]
-                    clear_overwritten_var_residency_excluding_live_values(
-                        &vars[*offset],
-                        *offset,
-                        stack,
-                        vars,
-                        context,
-                    );
-                }
-            }
+            #[cfg(feature = "native-accel")]
+            let _retired = context
+                .call_stack
+                .last()
+                .map_or_else(
+                    || vars.get(*offset),
+                    |frame| context.locals.get(frame.locals_start + *offset),
+                )
+                .map(|value| {
+                    super::resident_ownership::ConsumedValues::new(std::slice::from_ref(value))
+                });
             if context.call_stack.last().is_none() {
                 store_var(
                     stack,
@@ -1032,7 +956,9 @@ pub async fn dispatch_instruction(
         Instr::Pop => {
             if let Some(value) = stack.pop() {
                 #[cfg(feature = "native-accel")]
-                clear_popped_value_residency_excluding_live_values(&value, stack, vars, context);
+                drop(super::resident_ownership::ConsumedValues::new(
+                    std::slice::from_ref(&value),
+                ));
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -1105,7 +1031,9 @@ pub async fn dispatch_instruction(
             for _ in 0..*local_count {
                 if let Some(value) = context.locals.pop() {
                     #[cfg(feature = "native-accel")]
-                    clear_scope_value_residency_excluding_live_values(&value, stack, vars, context);
+                    drop(super::resident_ownership::ConsumedValues::new(
+                        std::slice::from_ref(&value),
+                    ));
                     #[cfg(not(feature = "native-accel"))]
                     _fallback_clear_value_residency(&value);
                 }

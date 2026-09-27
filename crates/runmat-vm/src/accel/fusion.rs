@@ -1,4 +1,3 @@
-use crate::accel::residency as accel_residency;
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
 use crate::interpreter::engine as interp_engine;
@@ -442,25 +441,30 @@ pub fn gather_fusion_inputs<'a>(
     })
 }
 
+#[must_use = "adopt the final fusion output before retiring overwritten stores"]
+pub struct RetiredFusionStores(crate::interpreter::resident_ownership::ConsumedValues);
+
+impl RetiredFusionStores {
+    pub fn finish(self, outputs: &[Value]) {
+        self.0.finish(outputs);
+    }
+}
+
 pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
     vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
-) {
+) -> RetiredFusionStores {
+    let mut retired = Vec::new();
     for (store, value) in materialized_stores {
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
-                if i < vars.len() {
-                    if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
-                        log::warn!("failed to clear fused global GPU residency: {err}");
-                    }
-                }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
                     refresh_workspace_state(vars);
                 }
-                vars[i] = value;
+                retired.push(std::mem::replace(&mut vars[i], value));
             }
             VarKind::Local => {
                 if let Some(frame) = context.call_stack.last() {
@@ -468,28 +472,22 @@ pub fn write_elementwise_materialized_stores(
                     while context.locals.len() <= absolute {
                         context.locals.push(Value::Num(0.0));
                     }
-                    if let Err(err) =
-                        accel_residency::clear_value_excluding(&context.locals[absolute], &value)
-                    {
-                        log::warn!("failed to clear fused local GPU residency: {err}");
-                    }
-                    context.locals[absolute] = value;
+                    retired.push(std::mem::replace(&mut context.locals[absolute], value));
                 } else {
                     let i = store.binding.index;
-                    if i < vars.len() {
-                        if let Err(err) = accel_residency::clear_value_excluding(&vars[i], &value) {
-                            log::warn!("failed to clear fused fallback GPU residency: {err}");
-                        }
-                    }
                     if i >= vars.len() {
                         vars.resize(i + 1, Value::Num(0.0));
                         refresh_workspace_state(vars);
                     }
-                    vars[i] = value;
+                    retired.push(std::mem::replace(&mut vars[i], value));
                 }
             }
         }
     }
+    let mut retired = crate::interpreter::resident_ownership::ConsumedValues::new(&retired);
+    retired.protect(vars);
+    retired.protect(&context.locals);
+    RetiredFusionStores(retired)
 }
 
 pub async fn execute_fusion_elementwise(
@@ -500,7 +498,9 @@ pub async fn execute_fusion_elementwise(
 ) -> Result<FusionExecutionOutcome<Value>, RuntimeError> {
     match execute_elementwise_placed(request).await {
         Ok(FusionExecutionOutcome::Executed(result)) => {
-            write_elementwise_materialized_stores(result.materialized_stores, vars, context);
+            let retired =
+                write_elementwise_materialized_stores(result.materialized_stores, vars, context);
+            retired.finish(std::slice::from_ref(&result.final_value));
             stack_guard.commit();
             Ok(FusionExecutionOutcome::Executed(result.final_value))
         }

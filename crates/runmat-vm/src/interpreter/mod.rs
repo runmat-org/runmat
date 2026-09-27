@@ -6,6 +6,8 @@ pub mod engine;
 pub mod errors;
 #[cfg(feature = "native-accel")]
 mod fusion_observation;
+#[cfg(feature = "native-accel")]
+pub(crate) mod resident_ownership;
 pub(crate) mod parallel_placement;
 pub mod runner;
 pub mod stack;

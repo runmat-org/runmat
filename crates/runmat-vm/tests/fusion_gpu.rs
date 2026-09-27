@@ -122,6 +122,8 @@ fn fusion_graph_helper_ignores_stale_compile_graph_metadata() {
 struct TestProvider {
     next_id: AtomicU64,
     buffers: Mutex<BufferStore>,
+    frees: Mutex<HashMap<u64, usize>>,
+    inspect_roots_on_free: AtomicBool,
     reject_fusion: AtomicBool,
     fused_dispatches: AtomicU64,
 }
@@ -131,6 +133,8 @@ impl TestProvider {
         Self {
             next_id: AtomicU64::new(1),
             buffers: Mutex::new(HashMap::new()),
+            frees: Mutex::new(HashMap::new()),
+            inspect_roots_on_free: AtomicBool::new(false),
             reject_fusion: AtomicBool::new(false),
             fused_dispatches: AtomicU64::new(0),
         }
@@ -391,6 +395,18 @@ impl AccelProvider for TestProvider {
     }
 
     fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+        if self.inspect_roots_on_free.load(Ordering::Relaxed) {
+            assert!(
+                runmat_gc::gc_visit_retained_values(&[], &mut |_| Some(())).is_some(),
+                "provider release must run outside root registration locks"
+            );
+        }
+        *self
+            .frees
+            .lock()
+            .unwrap()
+            .entry(handle.buffer_id)
+            .or_default() += 1;
         self.buffers.lock().unwrap().remove(&handle.buffer_id);
         Ok(())
     }
@@ -1634,6 +1650,8 @@ fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
 mod observation;
 #[path = "fusion_gpu/suspension.rs"]
 mod suspension;
+#[path = "fusion_gpu/consumed_values.rs"]
+mod consumed_values;
 
 #[test]
 fn fusion_feasibility_rejection_falls_back_before_provider_side_effects() {

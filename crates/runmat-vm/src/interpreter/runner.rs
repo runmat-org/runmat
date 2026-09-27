@@ -61,31 +61,6 @@ fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
     initial.extend_from_slice(vars);
 }
 
-fn check_cancelled_with_residency_cleanup(stack: &[Value], vars: &[Value]) -> VmResult<()> {
-    let result = interp_engine::check_cancelled();
-    if result.is_err() {
-        clear_cancelled_residency(stack, vars);
-    }
-    result
-}
-
-fn clear_cancelled_residency(stack: &[Value], vars: &[Value]) {
-    #[cfg(feature = "native-accel")]
-    {
-        // Session publication outlives this frame. Cancellation must release
-        // execution-owned values without invalidating globals or persistents,
-        // including values published while a suspended instruction was active.
-        let published = runtime_globals::collect_thread_roots();
-        for value in stack.iter().chain(vars) {
-            if let Err(error) = accel_residency::clear_value_excluding_values(value, &published) {
-                log::warn!("failed to clear cancelled GPU residency: {error}");
-            }
-        }
-    }
-    #[cfg(not(feature = "native-accel"))]
-    let _ = (stack, vars);
-}
-
 fn ensure_workspace_resolver_registered() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
@@ -227,6 +202,11 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
     input_residency: InputResidency,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<(runmat_value::ValueSequence, Vec<Value>), RuntimeError> {
+    #[cfg(feature = "native-accel")]
+    let _borrowed_arguments = matches!(input_residency, InputResidency::Borrowed)
+        .then(|| super::resident_ownership::BorrowedInputs::new(args))
+        .transpose()
+        .map_err(RuntimeError::new)?;
     let function_id = runmat_hir::FunctionId(function);
     let func = function_registry.get(function_id).ok_or_else(|| {
         let message = format!("Undefined semantic function: {function}");
@@ -630,6 +610,9 @@ async fn interpret_with_vars_inner(
         bytecode_frame_span(bytecode),
     );
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+    #[cfg(feature = "native-accel")]
+    let borrowed_inputs =
+        super::resident_ownership::BorrowedInputs::new(initial_vars).map_err(RuntimeError::new)?;
     let state = Box::new(InterpreterState::new_in_context(
         bytecode.clone(),
         initial_vars,
@@ -638,7 +621,11 @@ async fn interpret_with_vars_inner(
         runtime,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
-        Ok(outcome) => Ok(outcome),
+        Ok(outcome) => {
+            #[cfg(feature = "native-accel")]
+            borrowed_inputs.complete(initial_vars);
+            Ok(outcome)
+        }
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
             let current_name = current_function_name.unwrap_or("<main>");
@@ -785,10 +772,23 @@ async fn run_interpreter_inner(
         &bytecode.initially_unassigned_slots,
     );
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
+    let mut sequence_register = interp_dispatch::SequenceState::default();
     let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
+    _gc_context.register_frame_values(&context.locals, &sequence_register)?;
+    #[cfg(feature = "native-accel")]
+    // SAFETY: these frame owners stay pinned until the cleanup guard and then
+    // their GC registrations are dropped. The inner async block drops first.
+    let mut resident_frame = unsafe {
+        super::resident_ownership::FrameValues::new(
+            &stack,
+            &vars,
+            &context.locals,
+            &sequence_register,
+            _gc_context.root_ids(),
+        )
+    };
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
-    let mut sequence_register = interp_dispatch::SequenceState::default();
     #[cfg(feature = "native-accel")]
     let mut fusion_observations = super::fusion_observation::FusionRegionObservations::default();
     let cancellation = context.runtime.cancellation();
@@ -806,7 +806,7 @@ async fn run_interpreter_inner(
             set_vm_pc(pc);
             #[cfg(feature = "native-accel")]
             set_current_pc(pc);
-            check_cancelled_with_residency_cleanup(&stack, &vars)?;
+            interp_engine::check_cancelled()?;
             #[cfg(feature = "native-accel")]
             if let (Some(plan), Some(graph)) =
                 (active_group_plan_clone(), fusion_accel_graph.as_ref())
@@ -858,6 +858,8 @@ async fn run_interpreter_inner(
                         &[],
                     );
                     if !has_barrier {
+                        let _consumed_fusion =
+                            super::resident_ownership::ConsumedValues::new(&stack);
                         match accel_fusion::try_execute_fusion_group(
                         &plan,
                         graph,
@@ -891,7 +893,7 @@ async fn run_interpreter_inner(
                             // the observation first so cancellation retires the
                             // selected ticket as failure, even for a one-instruction
                             // CPU region that could otherwise complete this turn.
-                            check_cancelled_with_residency_cleanup(&stack, &vars)?;
+                            interp_engine::check_cancelled()?;
                         }
                         Err(err) => {
                             trace.event(
@@ -969,6 +971,21 @@ async fn run_interpreter_inner(
                 };
             #[cfg(feature = "native-accel")]
             let executed_pc = pc;
+            #[cfg(feature = "native-accel")]
+            let _consumed_call = match &bytecode.instructions[pc] {
+                Instr::CallBuiltinMulti(_, count, _)
+                | Instr::CallBuiltinMultiUsingOutputSlot(_, count, _) => {
+                    Some(super::resident_ownership::ConsumedValues::new(
+                        &stack[stack.len().saturating_sub(*count)..],
+                    ))
+                }
+                // Expanded arguments can reference sequence registers within
+                // the stack; retain the full represented range, never guess.
+                Instr::CallBuiltinExpandMultiOutput(..) => {
+                    Some(super::resident_ownership::ConsumedValues::new(&stack))
+                }
+                _ => None,
+            };
             let dispatch_result = interp_dispatch::dispatch_instruction(
                 interp_dispatch::DispatchMeta {
                     instr: &bytecode.instructions[pc],
@@ -1286,8 +1303,6 @@ async fn run_interpreter_inner(
     let Some(execution_result) = execution_result else {
         #[cfg(feature = "native-accel")]
         fusion_observations.abort();
-        clear_cancelled_residency(&stack, &vars);
-        sequence_register.clear(&mut stack);
         return Err(interp_engine::cancellation_error());
     };
     execution_result?;
@@ -1298,15 +1313,7 @@ async fn run_interpreter_inner(
     interpreter_timing.flush_host_span("loop_complete", None);
     #[cfg(feature = "native-accel")]
     {
-        let mut live_values = Vec::with_capacity(vars.len() + context.locals.len());
-        live_values.extend(vars.iter().cloned());
-        live_values.extend(context.locals.iter().cloned());
-        live_values.extend(runtime_globals::collect_thread_roots());
-        for value in &stack {
-            if let Err(err) = accel_residency::clear_value_excluding_values(value, &live_values) {
-                log::warn!("failed to clear stack GPU residency: {err}");
-            }
-        }
+        resident_frame.complete(&vars);
     }
     sync_initial_vars(initial_vars, &vars);
     Ok(InterpreterOutcome::Completed(

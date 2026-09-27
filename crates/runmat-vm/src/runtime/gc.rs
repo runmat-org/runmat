@@ -5,6 +5,8 @@ use runmat_value::Value;
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
+mod sequence_roots;
+
 type RootLifetime<'roots> = fn(&'roots Vec<Value>, &'roots Vec<Value>);
 
 /// RAII wrapper for GC root management during interpretation.
@@ -16,6 +18,33 @@ pub struct InterpretContext<'roots> {
 }
 
 impl<'roots> InterpretContext<'roots> {
+    #[cfg(feature = "native-accel")]
+    pub(crate) fn root_ids(&self) -> Vec<RootId> {
+        self.stack_root_id
+            .iter()
+            .chain(self.vars_root_id.iter())
+            .chain(&self.extra_root_ids)
+            .copied()
+            .collect()
+    }
+
+    pub(crate) fn register_frame_values(
+        &mut self,
+        locals: &'roots Vec<Value>,
+        sequence: &'roots crate::interpreter::dispatch::SequenceState,
+    ) -> Result<(), String> {
+        // SAFETY: the frame keeps both owners pinned until this context drops.
+        let locals = Box::new(unsafe {
+            VariableArrayRoot::new(NonNull::from(locals), "interpreter_locals".into())
+        });
+        self.extra_root_ids
+            .push(gc_register_value_root(locals).map_err(|error| error.to_string())?);
+        let sequence = Box::new(unsafe { sequence_roots::SequenceRoot::new(sequence) });
+        self.extra_root_ids
+            .push(gc_register_value_root(sequence).map_err(|error| error.to_string())?);
+        Ok(())
+    }
+
     pub fn new(stack: &'roots Vec<Value>, vars: &'roots Vec<Value>) -> Result<Self, String> {
         let stack_root = Box::new(unsafe {
             StackRoot::new(NonNull::from(stack), "interpreter_stack".to_string())
