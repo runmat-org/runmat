@@ -1,6 +1,7 @@
 //! Numeric bin assignment for `discretize`.
 
 mod arguments;
+mod computed_range;
 mod admission;
 mod edges;
 mod error;

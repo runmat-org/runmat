@@ -12,7 +12,7 @@ pub(super) fn validate(x: &Value, edge_input: &Value, rest: &[Value]) -> Builtin
     real_numeric(edge_input, "edges")?;
     vector(edge_input, "edges or scalar bin count")?;
     let (labels, _) = edges::tail_arguments(rest)?;
-    if let Some(labels) = labels {
+    let label_count = if let Some(labels) = labels {
         vector(labels, "replacement values")?;
         match labels {
             Value::GpuTensor(handle) => {
@@ -22,12 +22,19 @@ pub(super) fn validate(x: &Value, edge_input: &Value, rest: &[Value]) -> Builtin
                         "discretize: replacement values must be real numeric or text",
                     ));
                 }
+                Some(
+                    handle
+                        .shape
+                        .iter()
+                        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                        .ok_or_else(|| error::invalid("discretize: replacement shape overflows"))?,
+                )
             }
-            _ => {
-                Labels::from_value(labels)?;
-            }
+            _ => Some(Labels::validate_len(labels)?),
         }
-    }
+    } else {
+        None
+    };
     // A resident scalar's contents are unknown until its supported download.
     // Shape alone still proves when a second output cannot be requested.
     let shape = shape(edge_input);
@@ -45,16 +52,7 @@ pub(super) fn validate(x: &Value, edge_input: &Value, rest: &[Value]) -> Builtin
                 values.len() - 1
             }
         };
-        if let Some(labels) = labels {
-            let length = if let Value::GpuTensor(handle) = labels {
-                handle
-                    .shape
-                    .iter()
-                    .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                    .ok_or_else(|| error::invalid("discretize: replacement shape overflows"))?
-            } else {
-                Labels::from_value(labels)?.len()
-            };
+        if let Some(length) = label_count {
             if length != bins {
                 return Err(error::invalid(
                     "discretize: number of replacement values must match number of bins",

@@ -10,7 +10,30 @@ pub(super) enum Labels {
 }
 
 impl Labels {
+    /// Validate borrowed labels without cloning their storage or text payload.
+    pub(super) fn validate_len(value: &Value) -> BuiltinResult<usize> {
+        match value {
+            Value::Num(_) | Value::Int(_) | Value::String(_) => Ok(1),
+            Value::Tensor(tensor) => Ok(tensor.len()),
+            Value::StringArray(strings) => Ok(strings.data.len()),
+            Value::CharArray(_) => {
+                super::arguments::validate_scalar_text(value, "replacement value")?;
+                Ok(1)
+            }
+            Value::Cell(cell) => {
+                for value in cell.iter_column_major() {
+                    super::arguments::validate_scalar_text(value, "text replacement cell")?;
+                }
+                Ok(cell.data.len())
+            }
+            _ => Err(error::invalid(
+                "discretize: replacement values must be real numeric or text",
+            )),
+        }
+    }
+
     pub(super) fn from_value(value: &Value) -> BuiltinResult<Self> {
+        Self::validate_len(value)?;
         match value {
             Value::Num(value) => Ok(Self::Numeric(NumericStorage::F64(vec![*value]))),
             Value::Int(value) => Ok(Self::Numeric(integer_scalar(value))),

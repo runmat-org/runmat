@@ -15,6 +15,7 @@ struct State {
     downloads: usize,
     frees: usize,
     pending: bool,
+    success: bool,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -29,14 +30,16 @@ impl AccelProvider for Provider {
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async move {
-            let pending = {
+            let (pending, success) = {
                 let mut state = self.state.lock().unwrap();
                 state.downloads += 1;
-                state.pending
+                (state.pending, state.success)
             };
             runmat_accelerate_api::set_handle_logical(handle, true);
             if pending {
                 std::future::pending().await
+            } else if success {
+                self.inner.download(handle).await
             } else {
                 anyhow::bail!("injected download failure")
             }
@@ -111,5 +114,34 @@ fn failed_and_cancelled_downloads_restore_borrowed_metadata_without_free_or_retr
         block_on(provider.inner.download(&handle)).unwrap().data,
         vec![0.5]
     );
+    provider.free(&handle).unwrap();
+    provider.state.lock().unwrap().success = true;
+    let handle = provider
+        .upload(&HostTensorView {
+            data: &[0.0, 2.0, 4.0],
+            shape: &[1, 3],
+        })
+        .unwrap();
+    let args = [
+        Value::GpuTensor(handle.clone()),
+        Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0, 5.0], vec![1, 4]).unwrap()),
+    ];
+    let output = block_on(runmat_runtime::call_builtin_async_with_outputs(
+        "discretize",
+        &args,
+        1,
+    ))
+    .unwrap();
+    let output = match output {
+        Value::OutputList(mut values) => values.remove(0),
+        other => other,
+    };
+    let Value::Tensor(output) = output else {
+        panic!("numeric bins")
+    };
+    assert_eq!(output.materialize_f64(), vec![1.0, 2.0, 3.0]);
+    assert!(!runmat_accelerate_api::handle_is_logical(&handle));
+    assert_eq!(provider.state.lock().unwrap().downloads, 3);
+    assert_eq!(provider.state.lock().unwrap().frees, 1);
     provider.free(&handle).unwrap();
 }

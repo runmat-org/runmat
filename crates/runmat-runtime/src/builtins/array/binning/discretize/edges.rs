@@ -138,23 +138,7 @@ fn equal_width_edges(values: &[NumericScalar], bins: usize) -> BuiltinResult<Vec
             "discretize: requested number of bins is too large",
         ));
     }
-    let finite = values
-        .iter()
-        .map(|value| value.materialize_f64())
-        .filter(|value| value.is_finite())
-        .collect::<Vec<_>>();
-    if finite.is_empty() {
-        return Err(error::invalid(
-            "discretize: cannot infer equal-width bins from all-missing data",
-        ));
-    }
-    let min = finite.iter().copied().fold(f64::INFINITY, f64::min);
-    let max = finite.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    if min == max {
-        return Ok((0..=bins)
-            .map(|index| min - 0.5 + index as f64 / bins as f64)
-            .collect());
-    }
+    let (min, max) = super::computed_range::enclosing_bounds(values)?;
     Ok((0..=bins)
         .map(|index| {
             if index == 0 {

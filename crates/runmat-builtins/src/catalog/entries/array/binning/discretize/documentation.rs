@@ -12,6 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Computed edges and replacement values",
         paragraphs: &[
             "A positive scalar `N` asks RunMat to compute `N` uniform-width double bins. The two-output form returns the computed edge row as `E`; a second output is not available when explicit edges are supplied.",
+            "Computed edges remain double, including for integer input. RunMat finds extrema using their original numeric classes and rounds the outer double endpoints outward when necessary, so finite wide integers remain inside the computed range. Interior edges may repeat when the requested spacing is smaller than double precision can represent. Explicit integer edges retain exact integer comparisons without this conversion.",
             "A one-element numeric array is also a scalar bin count, including single precision and fixed-width integer arrays. Explicit edges and replacement values must be vectors; trailing singleton dimensions are accepted. Computed edges require at least one finite input and fewer than 50 million bins. Explicit-edge calls preserve empty and N-D input shapes.",
             "A numeric or text vector after the edges replaces bin indices. Numeric output preserves the replacement vector's class. Out-of-range and missing inputs become `NaN` for floating replacement values, exact zero for fixed-width integer replacement values, and an empty string for text replacement values.",
         ],

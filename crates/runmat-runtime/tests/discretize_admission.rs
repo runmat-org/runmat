@@ -96,3 +96,59 @@ fn text_options_use_effective_rank_and_scalar_string_arrays() {
     );
     assert!(invoke(&[input, edges, pages, Value::from("right")], 1).is_err());
 }
+
+#[test]
+fn computed_double_edges_enclose_exact_wide_integer_extrema() {
+    for (value, lower, upper) in [
+        (
+            9_007_199_254_740_993_u64,
+            9_007_199_254_740_992.0,
+            9_007_199_254_740_994.0,
+        ),
+        (
+            u64::MAX,
+            18_446_744_073_709_549_568.0,
+            18_446_744_073_709_551_616.0,
+        ),
+    ] {
+        for count in [1, 2] {
+            let outputs = invoke(
+                &[
+                    Value::Tensor(
+                        Tensor::from_numeric_storage(NumericStorage::U64(vec![value]), vec![1, 1])
+                            .unwrap(),
+                    ),
+                    Value::Num(f64::from(count)),
+                ],
+                2,
+            )
+            .unwrap();
+            let Value::Tensor(indices) = &outputs[0] else {
+                panic!("indices")
+            };
+            let Value::Tensor(edges) = &outputs[1] else {
+                panic!("double edges")
+            };
+            let index = indices.materialize_f64()[0];
+            assert!(index >= 1.0 && index <= f64::from(count));
+            let actual = edges.materialize_f64();
+            assert_eq!(actual[0], lower);
+            assert_eq!(*actual.last().unwrap(), upper);
+            assert!(matches!(
+                edges.clone().into_numeric_storage().unwrap(),
+                NumericStorage::F64(_)
+            ));
+        }
+    }
+    for value in [f64::MAX, -f64::MAX] {
+        let outputs = invoke(&[Value::Num(value), Value::Num(2.0)], 2).unwrap();
+        let Value::Tensor(indices) = &outputs[0] else {
+            panic!("indices")
+        };
+        let Value::Tensor(edges) = &outputs[1] else {
+            panic!("edges")
+        };
+        assert!(indices.materialize_f64()[0].is_finite());
+        assert!(edges.materialize_f64().iter().all(|edge| edge.is_finite()));
+    }
+}
