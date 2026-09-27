@@ -998,6 +998,9 @@ impl Bytecode {
 
     #[cfg(feature = "native-accel")]
     pub fn runtime_fusion_groups_for_graph(&self, graph: &AccelGraph) -> Vec<FusionGroup> {
+        if graph.nodes.is_empty() {
+            return Vec::new();
+        }
         let mut groups = self.runtime_fusion_groups();
         if groups.is_empty() {
             return groups;
