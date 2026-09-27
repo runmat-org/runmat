@@ -953,7 +953,7 @@ pub(crate) mod tests {
             let result = block_on(randn_builtin(args)).expect("randn");
             match result {
                 Value::GpuTensor(gpu) => {
-                    assert_eq!(gpu.shape, vec![2, 2]);
+                    assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 2]);
                     for value in gathered.materialize_f64() {

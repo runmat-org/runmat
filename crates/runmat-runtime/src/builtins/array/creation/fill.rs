@@ -1712,7 +1712,7 @@ pub(crate) mod tests {
             let result = block_on(fill_builtin(Value::Num(0.5), args)).expect("fill");
             match result {
                 Value::GpuTensor(gpu) => {
-                    assert_eq!(gpu.shape, vec![2, 2]);
+                    assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert!(gathered
                         .materialize_f64()

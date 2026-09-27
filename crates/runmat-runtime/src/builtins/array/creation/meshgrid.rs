@@ -1742,8 +1742,9 @@ pub(crate) mod tests {
             )
             .expect("axis");
             let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated fixture provenance");
             let eval = evaluate(&[Value::GpuTensor(automatic)]).expect("automatic gather");
             let Value::Tensor(output) = eval_first(&eval).expect("host grid") else {
                 panic!("automatic integer residency must return exact host output");
@@ -1759,8 +1760,9 @@ pub(crate) mod tests {
             );
 
             let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let error = match evaluate(&[Value::GpuTensor(explicit)]) {
                 Ok(_) => panic!("explicit integer gpuArray must reject"),
                 Err(error) => error,
@@ -2155,8 +2157,9 @@ pub(crate) mod tests {
         .expect("axis");
 
         let automatic = gpu_helpers::upload_tensor(provider, &axis).expect("automatic upload");
-        let automatic =
-            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("validated fixture provenance");
         let eval = evaluate(&[Value::GpuTensor(automatic)]).expect("automatic gather");
         let Value::Tensor(output) = eval_first(&eval).expect("exact host output") else {
             panic!("automatic integer residency must become host output");
@@ -2172,8 +2175,9 @@ pub(crate) mod tests {
         );
 
         let explicit = gpu_helpers::upload_tensor(provider, &axis).expect("explicit upload");
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let error = match evaluate(&[Value::GpuTensor(explicit)]) {
             Ok(_) => panic!("explicit integer gpuArray must reject"),
             Err(error) => error,

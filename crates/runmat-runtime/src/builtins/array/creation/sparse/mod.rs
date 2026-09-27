@@ -4415,7 +4415,9 @@ pub(crate) mod tests {
         )
         .expect("integer source");
         let handle = gpu_helpers::upload_tensor(provider, &source).expect("upload integer source");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let output =
             nonzeros_builtin(Value::GpuTensor(handle.clone())).expect("resident integer nonzeros");
         let Value::GpuTensor(output) = output else {

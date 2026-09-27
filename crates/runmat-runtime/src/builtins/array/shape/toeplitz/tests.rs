@@ -48,13 +48,14 @@ fn resident_exact_integer_construction_preserves_values_and_owner() {
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .unwrap()
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let Value::GpuTensor(output) =
             block_on(toeplitz_builtin(vec![Value::GpuTensor(handle.clone())])).unwrap()
         else {
             panic!("resident output");
         };
-        assert_eq!(output.device_id, handle.device_id());
+        assert_eq!(output.device_id(), handle.device_id());
         let Value::Tensor(host) = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
             output.clone(),
         )))

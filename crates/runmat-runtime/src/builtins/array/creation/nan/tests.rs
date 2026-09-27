@@ -283,7 +283,7 @@ fn nan_gpu_like_alloc() {
         .expect("nan");
         match result {
             Value::GpuTensor(gpu) => {
-                assert_eq!(gpu.shape, vec![2, 2]);
+                assert_eq!(gpu.shape(), vec![2, 2]);
                 let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                 assert!(gathered
                     .materialize_f64()

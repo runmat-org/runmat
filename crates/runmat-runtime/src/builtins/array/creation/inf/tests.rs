@@ -290,7 +290,7 @@ fn inf_gpu_like_alloc() {
         .expect("inf");
         match result {
             Value::GpuTensor(gpu) => {
-                assert_eq!(gpu.shape, vec![2, 2]);
+                assert_eq!(gpu.shape(), vec![2, 2]);
                 let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                 assert_all_pos_inf(&gathered);
             }

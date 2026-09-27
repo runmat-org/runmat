@@ -1831,7 +1831,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&gpu),
                 Some(runmat_accelerate_api::IntegerElementType::I16)
             );
-            assert_eq!(gpu.shape, vec![3, 3]);
+            assert_eq!(gpu.shape(), vec![3, 3]);
             let downloaded = block_on(provider.download_integer(&gpu))
                 .expect("download int16 randi")
                 .data;
@@ -1912,7 +1912,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&gpu),
                 Some(runmat_accelerate_api::IntegerElementType::U64)
             );
-            assert_eq!(gpu.shape, vec![1, 32]);
+            assert_eq!(gpu.shape(), vec![1, 32]);
             let downloaded = block_on(provider.download_integer(&gpu))
                 .expect("download uint64 randi")
                 .data;

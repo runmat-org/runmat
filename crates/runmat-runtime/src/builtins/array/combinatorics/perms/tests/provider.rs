@@ -12,7 +12,8 @@ fn provider_outputs_restore_owner_class_and_explicit_residency() {
         .expect("integer input");
         let handle = gpu_helpers::upload_tensor(provider, &input)
             .expect("upload")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let output = call(Value::GpuTensor(handle)).expect("resident perms");
         let Value::GpuTensor(output_handle) = &output else {
             panic!("expected resident output")
@@ -107,7 +108,8 @@ fn wgpu_fallback_preserves_every_integer_class_and_explicit_residency() {
         let tensor = Tensor::new_integer(input, vec![1, 2]).expect("integer input");
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .expect("upload")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated fixture provenance");
         let output = call(Value::GpuTensor(handle)).expect("resident perms");
         let Value::GpuTensor(output_handle) = &output else {
             panic!("expected resident output")

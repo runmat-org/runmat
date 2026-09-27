@@ -1039,7 +1039,7 @@ pub(crate) mod tests {
             let result = block_on(zeros_builtin(args)).expect("zeros");
             match result {
                 Value::GpuTensor(gpu) => {
-                    assert_eq!(gpu.shape, vec![2, 2]);
+                    assert_eq!(gpu.shape(), vec![2, 2]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert!(gathered.materialize_f64().iter().all(|&x| x == 0.0));
                 }

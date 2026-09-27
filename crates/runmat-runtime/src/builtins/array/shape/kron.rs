@@ -1321,8 +1321,9 @@ pub(crate) mod tests {
             let source_tensor = Tensor::new_integer(IntegerStorage::I32(vec![2, 3]), vec![2, 1])
                 .expect("integer source");
             let source = gpu_helpers::upload_tensor(provider, &source_tensor).expect("upload");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let result = kron_builtin(
                 Value::GpuTensor(source.clone()),
                 Value::Num(2.0),
@@ -1347,13 +1348,15 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
             let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated fixture provenance");
             let integer =
                 Tensor::new_integer(IntegerStorage::I32(vec![3, 4]), vec![2, 1]).expect("integer");
             let explicit = gpu_helpers::upload_tensor(provider, &integer).expect("explicit");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
 
             let result = kron_builtin(
                 Value::GpuTensor(automatic),

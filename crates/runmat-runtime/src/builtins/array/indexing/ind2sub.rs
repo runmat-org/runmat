@@ -952,8 +952,9 @@ pub(crate) mod tests {
                     shape: &[1, 1],
                 })
                 .expect("scalar index");
-            let indices =
-                indices.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let indices = indices
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated fixture provenance");
             let result = ind2sub_builtin(
                 Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
                 Value::GpuTensor(indices.clone()),
