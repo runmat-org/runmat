@@ -17,19 +17,35 @@ impl Drop for LeaseInner {
         }
         // The owner persists the typed outcome. The primitive never retries a
         // physical release, including when its result is uncertain.
-        if catch_unwind(AssertUnwindSafe(|| self.owner.retire(self.identity))).is_err() {
+        if let Err(payload) = catch_unwind(AssertUnwindSafe(|| self.owner.retire(self.identity))) {
+            drop_panic_payload(payload);
             // Also contain a broken recovery implementation during an existing
             // unwind. Such an owner violates the documented persistence contract;
             // this is not a successful retirement or a reason to retry.
-            let _ = catch_unwind(AssertUnwindSafe(|| {
+            if let Err(payload) = catch_unwind(AssertUnwindSafe(|| {
                 self.owner.record_retirement_panic(self.identity);
-            }));
+            })) {
+                drop_panic_payload(payload);
+            }
         }
+    }
+}
+
+/// A caught payload may itself panic when dropped. Dispose normally first;
+/// only a secondary panic payload is deliberately forgotten to avoid recursively
+/// invoking arbitrary destructors forever during cleanup. This exceptional
+/// containment does not leak successful allocations or ordinary owner resources.
+fn drop_panic_payload(payload: Box<dyn std::any::Any + Send>) {
+    if let Err(secondary) = catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+        std::mem::forget(secondary);
     }
 }
 
 /// One owning reference to a registered allocation. Clone copies only an Arc.
 /// Shape/storage views belong to the eventual tensor carrier, not this lease.
+/// Retirement callback unwinds are contained on unwind-enabled targets. This
+/// does not make an arbitrary owner's own destructor nonpanicking: the owner
+/// must satisfy its documented teardown contract. Panic-abort cannot be caught.
 #[derive(Clone)]
 pub struct AllocationLease {
     inner: Arc<LeaseInner>,

@@ -16,11 +16,26 @@ pub(super) enum Entry {
     Finished(AllocationRetirementOutcome),
 }
 
+pub(super) struct Record {
+    pub(super) phase: Entry,
+    pub(super) payload: Option<Box<[u8]>>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum RegistrationFault {
+    None,
+    RejectBeforeAssociation,
+    #[cfg(panic = "unwind")]
+    PanicBeforeAssociation,
+}
+
 pub(super) struct TestOwner {
     device: u32,
-    pub(super) entries: Mutex<HashMap<AllocationIdentity, Entry>>,
+    pub(super) entries: Mutex<HashMap<AllocationIdentity, Record>>,
     pub(super) retire_calls: AtomicUsize,
     pub(super) panic_during_retire: AtomicBool,
+    pub(super) registration_fault: Mutex<RegistrationFault>,
+    pub(super) observed_unpublished_registration: AtomicBool,
     outcome: AllocationRetirementOutcome,
     callback: Mutex<Option<Callback>>,
 }
@@ -29,9 +44,17 @@ impl TestOwner {
     pub(super) fn new(id: AllocationIdentity, outcome: AllocationRetirementOutcome) -> Arc<Self> {
         Arc::new(Self {
             device: id.device_id(),
-            entries: Mutex::new(HashMap::from([(id, Entry::Unregistered)])),
+            entries: Mutex::new(HashMap::from([(
+                id,
+                Record {
+                    phase: Entry::Unregistered,
+                    payload: Some(vec![19, 23].into_boxed_slice()),
+                },
+            )])),
             retire_calls: AtomicUsize::new(0),
             panic_during_retire: AtomicBool::new(false),
+            registration_fault: Mutex::new(RegistrationFault::None),
+            observed_unpublished_registration: AtomicBool::new(false),
             outcome,
             callback: Mutex::new(None),
         })
@@ -48,16 +71,22 @@ impl TestOwner {
     }
 
     pub(super) fn weak_lease(&self, id: AllocationIdentity) -> WeakAllocationLease {
-        let entries = self.entries.lock().unwrap();
-        let Some(Entry::Live(weak)) = entries.get(&id) else {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(Entry::Live(weak)) = entries.get(&id).map(|record| &record.phase) else {
             panic!("missing live lease")
         };
         weak.clone()
     }
 
     pub(super) fn outcome(&self, id: AllocationIdentity) -> AllocationRetirementOutcome {
-        let entries = self.entries.lock().unwrap();
-        let Some(Entry::Finished(outcome)) = entries.get(&id) else {
+        let entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let Some(Entry::Finished(outcome)) = entries.get(&id).map(|record| &record.phase) else {
             panic!("missing retirement record")
         };
         outcome.clone()
@@ -73,7 +102,10 @@ impl AllocationOwner for TestOwner {
         if id.device_id() != self.device {
             return Err(AllocationRegistrationError::WrongOwner);
         }
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
         if !entries.contains_key(&id) {
             return Err(
                 if entries
@@ -86,7 +118,7 @@ impl AllocationOwner for TestOwner {
                 },
             );
         }
-        match entries.get(&id).unwrap() {
+        match &entries.get(&id).unwrap().phase {
             Entry::Unregistered => {}
             Entry::Live(_) => {
                 return Err(AllocationRegistrationError::AlreadyRegistered);
@@ -99,15 +131,36 @@ impl AllocationOwner for TestOwner {
             lease.acquire().is_none(),
             "registration must complete before acquisition"
         );
-        entries.insert(id, Entry::Live(lease));
+        self.observed_unpublished_registration
+            .store(true, Ordering::SeqCst);
+        // Faults deliberately precede association: rejected/unwound admission
+        // leaves the payload available for a later valid registration.
+        let fault = *self.registration_fault.lock().unwrap();
+        match fault {
+            RegistrationFault::RejectBeforeAssociation => {
+                return Err(AllocationRegistrationError::NotLive)
+            }
+            #[cfg(panic = "unwind")]
+            RegistrationFault::PanicBeforeAssociation => {
+                panic!("pre-association registration fault")
+            }
+            RegistrationFault::None => {}
+        }
+        entries.get_mut(&id).unwrap().phase = Entry::Live(lease);
         Ok(())
     }
 
     fn retire(&self, id: AllocationIdentity) -> AllocationRetirementOutcome {
         {
-            let mut entries = self.entries.lock().unwrap();
-            assert!(matches!(entries.get(&id), Some(Entry::Live(_))));
-            entries.insert(id, Entry::Retiring);
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            assert!(matches!(
+                entries.get(&id).map(|record| &record.phase),
+                Some(Entry::Live(_))
+            ));
+            entries.get_mut(&id).unwrap().phase = Entry::Retiring;
         }
         self.retire_calls.fetch_add(1, Ordering::SeqCst);
         let callback = self.callback.lock().unwrap().take();
@@ -118,19 +171,31 @@ impl AllocationOwner for TestOwner {
             !self.panic_during_retire.load(Ordering::SeqCst),
             "retirement fault"
         );
-        self.entries
-            .lock()
-            .unwrap()
-            .insert(id, Entry::Finished(self.outcome.clone()));
+        let payload = {
+            let mut entries = self
+                .entries
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            let record = entries.get_mut(&id).unwrap();
+            record.phase = Entry::Finished(self.outcome.clone());
+            if self.outcome == AllocationRetirementOutcome::Retired {
+                record.payload.take()
+            } else {
+                None
+            }
+        };
+        drop(payload);
         self.outcome.clone()
     }
 
     fn record_retirement_panic(&self, id: AllocationIdentity) {
-        self.entries.lock().unwrap().insert(
-            id,
-            Entry::Finished(AllocationRetirementOutcome::Uncertain {
-                detail: "unexpected backend unwind".into(),
-            }),
-        );
+        self.entries
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .get_mut(&id)
+            .unwrap()
+            .phase = Entry::Finished(AllocationRetirementOutcome::Uncertain {
+            detail: "unexpected backend unwind".into(),
+        });
     }
 }

@@ -51,8 +51,14 @@ pub trait AllocationOwner: AllocationOwnerThreadBound + 'static {
     /// Under the existing map's lock, validate identity/generation/live payload
     /// and install exactly one weak lease. Reject a duplicate even if its old
     /// weak lease is no longer acquirable. No retired entry may be resurrected.
-    /// On Err leave the previous record unchanged. Do not invoke external
-    /// callbacks or hold a map lock beyond this call.
+    /// On Err or unwind leave the previous record and payload unchanged. Perform
+    /// all validation/fallible work first, then install the association and
+    /// immediately return Ok. Do not run fallible work or external callbacks
+    /// after installation. If a future backend needs such work, its existing
+    /// owner must supply rollback before it can implement this contract. An
+    /// unacquirable weak entry is not permission to strand the payload or reject
+    /// every future registration attempt. Poison recovery retains this invariant.
+    /// Do not hold a map lock beyond this call.
     ///
     /// The new weak lease cannot acquire until registration returns Ok. This
     /// prevents publishing partially admitted ownership to another caller.

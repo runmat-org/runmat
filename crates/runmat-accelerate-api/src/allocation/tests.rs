@@ -1,4 +1,5 @@
 mod owner;
+mod publication;
 
 use super::*;
 use owner::{Entry, TestOwner};
@@ -118,7 +119,10 @@ fn retirement_callback_can_reenter_owner_and_cannot_resurrect_lease() {
             .entries
             .try_lock()
             .expect("no map lock crosses retirement callback");
-        assert!(matches!(entries.get(&ID), Some(Entry::Retiring)));
+        assert!(matches!(
+            entries.get(&ID).map(|record| &record.phase),
+            Some(Entry::Retiring)
+        ));
         assert!(weak.acquire().is_none());
     });
     drop(lease);
