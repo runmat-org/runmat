@@ -3107,8 +3107,9 @@ fn dictionary_declares_integer_capabilities_and_gates_resident_input_before_gath
         DICTIONARY_GPU_INPUT_EXTENSION.error_identifier
     );
     assert!(!error.message().to_ascii_lowercase().contains("provider"));
-    // The managed nested cell can retain its field until collection.
     assert_eq!(allocation.probe.retirements(), 0);
+    drop(allocation.handle);
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

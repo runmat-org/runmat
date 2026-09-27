@@ -1826,9 +1826,8 @@ mod tests {
             0,
             "caller alias survives nested preflight"
         );
-        // The managed cell owns its own reference until GC; dropping the
-        // caller alias must not force-retire that still-owned allocation.
         drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
