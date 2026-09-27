@@ -65,7 +65,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                     BuiltinSinkPreparation::Barrier => request.into_operands(),
                     BuiltinSinkPreparation::Gather => gather_args(request.operands())
                         .await
-                        .map_err(|error| preparation_error(error.into()))?,
+                        .map_err(preparation_error)?,
                 };
                 return Ok(PreparedBuiltinOperands::passthrough(operands));
             }

@@ -531,7 +531,11 @@ impl Accelerator {
         Self { planner }
     }
 
-    pub async fn elementwise_add(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+    pub async fn elementwise_add(
+        &self,
+        a: &Value,
+        b: &Value,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
         match (a, b) {
             (Value::GpuTensor(ga), Value::GpuTensor(gb)) => {
                 let ha = self.gather_handle(ga).await?;
@@ -550,12 +554,16 @@ impl Accelerator {
         }
     }
 
-    fn elementwise_add_resolved(&self, a: &Value, b: &Value) -> anyhow::Result<Value> {
+    fn elementwise_add_resolved(
+        &self,
+        a: &Value,
+        b: &Value,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
         match (a, b) {
             (Value::Tensor(ma), Value::Tensor(mb)) => match self.planner.choose_elem_add(ma, mb) {
                 ExecutionTarget::Cpu => {
                     runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
-                        .map_err(|e| anyhow::anyhow!(e))
+                        .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
                 }
                 ExecutionTarget::Gpu(_) => {
                     let bk = self
@@ -570,17 +578,17 @@ impl Accelerator {
                 }
             },
             _ => runmat_runtime::call_builtin("plus", &[a.clone(), b.clone()])
-                .map_err(|e| anyhow::anyhow!(e)),
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from_source),
         }
     }
 
     async fn gather_handle(
         &self,
         h: &runmat_accelerate_api::GpuTensorHandle,
-    ) -> anyhow::Result<Value> {
+    ) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
         runmat_runtime::gather_if_needed_async(&Value::GpuTensor(h.clone()))
             .await
-            .map_err(|error| anyhow::anyhow!(error))
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)
     }
 }
 
@@ -590,7 +598,8 @@ mod native_gather_tests {
     use futures::executor::block_on;
     use runmat_value::{ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage};
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     fn accelerator_gather_preserves_native_complex_integer_and_source_lifetime() {
         crate::simple_provider::register_inprocess_provider();
         let provider = runmat_accelerate_api::provider().expect("in-process provider");
@@ -630,7 +639,10 @@ mod native_gather_tests {
                 runmat_accelerate_api::GpuTensorStorage::Real,
             )
             .unwrap();
-        assert!(block_on(accelerator.gather_handle(&unregistered.handle)).is_err());
+        let error = block_on(accelerator.gather_handle(&unregistered.handle)).unwrap_err();
+        assert!(std::error::Error::source(&error)
+            .unwrap()
+            .is::<runmat_runtime::RuntimeError>());
         unregistered
             .handle
             .allocation_lease()

@@ -42,7 +42,9 @@ use serde::{Deserialize, Serialize};
 
 mod builtin_call;
 mod calibration_cleanup;
+mod state;
 pub use builtin_call::{install_preparation_service, AdmittedAcceleration};
+pub use state::AutoOffloadHandle;
 
 const DEFAULT_CPU_ELEM_PER_ELEM: f64 = 1.0e-7;
 const DEFAULT_CPU_REDUCTION_PER_ELEM: f64 = 1.2e-7;
@@ -761,7 +763,6 @@ pub struct NativeAutoOffload {
     enabled: bool,
 }
 
-static GLOBAL: OnceCell<Option<NativeAutoOffload>> = OnceCell::new();
 static GLOBAL_INIT_LOCK: Lazy<AsyncMutex<()>> = Lazy::new(|| AsyncMutex::new(()));
 static PROFILE_MODEL: OnceCell<Option<ProfileCostModel>> = OnceCell::new();
 
@@ -848,36 +849,28 @@ fn record_provider_rejection(
     }
 }
 
-pub async fn global() -> Option<&'static NativeAutoOffload> {
+pub async fn global() -> Option<AutoOffloadHandle> {
     if !auto_enabled() {
         return None;
     }
     let active_provider = runmat_accelerate_api::provider()?;
-    if let Some(existing) = GLOBAL.get() {
-        return existing
-            .as_ref()
-            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
+    if let Some(existing) = state::cached() {
+        return existing.filter(|offload| {
+            runmat_accelerate_api::same_provider_instance(offload.provider, active_provider)
+        });
     }
-    // If auto-offload is disabled or there is no GPU provider registered,
-    // initialize_async() would return None immediately (no I/O, no blocking).
-    // Return None directly without acquiring the async lock so single-poll
-    // callers (e.g. the turbine JIT interpreter fallback) never observe a
-    // spurious Pending.  We intentionally do NOT write to GLOBAL here: doing
-    // so without holding GLOBAL_INIT_LOCK would race with a concurrent thread
-    // that is partway through initialize_async() and has found a valid
-    // provider.  That thread's subsequent GLOBAL.set(Some(offload)) would
-    // silently fail (OnceCell is set-once), permanently disabling the
-    // accelerator for the lifetime of the process.  These two checks are
-    // cheap (no I/O), so re-evaluating them on each call is acceptable.
+    // The early checks above must not cache an absent provider. Initialization
+    // can suspend while another caller registers one. Serialize initialization
+    // and retain configuration in the same process/worker scope as its provider.
     let _guard = GLOBAL_INIT_LOCK.lock().await;
-    if let Some(existing) = GLOBAL.get() {
-        return existing
-            .as_ref()
-            .filter(|offload| std::ptr::eq(offload.provider, active_provider));
+    if let Some(existing) = state::cached() {
+        return existing.filter(|offload| {
+            runmat_accelerate_api::same_provider_instance(offload.provider, active_provider)
+        });
     }
     let initialized = initialize_async().await;
-    let _ = GLOBAL.set(initialized);
-    GLOBAL.get().and_then(|value| value.as_ref())
+    state::initialize(initialized);
+    state::cached().flatten()
 }
 
 async fn initialize_async() -> Option<NativeAutoOffload> {
@@ -1609,7 +1602,7 @@ fn is_empty_placeholder_value(value: &Value) -> bool {
     }
 }
 
-async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
+async fn gather_args(args: &[Value]) -> ProviderExecutionResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for (idx, value) in args.iter().enumerate() {
         if let Value::GpuTensor(handle) = value {
@@ -1629,7 +1622,7 @@ async fn gather_args(args: &[Value]) -> Result<Vec<Value>> {
         }
         let gathered = gather_if_needed_async(value)
             .await
-            .map_err(|e| anyhow!(e))?;
+            .map_err(ProviderExecutionError::from_source)?;
         trace!(
             "auto-offload: gather_args arg[{}] -> {:?}",
             idx,
