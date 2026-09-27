@@ -14,20 +14,21 @@ pub(in super::super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<
     if !typed_fallback {
         match provider.unary_pow2(&input).await {
             Ok(mut output) if direct_output_matches(&output, &input, provider) => {
-                super::preserve_unary_provenance(&mut output, &input);
+                gpu_helpers::propagate_output_provenance(&mut output, [&input])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
-                gpu_helpers::free_rejected_provider_output(&output, &[&input], provider);
-                return Err(errors::internal(
-                    "provider unary_pow2 returned malformed output",
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    errors::internal("provider unary_pow2 returned malformed output"),
                 ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
-                return Err(errors::internal(format!(
-                    "provider unary_pow2 failed: {error}"
-                )))
+                let mut failure = errors::internal(format!("provider unary_pow2 failed: {error}"));
+                failure.source = Some(error.into_boxed_dyn_error());
+                failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(failure);
             }
         }
     }
@@ -56,14 +57,14 @@ async fn fallback_and_restore(
     let output = host::evaluate_host(gathered)?;
     let (mut restored, contract) = match &output {
         Value::Tensor(tensor) => (
-            gpu_helpers::upload_tensor(provider, tensor).map_err(errors::internal)?,
+            gpu_helpers::upload_tensor_protecting(provider, tensor, &[input])?,
             super::unary_contract(
                 GpuTensorStorage::Real,
                 super::precision_for(tensor.numeric_dtype()),
             ),
         ),
         Value::ComplexTensor(tensor) => (
-            gpu_helpers::upload_complex_tensor(provider, tensor).map_err(errors::internal)?,
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])?,
             super::unary_contract(
                 GpuTensorStorage::ComplexInterleaved,
                 super::precision_for(tensor.numeric_dtype()),
@@ -72,11 +73,11 @@ async fn fallback_and_restore(
         _ => return Err(super::unsupported_output_kind()),
     };
     if !gpu_helpers::unary_gpu_output_matches(&restored, input, provider, contract) {
-        gpu_helpers::free_rejected_provider_output(&restored, &[input], provider);
-        return Err(errors::internal(
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            restored,
+            errors::internal("provider upload returned malformed fallback output"),
         ));
     }
-    super::preserve_unary_provenance(&mut restored, input);
+    gpu_helpers::propagate_output_provenance(&mut restored, [input])?;
     gpu_helpers::resident_gpu_value(restored)
 }

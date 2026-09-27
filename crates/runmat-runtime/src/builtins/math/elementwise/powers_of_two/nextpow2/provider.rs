@@ -24,21 +24,22 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
         Ok(mut output)
             if output_matches(&output, &input, provider, output_representation(&input)) =>
         {
-            preserve_residency(&mut output, &input);
+            gpu_helpers::propagate_output_provenance(&mut output, [&input])?;
             gpu_helpers::resident_gpu_value(output)
         }
-        Ok(output) => {
-            gpu_helpers::free_rejected_provider_output(&output, &[&input], provider);
-            Err(errors::internal(
-                "provider unary_nextpow2 returned malformed output",
-            ))
-        }
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            errors::internal("provider unary_nextpow2 returned malformed output"),
+        )),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             evaluate_and_restore(&input, provider).await
         }
-        Err(error) => Err(errors::internal(format!(
-            "provider unary_nextpow2 failed: {error}"
-        ))),
+        Err(source) => {
+            let mut error = errors::internal(format!("provider unary_nextpow2 failed: {source}"));
+            error.source = Some(source.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(error)
+        }
     }
 }
 
@@ -68,14 +69,14 @@ async fn evaluate_and_restore(
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     let result = operation::transform(gathered)?;
-    let mut output = gpu_helpers::upload_tensor(provider, &result).map_err(errors::internal)?;
+    let mut output = gpu_helpers::upload_tensor_protecting(provider, &result, &[input])?;
     if !output_matches(&output, input, provider, output_representation(input)) {
-        gpu_helpers::free_rejected_provider_output(&output, &[input], provider);
-        return Err(errors::internal(
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            errors::internal("provider upload returned malformed fallback output"),
         ));
     }
-    preserve_residency(&mut output, input);
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -94,13 +95,7 @@ fn output_matches(
             precision: representation.precision,
             integer: representation.integer,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
-}
-
-fn preserve_residency(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
-    let provenance = runmat_accelerate_api::handle_provenance(input)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
 }

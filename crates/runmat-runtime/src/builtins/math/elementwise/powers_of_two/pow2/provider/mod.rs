@@ -4,7 +4,7 @@ mod unary;
 pub(super) use binary::try_direct as try_binary_direct;
 pub(super) use unary::evaluate as evaluate_unary;
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorStorage, ProviderPrecision};
 
 use crate::builtins::common::gpu_helpers;
 
@@ -18,12 +18,6 @@ fn precision_for(dtype: runmat_value::NumericDType) -> Option<ProviderPrecision>
     }
 }
 
-fn preserve_unary_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
-    let provenance = runmat_accelerate_api::handle_provenance(input)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
-}
-
 fn unary_contract(
     storage: GpuTensorStorage,
     precision: Option<ProviderPrecision>,
@@ -33,7 +27,7 @@ fn unary_contract(
         precision,
         integer: None,
         logical: false,
-        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     }
 }
 
