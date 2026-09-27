@@ -14,7 +14,6 @@ mod publication;
 mod payload;
 mod registry;
 pub(super) use guards::{F64Registry, IntegerRegistry, NumericRegistryGuard};
-pub(super) use publication::PendingAllocation;
 pub(super) use registry::{integer_registry, numeric_registry, registry};
 
 enum Phase {
@@ -38,12 +37,25 @@ pub(super) struct NumericAllocationState {
 }
 
 impl NumericAllocationState {
+    #[cfg(test)]
     pub(super) fn lock(&self) -> LockResult<NumericRegistryGuard<'_>> {
+        self.lock_for_device(None)
+    }
+
+    pub(super) fn lock_for(&self, device: u32) -> LockResult<NumericRegistryGuard<'_>> {
+        self.lock_for_device(Some(device))
+    }
+
+    fn lock_for_device(&self, device: Option<u32>) -> LockResult<NumericRegistryGuard<'_>> {
         self.allocations
             .lock()
-            .map(|guard| NumericRegistryGuard::new(guard, true))
+            .map(|guard| NumericRegistryGuard::new(guard, true, device))
             .map_err(|error| {
-                std::sync::PoisonError::new(NumericRegistryGuard::new(error.into_inner(), false))
+                std::sync::PoisonError::new(NumericRegistryGuard::new(
+                    error.into_inner(),
+                    false,
+                    device,
+                ))
             })
     }
 }

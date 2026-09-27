@@ -6,8 +6,8 @@ use runmat_runtime::builtins::common::broadcast::BroadcastPlan;
 fn admitted_plan(base: &GpuTensorHandle, exponent: &GpuTensorHandle) -> Result<BroadcastPlan> {
     require_non_integer_elementwise_inputs("real power", base, exponent)?;
     ensure!(
-        base.descriptor.storage == Some(GpuTensorStorage::Real)
-            && exponent.descriptor.storage == Some(GpuTensorStorage::Real),
+        base.descriptor().storage == Some(GpuTensorStorage::Real)
+            && exponent.descriptor().storage == Some(GpuTensorStorage::Real),
         "real power requires real storage"
     );
     ensure!(
@@ -20,13 +20,13 @@ fn admitted_plan(base: &GpuTensorHandle, exponent: &GpuTensorHandle) -> Result<B
             && !runmat_accelerate_api::handle_is_logical(exponent),
         "real power requires floating, not logical inputs"
     );
-    let shape = runtime_broadcast_shapes("real power", &base.shape, &exponent.shape)
+    let shape = runtime_broadcast_shapes("real power", base.shape(), exponent.shape())
         .map_err(|e| anyhow!(e))?;
     shape
         .iter()
         .try_fold(1usize, |n, d| n.checked_mul(*d))
         .ok_or_else(|| anyhow!("power broadcast size overflow"))?;
-    BroadcastPlan::new(&base.shape, &exponent.shape).map_err(|e| anyhow!(e))
+    BroadcastPlan::new(base.shape(), exponent.shape()).map_err(|e| anyhow!(e))
 }
 
 impl InProcessProvider {
@@ -36,27 +36,27 @@ impl InProcessProvider {
         exponent: &GpuTensorHandle,
     ) -> Result<PowerResultDomain> {
         ensure!(
-            base.device_id == self.device_id() && exponent.device_id == self.device_id(),
+            base.device_id() == self.device_id() && exponent.device_id() == self.device_id(),
             "power operands belong to another provider"
         );
         let plan = admitted_plan(base, exponent)?;
-        let registry = registry().lock().unwrap();
+        let registry = registry(self.device_id).lock().unwrap();
         let base_values = registry
-            .get(&base.buffer_id)
+            .get(base)
             .ok_or_else(|| anyhow!("power base buffer missing"))?;
         let exponent_values = registry
-            .get(&exponent.buffer_id)
+            .get(exponent)
             .ok_or_else(|| anyhow!("power exponent buffer missing"))?;
         ensure_storage_len(
             "real power",
             base_values,
-            &base.shape,
+            base.shape(),
             &GpuTensorStorage::Real,
         )?;
         ensure_storage_len(
             "real power",
             exponent_values,
-            &exponent.shape,
+            exponent.shape(),
             &GpuTensorStorage::Real,
         )?;
         Ok(plan
@@ -76,7 +76,7 @@ impl InProcessProvider {
         domain: PowerResultDomain,
     ) -> Result<GpuTensorHandle> {
         ensure!(
-            base.device_id == self.device_id() && exponent.device_id == self.device_id(),
+            base.device_id() == self.device_id() && exponent.device_id() == self.device_id(),
             "power operands belong to another provider"
         );
         let plan = admitted_plan(base, exponent)?;
@@ -91,23 +91,23 @@ impl InProcessProvider {
             .ok_or_else(|| anyhow!("power output size overflow"))?;
         let mut output = Vec::with_capacity(capacity);
         {
-            let registry = registry().lock().unwrap();
+            let registry = registry(self.device_id).lock().unwrap();
             let base_values = registry
-                .get(&base.buffer_id)
+                .get(base)
                 .ok_or_else(|| anyhow!("power base buffer missing"))?;
             let exponent_values = registry
-                .get(&exponent.buffer_id)
+                .get(exponent)
                 .ok_or_else(|| anyhow!("power exponent buffer missing"))?;
             ensure_storage_len(
                 "real power",
                 base_values,
-                &base.shape,
+                base.shape(),
                 &GpuTensorStorage::Real,
             )?;
             ensure_storage_len(
                 "real power",
                 exponent_values,
-                &exponent.shape,
+                exponent.shape(),
                 &GpuTensorStorage::Real,
             )?;
             for (_, a, b) in plan.iter() {
@@ -132,7 +132,7 @@ impl InProcessProvider {
                 }
             }
         }
-        Ok(self.allocate_tensor_with_storage(
+        self.allocate_tensor_with_storage(
             output,
             plan.output_shape().to_vec(),
             if domain == PowerResultDomain::Complex {
@@ -140,7 +140,7 @@ impl InProcessProvider {
             } else {
                 GpuTensorStorage::Real
             },
-        ))
+        )
     }
 }
 
@@ -174,11 +174,11 @@ mod tests {
             let values = block_on(provider.download(&output)).unwrap();
             if domain == PowerResultDomain::Real {
                 assert_eq!(values.data, vec![16.0, 2.0]);
-                assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+                assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
             } else {
-                assert_eq!(output.shape, vec![2, 2]);
+                assert_eq!(output.shape(), vec![2, 2]);
                 assert_eq!(
-                    output.descriptor.storage,
+                    output.descriptor().storage,
                     Some(GpuTensorStorage::ComplexInterleaved)
                 );
                 assert!((values.data[3] - 2.0).abs() < 1e-12);
@@ -189,8 +189,8 @@ mod tests {
                 ))
                 .is_err());
             }
-            for handle in [&base, &exponent, &output] {
-                provider.free(handle).unwrap();
+            for handle in [base, exponent, output] {
+                handle.release().unwrap();
             }
         }
     }
@@ -218,8 +218,8 @@ mod tests {
         assert!(values[2].is_nan() && values[4].is_nan());
         assert_eq!(values[3], 0.0);
         assert_eq!(values[5], 0.0);
-        for handle in [&base, &exponent, &output] {
-            provider.free(handle).unwrap();
+        for handle in [base, exponent, output] {
+            handle.release().unwrap();
         }
     }
 }

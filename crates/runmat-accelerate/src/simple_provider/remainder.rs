@@ -12,23 +12,23 @@ impl InProcessProvider {
     ) -> Result<GpuTensorHandle> {
         for input in [a, b] {
             ensure!(
-                input.device_id == self.device_id(),
+                input.device_id() == self.device_id(),
                 "remainder operand belongs to another provider"
             );
-            if input.descriptor.element_type != Some(NumericElementType::F64) {
+            if input.descriptor().element_type != Some(NumericElementType::F64) {
                 return Err(runmat_accelerate_api::unsupported_provider_operation(
                     "in-process floating remainder requires native double",
                 ));
             }
             ensure!(
-                input.descriptor.storage == Some(GpuTensorStorage::Real)
+                input.descriptor().storage == Some(GpuTensorStorage::Real)
                     && !runmat_accelerate_api::handle_is_logical(input)
                     && runmat_accelerate_api::handle_class_identity(input)
                         .is_none_or(|class| class == NumericElementType::F64.class_identity()),
                 "floating remainder operand metadata mismatch"
             );
         }
-        let shape = runtime_broadcast_shapes("remainder", &a.shape, &b.shape)
+        let shape = runtime_broadcast_shapes("remainder", a.shape(), b.shape())
             .map_err(|error| anyhow!(error))?;
         let empty = shape.contains(&0);
         if !empty {
@@ -38,20 +38,20 @@ impl InProcessProvider {
                 .ok_or_else(|| anyhow!("remainder output element count overflow"))?;
         }
         let output = {
-            let registry = registry().lock().unwrap();
+            let registry = registry(self.device_id).lock().unwrap();
             let left = registry
-                .get(&a.buffer_id)
+                .get(a)
                 .ok_or_else(|| anyhow!("remainder left buffer missing"))?;
             let right = registry
-                .get(&b.buffer_id)
+                .get(b)
                 .ok_or_else(|| anyhow!("remainder right buffer missing"))?;
-            ensure_storage_len("remainder", left, &a.shape, &GpuTensorStorage::Real)?;
-            ensure_storage_len("remainder", right, &b.shape, &GpuTensorStorage::Real)?;
+            ensure_storage_len("remainder", left, a.shape(), &GpuTensorStorage::Real)?;
+            ensure_storage_len("remainder", right, b.shape(), &GpuTensorStorage::Real)?;
             if empty {
                 Vec::new()
             } else {
                 let plan =
-                    BroadcastPlan::new(&a.shape, &b.shape).map_err(|error| anyhow!(error))?;
+                    BroadcastPlan::new(a.shape(), b.shape()).map_err(|error| anyhow!(error))?;
                 plan.iter()
                     .map(|(_, l, r)| {
                         runmat_runtime::builtins::math::rounding::floating_remainder::apply_f64(
@@ -61,6 +61,6 @@ impl InProcessProvider {
                     .collect()
             }
         };
-        Ok(self.allocate_tensor_with_storage(output, shape, GpuTensorStorage::Real))
+        self.allocate_tensor_with_storage(output, shape, GpuTensorStorage::Real)
     }
 }

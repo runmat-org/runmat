@@ -10,18 +10,30 @@ pub(in crate::simple_provider) struct NumericRegistryGuard<'a> {
     records: MutexGuard<'a, HashMap<u64, Record>>,
     retained: RefCell<Vec<AllocationLease>>,
     healthy: bool,
+    device: Option<u32>,
 }
 impl<'a> NumericRegistryGuard<'a> {
-    pub(super) fn new(guard: MutexGuard<'a, HashMap<u64, Record>>, healthy: bool) -> Self {
+    pub(super) fn new(
+        guard: MutexGuard<'a, HashMap<u64, Record>>,
+        healthy: bool,
+        device: Option<u32>,
+    ) -> Self {
         Self {
             records: guard,
             retained: RefCell::new(Vec::new()),
             healthy,
+            device,
         }
     }
 
     fn live_record(&self, handle: &GpuTensorHandle) -> Option<&Record> {
         if !self.healthy {
+            return None;
+        }
+        if self
+            .device
+            .is_some_and(|device| device != handle.device_id())
+        {
             return None;
         }
         let record = self.records.get(&handle.buffer_id())?;
@@ -54,6 +66,13 @@ impl<'a> NumericRegistryGuard<'a> {
         self.live_record(handle)?.payload.as_ref()
     }
 
+    pub(in crate::simple_provider) fn producer_is_logical(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Option<bool> {
+        Some(self.live_record(handle)?.producer_logical)
+    }
+
     fn writable(
         &mut self,
         handle: &GpuTensorHandle,
@@ -67,12 +86,14 @@ impl<'a> NumericRegistryGuard<'a> {
     }
 }
 
-pub(in crate::simple_provider) struct F64Registry;
+pub(in crate::simple_provider) struct F64Registry {
+    pub(super) device: u32,
+}
 pub(in crate::simple_provider) struct F64RegistryGuard<'a>(NumericRegistryGuard<'a>);
 impl F64Registry {
-    pub(in crate::simple_provider) fn lock(&self) -> LockResult<F64RegistryGuard<'_>> {
+    pub(in crate::simple_provider) fn lock(&self) -> LockResult<F64RegistryGuard<'static>> {
         numeric_registry()
-            .lock()
+            .lock_for(self.device)
             .map(F64RegistryGuard)
             .map_err(|error| PoisonError::new(F64RegistryGuard(error.into_inner())))
     }
@@ -97,12 +118,14 @@ impl F64RegistryGuard<'_> {
     }
 }
 
-pub(in crate::simple_provider) struct IntegerRegistry;
+pub(in crate::simple_provider) struct IntegerRegistry {
+    pub(super) device: u32,
+}
 pub(in crate::simple_provider) struct IntegerRegistryGuard<'a>(NumericRegistryGuard<'a>);
 impl IntegerRegistry {
-    pub(in crate::simple_provider) fn lock(&self) -> LockResult<IntegerRegistryGuard<'_>> {
+    pub(in crate::simple_provider) fn lock(&self) -> LockResult<IntegerRegistryGuard<'static>> {
         numeric_registry()
-            .lock()
+            .lock_for(self.device)
             .map(IntegerRegistryGuard)
             .map_err(|error| PoisonError::new(IntegerRegistryGuard(error.into_inner())))
     }

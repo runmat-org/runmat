@@ -26,11 +26,9 @@ pub(in crate::simple_provider) fn numeric_registry() -> &'static Arc<NumericAllo
     }
 }
 
-static F64_REGISTRY_VIEW: F64Registry = F64Registry;
-static INTEGER_REGISTRY_VIEW: IntegerRegistry = IntegerRegistry;
-pub(in crate::simple_provider) fn registry() -> &'static F64Registry {
-    &F64_REGISTRY_VIEW
+pub(in crate::simple_provider) fn registry(device: u32) -> F64Registry {
+    F64Registry { device }
 }
-pub(in crate::simple_provider) fn integer_registry() -> &'static IntegerRegistry {
-    &INTEGER_REGISTRY_VIEW
+pub(in crate::simple_provider) fn integer_registry(device: u32) -> IntegerRegistry {
+    IntegerRegistry { device }
 }

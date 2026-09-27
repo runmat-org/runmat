@@ -14,20 +14,20 @@ impl InProcessProvider {
         operation: Logarithm,
     ) -> Result<GpuTensorHandle> {
         ensure!(
-            input.device_id == self.device_id(),
+            input.device_id() == self.device_id(),
             "logarithm input belongs to another provider"
         );
         ensure!(
-            input.descriptor.element_type == Some(NumericElementType::F64)
-                && input.descriptor.storage == Some(GpuTensorStorage::Real)
+            input.descriptor().element_type == Some(NumericElementType::F64)
+                && input.descriptor().storage == Some(GpuTensorStorage::Real)
                 && !runmat_accelerate_api::handle_is_logical(input),
             "in-process logarithm requires real native double input"
         );
-        let guard = registry().lock().unwrap();
+        let guard = registry(self.device_id).lock().unwrap();
         let values = guard
-            .get(&input.buffer_id)
+            .get(input)
             .ok_or_else(|| anyhow!("logarithm input buffer is missing"))?;
-        ensure_storage_len("logarithm", values, &input.shape, &GpuTensorStorage::Real)?;
+        ensure_storage_len("logarithm", values, input.shape(), &GpuTensorStorage::Real)?;
         let output = values
             .iter()
             .map(|value| match operation {
@@ -37,7 +37,7 @@ impl InProcessProvider {
             })
             .collect();
         drop(guard);
-        Ok(self.allocate_tensor(output, input.shape.clone()))
+        self.allocate_tensor(output, input.shape().to_vec())
     }
 }
 
@@ -63,14 +63,14 @@ mod tests {
                 Logarithm::OnePlus => provider.unary_log1p(&input),
             })
             .unwrap();
-            assert_ne!(input.buffer_id, output.buffer_id);
-            assert_eq!(output.device_id, provider.device_id());
-            assert_eq!(output.shape, input.shape);
+            assert_ne!(input.buffer_id(), output.buffer_id());
+            assert_eq!(output.device_id(), provider.device_id());
+            assert_eq!(output.shape(), input.shape());
             assert_eq!(
-                output.descriptor.element_type,
+                output.descriptor().element_type,
                 Some(NumericElementType::F64)
             );
-            assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+            assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
             for (actual, original) in block_on(provider.download(&output))
                 .unwrap()
                 .data
@@ -86,14 +86,19 @@ mod tests {
                     actual.to_bits() == expected.to_bits() || actual.is_nan() && expected.is_nan()
                 );
             }
-            let mut foreign = input.clone();
-            foreign.device_id = foreign.device_id.wrapping_add(1);
+            let other = InProcessProvider::new();
+            let foreign = other
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: input.shape(),
+                })
+                .unwrap();
             assert!(provider.logarithm(&foreign, operation).is_err());
-            let mut malformed = input.clone();
-            malformed.descriptor.storage = None;
-            assert!(provider.logarithm(&malformed, operation).is_err());
-            provider.free(&output).unwrap();
-            provider.free(&input).unwrap();
+            let mut wire = input.wire_descriptor();
+            wire.view = wire.view.with_logical(true);
+            assert!(provider.acquire_live(&wire).is_err());
+            output.release().unwrap();
+            input.release().unwrap();
         }
     }
 }
