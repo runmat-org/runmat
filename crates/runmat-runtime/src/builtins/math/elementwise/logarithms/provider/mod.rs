@@ -34,8 +34,10 @@ pub(super) async fn evaluate(
             restore::fallback(operation, provider, &handle, &metadata).await
         }
         GpuLowerBoundResult::AtOrAbove => {
-            let result = operation.evaluate_provider(provider, &handle).await;
-            gpu_helpers::restore_handle_metadata(&handle, &metadata);
+            let result = {
+                let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+                operation.evaluate_provider(provider, &handle).await
+            };
             match result {
                 Ok(output) => contract::validate(operation, provider, &handle, output),
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {

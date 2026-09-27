@@ -39,9 +39,12 @@ pub(super) async fn gather_compute_restore<F>(
 where
     F: FnOnce(Value) -> BuiltinResult<Value>,
 {
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(input.clone()))
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+    let gathered = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
+        gpu_helpers::gather_value_async(&Value::GpuTensor(input.clone()))
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?
+    };
     let output = compute(gathered)?;
     restore_output(provider, input, output, builtin)
 }
@@ -57,14 +60,14 @@ fn restore_output(
             let tensor = runmat_value::Tensor::new(vec![*value], vec![1, 1])
                 .map_err(|error| internal(builtin, error))?;
             (
-                gpu_helpers::upload_tensor(provider, &tensor)
+                gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])
                     .map_err(|error| internal(builtin, error))?,
                 GpuTensorStorage::Real,
                 Some(ProviderPrecision::F64),
             )
         }
         Value::Tensor(tensor) => (
-            gpu_helpers::upload_tensor(provider, tensor)
+            gpu_helpers::upload_tensor_protecting(provider, tensor, &[input])
                 .map_err(|error| internal(builtin, error))?,
             GpuTensorStorage::Real,
             precision_for(tensor.numeric_dtype()),
@@ -73,14 +76,14 @@ fn restore_output(
             let tensor = runmat_value::ComplexTensor::new(vec![(*real, *imag)], vec![1, 1])
                 .map_err(|error| internal(builtin, error))?;
             (
-                gpu_helpers::upload_complex_tensor(provider, &tensor)
+                gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])
                     .map_err(|error| internal(builtin, error))?,
                 GpuTensorStorage::ComplexInterleaved,
                 Some(ProviderPrecision::F64),
             )
         }
         Value::ComplexTensor(tensor) => (
-            gpu_helpers::upload_complex_tensor(provider, tensor)
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input])
                 .map_err(|error| internal(builtin, error))?,
             GpuTensorStorage::ComplexInterleaved,
             precision_for(tensor.numeric_dtype()),

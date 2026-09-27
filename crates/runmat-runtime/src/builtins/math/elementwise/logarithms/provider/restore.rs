@@ -10,7 +10,10 @@ pub(super) async fn fallback(
     handle: &GpuTensorHandle,
     metadata: &gpu_helpers::GpuHandleMetadataSnapshot,
 ) -> BuiltinResult<Value> {
-    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await;
+    let gathered = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+        gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await
+    };
     gpu_helpers::restore_handle_metadata(handle, metadata);
     let gathered =
         gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;

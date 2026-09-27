@@ -19,7 +19,10 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
             &REALSQRT_ERROR_DOMAIN,
             "gpuArray contains negative values",
         )),
-        Ok(GpuLowerBoundResult::AtOrAbove) => match provider.unary_sqrt(&input).await {
+        Ok(GpuLowerBoundResult::AtOrAbove) => match {
+            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&input);
+            provider.unary_sqrt(&input).await
+        } {
             Ok(output) => super::super::super::unary_provider::validate_real_unary_output(
                 provider,
                 &input,

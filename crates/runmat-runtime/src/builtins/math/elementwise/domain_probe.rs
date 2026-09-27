@@ -14,6 +14,7 @@ pub(super) enum GpuDomainProbeError {
     ProviderReduce(anyhow::Error),
     ProviderDownload(Box<crate::RuntimeError>),
     AliasedReduction,
+    MalformedInput,
     MalformedReduction,
 }
 
@@ -25,6 +26,9 @@ impl std::fmt::Display for GpuDomainProbeError {
                 write!(formatter, "provider reduce_min download failed: {error}")
             }
             Self::AliasedReduction => formatter.write_str("provider reduce_min aliased its input"),
+            Self::MalformedInput => {
+                formatter.write_str("range probe requires an owned real floating input")
+            }
             Self::MalformedReduction => {
                 formatter.write_str("provider reduce_min returned malformed output")
             }
@@ -42,13 +46,32 @@ pub(super) async fn probe_gpu_lower_bound(
     handle: &GpuTensorHandle,
     complex_below: f64,
 ) -> Result<GpuLowerBoundResult, GpuDomainProbeError> {
-    if handle.shape.iter().product::<usize>() == 0 {
+    let element = gpu_helpers::expected_handle_numeric_element_type(handle)
+        .map_err(|_| GpuDomainProbeError::MalformedInput)?;
+    if gpu_helpers::exact_provider_for_handle(handle)
+        .is_none_or(|owner| !std::ptr::eq(owner, provider))
+        || !gpu_helpers::numeric_descriptor_matches(handle, element, GpuTensorStorage::Real)
+        || runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Err(GpuDomainProbeError::MalformedInput);
+    }
+    if handle.shape.contains(&0) {
         return Ok(GpuLowerBoundResult::AtOrAbove);
     }
+    if handle
+        .shape
+        .iter()
+        .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+        .is_none()
+    {
+        return Err(GpuDomainProbeError::MalformedInput);
+    }
 
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(handle);
-    let reduction = provider.reduce_min(handle).await;
-    gpu_helpers::restore_handle_metadata(handle, &input_metadata);
+    let reduction = {
+        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+        provider.reduce_min(handle).await
+    };
     let minimum = match reduction {
         Ok(handle) => handle,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
@@ -68,14 +91,23 @@ pub(super) async fn probe_gpu_lower_bound(
             != runmat_accelerate_api::handle_precision(handle)
         || runmat_accelerate_api::handle_integer_type(&minimum).is_some()
         || runmat_accelerate_api::handle_is_logical(&minimum)
-        || minimum.shape.iter().product::<usize>() != 1
+        || !gpu_helpers::numeric_descriptor_matches(&minimum, element, GpuTensorStorage::Real)
+        || minimum
+            .shape
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            != Some(1)
     {
-        gpu_helpers::free_unprotected_exact_owner(&minimum, &[handle]);
+        gpu_helpers::free_rejected_provider_output(&minimum, &[handle], provider);
         return Err(GpuDomainProbeError::MalformedReduction);
     }
 
-    let host = gpu_helpers::download_floating_projection_async(provider, &minimum).await;
-    gpu_helpers::free_unprotected_exact_owner(&minimum, &[handle]);
+    let minimum = Reduction {
+        provider,
+        handle: minimum,
+    };
+    let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+    let host = gpu_helpers::download_floating_projection_async(provider, &minimum.handle).await;
     let host = host.map_err(|error| GpuDomainProbeError::ProviderDownload(Box::new(error)))?;
     if host.data.iter().any(|value| value.is_nan()) {
         return Ok(GpuLowerBoundResult::Unknown);
@@ -84,5 +116,19 @@ pub(super) async fn probe_gpu_lower_bound(
         Ok(GpuLowerBoundResult::Below)
     } else {
         Ok(GpuLowerBoundResult::AtOrAbove)
+    }
+}
+
+/// A validated, distinct reduction allocation retains its owner across awaits.
+struct Reduction {
+    provider: &'static dyn AccelProvider,
+    handle: GpuTensorHandle,
+}
+
+impl Drop for Reduction {
+    fn drop(&mut self) {
+        if self.provider.free(&self.handle).is_ok() {
+            runmat_accelerate_api::clear_handle_metadata(&self.handle);
+        }
     }
 }
