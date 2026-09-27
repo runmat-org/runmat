@@ -768,35 +768,73 @@ pub(crate) async fn flip_gpu_with(
             format!("{builtin}: dimension indices must be >= 1"),
         ));
     }
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let logical = runmat_accelerate_api::handle_is_logical(&handle);
-        let integer_type = runmat_accelerate_api::handle_integer_type(&handle);
-        let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
-        if integer_type.is_none() {
-            if let Ok(out) = provider.flip(&handle, &zero_based) {
-                if flip_native_output_matches(&handle, &out, provider) {
-                    runmat_accelerate_api::set_handle_logical(&out, logical);
-                    return gpu_helpers::resident_gpu_value(out);
-                }
-                if !gpu_handles_alias(&handle, &out) {
-                    let owner =
-                        runmat_accelerate_api::provider_for_handle(&out).unwrap_or(provider);
-                    let _ = owner.free(&out);
-                }
-            }
-        }
-        let host_tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        let flipped = flip_tensor_with(builtin, host_tensor, dims)?;
-        let out = gpu_helpers::upload_tensor(provider, &flipped)
-            .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))?;
-        runmat_accelerate_api::set_handle_logical(&out, logical);
-        Ok(Value::GpuTensor(out))
-    } else {
-        Err(flip_error_for(
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        flip_error_for(
             builtin,
             format!("{builtin}: no acceleration provider owns the input handle"),
-        ))
+        )
+    })?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    let zero_based: Vec<usize> = dims.iter().map(|&d| d - 1).collect();
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+        match provider.flip(&handle, &zero_based) {
+            Ok(mut output) => {
+                if !flip_native_output_matches(&handle, &output, provider) {
+                    return Err(gpu_helpers::reject_gpu_output(
+                        output,
+                        flip_error_for(builtin, format!("{builtin}: invalid provider flip output")),
+                    ));
+                }
+                gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+                return gpu_helpers::resident_gpu_value(output);
+            }
+            Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {}
+            Err(cause) => {
+                return Err(crate::build_runtime_error(format!(
+                    "{builtin}: provider flip failed: {cause}"
+                ))
+                .with_builtin(builtin)
+                .with_source(cause)
+                .build())
+            }
+        }
     }
+    let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?;
+    let mut output = match host {
+        Value::Tensor(tensor) => {
+            let tensor = flip_tensor_with(builtin, tensor, dims)?;
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?
+        }
+        Value::ComplexTensor(tensor) => {
+            let tensor = flip_complex_tensor_with(builtin, tensor, dims)?;
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[&handle])?
+        }
+        Value::LogicalArray(array) => {
+            let array = flip_logical_array_with(builtin, array, dims)?;
+            runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &array.data,
+                    shape: &array.shape,
+                },
+                &[&handle],
+            )
+            .map_err(|cause| {
+                crate::build_runtime_error(format!("{builtin}: logical upload failed: {cause}"))
+                    .with_builtin(builtin)
+                    .with_source(cause)
+                    .build()
+            })?
+        }
+        _ => {
+            return Err(flip_error_for(
+                builtin,
+                format!("{builtin}: provider download did not retain tensor storage"),
+            ))
+        }
+    };
+    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn flip_native_output_matches(
@@ -812,12 +850,13 @@ fn flip_native_output_matches(
         && runmat_accelerate_api::handle_precision(output)
             == runmat_accelerate_api::handle_precision(input)
         && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && output.view().is_logical() == input.view().is_logical()
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
 fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
+    lhs.shares_allocation_with(rhs)
 }
 
 fn flip_generic<T: Clone>(
@@ -1031,14 +1070,13 @@ pub(crate) mod tests {
     #[test]
     fn flip_gpu_logical_result_preserves_residency_and_class() {
         test_support::with_test_provider(|provider| {
-            let values = [1.0, 0.0, 0.0, 1.0];
+            let values = [1u8, 0, 0, 1];
             let handle = provider
-                .upload(&HostTensorView {
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
                     data: &values,
                     shape: &[2, 2],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
             let Value::GpuTensor(result) =
                 flip_builtin(Value::GpuTensor(handle), Vec::new()).expect("flip logical gpu")
             else {
@@ -1049,6 +1087,54 @@ pub(crate) mod tests {
                 runmat_accelerate_api::provider_for_handle(&result).expect("result owner"),
                 provider
             ));
+        });
+    }
+
+    #[test]
+    fn flip_gpu_paired_integer_fallback_preserves_exact_components() {
+        test_support::with_test_provider(|provider| {
+            let real = vec![u64::MAX, 1u64 << 63, 3, 4, 5, 6];
+            let imag = vec![6, 5, 4, 3, 1u64 << 63, u64::MAX];
+            let host = ComplexTensor::new_integer(
+                runmat_value::IntegerComplexStorage::new(
+                    runmat_value::IntegerStorage::U64(real.clone()),
+                    runmat_value::IntegerStorage::U64(imag.clone()),
+                )
+                .unwrap(),
+                vec![2, 3],
+            )
+            .unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
+            let value =
+                flip_builtin(Value::GpuTensor(input.clone()), vec![Value::Num(1.0)]).unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident paired result")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            let Value::ComplexTensor(result) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("paired output")
+            };
+            let storage = result.integer_storage().unwrap();
+            assert_eq!(
+                storage.real,
+                runmat_value::IntegerStorage::U64(vec![
+                    real[1], real[0], real[3], real[2], real[5], real[4]
+                ])
+            );
+            assert_eq!(
+                storage.imag,
+                runmat_value::IntegerStorage::U64(vec![
+                    imag[1], imag[0], imag[3], imag[2], imag[5], imag[4]
+                ])
+            );
+            let Value::ComplexTensor(original) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
+            else {
+                panic!("paired input")
+            };
+            assert_eq!(original.integer_storage(), host.integer_storage());
         });
     }
 

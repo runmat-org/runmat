@@ -589,11 +589,7 @@ async fn zeros_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
             "zeros: provider cannot preserve explicit complex gpuArray output",
         ));
     }
-    let attempt = if handle.shape() == shape {
-        provider.zeros_like(handle)
-    } else {
-        provider.zeros(shape)
-    };
+    let attempt = provider.zeros_like(handle, shape);
     if let Ok(gpu) = attempt {
         if let Ok(value) = validate_zeros_gpu_output(
             provider,
