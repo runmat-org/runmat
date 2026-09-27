@@ -399,28 +399,26 @@ fn registered_bit_position_operations_use_scalar_or_exact_size_expansion() {
 
 #[test]
 fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
-
-    let integer_handle = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX - 1,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        IntegerElementType::I64.into(),
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
-    let logical_handle = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: u32::MAX,
-        buffer_id: u64::MAX,
-        descriptor: Default::default(),
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
     };
-    runmat_accelerate_api::set_handle_logical(&logical_handle, true);
 
-    let resident_integer = Value::GpuTensor(integer_handle.clone());
-    let resident_logical = Value::GpuTensor(logical_handle.clone());
+    let owner = TestAllocationOwner::new();
+    let integer = owner
+        .allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::I64(vec![2]),
+            shape: vec![1, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let logical = owner.allocate_logical(vec![1], vec![1, 1]).unwrap();
+    assert!(runmat_accelerate_api::provider_for_handle(&integer.handle).is_none());
+    assert!(runmat_accelerate_api::provider_for_handle(&logical.handle).is_none());
+    let integer_descriptor = integer.handle.wire_descriptor();
+    let logical_descriptor = logical.handle.wire_descriptor();
+    let resident_integer = Value::GpuTensor(integer.handle.clone());
+    let resident_logical = Value::GpuTensor(logical.handle.clone());
     let host_integer = Value::Int(IntValue::I64(2));
     let host_logical = Value::Bool(true);
     for builtin in [
@@ -438,7 +436,17 @@ fn registered_integer_arithmetic_rejects_logicals_before_provider_dispatch() {
         }
     }
 
-    runmat_accelerate_api::clear_handle_logical(&logical_handle);
+    assert_eq!(integer.handle.wire_descriptor(), integer_descriptor);
+    assert_eq!(logical.handle.wire_descriptor(), logical_descriptor);
+    assert!(runmat_accelerate_api::handle_is_logical(&logical.handle));
+    assert_eq!(integer.probe.retirements(), 0);
+    assert_eq!(logical.probe.retirements(), 0);
+    drop(resident_integer);
+    drop(resident_logical);
+    integer.handle.release().unwrap();
+    logical.handle.release().unwrap();
+    assert_eq!(integer.probe.retirements(), 1);
+    assert_eq!(logical.probe.retirements(), 1);
 }
 
 macro_rules! integer_class_cases {
@@ -1367,23 +1375,25 @@ fn registered_set_double_exception_keeps_wide_integer_comparison_exact() {
 
 #[test]
 fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dispatch() {
-    use runmat_accelerate_api::{GpuTensorHandle, IntegerElementType};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, HostNumericDataOwned,
+        HostNumericTensorOwned,
+    };
 
-    for (offset, integer_type) in [IntegerElementType::I64, IntegerElementType::U64]
-        .into_iter()
-        .enumerate()
-    {
-        let handle = GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 100 - offset as u64,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            integer_type.into(),
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
-        let resident = Value::GpuTensor(handle.clone());
+    for data in [
+        HostNumericDataOwned::I64(vec![i64::MIN, i64::MAX]),
+        HostNumericDataOwned::U64(vec![(1 << 53) + 1, u64::MAX]),
+    ] {
+        let allocation = TestAllocationOwner::new()
+            .allocate_numeric(HostNumericTensorOwned {
+                data,
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        assert!(runmat_accelerate_api::provider_for_handle(&allocation.handle).is_none());
+        let descriptor = allocation.handle.wire_descriptor();
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let host = integer_tensor(IntegerStorage::I32(vec![1, 2]), vec![2, 1]);
         for builtin in ["ismember", "intersect", "union", "setdiff", "setxor"] {
             for args in [
@@ -1407,5 +1417,10 @@ fn registered_set_functions_reject_64_bit_integer_gpu_inputs_before_provider_dis
                 );
             }
         }
+        assert_eq!(allocation.handle.wire_descriptor(), descriptor);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(resident);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }
