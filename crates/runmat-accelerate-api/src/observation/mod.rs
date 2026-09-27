@@ -60,6 +60,19 @@ pub enum ProviderObservationFailure {
     InvalidTiming,
     TrackingOverflow,
     ResourceLimit,
+    ExecutionUnproven,
+    SharedRuntimeFallback,
+}
+
+/// Reported by the admitted operation owner, never inferred from output
+/// residency or the presence of transfer submissions. Selected execution means
+/// the selected provider's actual operation (including an audited identity/empty
+/// route) succeeded; it does not claim device completion.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderExecutionDisposition {
+    SelectedProvider,
+    SharedRuntimeFallback,
+    Unproven,
 }
 
 /// Physical instrumentation demand for the admitted operation. Requested buffer

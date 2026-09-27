@@ -5,6 +5,13 @@ use runmat_value::Value;
 /// borrowed input protection and adopt returned aliases before releasing temps.
 /// No timing assumptions are imposed by the runtime.
 pub trait BuiltinPreparationObservation {
+    /// Optional provider-owned operation scope. None deliberately masks an outer
+    /// scope; opaque bodies must not borrow another candidate's completion proof.
+    fn provider_recorder(
+        &self,
+    ) -> Option<runmat_accelerate_api::observation::ProviderOperationRecorder> {
+        None
+    }
     fn begin_execution(&mut self) {}
     fn finish(self: Box<Self>, result: &Result<Value, RuntimeError>) -> Result<(), RuntimeError>;
     fn abort(self: Box<Self>);
@@ -46,6 +53,14 @@ impl PreparedBuiltinOperands {
         if let Some(observation) = &mut self.observation {
             observation.begin_execution();
         }
+    }
+
+    pub(super) fn provider_recorder(
+        &self,
+    ) -> Option<runmat_accelerate_api::observation::ProviderOperationRecorder> {
+        self.observation
+            .as_ref()
+            .and_then(|observation| observation.provider_recorder())
     }
 
     pub(super) fn finish(

@@ -10,6 +10,7 @@ struct State {
     pending: u64,
     failure: Option<ProviderObservationFailure>,
     taken: bool,
+    selected_execution: Option<bool>,
     stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
     waiter: Option<Waker>,
@@ -143,6 +144,7 @@ impl ProviderOperationReceipt {
                         .is_none()
                         .then_some(ProviderObservationFailure::InvalidTiming),
                     taken: false,
+                    selected_execution: None,
                     stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                     pipelines: ProviderPipelineObservations::default(),
                     waiter: None,
@@ -163,6 +165,19 @@ impl ProviderOperationReceipt {
         )
     }
 
+    /// Direct admitted bodies may fall back internally. Require their explicit
+    /// route witness before publication, in addition to provider completion.
+    /// Call before staging; a late change cannot retroactively certify work.
+    pub fn require_selected_execution(&mut self) {
+        self.0.with(|state| {
+            if state.registered != 0 || state.publication.is_some() || state.taken {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            } else {
+                state.selected_execution = Some(false);
+            }
+        });
+    }
+
     /// Seal submission registration after all selected-route work and successful
     /// output publication. Positively identified synchronous/empty work with no
     /// submissions completes here. Missing instrumentation is not such evidence;
@@ -172,6 +187,10 @@ impl ProviderOperationReceipt {
         self.0.with(|state| {
             if let Some(reason) = state.failure {
                 return Err(reason);
+            }
+            if state.selected_execution == Some(false) {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+                return Err(ProviderObservationFailure::ExecutionUnproven);
             }
             if state.publication.is_some() || state.taken {
                 state.fail(ProviderObservationFailure::PublicationFailed);
@@ -255,6 +274,24 @@ impl Drop for ProviderOperationReceipt {
 pub struct ProviderOperationRecorder(Arc<Shared>, #[cfg(feature = "wgpu")] ProgressOwner);
 
 impl ProviderOperationRecorder {
+    /// The operation owner must mark fallback even if it subsequently restores
+    /// a resident result. A later selected-route event cannot undo invalidation.
+    pub fn execution_disposition(&self, disposition: ProviderExecutionDisposition) {
+        self.0.with(|state| match disposition {
+            ProviderExecutionDisposition::SelectedProvider => {
+                if state.publication.is_none() && state.selected_execution.is_some() {
+                    state.selected_execution = Some(true);
+                }
+            }
+            ProviderExecutionDisposition::SharedRuntimeFallback => {
+                state.fail(ProviderObservationFailure::SharedRuntimeFallback);
+            }
+            ProviderExecutionDisposition::Unproven => {
+                state.fail(ProviderObservationFailure::ExecutionUnproven);
+            }
+        });
+    }
+
     pub fn fail(&self, reason: ProviderObservationFailure) {
         self.0.with(|state| state.fail(reason));
     }

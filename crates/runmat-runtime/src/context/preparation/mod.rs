@@ -36,18 +36,21 @@ pub async fn prepare_admitted(
 /// Keep ownership/observation alive across every poll of the admitted body.
 /// Returned aliases are visible to the service's completion/adoption hook.
 /// Dropping this future (including cancellation) records an abort, not success.
-pub(crate) async fn execute_prepared<F, Fut>(
+pub(crate) fn execute_prepared<F, Fut>(
     mut prepared: PreparedBuiltinOperands,
     execute: F,
-) -> Result<Value, RuntimeError>
+) -> impl Future<Output = Result<Value, RuntimeError>>
 where
     F: FnOnce(Vec<Value>) -> Fut,
     Fut: Future<Output = Result<Value, RuntimeError>>,
 {
-    prepared.begin_execution();
-    let result = execute(prepared.take_operands()).await;
-    prepared.finish(&result)?;
-    result
+    let recorder = prepared.provider_recorder();
+    runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
+        prepared.begin_execution();
+        let result = execute(prepared.take_operands()).await;
+        prepared.finish(&result)?;
+        result
+    })
 }
 
 pub(crate) async fn execute_admitted<F, Fut>(

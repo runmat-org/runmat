@@ -1,4 +1,5 @@
 use super::*;
+mod observation;
 use crate::context::{RuntimeAccelerationService, RuntimeServiceFuture, RuntimeServicePorts};
 use futures::{executor::block_on, task::noop_waker};
 use runmat_builtins::*;

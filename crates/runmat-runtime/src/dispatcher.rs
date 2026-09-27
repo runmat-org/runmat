@@ -373,6 +373,11 @@ async fn call_builtin_async_impl(
             Ok(result) => return compatibility_checked_builtin_result(name, args, result),
             Err(err) => {
                 if should_retry_with_gpu_gather(&err, execution_args) {
+                    if let Some(recorder) =
+                        runmat_accelerate_api::observation::current_provider_observation()
+                    {
+                        recorder.execution_disposition(runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback);
+                    }
                     match gather_args_for_retry_async(execution_args).await {
                         Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
                             Ok(result) => {
