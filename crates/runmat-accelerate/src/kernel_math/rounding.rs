@@ -2,6 +2,12 @@
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 
+mod digits;
+
+pub(crate) fn digit_functions(precision: ProviderPrecision) -> String {
+    functions(precision) + &digits::functions(precision)
+}
+
 pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
     FusionMathHelper::Round
         .entrypoint(match precision {
@@ -13,8 +19,8 @@ pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
 
 pub(crate) fn functions(precision: ProviderPrecision) -> String {
     let (ty, classification) = match precision {
-        ProviderPrecision::F32 => ("f32", "let bits = bitcast<u32>(a);\nlet special = (bits & 0x7f800000u) == 0x7f800000u;\nlet zero = (bits & 0x7fffffffu) == 0u;"),
-        ProviderPrecision::F64 => ("f64", "let bits = bitcast<vec2<u32>>(a);\nlet special = (bits.y & 0x7ff00000u) == 0x7ff00000u;\nlet zero = (bits.y & 0x7fffffffu) == 0u && bits.x == 0u;"),
+        ProviderPrecision::F32 => ("f32", "let bits = bitcast<u32>(a);\nlet special = (bits & 0x7f800000u) == 0x7f800000u;\nlet zero = (bits & 0x7fffffffu) == 0u;\nlet negative = (bits & 0x80000000u) != 0u;"),
+        ProviderPrecision::F64 => ("f64", "let bits = bitcast<vec2<u32>>(a);\nlet special = (bits.y & 0x7ff00000u) == 0x7ff00000u;\nlet zero = (bits.y & 0x7fffffffu) == 0u && bits.x == 0u;\nlet negative = (bits.y & 0x80000000u) != 0u;"),
     };
     let name = entrypoint(precision);
     format!(
@@ -27,7 +33,7 @@ fn {name}(a: {ty}) -> {ty} {{
     // Test the represented fraction rather than adding 0.5 to the input:
     // that addition changes already-integral values near the precision limit.
     let rounded = integral + select({ty}(0.0), {ty}(1.0), magnitude - integral >= {ty}(0.5));
-    if a < {ty}(0.0) {{ return -rounded; }}
+    if negative {{ return -rounded; }}
     return rounded;
 }}
 "#
