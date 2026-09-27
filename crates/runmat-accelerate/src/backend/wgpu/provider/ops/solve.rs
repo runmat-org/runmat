@@ -323,8 +323,11 @@ impl WgpuProvider {
         options.need_rcond || options.rcond.is_some()
     }
 
-    fn triangular_solve_bind_group_layout(&self) -> Arc<wgpu::BindGroupLayout> {
-        self.cached_bind_group_layout("runmat-triangular-solve-layout", |device| {
+    fn triangular_solve_bind_group_layout(
+        &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
+    ) -> Result<Arc<wgpu::BindGroupLayout>> {
+        self.cached_bind_group_layout(emission, "runmat-triangular-solve-layout", |emission| {
             let entries = [
                 crate::backend::wgpu::bindings::storage_read_entry(0),
                 crate::backend::wgpu::bindings::storage_read_entry(1),
@@ -332,26 +335,29 @@ impl WgpuProvider {
                 crate::backend::wgpu::bindings::storage_read_write_entry(3),
                 crate::backend::wgpu::bindings::uniform_entry(4),
             ];
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("runmat-triangular-solve-bgl"),
-                entries: &entries,
-            })
+            emission
+                .device()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("runmat-triangular-solve-bgl"),
+                    entries: &entries,
+                })
         })
     }
 
     fn triangular_solve_pipeline(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         transpose: bool,
         lower: bool,
-    ) -> Arc<wgpu::ComputePipeline> {
+    ) -> Result<Arc<wgpu::ComputePipeline>> {
         let shader = crate::backend::wgpu::shaders::solve::triangular_linsolve_shader(
             self.precision,
             transpose,
             lower,
         );
-        let bind_group_layout = self.triangular_solve_bind_group_layout();
+        let bind_group_layout = self.triangular_solve_bind_group_layout(emission)?;
         let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
-            self.device_ref(),
+            emission,
             "runmat-triangular-solve-pipeline-layout",
             bind_group_layout.as_ref(),
         );
@@ -362,11 +368,12 @@ impl WgpuProvider {
             Some(crate::backend::wgpu::config::effective_workgroup_size()),
         );
         let module = crate::backend::wgpu::pipelines::create_shader_module(
-            self.device_ref(),
+            emission,
             "runmat-triangular-solve-shader",
             &shader,
         );
         self.get_or_create_pipeline(
+            emission,
             shader_hash,
             &pipeline_layout,
             &module,
@@ -379,6 +386,7 @@ impl WgpuProvider {
 
     fn triangular_solve_bind_group(
         &self,
+        emission: &runmat_accelerate_api::WgpuEmission<'_>,
         bind_group_layout: &wgpu::BindGroupLayout,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
@@ -412,18 +420,22 @@ impl WgpuProvider {
                 resource: params_buffer.as_entire_binding(),
             },
         ];
-        Ok(self
-            .bind_group_cache
-            .get_or_create(bind_group_layout, &bind_entries, || {
+        self.bind_group_cache.get_or_create(
+            emission,
+            bind_group_layout,
+            &bind_entries,
+            |emission| {
                 Arc::new(
-                    self.device_ref()
+                    emission
+                        .device()
                         .create_bind_group(&wgpu::BindGroupDescriptor {
                             label: Some("runmat-triangular-solve-bind-group"),
                             layout: bind_group_layout,
                             entries: &bind_entries,
                         }),
                 )
-            }))
+            },
+        )
     }
 
     fn run_triangular_linsolve_device(
@@ -451,53 +463,55 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("linsolve: rhs dimensions overflow"))?;
         let mut current = self.zeros(rhs.shape())?;
         let mut scratch = self.zeros(rhs.shape())?;
-        let bind_group_layout = self.triangular_solve_bind_group_layout();
-        let pipeline = self.triangular_solve_pipeline(transpose, effective_lower);
-        crate::backend::wgpu::dispatch::solve::warmup_noop(
-            self.device_ref(),
-            self.queue_ref(),
-            &pipeline,
-        );
-        let mut params = crate::backend::wgpu::params::TriangularSolveParams {
-            len: len as u32,
-            offset: 0,
-            total: len as u32,
-            rows: lhs_rows as u32,
-            rhs_cols: rhs_cols as u32,
-            target_row: 0,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-triangular-solve-params");
-        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        for step in 0..lhs_rows {
-            params.target_row = if effective_lower {
-                step
-            } else {
-                lhs_rows - 1 - step
-            } as u32;
-            self.queue_ref()
-                .write_buffer(&params_buffer, 0, bytes_of(&params));
-            let bind_group = self.triangular_solve_bind_group(
-                bind_group_layout.as_ref(),
-                lhs,
-                rhs,
-                &current,
-                &scratch,
-                &params_buffer,
-            )?;
-            crate::backend::wgpu::dispatch::solve::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline,
-                bind_group.as_ref(),
-                workgroups,
+        self.with_emission(|emission, pending| -> Result<()> {
+            let bind_group_layout = self.triangular_solve_bind_group_layout(emission)?;
+            let pipeline = self.triangular_solve_pipeline(emission, transpose, effective_lower)?;
+            crate::backend::wgpu::dispatch::solve::warmup_noop(emission, pending, &pipeline)?;
+            let mut params = crate::backend::wgpu::params::TriangularSolveParams {
+                len: len as u32,
+                offset: 0,
+                total: len as u32,
+                rows: lhs_rows as u32,
+                rhs_cols: rhs_cols as u32,
+                target_row: 0,
+                _pad0: 0,
+                _pad1: 0,
+            };
+            let params_buffer =
+                self.uniform_buffer(emission, &params, "runmat-triangular-solve-params")?;
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                len as u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
             );
-            std::mem::swap(&mut current, &mut scratch);
-        }
+            for step in 0..lhs_rows {
+                params.target_row = if effective_lower {
+                    step
+                } else {
+                    lhs_rows - 1 - step
+                } as u32;
+                emission
+                    .queue()
+                    .write_buffer(&params_buffer, 0, bytes_of(&params));
+                let bind_group = self.triangular_solve_bind_group(
+                    emission,
+                    bind_group_layout.as_ref(),
+                    lhs,
+                    rhs,
+                    &current,
+                    &scratch,
+                    &params_buffer,
+                )?;
+                crate::backend::wgpu::dispatch::solve::run(
+                    emission,
+                    pending,
+                    &pipeline,
+                    bind_group.as_ref(),
+                    workgroups,
+                )?;
+                std::mem::swap(&mut current, &mut scratch);
+            }
+            Ok(())
+        })??;
         drop(scratch);
         Ok(ProviderLinsolveResult {
             solution: current,
@@ -523,83 +537,95 @@ impl WgpuProvider {
         );
 
         let bytes = (len_out as u64) * (self.element_size as u64);
-        let gram_buffer = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
-            bytes,
-            "runmat-chol-gram-scratch",
-        );
-        if bytes > 0 {
-            let copy_label = format!("{label}-gram-copy");
-            let mut encoder =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some(copy_label.as_str()),
-                    });
-            encoder.copy_buffer_to_buffer(
-                matrix_entry.buffer.as_ref(),
-                0,
-                gram_buffer.as_ref(),
-                0,
+        let (r_buffer, r_inv_buffer) = self.with_emission(|emission, pending| -> Result<_> {
+            let gram_buffer = self.kernel_resources.scratch_storage_buffer(
+                emission,
+                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
                 bytes,
-            );
-            self.submit(encoder);
-        }
+                "runmat-chol-gram-scratch",
+            )?;
+            if bytes > 0 {
+                let copy_label = format!("{label}-gram-copy");
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some(copy_label.as_str()),
+                        });
+                encoder.copy_buffer_to_buffer(
+                    matrix_entry.buffer.as_ref(),
+                    0,
+                    gram_buffer.as_ref(),
+                    0,
+                    bytes,
+                );
+                self.submit(emission, pending, encoder)?;
+            }
 
-        let r_buffer = self.create_storage_buffer_checked(len_out, "runmat-chol-r")?;
-        let r_inv_buffer = self.create_storage_buffer_checked(len_out, "runmat-chol-rinv")?;
+            let r_buffer =
+                self.create_storage_buffer_checked(emission, len_out, "runmat-chol-r")?;
+            let r_inv_buffer =
+                self.create_storage_buffer_checked(emission, len_out, "runmat-chol-rinv")?;
 
-        let params = QrPowerIterParams {
-            cols: rows as u32,
-            stride: rows as u32,
-            _pad0: [0, 0],
-        };
-        let params_buffer = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::UniformBufferKey::QrPowerIterParams,
-            std::mem::size_of::<QrPowerIterParams>() as u64,
-            "runmat-chol-params",
-        );
-        self.queue_ref()
-            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            let params = QrPowerIterParams {
+                cols: rows as u32,
+                stride: rows as u32,
+                _pad0: [0, 0],
+            };
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                emission,
+                crate::backend::wgpu::resources::UniformBufferKey::QrPowerIterParams,
+                std::mem::size_of::<QrPowerIterParams>() as u64,
+                "runmat-chol-params",
+            )?;
+            emission
+                .queue()
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
 
-        let layout = &self.pipelines.qr_power_iter.layout;
-        let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: gram_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: r_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: r_inv_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ];
-        let bind_group = self
-            .bind_group_cache
-            .get_or_create(layout, &bind_entries, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-chol-bind"),
-                            layout,
-                            entries: &bind_entries,
-                        }),
-                )
-            });
-        crate::backend::wgpu::dispatch::qr_power_iter::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.qr_power_iter.pipeline,
-            bind_group.as_ref(),
-        );
+            let layout = &self.pipelines.qr_power_iter.get(emission)?.layout;
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: gram_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: r_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: r_inv_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let bind_group = self.bind_group_cache.get_or_create(
+                emission,
+                layout,
+                &bind_entries,
+                |emission| {
+                    Arc::new(
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-chol-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
+                },
+            )?;
+            crate::backend::wgpu::dispatch::qr_power_iter::run(
+                emission,
+                pending,
+                &self.pipelines.qr_power_iter.get(emission)?.pipeline,
+                bind_group.as_ref(),
+            )?;
+
+            Ok((r_buffer, r_inv_buffer))
+        })??;
 
         let shape = vec![rows, rows];
         let r_handle = self.register_existing_buffer_with_usage(

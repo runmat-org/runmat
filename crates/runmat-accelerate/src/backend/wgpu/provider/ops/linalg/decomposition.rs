@@ -245,86 +245,96 @@ impl WgpuProvider {
             gram_entry.len
         );
         let gram_bytes = (gram_len as u64) * (self.element_size as u64);
-        let gram_scratch = self.kernel_resources.scratch_storage_buffer(
-            self.device_ref(),
-            crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
-            gram_bytes,
-            "runmat-qr-gram-scratch",
-        );
-        if gram_bytes > 0 {
-            let gram_copy_label = format!("{label}-gram-copy");
-            let mut encoder =
-                self.device_ref()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some(gram_copy_label.as_str()),
-                    });
-            encoder.copy_buffer_to_buffer(
-                gram_entry.buffer.as_ref(),
-                0,
-                gram_scratch.as_ref(),
-                0,
-                gram_bytes,
-            );
-            self.submit(encoder);
-        }
-
         let len_out = cols * cols;
-        // These buffers escape as owning results; reusable scratch cannot back
-        // them while an earlier result or exported view remains live.
-        let r_buffer = self.create_storage_buffer_checked(len_out, "runmat-qr-r")?;
-        let r_inv_buffer = self.create_storage_buffer_checked(len_out, "runmat-qr-rinv")?;
+        let (r_buffer, r_inv_buffer) = self.with_emission(|emission, pending| -> Result<_> {
+            let gram_scratch = self.kernel_resources.scratch_storage_buffer(
+                emission,
+                crate::backend::wgpu::resources::ScratchBufferKind::QrGram,
+                gram_bytes,
+                "runmat-qr-gram-scratch",
+            )?;
+            if gram_bytes > 0 {
+                let gram_copy_label = format!("{label}-gram-copy");
+                let mut encoder =
+                    emission
+                        .device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some(gram_copy_label.as_str()),
+                        });
+                encoder.copy_buffer_to_buffer(
+                    gram_entry.buffer.as_ref(),
+                    0,
+                    gram_scratch.as_ref(),
+                    0,
+                    gram_bytes,
+                );
+                self.submit(emission, pending, encoder)?;
+            }
 
-        let params = QrPowerIterParams {
-            cols: cols as u32,
-            stride: cols as u32,
-            _pad0: [0, 0],
-        };
-        let params_buffer = self.kernel_resources.uniform_buffer(
-            self.device_ref(),
-            UniformBufferKey::QrPowerIterParams,
-            std::mem::size_of::<QrPowerIterParams>() as u64,
-            "runmat-qr-power-params",
-        );
-        self.queue
-            .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+            // These buffers escape as owning results; reusable scratch cannot back
+            // them while an earlier result or exported view remains live.
+            let r_buffer = self.create_storage_buffer_checked(emission, len_out, "runmat-qr-r")?;
+            let r_inv_buffer =
+                self.create_storage_buffer_checked(emission, len_out, "runmat-qr-rinv")?;
 
-        let layout = &self.pipelines.qr_power_iter.layout;
-        let bind_entries = [
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: gram_scratch.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: r_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: r_inv_buffer.as_ref().as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: params_buffer.as_entire_binding(),
-            },
-        ];
-        let bind_group = self
-            .bind_group_cache
-            .get_or_create(layout, &bind_entries, || {
-                Arc::new(
-                    self.device_ref()
-                        .create_bind_group(&wgpu::BindGroupDescriptor {
-                            label: Some("runmat-qr-power-bind"),
-                            layout,
-                            entries: &bind_entries,
-                        }),
-                )
-            });
-        crate::backend::wgpu::dispatch::qr_power_iter::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.qr_power_iter.pipeline,
-            bind_group.as_ref(),
-        );
+            let params = QrPowerIterParams {
+                cols: cols as u32,
+                stride: cols as u32,
+                _pad0: [0, 0],
+            };
+            let params_buffer = self.kernel_resources.uniform_buffer(
+                emission,
+                UniformBufferKey::QrPowerIterParams,
+                std::mem::size_of::<QrPowerIterParams>() as u64,
+                "runmat-qr-power-params",
+            )?;
+            emission
+                .queue()
+                .write_buffer(params_buffer.as_ref(), 0, bytes_of(&params));
+
+            let layout = &self.pipelines.qr_power_iter.get(emission)?.layout;
+            let bind_entries = [
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: gram_scratch.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: r_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: r_inv_buffer.as_ref().as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: params_buffer.as_entire_binding(),
+                },
+            ];
+            let bind_group = self.bind_group_cache.get_or_create(
+                emission,
+                layout,
+                &bind_entries,
+                |emission| {
+                    Arc::new(
+                        emission
+                            .device()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-qr-power-bind"),
+                                layout,
+                                entries: &bind_entries,
+                            }),
+                    )
+                },
+            )?;
+            crate::backend::wgpu::dispatch::qr_power_iter::run(
+                emission,
+                pending,
+                &self.pipelines.qr_power_iter.get(emission)?.pipeline,
+                bind_group.as_ref(),
+            )?;
+            Ok((r_buffer, r_inv_buffer))
+        })??;
 
         drop(gram_handle);
 
