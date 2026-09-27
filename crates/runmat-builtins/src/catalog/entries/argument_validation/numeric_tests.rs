@@ -114,3 +114,48 @@ fn filesystem_validation_declares_environment_read_and_suspension() {
         }
     }
 }
+
+#[test]
+fn ordered_literal_validators_reject_nan_without_changing_signed_zero_boundaries() {
+    for (entry, accepts_zero) in [
+        (&MUST_BE_POSITIVE_CATALOG_ENTRY, false),
+        (&MUST_BE_NEGATIVE_CATALOG_ENTRY, false),
+        (&MUST_BE_NONNEGATIVE_CATALOG_ENTRY, true),
+        (&MUST_BE_NONPOSITIVE_CATALOG_ENTRY, true),
+    ] {
+        for (value, accepted) in [(f64::NAN, false), (0.0, accepts_zero), (-0.0, accepts_zero)] {
+            let mut call = request(vec![ValueFact::unknown(DynamicReason::RuntimeValue)], 0);
+            call.literals.literal_args = vec![LiteralValue::Number(value)];
+            assert_eq!(
+                infer_catalog_call(entry, &call).diagnostics.is_empty(),
+                accepted,
+                "{} {value:?}",
+                entry.identity.name
+            );
+        }
+    }
+    for (entry, accepts_equal) in [
+        (&MUST_BE_GREATER_THAN_CATALOG_ENTRY, false),
+        (&MUST_BE_GREATER_THAN_OR_EQUAL_CATALOG_ENTRY, true),
+        (&MUST_BE_LESS_THAN_CATALOG_ENTRY, false),
+        (&MUST_BE_LESS_THAN_OR_EQUAL_CATALOG_ENTRY, true),
+    ] {
+        for (left, right, accepted) in [
+            (f64::NAN, 1.0, false),
+            (1.0, f64::NAN, false),
+            (f64::NAN, f64::NAN, false),
+            (-0.0, 0.0, accepts_equal),
+            (f64::INFINITY, f64::INFINITY, accepts_equal),
+        ] {
+            let mut call = request(vec![ValueFact::unknown(DynamicReason::RuntimeValue); 2], 0);
+            call.literals.literal_args =
+                vec![LiteralValue::Number(left), LiteralValue::Number(right)];
+            assert_eq!(
+                infer_catalog_call(entry, &call).diagnostics.is_empty(),
+                accepted,
+                "{} {left:?} {right:?}",
+                entry.identity.name
+            );
+        }
+    }
+}

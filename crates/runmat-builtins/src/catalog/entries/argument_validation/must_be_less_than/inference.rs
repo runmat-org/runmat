@@ -7,7 +7,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         request.literals.literal_args.first(),
         request.literals.literal_args.get(1),
     ) {
-        if !(lhs < rhs) {
+        if lhs.partial_cmp(rhs) != Some(std::cmp::Ordering::Less) {
             reject(
                 &mut diagnostics,
                 0,

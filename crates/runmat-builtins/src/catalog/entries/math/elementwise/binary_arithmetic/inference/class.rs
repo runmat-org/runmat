@@ -24,15 +24,14 @@ pub(super) fn result(
     }
     let left_numeric = arithmetic_input(left)?;
     let right_numeric = arithmetic_input(right)?;
-    if left_numeric.class.integer_class().is_some() || right_numeric.class.integer_class().is_some()
-    {
-        if !matches!(left.kind, ValueKindFact::Numeric(_))
+    if (left_numeric.class.integer_class().is_some()
+        || right_numeric.class.integer_class().is_some())
+        && (!matches!(left.kind, ValueKindFact::Numeric(_))
             || !matches!(right.kind, ValueKindFact::Numeric(_))
             || left_numeric.domain == NumericDomain::Complex
-            || right_numeric.domain == NumericDomain::Complex
-        {
-            return Err(DynamicReason::UnsupportedRepresentation);
-        }
+            || right_numeric.domain == NumericDomain::Complex)
+    {
+        return Err(DynamicReason::UnsupportedRepresentation);
     }
     let class = output_class(left_numeric.class, right_numeric.class, left, right)?;
     let domain = if class.integer_class().is_some() {

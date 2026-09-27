@@ -4,7 +4,7 @@ use runmat_types::ShapeFact;
 /// dimensions cannot prove rejection; zero-row empty text retains its policy.
 pub(crate) fn possible_character_row(shape: &ShapeFact) -> bool {
     shape.known_dims().is_none_or(|dims| {
-        !dims.first().copied().flatten().is_some_and(|rows| rows > 1)
+        dims.first().copied().flatten().is_none_or(|rows| rows <= 1)
             && !dims
                 .iter()
                 .skip(2)
