@@ -152,6 +152,13 @@ fn preparation_error(error: impl std::fmt::Display) -> RuntimeError {
 }
 
 impl BuiltinPreparationObservation for BuiltinCallGuard {
+    fn provider_recorder(
+        &self,
+    ) -> Option<runmat_accelerate_api::observation::ProviderOperationRecorder> {
+        self.observation
+            .as_ref()
+            .and_then(BuiltinCallObservation::recorder)
+    }
     fn begin_execution(&mut self) {
         BuiltinCallGuard::begin_execution(self);
     }

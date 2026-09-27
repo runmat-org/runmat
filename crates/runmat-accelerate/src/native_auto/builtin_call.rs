@@ -1,5 +1,5 @@
 //! Automatic argument placement and its invocation-owned observation.
-mod observation;
+pub(super) mod observation;
 mod admitted;
 pub use admitted::{install_preparation_service, AdmittedAcceleration};
 mod ownership;
@@ -38,6 +38,8 @@ impl BuiltinCallGuard {
         if let (Some(uploads), Ok(value)) = (self.uploads.as_mut(), result) {
             uploads.adopt(value)?;
         }
+        // Release unused staging before sealing the candidate's publication.
+        drop(self.uploads.take());
         if let Some(observation) = self.observation.take() {
             observation.finish(result);
         }
@@ -81,12 +83,16 @@ impl PreparedBuiltinCall {
         Fut: std::future::Future<Output = Result<Value, RuntimeError>>,
     {
         let (args, mut guard) = self.into_execution();
-        async move {
+        let recorder = guard
+            .observation
+            .as_ref()
+            .and_then(BuiltinCallObservation::recorder);
+        runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
             guard.begin_execution();
             let result = call(args).await;
             guard.finish(&result).map_err(|error| *error)?;
             result
-        }
+        })
     }
 
     pub(super) fn into_args(mut self) -> Vec<Value> {

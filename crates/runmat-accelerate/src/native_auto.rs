@@ -1267,7 +1267,7 @@ impl NativeAutoOffload {
     ) -> (
         DecisionEvaluation,
         Option<ProviderRejectionCode>,
-        Option<Box<crate::placement::LocalPlacementFeedback>>,
+        builtin_call::observation::BuiltinObservationPlan,
     ) {
         let cpu_cost = ExecutionCostEstimate {
             components: ExecutionCostComponents {
@@ -1323,26 +1323,34 @@ impl NativeAutoOffload {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::ProviderRejected;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, Some(code), None)
+                (evaluation, Some(code), Default::default())
             }
             Ok(LocalPlacementOutcome::Selected {
                 selected,
                 cpu_cost,
                 provider_cost,
                 feedback,
-                provider_query: _,
-                provider_observation: _,
+                provider_query,
+                provider_observation,
             }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;
                 evaluation.cpu_secs = cpu_cost.checked_total_ns().map(ns_to_seconds);
                 evaluation.gpu_secs = provider_cost.checked_total_ns().map(ns_to_seconds);
-                (evaluation, None, feedback)
+                (
+                    evaluation,
+                    None,
+                    builtin_call::observation::BuiltinObservationPlan {
+                        feedback,
+                        provider_query: Some(provider_query),
+                        provider_observation,
+                    },
+                )
             }
             Err(_) => {
                 evaluation.recommend_gpu = false;
                 evaluation.reason = DecisionReason::Disabled;
-                (evaluation, None, None)
+                (evaluation, None, Default::default())
             }
         }
     }

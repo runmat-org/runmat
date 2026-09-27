@@ -4,6 +4,7 @@ mod admitted;
 mod integer_conversion;
 mod pol2cart;
 mod admitted_owners;
+mod receipt;
 use crate::placement::{begin_trace, LocalPlacementFeedback};
 use runmat_execution::{
     Digest, PlacementFeedback, PlacementPlanRequest, PlacementRevision, PlacementSignature,

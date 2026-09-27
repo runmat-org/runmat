@@ -1,5 +1,17 @@
 use super::*;
 use crate::placement::LocalPlacementFeedback;
+use runmat_accelerate_api::observation::{
+    ProviderExecutionDisposition, ProviderObservationSupport, ProviderOperationReceipt,
+    ProviderOperationRecorder,
+};
+
+#[derive(Default)]
+pub(in crate::native_auto) struct BuiltinObservationPlan {
+    pub(in crate::native_auto) feedback: Option<Box<LocalPlacementFeedback>>,
+    pub(in crate::native_auto) provider_query:
+        Option<Box<runmat_accelerate_api::ProviderFeasibilityQuery>>,
+    pub(in crate::native_auto) provider_observation: bool,
+}
 
 pub struct BuiltinCallObservation {
     pub(super) feedback: Option<Box<LocalPlacementFeedback>>,
@@ -7,6 +19,7 @@ pub struct BuiltinCallObservation {
     provider_selected: bool,
     host_inputs: bool,
     started: Instant,
+    receipt: Option<ProviderOperationReceipt>,
 }
 
 impl BuiltinCallObservation {
@@ -24,7 +37,32 @@ impl BuiltinCallObservation {
                 .iter()
                 .any(runmat_runtime::dispatcher::value_contains_gpu),
             started: Instant::now(),
+            receipt: None,
         }
+    }
+
+    pub(super) fn prepare_provider(
+        &mut self,
+        provider: &dyn AccelProvider,
+        query: Option<&runmat_accelerate_api::ProviderFeasibilityQuery>,
+    ) {
+        if !self.provider_selected || self.feedback.is_none() {
+            return;
+        }
+        if let Some(query) = query {
+            if let ProviderObservationSupport::Observed(mut receipt) =
+                provider.begin_operation_observation(query)
+            {
+                receipt.require_selected_execution();
+                self.receipt = Some(receipt);
+            }
+        }
+    }
+
+    pub(super) fn recorder(&self) -> Option<ProviderOperationRecorder> {
+        self.receipt
+            .as_ref()
+            .map(ProviderOperationReceipt::recorder)
     }
 
     pub(super) fn execution_started(&mut self) {
@@ -34,6 +72,10 @@ impl BuiltinCallObservation {
     }
 
     pub(super) fn preparation_fallback(&mut self) {
+        if let Some(recorder) = self.recorder() {
+            recorder.execution_disposition(ProviderExecutionDisposition::SharedRuntimeFallback);
+        }
+        self.receipt = None;
         self.report(false);
         self.provider_selected = false;
         if let Some(trace) = self.trace.as_ref() {
@@ -66,6 +108,11 @@ impl BuiltinCallObservation {
         }
         let elapsed = duration_ns_saturating(self.started.elapsed()).max(1);
         if self.provider_selected {
+            if let (Some(receipt), Some(feedback)) = (self.receipt.take(), self.feedback.take()) {
+                // The receipt independently requires explicit operation-owner
+                // route evidence. Resident/host result shape proves nothing.
+                crate::placement::publish_provider_feedback(receipt, *feedback);
+            }
             // A returned value may follow asynchronous submission or the
             // dispatcher's host retry. Neither proves provider completion.
             self.feedback = None;

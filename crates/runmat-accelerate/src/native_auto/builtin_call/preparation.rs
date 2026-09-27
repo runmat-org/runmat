@@ -153,7 +153,7 @@ impl NativeAutoOffload {
         let identity = runmat_builtins::builtin_id_by_name(name)
             .map(|id| id.0)
             .unwrap_or_else(|| name.to_owned());
-        let (evaluation, rejection, feedback) = self.plan_operation(
+        let (evaluation, rejection, plan) = self.plan_operation(
             evaluation,
             &identity,
             family,
@@ -169,39 +169,48 @@ impl NativeAutoOffload {
         ));
         record_provider_rejection(&trace, rejection);
         let mut observation =
-            BuiltinCallObservation::new(feedback, trace, evaluation.recommend_gpu, args);
-        let mut processed = args.to_vec();
-        let mut uploads = None;
-        if evaluation.recommend_gpu {
-            for value in processed.iter_mut().take(operation.count()) {
-                if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
-                    continue;
+            BuiltinCallObservation::new(plan.feedback, trace, evaluation.recommend_gpu, args);
+        observation.prepare_provider(
+            self.provider,
+            plan.provider_query
+                .as_deref()
+                .filter(|_| plan.provider_observation),
+        );
+        let recorder = observation.recorder();
+        runmat_accelerate_api::observation::with_provider_observation(recorder, || {
+            let mut processed = args.to_vec();
+            let mut uploads = None;
+            if evaluation.recommend_gpu {
+                for value in processed.iter_mut().take(operation.count()) {
+                    if !matches!(value, Value::Tensor(tensor) if !tensor.is_empty()) {
+                        continue;
+                    }
+                    if uploads.is_none() {
+                        uploads = Some(super::ownership::OwnedUploads::new(self.provider, args)?);
+                    }
+                    let uploads = uploads.as_mut().expect("initialized before upload");
+                    *value = self.promote_tensor_protecting(
+                        value,
+                        1,
+                        observation.trace.as_ref(),
+                        &uploads.protected(),
+                    )?;
+                    uploads.track(value);
                 }
-                if uploads.is_none() {
-                    uploads = Some(super::ownership::OwnedUploads::new(self.provider, args)?);
+                if !processed
+                    .iter()
+                    .take(operation.count())
+                    .any(runmat_runtime::dispatcher::value_contains_gpu)
+                {
+                    observation.preparation_fallback();
                 }
-                let uploads = uploads.as_mut().expect("initialized before upload");
-                *value = self.promote_tensor_protecting(
-                    value,
-                    1,
-                    observation.trace.as_ref(),
-                    &uploads.protected(),
-                )?;
-                uploads.track(value);
             }
-            if !processed
-                .iter()
-                .take(operation.count())
-                .any(runmat_runtime::dispatcher::value_contains_gpu)
-            {
-                observation.preparation_fallback();
-            }
-        }
-        observation.execution_started();
-        Ok(PreparedBuiltinCall {
-            args: processed,
-            observation: Some(observation),
-            uploads,
+            observation.execution_started();
+            Ok(PreparedBuiltinCall {
+                args: processed,
+                observation: Some(observation),
+                uploads,
+            })
         })
     }
 }

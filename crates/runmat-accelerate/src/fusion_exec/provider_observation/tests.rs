@@ -1,6 +1,6 @@
 use super::*;
 use crate::placement::PlacementSession;
-use runmat_accelerate_api::observation::ProviderObservationClock;
+use runmat_accelerate_api::observation::{ProviderObservationClock, ProviderObservationFailure};
 use runmat_execution::{Digest, PlacementRevision, PlacementSignature};
 use runmat_runtime::context::{RuntimeContext, RuntimeServicePorts};
 use std::rc::Rc;

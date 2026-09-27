@@ -1,6 +1,8 @@
 //! Executor-neutral placement observation and policy scaffolding.
 
 mod event;
+mod completion;
+pub(crate) use completion::publish_provider_feedback;
 mod fusion;
 mod local;
 mod partition;
