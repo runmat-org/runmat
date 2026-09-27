@@ -8,6 +8,7 @@ use fixture::{Mode, Provider};
 
 #[test]
 fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     for explicit in [false, true] {
         for mode in [
             Mode::Supported,
@@ -55,7 +56,9 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
             ));
             assert_eq!(
                 *provider.trace.lock().unwrap(),
-                ["download", "numeric-upload"]
+                ["download", "numeric-upload"],
+                "explicit={explicit}, result={:?}",
+                result.as_ref().map(|_| "success")
             );
             match mode {
                 Mode::Supported => {
@@ -112,4 +115,38 @@ fn color_native_single_uses_actual_owner_capability_not_preferred_precision() {
             assert!(borrowed.acquire().is_none());
         }
     }
+}
+
+#[test]
+fn explicit_color_extension_rejection_precedes_all_provider_effects() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(false);
+    let inner = Box::leak(Box::new(
+        runmat_accelerate::simple_provider::InProcessProvider::new(),
+    ));
+    let provider = Provider::new(inner, Mode::Supported);
+    let _active = ThreadProviderGuard::set(Some(provider));
+    let input = inner
+        .upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[70., 5., 10.]),
+            shape: &[1, 1, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap()
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
+    let borrowed = input.allocation_lease().downgrade();
+    let error = block_on(call_builtin_async_with_outputs(
+        "lab2rgb",
+        &[Value::GpuTensor(input.clone())],
+        1,
+    ))
+    .unwrap_err();
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:compatibility:Lab2rgbExplicitGpuExtension")
+    );
+    assert!(provider.trace.lock().unwrap().is_empty());
+    assert!(input.allocation_lease().validate_live().is_ok());
+    drop(input);
+    assert!(borrowed.acquire().is_none());
 }
