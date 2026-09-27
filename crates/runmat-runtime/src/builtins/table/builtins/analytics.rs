@@ -1241,13 +1241,17 @@ mod integer_compatibility_tests {
     #[test]
     fn grouping_strict_mode_gates_resident_inputs_before_provider_access() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let handle = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let resident = Value::GpuTensor(handle.clone());
         let group_summary =
             ensure_groupsummary_extensions(&resident, &Value::from("G"), &Value::from("mean"), &[])
@@ -1262,7 +1266,10 @@ mod integer_compatibility_tests {
             grpstats.identifier(),
             GRPSTATS_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((resident, handle));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -1470,24 +1477,30 @@ mod integer_compatibility_tests {
 
     #[test]
     fn groupsummary_residency_gate_only_applies_to_explicit_handles() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 426,
-            descriptor: Default::default(),
-        };
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
         ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(automatic.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
         )
         .expect("automatic residency remains transparent");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         let error = ensure_groupsummary_extensions(
-            &Value::GpuTensor(handle.clone()),
+            &Value::GpuTensor(explicit.clone()),
             &Value::from("G"),
             &Value::from("mean"),
             &[],
@@ -1497,6 +1510,9 @@ mod integer_compatibility_tests {
             error.identifier(),
             GROUPSUMMARY_RESIDENT_INPUT_EXTENSION.error_identifier
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop((automatic, explicit));
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }
