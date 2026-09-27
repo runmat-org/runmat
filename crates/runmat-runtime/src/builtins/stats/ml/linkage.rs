@@ -1137,20 +1137,24 @@ mod tests {
     #[test]
     fn linkage_explicit_gpu_fallback_is_gated_before_download() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 0,
-            buffer_id: 9_426_001,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 3],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let error =
             block_on(linkage_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:LinkageExplicitGpuInputExtension")
         );
-        runmat_accelerate_api::clear_handle_metadata(&handle);
+        drop(handle);
     }
 
     #[test]
@@ -1160,8 +1164,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let input = tensor(vec![0.0, 1.0, 2.0], 3, 1);
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("upload");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated provenance");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let Value::Tensor(output) = block_on(linkage_builtin(Value::GpuTensor(handle), vec![]))
                 .expect("automatic residency may gather transparently")

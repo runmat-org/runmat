@@ -1855,7 +1855,7 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:CovIntegerDataExtension")
             );
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 

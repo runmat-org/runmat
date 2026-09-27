@@ -1758,7 +1758,7 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:CorrcoefIntegerDataExtension")
             );
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -2042,7 +2042,7 @@ pub(crate) mod tests {
         let gpu = block_on(provider.corrcoef(&handle, &options)).expect("corrcoef");
         let gathered = test_support::gather(Value::GpuTensor(gpu.clone())).expect("gather");
         assert_tensor_close(&gathered, &cpu.materialize_f64(), 1.0e-6);
-        provider.free(&gpu).expect("free corrcoef output");
+        drop(gpu);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -2070,7 +2070,7 @@ pub(crate) mod tests {
         .expect("row corrcoef");
         let row_gathered = test_support::gather(row_result).expect("row gather");
         assert_tensor_close(&row_gathered, &[1.0], 1.0e-6);
-        let _ = provider.free(&row_handle);
+        drop(row_handle);
 
         let left = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let right = Tensor::new(vec![4.0, 1.0, 2.0, 8.0], vec![2, 2]).unwrap();
@@ -2106,7 +2106,7 @@ pub(crate) mod tests {
             .expect("right after corrcoef");
         assert_eq!(left_after.shape, vec![2, 2]);
         assert_eq!(right_after.shape, vec![2, 2]);
-        let _ = provider.free(&left_handle);
-        let _ = provider.free(&right_handle);
+        drop(left_handle);
+        drop(right_handle);
     }
 }

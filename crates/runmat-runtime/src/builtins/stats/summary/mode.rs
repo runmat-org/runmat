@@ -2098,14 +2098,12 @@ pub(crate) mod tests {
                 vec![2.0]
             );
 
-            let logical_source = Tensor::new(vec![0.0, 1.0, 1.0], vec![3, 1]).unwrap();
             let logical_handle = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &logical_source.materialize_f64(),
-                    shape: &logical_source.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 1],
+                    shape: &[3, 1],
                 })
                 .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
             let logical_outputs =
                 mode_outputs(Value::GpuTensor(logical_handle), Vec::new(), 2).expect("mode");
             let Value::GpuTensor(logical_mode) = &logical_outputs[0] else {

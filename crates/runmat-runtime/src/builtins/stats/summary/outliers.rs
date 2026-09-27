@@ -1691,8 +1691,9 @@ mod tests {
             let input = Tensor::new(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
                 .expect("upload observations");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let output = block_on(isoutlier_builtin(Value::GpuTensor(handle), Vec::new()))
                 .expect("documented resident isoutlier");
             assert!(matches!(output, Value::GpuTensor(_)));
@@ -1710,7 +1711,9 @@ mod tests {
         let input = Tensor::new(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
             .expect("upload observations");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let output = block_on(isoutlier_builtin(Value::GpuTensor(handle), Vec::new()))
             .expect("documented WGPU isoutlier");
@@ -1873,12 +1876,16 @@ mod tests {
             Some("RunMat:compatibility:FilloutliersNumericMaskExtension")
         );
 
-        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let poison = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![1, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle,
+        );
         let error = block_on(filloutliers_builtin(
             tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]),
             vec![

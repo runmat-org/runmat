@@ -2455,12 +2455,16 @@ mod tests {
             Some("RunMat:compatibility:FitclinearIntegerNumericArgumentExtension")
         );
 
-        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![4, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let poison = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![4, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle,
+        );
         let error = fitclinear_builtin(poison, vec![tensor(vec![0.0, 0.0, 1.0, 1.0], vec![4, 1])])
             .await
             .expect_err("resident gate before gather");

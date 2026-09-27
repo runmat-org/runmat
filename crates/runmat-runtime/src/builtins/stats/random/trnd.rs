@@ -488,16 +488,14 @@ mod tests {
                 Some("RunMat:compatibility:TrndIntegerSizeExtension")
             );
 
-            let resident_nu = GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_305_001,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_nu = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![1, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle;
             let error = block_on(trnd_builtin(vec![Value::GpuTensor(resident_nu.clone())]))
                 .expect_err("MATLAB mode rejects resident integer nu before gather");
             assert_eq!(
@@ -505,16 +503,14 @@ mod tests {
                 Some("RunMat:compatibility:TrndIntegerDegreesOfFreedomExtension")
             );
 
-            let resident_size = GpuTensorHandle {
-                shape: vec![1, 2],
-                device_id: 0,
-                buffer_id: 9_305_002,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            let resident_size = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::U16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![1, 2],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle;
             let error = block_on(trnd_builtin(vec![
                 Value::Num(5.0),
                 Value::GpuTensor(resident_size.clone()),

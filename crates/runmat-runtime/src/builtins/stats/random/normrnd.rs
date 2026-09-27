@@ -694,7 +694,9 @@ mod tests {
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_eq!(host.shape, vec![2, 2]);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let out = block_on(normrnd_builtin(vec![
             Value::GpuTensor(handle),
             Value::Num(1.0),

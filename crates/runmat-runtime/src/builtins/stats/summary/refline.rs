@@ -728,13 +728,17 @@ mod tests {
 
     #[test]
     fn refline_strict_mode_gates_explicit_gpu_before_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 445,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 2],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(refline_builtin(vec![Value::GpuTensor(handle)]))
             .expect_err("strict mode rejects explicit GPU coefficients before gather");
@@ -890,8 +894,8 @@ mod tests {
             },
         )
         .with_gpu_source_inputs(Scatter2GpuInputs {
-            x_buffer: x_ref.buffer.clone(),
-            y_buffer: y_ref.buffer.clone(),
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
             len: x_ref.len as u32,
             scalar: ScalarType::from_is_f64(
                 x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
@@ -915,10 +919,10 @@ mod tests {
         assert_eq!(y_data(handle), vec![2.0, 6.0]);
 
         if let Value::GpuTensor(handle) = x {
-            provider.free(&handle).ok();
+            drop(handle);
         }
         if let Value::GpuTensor(handle) = y {
-            provider.free(&handle).ok();
+            drop(handle);
         }
         runmat_accelerate::simple_provider::register_inprocess_provider();
     }

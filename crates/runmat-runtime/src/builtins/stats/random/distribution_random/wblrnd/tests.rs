@@ -284,7 +284,8 @@ fn documented_gpu_inputs_restore_residency_and_precision() {
         ] {
             let handle = gpu_helpers::upload_tensor(provider, &parameter)
                 .expect("upload")
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let output = block_on(wblrnd_builtin(vec![
                 Value::GpuTensor(handle),
                 Value::Num(1.0),
@@ -325,7 +326,8 @@ fn wgpu_fallback_preserves_explicit_residency_and_precision() {
     ] {
         let handle = gpu_helpers::upload_tensor(provider, &parameter)
             .expect("upload")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let output = block_on(wblrnd_builtin(vec![
             Value::GpuTensor(handle),
             Value::Num(1.0),

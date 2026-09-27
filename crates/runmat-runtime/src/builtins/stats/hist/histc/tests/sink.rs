@@ -58,7 +58,7 @@ fn histogram_sink_keeps_borrowed_data_and_edges_reusable() {
         ))
         .is_err());
         assert!(runmat_accelerate::fusion_residency::is_resident(&input));
-        provider.free(&input).unwrap();
-        provider.free(&edges).unwrap();
+        drop(input);
+        drop(edges);
     });
 }

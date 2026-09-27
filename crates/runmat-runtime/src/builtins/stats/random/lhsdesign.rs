@@ -848,8 +848,9 @@ mod tests {
         test_support::with_test_provider(|provider| {
             let count = Tensor::new(vec![4.0], vec![1, 1]).unwrap();
             let explicit = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(lhsdesign_builtin(vec![
                 Value::GpuTensor(explicit),
@@ -862,8 +863,9 @@ mod tests {
             );
 
             let automatic = gpu_helpers::upload_tensor(provider, &count).expect("upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated provenance");
             let output = block_on(lhsdesign_builtin(vec![
                 Value::GpuTensor(automatic),
                 Value::Num(2.0),

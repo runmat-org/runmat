@@ -1990,12 +1990,16 @@ mod tests {
     #[test]
     fn dummyvar_gpu_extension_rejects_before_provider_access() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: 0,
-            buffer_id: 9_399_001,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![2, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle,
+        );
         let error = block_on(dummyvar_builtin(resident)).expect_err("GPU extension gate");
         assert_eq!(
             error.identifier(),

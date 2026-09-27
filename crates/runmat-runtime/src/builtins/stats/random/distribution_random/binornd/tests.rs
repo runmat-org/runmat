@@ -1,5 +1,5 @@
 use futures::executor::block_on;
-use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
+use runmat_accelerate_api::ProviderPrecision;
 use runmat_value::{IntegerStorage, NumericDType, Tensor, Value};
 
 use super::*;
@@ -160,16 +160,14 @@ fn compatibility_gates_each_extension_before_gather() {
         assert_eq!(error.identifier(), Some(identifier));
     }
 
-    let resident = GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_306_001,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(
-        runmat_accelerate_api::NumericElementType::I16,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-    );
+    let resident = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            runmat_accelerate_api::NumericElementType::I16,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+            vec![1, 1],
+        )
+        .expect("genuine unregistered resident fixture")
+        .handle;
     let error = block_on(binornd_builtin(vec![
         Value::GpuTensor(resident),
         Value::Num(0.5),
@@ -327,7 +325,8 @@ fn provider_fallback_preserves_explicit_residency_and_precision() {
         ] {
             let handle = gpu_helpers::upload_tensor(provider, &parameter)
                 .expect("upload")
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let output = block_on(binornd_builtin(vec![
                 Value::Num(4.0),
                 Value::GpuTensor(handle),
@@ -368,7 +367,8 @@ fn wgpu_fallback_preserves_explicit_residency_and_precision() {
     ] {
         let handle = gpu_helpers::upload_tensor(provider, &parameter)
             .expect("upload")
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let output = block_on(binornd_builtin(vec![
             Value::Num(4.0),
             Value::GpuTensor(handle),

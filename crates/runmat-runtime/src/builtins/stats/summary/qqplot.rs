@@ -891,13 +891,17 @@ mod tests {
 
     #[test]
     fn qqplot_strict_mode_gates_explicit_gpu_before_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 444,
-            descriptor: Default::default(),
-        };
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![2, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(qqplot_builtin(vec![Value::GpuTensor(handle)]))
             .expect_err("strict mode rejects explicit GPU input before gather");

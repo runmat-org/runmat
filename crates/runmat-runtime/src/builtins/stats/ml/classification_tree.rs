@@ -2158,12 +2158,16 @@ mod tests {
             Some("RunMat:compatibility:FitctreeIntegerNumericArgumentExtension")
         );
 
-        let poison = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![4, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let poison = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![4, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle,
+        );
         let error = block_on(fitctree_builtin(
             poison,
             vec![tensor_value(vec![0.0, 0.0, 1.0, 1.0], 4, 1)],

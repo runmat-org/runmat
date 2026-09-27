@@ -3151,7 +3151,9 @@ mod tests {
         let host = test_support::gather(Value::GpuTensor(out)).expect("gather automatic output");
         assert_close(host.materialize_f64()[0], 0.5, 1.0e-12);
 
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let out = block_on(normcdf::normcdf_builtin(
             Value::GpuTensor(handle),
             Vec::new(),
@@ -3710,7 +3712,7 @@ mod tests {
             assert!(runmat_accelerate::fusion_residency::is_resident(&source));
             let gathered = test_support::gather(output).expect("gather tinv output");
             assert_eq!(gathered.materialize_f64(), vec![0.0]);
-            let _ = provider.free(&source);
+            drop(source);
         });
     }
 
@@ -3991,7 +3993,7 @@ mod tests {
             assert!(matches!(result, Value::GpuTensor(_)));
             let gathered = crate::builtins::common::test_support::gather(result).unwrap();
             assert!((gathered.materialize_f64()[0] - 0.300_014_164_121_372).abs() < 1.0e-12);
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -4377,7 +4379,7 @@ mod tests {
             let gathered =
                 crate::builtins::common::test_support::gather(output).expect("gather output");
             assert!(gathered.materialize_f64()[0].abs() < 1.0e-12);
-            let _ = provider.free(&source);
+            drop(source);
         });
     }
 
@@ -4449,8 +4451,9 @@ mod tests {
             assert!(gpu_helpers::exact_provider_for_handle(&output)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
 
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(wblinv::wblinv_builtin(Value::GpuTensor(source), Vec::new()))
                 .expect_err("explicit gpu gate");

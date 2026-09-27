@@ -1940,30 +1940,36 @@ mod tests {
 
     #[test]
     fn kstest_residency_gate_distinguishes_automatic_and_explicit_handles() {
-        let automatic = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: 0,
-            buffer_id: 9_421_001,
-            descriptor: Default::default(),
-        };
-        let automatic =
-            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![2, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let automatic = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         ensure_kstest_extensions(&Value::GpuTensor(automatic.clone()), &[])
             .expect("automatic residency must retain transparent gather fallback");
-        runmat_accelerate_api::clear_handle_metadata(&automatic);
+        drop(automatic);
 
-        let explicit = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: 0,
-            buffer_id: 9_421_002,
-            descriptor: Default::default(),
-        };
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![2, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let err = ensure_kstest_extensions(&Value::GpuTensor(explicit.clone()), &[])
             .expect_err("explicit gpuArray input must retain its compatibility gate");
-        runmat_accelerate_api::clear_handle_metadata(&explicit);
+        drop(explicit);
         assert_eq!(
             err.identifier(),
             KSTEST_RESIDENT_INPUT_EXTENSION.error_identifier
@@ -1984,21 +1990,24 @@ mod tests {
             KSTEST_INTEGER_CDF_EXTENSION.error_identifier
         );
 
-        let explicit = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 2],
-            device_id: 0,
-            buffer_id: 9_421_003,
-            descriptor: Default::default(),
-        };
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![2, 2],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let resident_cdf = Value::Cell(
             runmat_value::CellArray::new(vec![Value::GpuTensor(explicit.clone())], 1, 1)
                 .expect("singleton cell"),
         );
         let err = ensure_kstest_extensions(&Value::Num(0.0), &[Value::from("CDF"), resident_cdf])
             .expect_err("nested explicit CDF must gate");
-        runmat_accelerate_api::clear_handle_metadata(&explicit);
+        drop(explicit);
         assert_eq!(
             err.identifier(),
             KSTEST_RESIDENT_INPUT_EXTENSION.error_identifier
@@ -2007,13 +2016,17 @@ mod tests {
 
     #[test]
     fn kstest_rejects_malformed_or_text_only_roles_before_resident_access() {
-        let poison = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 9_421,
-            descriptor: Default::default(),
-        };
-        let poison = poison.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let poison = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let poison = poison
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
 
         let err = block_on(kstest_builtin(
@@ -2030,7 +2043,7 @@ mod tests {
             vec![Value::from("Tail"), Value::GpuTensor(poison.clone())],
         ))
         .expect_err("text-only Tail must reject before resident access");
-        runmat_accelerate_api::clear_handle_metadata(&poison);
+        drop(poison);
         assert_eq!(err.identifier(), Some("RunMat:kstest:InvalidArgument"));
         assert!(err.message.contains("Tail must be a string scalar"));
     }

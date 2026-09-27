@@ -397,10 +397,6 @@ mod tests {
             Box::pin(async { Err(anyhow::anyhow!("cpu-only test provider does not download")) })
         }
 
-        fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "cpu-only test provider".to_string()
         }

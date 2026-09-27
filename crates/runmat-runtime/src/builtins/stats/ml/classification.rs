@@ -1792,11 +1792,12 @@ mod tests {
                 err.identifier(),
                 CLASSIFY_RESIDENT_INPUT_EXTENSION.error_identifier
             );
-            let logical_source = Tensor::new(vec![0.0, 1.0], vec![2, 1]).expect("logical sample");
-            let logical_handle =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &logical_source)
-                    .expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[2, 1],
+                })
+                .expect("logical upload");
             let (_, training, group) = valid_floating_inputs();
             let err = block_on(classify_builtin(
                 Value::GpuTensor(logical_handle.clone()),
@@ -1809,9 +1810,9 @@ mod tests {
                 err.identifier(),
                 CLASSIFY_LOGICAL_PREDICTOR_EXTENSION.error_identifier
             );
-            let _ = provider.free(&handle);
-            let _ = provider.free(&floating_handle);
-            let _ = provider.free(&logical_handle);
+            drop(handle);
+            drop(floating_handle);
+            drop(logical_handle);
         });
     }
 

@@ -1459,12 +1459,16 @@ mod tests {
         let err = numeric_data_from_value(matrix, "x").unwrap_err();
         assert!(err.message().contains("vector"), "{}", err.message());
 
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![2, 1],
-            device_id: 0,
-            buffer_id: 9_369_001,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    vec![2, 1],
+                )
+                .expect("genuine unregistered resident fixture")
+                .handle,
+        );
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(binscatter_builtin(vec![
             resident,
@@ -1521,7 +1525,7 @@ mod tests {
                     panic!("expected gathered XData");
                 };
                 assert_eq!(x_data.integer_storage(), Some(&storage));
-                let _ = provider.free(&handle);
+                drop(handle);
             }
         });
     }

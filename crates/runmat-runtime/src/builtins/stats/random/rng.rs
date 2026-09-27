@@ -1005,7 +1005,7 @@ pub(crate) mod tests {
             let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
             let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
             assert_eq!(gpu.materialize_f64(), host_after_gpu);
-            provider.free(&handle).expect("free uniform handle");
+            drop(handle);
         });
     }
 
@@ -1040,7 +1040,7 @@ pub(crate) mod tests {
                 "host value at {idx} out of [0,1): {value}"
             );
         }
-        let _ = provider.free(&handle);
+        drop(handle);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

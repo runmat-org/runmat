@@ -1504,14 +1504,17 @@ mod tests {
             error.identifier(),
             Some("RunMat:compatibility:TsneIntegerOptionExtension")
         );
-        let explicit = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let error = ensure_tsne_extensions(&Value::GpuTensor(explicit), &[])
             .expect_err("explicit residency must gate before provider access");
         assert_eq!(

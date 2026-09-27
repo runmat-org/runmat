@@ -2845,8 +2845,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("upload integer population");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let Value::GpuTensor(output) = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),
@@ -2890,8 +2891,9 @@ mod tests {
             expected.sort_by_key(|value| format!("{value:?}"));
             let population = Tensor::new_integer(storage, vec![1, 2]).expect("population");
             let source = gpu_helpers::upload_tensor(provider, &population).expect("upload");
-            let source =
-                source.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let source = source
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance");
             let output = block_on(randsample::randsample_builtin(vec![
                 Value::GpuTensor(source),
                 Value::Num(2.0),
@@ -3115,7 +3117,7 @@ mod tests {
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             drop(strict);
-            provider.free(&handle).expect("free resident Q");
+            drop(handle);
         });
     }
 

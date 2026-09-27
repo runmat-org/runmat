@@ -1823,7 +1823,9 @@ mod tests {
             .expect("gather automatic output");
         assert_eq!(host.numeric_dtype(), NumericDType::F64);
         assert_close(host.materialize_f64()[0], -1.0);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let out =
             call(Value::GpuTensor(handle), Vec::new()).expect("explicit resident double output");
         let Value::GpuTensor(out) = out else {

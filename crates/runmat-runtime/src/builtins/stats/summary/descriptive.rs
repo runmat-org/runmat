@@ -2161,8 +2161,8 @@ mod tests {
                 block_on(tabulate::tabulate_builtin(Value::GpuTensor(handle.clone()))),
                 "RunMat:compatibility:TabulateGpuInputExtension",
             );
-            let _ = provider.free(&handle);
-            let _ = provider.free(&vecdim);
+            drop(handle);
+            drop(vecdim);
         });
     }
 

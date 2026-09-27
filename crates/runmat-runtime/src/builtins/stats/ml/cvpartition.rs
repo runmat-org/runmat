@@ -2160,17 +2160,15 @@ mod tests {
 
     #[test]
     fn resident_integer_roles_gate_before_gather() {
-        fn resident(shape: Vec<usize>, buffer_id: u64) -> Value {
-            let handle = runmat_accelerate_api::GpuTensorHandle {
-                shape,
-                device_id: u32::MAX,
-                buffer_id,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+        fn resident(shape: Vec<usize>, _fixture_id: u64) -> Value {
+            let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    runmat_accelerate_api::NumericElementType::U64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                    shape,
+                )
+                .expect("genuine unregistered integer fixture")
+                .handle;
             Value::GpuTensor(handle)
         }
         let cases = [

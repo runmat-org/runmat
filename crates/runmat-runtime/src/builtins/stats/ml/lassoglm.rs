@@ -2161,12 +2161,14 @@ mod tests {
 
     #[test]
     fn residency_policy_distinguishes_automatic_and_explicit_handles() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: 42_001,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle;
         let host = tensor(vec![1.0], vec![1, 1]);
         let distr = Value::from("normal");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -2174,13 +2176,16 @@ mod tests {
         let automatic = Value::GpuTensor(
             handle
                 .clone()
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic),
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("validated provenance"),
         );
         ensure_extensions(&automatic, &host, &distr, &[])
             .expect("automatic residency must remain transparent to compatibility policy");
 
         let explicit = Value::GpuTensor(
-            handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
+            handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("validated provenance"),
         );
         let err = ensure_extensions(&explicit, &host, &distr, &[])
             .expect_err("an explicit gpuArray must require the resident-input extension");
@@ -2192,13 +2197,16 @@ mod tests {
 
     #[test]
     fn call_surface_validation_precedes_residency_policy() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: 42_002,
-            descriptor: Default::default(),
-        }
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                vec![1, 1],
+            )
+            .expect("genuine unregistered resident fixture")
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("validated provenance");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = block_on(lassoglm_builtin(
             Value::GpuTensor(handle.clone()),

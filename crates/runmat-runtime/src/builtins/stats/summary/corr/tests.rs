@@ -241,7 +241,7 @@ fn corr_resident_integer_data_rejects_before_gather() {
             error.identifier(),
             Some("RunMat:compatibility:CorrIntegerDataExtension")
         );
-        let _ = provider.free(&handle);
+        drop(handle);
     });
 }
 
