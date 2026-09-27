@@ -938,21 +938,28 @@ pub(crate) mod tests {
         drop(_compat);
 
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("logical payload");
             let handle = provider
-                .upload(&HostTensorView {
-                    data: &tensor.materialize_f64(),
-                    shape: &tensor.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
                 })
-                .expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+                .expect("logical producer upload");
+            let weak = handle.downgrade();
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let error = cond_builtin(Value::GpuTensor(handle), Vec::new())
+            let error = cond_builtin(Value::GpuTensor(handle.clone()), Vec::new())
                 .expect_err("resident logical A extension");
             assert_eq!(
                 error.identifier(),
                 COND_LOGICAL_MATRIX_EXTENSION.error_identifier
             );
+            assert!(runmat_accelerate_api::handle_is_logical(&handle));
+            handle
+                .allocation_lease()
+                .validate_live()
+                .expect("rejection preserves caller input");
+            drop(error);
+            handle.release().expect("release logical caller");
+            assert!(weak.acquire().is_err());
         });
     }
 

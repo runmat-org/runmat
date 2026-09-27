@@ -614,7 +614,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate::backend::wgpu::provider as wgpu_backend;
-    use runmat_accelerate_api::{AccelProvider as _, HostTensorView};
+    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{
         IntValue, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructValue,

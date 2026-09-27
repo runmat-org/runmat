@@ -2132,10 +2132,21 @@ pub(crate) mod tests {
             )
             .expect("gpu linsolve");
             let gathered = test_support::gather(gpu_value).expect("gather");
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
+            let weak_a = ha.downgrade();
+            let weak_b = hb.downgrade();
+            ha.clone()
+                .release()
+                .expect("release temporary caller alias");
+            let original = block_on(provider.download(&ha)).expect("caller A survives solve");
+            assert_eq!(original.shape, a.shape);
+            assert_eq!(original.data, a.materialize_f64());
+            ha.release().expect("release caller A");
+            hb.release().expect("release caller B");
+            assert!(weak_a.acquire().is_err());
+            assert!(weak_b.acquire().is_err());
 
             assert_eq!(gathered.shape, cpu_tensor.shape);
+            assert_eq!(gathered.numel(), cpu_tensor.numel());
             for (gpu, cpu) in gathered
                 .materialize_f64()
                 .iter()
@@ -2216,8 +2227,8 @@ pub(crate) mod tests {
             assert!(telemetry.download_bytes > 0);
             assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 1);
 
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
+            ha.release().expect("release caller A");
+            hb.release().expect("release caller B");
         });
     }
 
@@ -2254,8 +2265,8 @@ pub(crate) mod tests {
             assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 0);
             assert!(telemetry.download_bytes > 0);
 
-            let _ = provider.free(&ha);
-            let _ = provider.free(&hb);
+            ha.release().expect("release caller A");
+            hb.release().expect("release caller B");
         });
     }
 
@@ -2309,8 +2320,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2373,8 +2384,8 @@ pub(crate) mod tests {
         )
         .expect("gpu square linsolve");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2440,8 +2451,8 @@ pub(crate) mod tests {
             Value::Num(value) => *value,
             other => panic!("unexpected gpu rcond {other:?}"),
         };
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, vec![2, 1]);
         assert!(
@@ -2513,8 +2524,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2581,8 +2592,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2669,8 +2680,8 @@ pub(crate) mod tests {
         };
         let gpu_solution = outputs.remove(0);
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2758,8 +2769,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2831,8 +2842,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2908,8 +2919,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -2985,8 +2996,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -3069,8 +3080,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -3139,8 +3150,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -3219,8 +3230,8 @@ pub(crate) mod tests {
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
@@ -3279,8 +3290,8 @@ pub(crate) mod tests {
         )
         .expect("gpu linsolve");
         let gathered = test_support::gather(gpu_value).expect("gather");
-        let _ = provider.free(&ha);
-        let _ = provider.free(&hb);
+        ha.release().expect("release caller A");
+        hb.release().expect("release caller B");
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered
