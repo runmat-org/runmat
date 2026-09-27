@@ -84,6 +84,27 @@ impl AccelProvider for Provider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         self.elem_add(left, right)
     }
+    fn classify_real_power<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::PowerResultDomain> {
+        if self.mode.load(Ordering::SeqCst) == 3 {
+            runmat_accelerate_api::set_handle_logical(left, true);
+            runmat_accelerate_api::set_handle_logical(right, true);
+            Box::pin(futures::future::pending())
+        } else {
+            self.inner.classify_real_power(left, right)
+        }
+    }
+    fn real_power_in_domain<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+        _: runmat_accelerate_api::PowerResultDomain,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.elem_add(left, right)
+    }
 }
 
 #[test]
@@ -98,7 +119,7 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
         freed: Mutex::new(vec![]),
     });
     let _provider = ThreadProviderGuard::set(Some(provider));
-    for (name, mode) in ["plus", "power"]
+    for (name, mode) in ["plus"]
         .into_iter()
         .flat_map(|name| (0..3).map(move |mode| (name, mode)))
     {
@@ -149,6 +170,42 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
             provider.inner.free(handle).unwrap();
         }
     }
+    // Power's typed hook supports broadcast directly. Cancellation during
+    // either the domain probe or the actual kernel must restore both inputs.
+    for mode in [0, 3] {
+        provider.mode.store(mode, Ordering::SeqCst);
+        provider.freed.lock().unwrap().clear();
+        let left = provider
+            .inner
+            .upload(&HostTensorView {
+                data: &[-4.0, 4.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let right = provider
+            .inner
+            .upload(&HostTensorView {
+                data: &[2.0, 0.5],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let args = [
+            Value::GpuTensor(left.clone()),
+            Value::GpuTensor(right.clone()),
+        ];
+        let mut execution = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
+            "power", &args, 1,
+        ));
+        assert!(execution.as_mut().now_or_never().is_none());
+        drop(execution);
+        assert!(provider.freed.lock().unwrap().is_empty());
+        for handle in [&left, &right] {
+            assert!(!runmat_accelerate_api::handle_is_logical(handle));
+            assert!(block_on(provider.inner.download(handle)).is_ok());
+            provider.inner.free(handle).unwrap();
+        }
+    }
+    provider.mode.store(0, Ordering::SeqCst);
     // A mixed resident power call owns either a scalar fill or uploaded host
     // tensor until its asynchronous operation finishes, in both operand orders.
     for resident_first in [false, true] {

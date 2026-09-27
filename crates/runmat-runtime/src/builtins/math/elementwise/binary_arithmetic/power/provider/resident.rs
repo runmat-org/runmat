@@ -49,7 +49,7 @@ async fn power_gpu_host(
             if let Some(output) =
                 try_resident_scalar(provider, &resident, scalar, resident_operand).await?
             {
-                return Ok(Value::GpuTensor(output));
+                return Ok(output);
             }
         } else if let Some(host_tensor) = value_to_real_tensor(&host).await? {
             if host_tensor.shape == resident.shape && tensor_matches_handle(&host_tensor, &resident)
@@ -60,16 +60,11 @@ async fn power_gpu_host(
                 };
                 let temporary = Temporary::new(uploaded, provider, &[&resident]);
                 let uploaded = &temporary.handle;
-                let result = accept_result(
-                    resident_operand
-                        .elem_pow(provider, &resident, uploaded)
-                        .await,
-                    provider,
-                    &resident,
-                    Some(uploaded),
-                );
+                let result = resident_operand
+                    .typed_power(provider, &resident, uploaded)
+                    .await;
                 if let Some(output) = result? {
-                    return Ok(Value::GpuTensor(output));
+                    return Ok(output);
                 }
             }
         }
@@ -79,28 +74,18 @@ async fn power_gpu_host(
 }
 
 async fn try_resident_scalar(
-    provider: &dyn AccelProvider,
+    provider: &'static dyn AccelProvider,
     resident: &GpuTensorHandle,
     scalar: f64,
     resident_operand: ResidentOperand,
-) -> BuiltinResult<Option<GpuTensorHandle>> {
-    if let Some(uploaded) =
-        gpu_helpers::upload_exact_integer_scalar_like(provider, resident, scalar)
-            .map_err(|error| builtin_error(format!("power: {error}")))?
+) -> BuiltinResult<Option<Value>> {
+    if provider.precision() == runmat_accelerate_api::ProviderPrecision::F32
+        && !scalar.is_nan()
+        && f64::from(scalar as f32) != scalar
     {
-        let temporary = Temporary::new(uploaded, provider, &[resident]);
-        let uploaded = &temporary.handle;
-        let result = accept_result(
-            resident_operand
-                .elem_pow(provider, resident, uploaded)
-                .await,
-            provider,
-            resident,
-            Some(uploaded),
-        );
-        if let Some(output) = result? {
-            return Ok(Some(output));
-        }
+        // Mixed single/double power evaluates the original scalar before
+        // rounding the output. A rounded upload is not the same operand.
+        return Ok(None);
     }
 
     let fill_result = {
@@ -119,13 +104,22 @@ async fn try_resident_scalar(
             "power: provider returned invalid scalar-fill metadata",
         ));
     }
-    let result = accept_result(
+    if let Some(output) = resident_operand
+        .typed_power(provider, resident, filled)
+        .await?
+    {
+        return Ok(Some(output));
+    }
+    if !resident_operand.proves_legacy_real_power(scalar) {
+        return Ok(None);
+    }
+    accept_result(
         resident_operand.elem_pow(provider, resident, filled).await,
         provider,
         resident,
         Some(filled),
-    );
-    result
+    )
+    .map(|output| output.map(gpu_helpers::resident_gpu_value))
 }
 
 fn accept_result(
@@ -175,6 +169,25 @@ async fn gather_and_evaluate(
 }
 
 impl ResidentOperand {
+    async fn typed_power(
+        self,
+        provider: &'static dyn AccelProvider,
+        resident: &GpuTensorHandle,
+        host: &GpuTensorHandle,
+    ) -> BuiltinResult<Option<Value>> {
+        match self {
+            Self::Base => super::pair::try_real_pair(provider, resident, host).await,
+            Self::Exponent => super::pair::try_real_pair(provider, host, resident).await,
+        }
+    }
+
+    fn proves_legacy_real_power(self, host: f64) -> bool {
+        match self {
+            Self::Base => host.is_finite() && host != 0.0 && host.fract() == 0.0,
+            Self::Exponent => host.is_finite() && host > 0.0 && host != 1.0,
+        }
+    }
+
     async fn elem_pow(
         self,
         provider: &dyn AccelProvider,

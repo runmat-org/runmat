@@ -100,3 +100,50 @@ fn classification_uses_paired_broadcast_positions_not_unrelated_extrema() {
     assert_eq!(result.shape, vec![2, 2]);
     assert!((result.as_f64_slice().unwrap()[1].1 - 2.0).abs() < 1e-12);
 }
+
+#[test]
+fn actual_resident_dispatch_preserves_complex_promotion_in_both_compatibility_modes() {
+    use runmat_accelerate::simple_provider::InProcessProvider;
+    use runmat_accelerate_api::{
+        AccelProvider, GpuTensorStorage, HostTensorView, ThreadProviderGuard,
+    };
+    use std::sync::OnceLock;
+    static PROVIDER: OnceLock<InProcessProvider> = OnceLock::new();
+    let provider = PROVIDER.get_or_init(InProcessProvider::new);
+    let _provider = ThreadProviderGuard::set(Some(provider));
+    for extensions in [false, true] {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(extensions);
+        let base = provider
+            .upload(&HostTensorView {
+                data: &[-1e-300, 4.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        let exponent = provider
+            .upload(&HostTensorView {
+                data: &[0.5, 2.0],
+                shape: &[1, 2],
+            })
+            .unwrap();
+        for host_exponent in [false, true] {
+            let exp = if host_exponent {
+                Value::Num(0.5)
+            } else {
+                Value::GpuTensor(exponent.clone())
+            };
+            let Value::GpuTensor(output) = power(Value::GpuTensor(base.clone()), exp) else {
+                panic!("resident complex output")
+            };
+            assert_eq!(
+                output.descriptor.storage,
+                Some(GpuTensorStorage::ComplexInterleaved)
+            );
+            let values = block_on(provider.download(&output)).unwrap().data;
+            assert!((values[1] / 1e-150 - 1.0).abs() < 1e-12);
+            assert_eq!(values[3], 0.0);
+            provider.free(&output).unwrap();
+        }
+        provider.free(&base).unwrap();
+        provider.free(&exponent).unwrap();
+    }
+}
