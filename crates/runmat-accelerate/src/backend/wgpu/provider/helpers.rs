@@ -243,10 +243,15 @@ impl WgpuProvider {
         &self,
         tuning: &ImageNormalizeTuning,
     ) -> Result<Arc<wgpu::ComputePipeline>> {
-        if let Ok(cache) = self.image_norm_pipeline_cache.lock() {
-            if let Some(existing) = cache.get(tuning) {
-                return Ok(existing.clone());
-            }
+        let observation = super::pipeline_observation::PipelineObservation::begin();
+        let cached = self
+            .image_norm_pipeline_cache
+            .lock()
+            .ok()
+            .and_then(|cache| cache.get(tuning).cloned());
+        if let Some(existing) = cached {
+            observation.finish(runmat_execution::CandidatePreparationState::Warm);
+            return Ok(existing);
         }
         info!(
             "Compiling image_normalize pipeline tuning: batch_tile={} values/thread={} lane={} spatial={}",
@@ -283,6 +288,7 @@ impl WgpuProvider {
         if let Ok(mut cache) = self.image_norm_pipeline_cache.lock() {
             cache.insert(*tuning, arc.clone());
         }
+        observation.finish(runmat_execution::CandidatePreparationState::Cold);
         Ok(arc)
     }
     pub fn device_id(&self) -> u32 {
@@ -499,6 +505,7 @@ impl WgpuProvider {
         persist_layout_tag: Option<&str>,
         persist_workgroup_size: Option<u32>,
     ) -> Arc<wgpu::ComputePipeline> {
+        let observation = super::pipeline_observation::PipelineObservation::begin();
         if let Some(p) = self
             .fused_pipeline_cache
             .try_lock()
@@ -506,6 +513,7 @@ impl WgpuProvider {
             .and_then(|guard| guard.get(&hash_key).cloned())
         {
             self.metrics.inc_hit();
+            observation.finish(runmat_execution::CandidatePreparationState::Warm);
             return p;
         }
         self.metrics.inc_miss();
@@ -528,6 +536,7 @@ impl WgpuProvider {
         if let Ok(mut guard) = self.fused_pipeline_cache.try_lock() {
             guard.insert(hash_key, p.clone());
         }
+        observation.finish(runmat_execution::CandidatePreparationState::Cold);
         p
     }
 

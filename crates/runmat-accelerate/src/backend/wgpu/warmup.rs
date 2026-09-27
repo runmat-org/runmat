@@ -153,6 +153,6 @@ pub fn noop_after_create(
         });
         pass.set_pipeline(pipeline);
     }
-    queue.submit(Some(enc.finish()));
+    super::dispatch::observation::submit(device, queue, enc);
     device.poll(wgpu::Maintain::Wait);
 }

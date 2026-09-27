@@ -1868,6 +1868,24 @@ pub trait AccelProvider: Send + Sync {
         Ok(None)
     }
 
+    /// Complete observation coverage is separate from ordinary execution support.
+    /// Implementations must audit the exact route, including transfers/adapters.
+    fn operation_observation_capability(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> observation::ProviderObservationCapability {
+        observation::ProviderObservationCapability::Unsupported
+    }
+
+    /// Begin before staging. Unsupported providers must never return an empty
+    /// receipt as a substitute for missing asynchronous completion evidence.
+    fn begin_operation_observation(
+        &self,
+        _query: &ProviderFeasibilityQuery,
+    ) -> observation::ProviderObservationSupport {
+        observation::ProviderObservationSupport::Unsupported
+    }
+
     /// Determines whether a representation-specific operation can execute
     /// without attempting allocation, compilation, transfer, or dispatch.
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {

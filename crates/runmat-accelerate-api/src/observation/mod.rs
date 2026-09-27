@@ -7,11 +7,13 @@
 //! consumes the result on its own thread. No callback invokes runtime services.
 //! Nested operations should share the current recorder, not record a second total.
 mod activation;
+mod budget;
 mod state;
 
 pub use activation::{
     current_provider_observation, observe_provider_future, with_provider_observation,
 };
+pub use budget::ProviderObservationBudget;
 pub use state::{ProviderOperationReceipt, ProviderOperationRecorder, ProviderSubmission};
 
 use std::sync::Arc;
@@ -51,6 +53,23 @@ pub enum ProviderObservationFailure {
     PublicationFailed,
     InvalidTiming,
     TrackingOverflow,
+    ResourceLimit,
+}
+
+/// Physical instrumentation demand for the admitted operation. Requested buffer
+/// bytes are not driver allocation/VRAM granularity. No timing estimate is implied.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProviderObservationOverhead {
+    pub submissions: u32,
+    pub requested_peak_buffer_bytes: u64,
+    pub clear_commands: u32,
+    pub map_callbacks: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProviderObservationCapability {
+    Unsupported,
+    Supported(ProviderObservationOverhead),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,6 +96,32 @@ pub enum ProviderObservationStage {
     Materialization,
 }
 
+impl ProviderObservationStage {
+    pub const ALL: [Self; 8] = [
+        Self::Preparation,
+        Self::Allocation,
+        Self::Upload,
+        Self::Queue,
+        Self::Execution,
+        Self::Synchronization,
+        Self::Download,
+        Self::Materialization,
+    ];
+    pub const COUNT: usize = Self::ALL.len();
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Preparation => 0,
+            Self::Allocation => 1,
+            Self::Upload => 2,
+            Self::Queue => 3,
+            Self::Execution => 4,
+            Self::Synchronization => 5,
+            Self::Download => 6,
+            Self::Materialization => 7,
+        }
+    }
+}
+
 /// Bounded aggregates per stage; no per-submission event log is retained.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ProviderStageMeasurement {
@@ -87,7 +132,7 @@ pub struct ProviderStageMeasurement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProviderOperationObservation {
     pub status: ProviderObservationStatus,
-    pub stages: [ProviderStageMeasurement; 8],
+    pub stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     /// Actual selected pipeline events, not global cache-counter differences.
     pub pipelines: ProviderPipelineObservations,
 }

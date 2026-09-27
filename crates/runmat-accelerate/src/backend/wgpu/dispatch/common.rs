@@ -14,7 +14,7 @@ pub fn noop_then_poll(device: &wgpu::Device, pipeline: &wgpu::ComputePipeline) {
 }
 
 pub fn submit(device: &wgpu::Device, queue: &wgpu::Queue, enc: wgpu::CommandEncoder) {
-    let _submission = queue.submit(Some(enc.finish()));
+    let _submission = super::observation::submit(device, queue, enc);
     #[cfg(target_arch = "wasm32")]
     {
         device.poll(wgpu::Maintain::Poll);

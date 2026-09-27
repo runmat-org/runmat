@@ -131,7 +131,7 @@ fn late_registration_fails_closed_and_stages_do_not_replace_total() {
     assert_eq!(result.pipelines.cold, 1);
     assert_eq!(result.pipelines.warm, 1);
     assert_eq!(
-        result.stages[ProviderObservationStage::Upload as usize].elapsed,
+        result.stages[ProviderObservationStage::Upload.index()].elapsed,
         Duration::from_nanos(8)
     );
     let mut receipt = ProviderOperationReceipt::new();
@@ -359,9 +359,56 @@ fn measurements_freeze_at_completion_not_delayed_delivery() {
     );
     recorder.record_pipeline(CandidatePreparationState::Cold);
     let evidence = receipt.take_completed().unwrap();
-    let execution = evidence.stages[ProviderObservationStage::Execution as usize];
+    let execution = evidence.stages[ProviderObservationStage::Execution.index()];
     assert_eq!(execution.samples, 1);
     assert_eq!(execution.elapsed, Duration::from_nanos(7));
     assert_eq!(evidence.pipelines.warm, 1);
     assert_eq!(evidence.pipelines.cold, 0);
+}
+
+#[test]
+fn provider_budget_is_shared_and_cancellation_does_not_recycle_live_tokens() {
+    let budget = Arc::new(ProviderObservationBudget::new(
+        std::num::NonZeroU32::new(1).unwrap(),
+    ));
+    let mut first = ProviderOperationReceipt::with_budget(budget.clone());
+    let callback = first.recorder().submission().unwrap();
+    first.fail(ProviderObservationFailure::Cancelled);
+    drop(first);
+    let second = ProviderOperationReceipt::with_budget(budget.clone());
+    assert!(matches!(
+        second.recorder().submission(),
+        Err(ProviderObservationFailure::ResourceLimit)
+    ));
+    assert_eq!(
+        second.status(),
+        ProviderObservationStatus::Failed(ProviderObservationFailure::ResourceLimit)
+    );
+    callback.complete();
+    let mut third = ProviderOperationReceipt::with_budget(budget);
+    third.recorder().submission().unwrap().complete();
+    third.publish().unwrap();
+    assert!(matches!(
+        third.take_completed().unwrap().status,
+        ProviderObservationStatus::Completed { submissions: 1, .. }
+    ));
+}
+
+#[test]
+fn every_stage_has_a_distinct_bounded_measurement_slot() {
+    let mut receipt = ProviderOperationReceipt::new();
+    for stage in ProviderObservationStage::ALL {
+        receipt
+            .recorder()
+            .record_stage(stage, Duration::from_nanos(stage.index() as u64 + 1));
+    }
+    receipt.publish().unwrap();
+    let observation = receipt.take_completed().unwrap();
+    for stage in ProviderObservationStage::ALL {
+        assert_eq!(observation.stages[stage.index()].samples, 1);
+        assert_eq!(
+            observation.stages[stage.index()].elapsed,
+            Duration::from_nanos(stage.index() as u64 + 1)
+        );
+    }
 }

@@ -19,5 +19,5 @@ pub fn run(
             pass.dispatch_workgroups(workgroups, 1, 1);
         }
     }
-    queue.submit(Some(encoder.finish()));
+    super::observation::submit(device, queue, encoder);
 }

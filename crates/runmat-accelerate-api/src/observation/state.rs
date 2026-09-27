@@ -10,7 +10,7 @@ struct State {
     pending: u64,
     failure: Option<ProviderObservationFailure>,
     taken: bool,
-    stages: [ProviderStageMeasurement; 8],
+    stages: [ProviderStageMeasurement; ProviderObservationStage::COUNT],
     pipelines: ProviderPipelineObservations,
     waiter: Option<Waker>,
 }
@@ -57,6 +57,7 @@ impl State {
 struct Shared {
     state: Mutex<State>,
     clock: Arc<dyn ProviderObservationClock>,
+    budget: Arc<ProviderObservationBudget>,
 }
 
 impl Shared {
@@ -95,6 +96,22 @@ impl ProviderOperationReceipt {
     }
 
     pub fn with_clock(clock: Arc<dyn ProviderObservationClock>) -> Self {
+        Self::with_clock_and_budget(
+            clock,
+            Arc::new(ProviderObservationBudget::new(
+                std::num::NonZeroU32::new(64).expect("nonzero local observation limit"),
+            )),
+        )
+    }
+
+    pub fn with_budget(budget: Arc<ProviderObservationBudget>) -> Self {
+        Self::with_clock_and_budget(clock(), budget)
+    }
+
+    pub fn with_clock_and_budget(
+        clock: Arc<dyn ProviderObservationClock>,
+        budget: Arc<ProviderObservationBudget>,
+    ) -> Self {
         let start = clock.now();
         Self(Arc::new(Shared {
             state: Mutex::new(State {
@@ -107,11 +124,12 @@ impl ProviderOperationReceipt {
                     .is_none()
                     .then_some(ProviderObservationFailure::InvalidTiming),
                 taken: false,
-                stages: [ProviderStageMeasurement::default(); 8],
+                stages: [ProviderStageMeasurement::default(); ProviderObservationStage::COUNT],
                 pipelines: ProviderPipelineObservations::default(),
                 waiter: None,
             }),
             clock,
+            budget,
         }))
     }
 
@@ -214,6 +232,11 @@ impl ProviderOperationRecorder {
     /// Register before submission. Each token is completed exactly once, or its
     /// drop marks observation failure. Registration after publication is rejected.
     pub fn submission(&self) -> Result<ProviderSubmission, ProviderObservationFailure> {
+        let Some(permit) = self.0.budget.acquire() else {
+            self.0
+                .with(|state| state.fail(ProviderObservationFailure::ResourceLimit));
+            return Err(ProviderObservationFailure::ResourceLimit);
+        };
         self.0.with(|state| {
             if let Some(reason) = state.failure {
                 return Err(reason);
@@ -231,6 +254,7 @@ impl ProviderOperationRecorder {
             Ok(ProviderSubmission {
                 shared: self.0.clone(),
                 consumed: false,
+                _permit: permit,
             })
         })
     }
@@ -245,7 +269,7 @@ impl ProviderOperationRecorder {
             if state.taken || state.status() != ProviderObservationStatus::Pending {
                 return;
             }
-            let slot = &mut state.stages[stage as usize];
+            let slot = &mut state.stages[stage.index()];
             match (
                 slot.samples.checked_add(1),
                 slot.elapsed.checked_add(elapsed),
@@ -285,6 +309,7 @@ impl ProviderOperationRecorder {
 pub struct ProviderSubmission {
     shared: Arc<Shared>,
     consumed: bool,
+    _permit: budget::Permit,
 }
 
 impl ProviderSubmission {

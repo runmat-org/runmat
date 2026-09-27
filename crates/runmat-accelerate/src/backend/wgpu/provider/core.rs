@@ -361,8 +361,11 @@ impl WgpuProvider {
         )
         .entered();
         log::trace!("wgpu submit {}: begin", submission_id);
-        let work = encoder.finish();
-        let submission_index = self.queue.submit(Some(work));
+        let submission_index = crate::backend::wgpu::dispatch::observation::submit(
+            self.device_ref(),
+            self.queue_ref(),
+            encoder,
+        );
         log::trace!(
             "wgpu submit {}: submitted, polling (index={:?})",
             submission_id,
@@ -376,22 +379,6 @@ impl WgpuProvider {
         self.device.poll(wgpu::Maintain::Poll);
         #[cfg(target_arch = "wasm32")]
         log::trace!("wgpu submit {}: poll complete", submission_id);
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.queue.on_submitted_work_done(move || {
-                log::trace!(
-                    "wgpu submit {}: on_submitted_work_done callback fired",
-                    submission_id
-                );
-            });
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            log::trace!(
-                "wgpu submit {}: on_submitted_work_done unavailable on wasm",
-                submission_id
-            );
-        }
         #[cfg(target_arch = "wasm32")]
         {
             let elapsed = poll_start.elapsed();

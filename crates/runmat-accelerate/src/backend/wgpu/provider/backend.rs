@@ -83,6 +83,8 @@ mod fft;
 mod finance;
 #[path = "helpers.rs"]
 mod helpers;
+#[path = "pipeline_observation.rs"]
+mod pipeline_observation;
 #[path = "ops/image.rs"]
 mod image;
 #[path = "ops/indexing.rs"]

@@ -26,6 +26,29 @@ pub(crate) struct PhysicalWork {
     pub adapter_element_visits: u64,
 }
 
+/// This route's complete submission geometry includes staging and output casts,
+/// chunks and multioutput kernels. Other provider operations are not inferred to
+/// have observation coverage from sharing an operation family.
+#[cfg(feature = "wgpu")]
+pub(crate) fn observation_capability(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+    use runmat_accelerate_api::observation::{
+        ProviderObservationCapability, ProviderObservationOverhead,
+    };
+    let Some(work) = physical_work(provider, query) else {
+        return ProviderObservationCapability::Unsupported;
+    };
+    ProviderObservationCapability::Supported(ProviderObservationOverhead {
+        submissions: work.queue_submissions,
+        requested_peak_buffer_bytes: u64::from(work.queue_submissions)
+            * crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES,
+        clear_commands: work.queue_submissions,
+        map_callbacks: work.queue_submissions,
+    })
+}
+
 pub(super) fn validate(
     provider: &(impl AccelProvider + ?Sized),
     wgpu: bool,

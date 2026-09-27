@@ -16,6 +16,6 @@ pub fn run(
         pass.set_bind_group(0, bind_group, &[]);
         pass.dispatch_workgroups(1, 1, 1);
     }
-    queue.submit(Some(encoder.finish()));
+    super::observation::submit(device, queue, encoder);
     device.poll(wgpu::Maintain::Wait);
 }

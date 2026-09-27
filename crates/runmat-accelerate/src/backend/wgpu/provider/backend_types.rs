@@ -34,6 +34,8 @@ pub struct WgpuProvider {
     pub(super) next_id: AtomicU64,
     pub(super) pipelines: WgpuPipelines,
     pub(super) runtime_device_id: u32,
+    pub(super) observation_budget:
+        Arc<runmat_accelerate_api::observation::ProviderObservationBudget>,
     pub(super) cache_device_id: u32,
     pub(super) precision: NumericPrecision,
     pub(super) element_size: usize,

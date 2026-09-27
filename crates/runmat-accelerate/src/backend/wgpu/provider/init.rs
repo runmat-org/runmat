@@ -386,6 +386,12 @@ impl WgpuProvider {
             next_id: AtomicU64::new(1),
             pipelines,
             runtime_device_id,
+            observation_budget: Arc::new(
+                runmat_accelerate_api::observation::ProviderObservationBudget::new(
+                    std::num::NonZeroU32::new(64)
+                        .expect("nonzero provider observation safety limit"),
+                ),
+            ),
             cache_device_id,
             precision,
             element_size,

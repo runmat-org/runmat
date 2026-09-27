@@ -117,7 +117,7 @@ pub fn probe_kernel_with_buffers(
         let groups_x = wg.max(1);
         pass.dispatch_workgroups(groups_x, 1, 1);
     }
-    queue.submit(Some(enc.finish()));
+    super::dispatch::observation::submit(device, queue, enc);
     device.poll(wgpu::Maintain::Wait);
     log::info!(
         "probe_kernel_with_buffers: '{}' compiled+submitted in {:.3} ms",

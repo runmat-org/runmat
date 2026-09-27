@@ -1,6 +1,39 @@
 use super::*;
 use crate::simple_provider::InProcessProvider;
 
+#[cfg(feature = "wgpu")]
+#[test]
+fn observation_accounts_for_complete_physical_chain_not_one_dispatch() {
+    use runmat_accelerate_api::observation::ProviderObservationCapability;
+    let provider = InProcessProvider::new(); // geometry only, not execution proof
+    let mut query = ProviderFeasibilityQuery {
+        operation: ProviderOperationIdentity::new("fusion.elementwise"),
+        family: ProviderOperationFamily::Fusion,
+        inputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        outputs: vec![value(ProviderElementType::F32, ProviderResidency::Device)],
+        workload: Default::default(),
+    };
+    let work = physical_work(&provider, &query).unwrap();
+    assert!(work.queue_submissions > 1);
+    let ProviderObservationCapability::Supported(overhead) =
+        observation_capability(&provider, &query)
+    else {
+        panic!("audited route");
+    };
+    assert_eq!(overhead.submissions, work.queue_submissions);
+    assert_eq!(overhead.clear_commands, work.queue_submissions);
+    assert_eq!(overhead.map_callbacks, work.queue_submissions);
+    assert_eq!(
+        overhead.requested_peak_buffer_bytes,
+        u64::from(work.queue_submissions) * 8
+    );
+    query.operation = ProviderOperationIdentity::new("zeros");
+    assert_eq!(
+        observation_capability(&provider, &query),
+        ProviderObservationCapability::Unsupported
+    );
+}
+
 fn value(
     element_type: ProviderElementType,
     residency: ProviderResidency,

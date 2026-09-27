@@ -13,6 +13,34 @@ use runmat_accelerate_api::{
 };
 
 impl AccelProvider for WgpuProvider {
+    fn operation_observation_capability(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        // Native map callbacks require a timely progress owner. Until that
+        // separate boundary is connected, opportunistic polls cannot train
+        // timings: they may include arbitrary idle time between commands.
+        if cfg!(not(target_arch = "wasm32")) {
+            return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+        }
+        crate::placement::provider_observation_capability(self, query)
+    }
+
+    fn begin_operation_observation(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationSupport {
+        use runmat_accelerate_api::observation::{
+            ProviderObservationCapability, ProviderObservationSupport, ProviderOperationReceipt,
+        };
+        match self.operation_observation_capability(query) {
+            ProviderObservationCapability::Unsupported => ProviderObservationSupport::Unsupported,
+            ProviderObservationCapability::Supported(_) => ProviderObservationSupport::Observed(
+                ProviderOperationReceipt::with_budget(self.observation_budget.clone()),
+            ),
+        }
+    }
+
     fn export_context(&self, kind: AccelContextKind) -> Option<AccelContextHandle> {
         self.export_context_exec(kind)
     }
