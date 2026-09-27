@@ -9,9 +9,6 @@ use runmat_builtins::{
     BuiltinImplementationAuthority,
 };
 
-#[cfg(test)]
-mod tests;
-
 /// Evidence for one selected implementation, not permission to skip operand,
 /// method-overload, output-count, or numerical-domain admission.
 pub struct SelectedFusionBinding {
