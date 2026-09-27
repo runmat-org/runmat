@@ -75,6 +75,7 @@ mod tests {
                     flops: Some(8),
                     batch: Some(1),
                     numerical_domain: Default::default(),
+                    requested_outputs: None,
                 },
             },
             preparation: CandidatePreparationState::Warm,
@@ -99,6 +100,12 @@ mod tests {
         let original = digest(&query);
         assert_eq!(original, digest(&query.clone()));
         let mut changed = query.clone();
+        changed.operation.workload.requested_outputs = Some(0);
+        assert_ne!(original, digest(&changed));
+        let discarded = digest(&changed);
+        changed.operation.workload.requested_outputs = Some(3);
+        assert_ne!(discarded, digest(&changed));
+        changed = query.clone();
         changed.preparation = CandidatePreparationState::Cold;
         assert_ne!(original, digest(&changed));
         changed = query.clone();

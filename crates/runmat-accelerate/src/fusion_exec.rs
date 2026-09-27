@@ -333,6 +333,7 @@ fn select_fusion_provider_with_contract(
                 flops: None,
                 batch: None,
                 numerical_domain: Default::default(),
+                requested_outputs: None,
             },
             preparation: CandidatePreparationState::Warm,
             cpu,

@@ -126,6 +126,12 @@ impl AdmittedBuiltinPreparation {
             .signatures
             .get(admission.signature)
             .ok_or_else(|| invalid("admitted signature is absent from the descriptor"))?;
+        if matches!(form.operation, runmat_builtins::BuiltinPreparationOperation::ElementwiseNary { data_arity } if data_arity < 2)
+        {
+            return Err(invalid(
+                "N-ary preparation requires at least two data operands",
+            ));
+        }
         if form
             .data_arguments
             .iter()

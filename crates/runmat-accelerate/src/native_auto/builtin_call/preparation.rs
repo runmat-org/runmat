@@ -3,6 +3,10 @@ use super::*;
 pub(super) enum ArgumentOperation {
     Reduction,
     Binary(BinaryOp),
+    ElementwiseNary {
+        data_arity: usize,
+        requested_outputs: Option<u32>,
+    },
     Unary(UnaryOp),
     RealUnary(runmat_accelerate_api::NumericalDomainEvidence),
     RealPower(runmat_accelerate_api::NumericalDomainEvidence),
@@ -33,6 +37,7 @@ impl ArgumentOperation {
     fn count(&self) -> usize {
         match self {
             Self::Binary(_) | Self::RealPower(_) => 2,
+            Self::ElementwiseNary { data_arity, .. } => *data_arity,
             _ => 1,
         }
     }
@@ -52,6 +57,20 @@ impl ArgumentOperation {
             ..Default::default()
         };
         let (evaluation, family) = match self {
+            Self::ElementwiseNary {
+                data_arity,
+                requested_outputs,
+            } => {
+                let args = args.get(..*data_arity)?;
+                let elements = super::nary::broadcast_elements(args)?;
+                workload.elements = u64::try_from(elements).ok();
+                workload.requested_outputs = *requested_outputs;
+                let values = args.iter().collect::<Vec<_>>();
+                (
+                    auto.evaluate_elementwise(elements, &values),
+                    ProviderOperationFamily::Elementwise,
+                )
+            }
             Self::Reduction => (
                 auto.evaluate_reduction(elements),
                 ProviderOperationFamily::Reduction,

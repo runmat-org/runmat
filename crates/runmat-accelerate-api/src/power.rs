@@ -41,6 +41,18 @@ mod tests {
         let old: crate::ProviderWorkload =
             serde_json::from_str(r#"{"elements":4,"flops":null,"batch":null}"#).unwrap();
         assert_eq!(old.numerical_domain, NumericalDomainEvidence::Unknown);
+        assert_eq!(old.requested_outputs, None);
+        for requested_outputs in [None, Some(0), Some(1), Some(3)] {
+            let workload = crate::ProviderWorkload {
+                requested_outputs,
+                ..old.clone()
+            };
+            let encoded = serde_json::to_string(&workload).unwrap();
+            assert_eq!(
+                serde_json::from_str::<crate::ProviderWorkload>(&encoded).unwrap(),
+                workload
+            );
+        }
         for domain in [Real, Complex] {
             let workload = crate::ProviderWorkload {
                 numerical_domain: NumericalDomainEvidence::RealPower(domain),

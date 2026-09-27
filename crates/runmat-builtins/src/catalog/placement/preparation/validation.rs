@@ -14,6 +14,10 @@ pub fn validate_builtin_preparation(entry: &BuiltinCatalogEntry) -> Vec<&'static
     }
     let mut ids = BTreeSet::new();
     for form in forms {
+        if matches!(form.operation, BuiltinPreparationOperation::ElementwiseNary { data_arity } if data_arity < 2)
+        {
+            errors.push("N-ary preparation requires at least two data operands");
+        }
         if !ids.insert(form.id) {
             errors.push("preparation form IDs must be unique within an identity");
         }

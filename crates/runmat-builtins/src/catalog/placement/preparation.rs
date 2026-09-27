@@ -38,6 +38,10 @@ pub enum BuiltinPreparationOperation {
     /// A real unary route whose numerical domain is admitted by its owner.
     RealUnary(runmat_types::RealUnaryPredicate),
     ElementwiseBinary,
+    /// An admitted broadcast operation consuming every declared data operand.
+    ElementwiseNary {
+        data_arity: usize,
+    },
     /// Real floating operands whose result domain depends on paired values.
     RealPower,
     MatrixMultiply,
@@ -77,6 +81,7 @@ impl BuiltinPreparationOperation {
         match self {
             Self::Unary | Self::RealUnary(_) | Self::Transpose | Self::Reduction(_) => Some(1),
             Self::ElementwiseBinary | Self::RealPower | Self::MatrixMultiply => Some(2),
+            Self::ElementwiseNary { data_arity } => Some(data_arity),
             Self::Sink(_) => None,
         }
     }

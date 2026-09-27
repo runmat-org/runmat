@@ -106,6 +106,19 @@ pub(super) fn prepare_with(
         Operation::RealUnary(_) => ArgumentOperation::RealUnary(request.numerical_domain()),
         Operation::Transpose => ArgumentOperation::Unary(UnaryOp::Transpose),
         Operation::ElementwiseBinary => ArgumentOperation::Binary(BinaryOp::Elementwise),
+        Operation::ElementwiseNary { data_arity } => ArgumentOperation::ElementwiseNary {
+            data_arity,
+            requested_outputs: request
+                .admission()
+                .requested_outputs
+                .map(u32::try_from)
+                .transpose()
+                .map_err(|_| {
+                    Box::new(preparation_error(
+                        "requested output count exceeds workload representation",
+                    ))
+                })?,
+        },
         Operation::RealPower => ArgumentOperation::RealPower(request.numerical_domain()),
         Operation::MatrixMultiply => ArgumentOperation::Binary(BinaryOp::MatMul),
         Operation::Reduction(_) => ArgumentOperation::Reduction,

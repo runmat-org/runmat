@@ -23,6 +23,10 @@ pub struct ProviderWorkload {
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     pub batch: Option<u64>,
+    /// Language-requested outputs; None is the operation's implicit default,
+    /// not zero. This distinguishes resource work and placement feedback keys.
+    #[serde(default)]
+    pub requested_outputs: Option<u32>,
     #[serde(default)]
     pub numerical_domain: crate::NumericalDomainEvidence,
 }
