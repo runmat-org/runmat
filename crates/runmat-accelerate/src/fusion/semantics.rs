@@ -277,6 +277,19 @@ impl ResolvedProgram {
 }
 
 fn primitive_fact(operation: PrimitiveOp, arguments: &[ValueFact]) -> Result<ValueFact> {
+    // The host matrix-product owner delegates exactly to elementwise times
+    // when either operand is scalar. Other matrix products require their own
+    // contraction route: even an outer product adds the term to +0, unlike a
+    // bare multiplication for signed zero, and Single uses a wider host sum.
+    if operation == PrimitiveOp::Mul
+        && !arguments
+            .iter()
+            .any(|argument| argument.shape.element_count() == Some(1))
+    {
+        return Err(anyhow!(
+            "typed scalar fusion requires a proven scalar matrix-product operand"
+        ));
+    }
     let operator = match operation {
         PrimitiveOp::Add => OperatorKind::Add,
         PrimitiveOp::Sub => OperatorKind::Subtract,

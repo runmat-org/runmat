@@ -2922,9 +2922,13 @@ fn primitive_expr(
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} * {rhs})"))
         }
-        PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
+        PrimitiveOp::ElemDiv => {
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} / {rhs})"))
+        }
+        PrimitiveOp::ElemLeftDiv => {
+            let (lhs, rhs) = binary(exprs)?;
+            Some(format!("({rhs} / {lhs})"))
         }
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
             let (lhs, rhs) = binary(exprs)?;

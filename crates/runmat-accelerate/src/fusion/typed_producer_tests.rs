@@ -5,6 +5,9 @@ use crate::precision::PrecisionPolicy;
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_value::Value;
 
+#[path = "typed_producer_primitive_tests.rs"]
+mod primitive_tests;
+
 fn plan(operations: Vec<FusionOp>, output: ValueId) -> FusionGroupPlan {
     FusionGroupPlan {
         index: 0,
