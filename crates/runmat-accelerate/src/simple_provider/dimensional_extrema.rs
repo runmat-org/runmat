@@ -1,4 +1,4 @@
-//! Dimensional min/max: fixed Include-NaN, first NaN and first equal extremum.
+//! Dimensional min/max: Include-NaN, signed-zero ordering, first equal extremum.
 use super::*;
 
 #[cfg(test)]
@@ -51,12 +51,16 @@ impl InProcessProvider {
                 match data {
                     InProcessNumericData::F32(values) => {
                         let (values, indices) =
-                            reduce(values, input.shape(), dim, minimum, f32::is_nan);
+                            reduce(values, input.shape(), dim, minimum, f32::is_nan, |v| {
+                                (v == 0.0).then(|| v.is_sign_negative())
+                            });
                         (InProcessNumericData::F32(values), indices, shape)
                     }
                     InProcessNumericData::F64(values) => {
                         let (values, indices) =
-                            reduce(values, input.shape(), dim, minimum, f64::is_nan);
+                            reduce(values, input.shape(), dim, minimum, f64::is_nan, |v| {
+                                (v == 0.0).then(|| v.is_sign_negative())
+                            });
                         (InProcessNumericData::F64(values), indices, shape)
                     }
                     InProcessNumericData::Integer(values) => {
@@ -81,6 +85,7 @@ fn reduce<T: Copy + PartialOrd>(
     dim: usize,
     minimum: bool,
     is_nan: fn(T) -> bool,
+    zero_sign: fn(T) -> Option<bool>,
 ) -> (Vec<T>, Vec<f64>) {
     let rows = shape[0];
     let count = if dim == 0 { shape[1] } else { rows };
@@ -102,7 +107,22 @@ fn reduce<T: Copy + PartialOrd>(
                 break;
             }
             let candidate = data[source(position)];
-            if is_nan(candidate) || (minimum && candidate < best) || (!minimum && candidate > best)
+            // Owning min/max domains order -0 below +0; only equal signed
+            // zeros are ties. Preserve the first preferred zero's index.
+            let preferred_zero = match (zero_sign(best), zero_sign(candidate)) {
+                (Some(current), Some(candidate)) => {
+                    if minimum {
+                        candidate && !current
+                    } else {
+                        !candidate && current
+                    }
+                }
+                _ => false,
+            };
+            if is_nan(candidate)
+                || preferred_zero
+                || (minimum && candidate < best)
+                || (!minimum && candidate > best)
             {
                 best = candidate;
                 best_index = position;

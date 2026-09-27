@@ -656,6 +656,12 @@ fn better(current: f64, candidate: f64, op: u32) -> bool {
     // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
     if extrema_is_nan(current) { return false; }
     if extrema_is_nan(candidate) { return true; }
+    let current_zero = extrema_zero_rank(current);
+    let candidate_zero = extrema_zero_rank(candidate);
+    if current_zero != 0 && candidate_zero != 0 {
+        if op == 0u { return candidate_zero < current_zero; }
+        return candidate_zero > current_zero;
+    }
     if op == 0u { return candidate < current; }
     return candidate > current;
 }
@@ -664,6 +670,12 @@ fn extrema_is_nan(value: f64) -> bool {
     let bits = bitcast<vec2<u32>>(value);
     let magnitude = bits.y & 0x7fffffffu;
     return magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && bits.x != 0u);
+}
+
+fn extrema_zero_rank(value: f64) -> i32 {
+    let bits = bitcast<vec2<u32>>(value);
+    if (bits.y & 0x7fffffffu) != 0u || bits.x != 0u { return 0; }
+    return select(1, -1, (bits.y & 0x80000000u) != 0u);
 }
 
 fn pos_inf_f64() -> f64 {
@@ -728,12 +740,24 @@ fn better(current: f32, candidate: f32, op: u32) -> bool {
     // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
     if extrema_is_nan(current) { return false; }
     if extrema_is_nan(candidate) { return true; }
+    let current_zero = extrema_zero_rank(current);
+    let candidate_zero = extrema_zero_rank(candidate);
+    if current_zero != 0 && candidate_zero != 0 {
+        if op == 0u { return candidate_zero < current_zero; }
+        return candidate_zero > current_zero;
+    }
     if op == 0u { return candidate < current; }
     return candidate > current;
 }
 
 fn extrema_is_nan(value: f32) -> bool {
     return (bitcast<u32>(value) & 0x7fffffffu) > 0x7f800000u;
+}
+
+fn extrema_zero_rank(value: f32) -> i32 {
+    let bits = bitcast<u32>(value);
+    if (bits & 0x7fffffffu) != 0u { return 0; }
+    return select(1, -1, (bits & 0x80000000u) != 0u);
 }
 
 fn pos_inf_f32() -> f32 {

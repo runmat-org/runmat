@@ -60,6 +60,15 @@ async fn dimensional_extrema_include_nan_layout_empty_and_workgroup_boundary() {
         provider.download(&result.indices).await.unwrap().data,
         vec![1.0, 1.0]
     );
+    let maximum = provider.reduce_max_dim(&ties, 0).await.unwrap();
+    assert_eq!(
+        provider.download(&maximum.values).await.unwrap().data[0].to_bits(),
+        0.0f64.to_bits()
+    );
+    assert_eq!(
+        provider.download(&maximum.indices).await.unwrap().data,
+        vec![2.0, 1.0]
+    );
     let length = provider.workgroup_config.scalar as usize + 1;
     let boundary = upload(&vec![7.0; length], &[1, length]);
     let result = provider.reduce_max_dim(&boundary, 0).await.unwrap();

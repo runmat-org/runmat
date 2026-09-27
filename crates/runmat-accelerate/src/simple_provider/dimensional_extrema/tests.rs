@@ -12,6 +12,7 @@ fn native_include_contract_matches_actual_host_domains() {
                     vec![f64::INFINITY, f64::NAN, 2.0, -0.0, 0.0, -0.0],
                 ),
                 (vec![2, 2], vec![f64::NAN; 4]),
+                (vec![3, 2], vec![0.0, -0.0, -0.0, -0.0, 0.0, 0.0]),
                 (vec![0, 3], vec![]),
                 (vec![3, 0], vec![]),
             ] {
@@ -50,8 +51,10 @@ fn native_include_contract_matches_actual_host_domains() {
                             panic!("two host outputs required")
                         };
                         let actual = result(&provider, &input, dim, minimum).unwrap();
-                        for (actual, expected) in
-                            [&actual.values, &actual.indices].into_iter().zip(expected)
+                        for (output_index, (actual, expected)) in [&actual.values, &actual.indices]
+                            .into_iter()
+                            .zip(expected)
+                            .enumerate()
                         {
                             let expected = match expected {
                                 Value::Tensor(t) => t,
@@ -67,8 +70,12 @@ fn native_include_contract_matches_actual_host_domains() {
                                     &expected,
                                 );
                             assert_eq!(downloaded.data.len(), values.len());
-                            for (a, e) in downloaded.data.iter().zip(values.iter()) {
-                                assert!(a.to_bits() == e.to_bits() || a.is_nan() && e.is_nan());
+                            for (index, (a, e)) in
+                                downloaded.data.iter().zip(values.iter()).enumerate()
+                            {
+                                assert!(a.to_bits() == e.to_bits() || a.is_nan() && e.is_nan(),
+                                    "{name}: single={single}, dim={dim}, input_shape={:?}, output={output_index}, element={index}: actual={a:?} ({:#x}), host={e:?} ({:#x})",
+                                    input.shape(), a.to_bits(), e.to_bits());
                             }
                         }
                     }
@@ -126,7 +133,7 @@ fn native_dimensions_select_first_nan_and_first_tie() {
                     NumericElementType::F64
                 );
                 let expected_indices = if dim == 0 {
-                    vec![2.0, 1.0, 1.0]
+                    vec![2.0, 1.0, if minimum { 1.0 } else { 2.0 }]
                 } else {
                     vec![2.0, 1.0, 2.0]
                 };
@@ -143,7 +150,10 @@ fn native_dimensions_select_first_nan_and_first_tie() {
                 };
                 assert!(actual[0].is_nan() && actual[1].is_nan());
                 if dim == 0 {
-                    assert_eq!(actual[2].to_bits(), (-0.0f64).to_bits());
+                    assert_eq!(
+                        actual[2].to_bits(),
+                        (if minimum { -0.0f64 } else { 0.0f64 }).to_bits()
+                    );
                 } else {
                     assert!(actual[2].is_nan());
                 }

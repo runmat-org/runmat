@@ -3542,7 +3542,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
     }
     /// Reduce a zero-based dimension with fixed Include-NaN semantics.
     /// Return the first NaN (if any), otherwise the first minimum, with 1-based
-    /// indices. Preserve the values' numeric class and empty input shape.
+    /// indices. Negative zero orders below positive zero; identical signed
+    /// zeros retain the first index. Preserve numeric class and empty input shape.
     /// Unsupported representations must return typed Unsupported; omit-NaN
     /// requests use a separate domain path, not this hook.
     fn reduce_min_dim<'a>(
@@ -3559,7 +3560,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         unsupported_future("reduce_max not supported by provider")
     }
     /// As `reduce_min_dim`, selecting the first maximum instead of minimum.
-    /// NaN policy remains Include; equal extrema retain the first index.
+    /// NaN policy remains Include; positive zero orders above negative zero,
+    /// and equal extrema (including identical signed zeros) retain the first index.
     fn reduce_max_dim<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,
