@@ -13,7 +13,7 @@ pub fn cast(name: &str, input: u32, output: u32) -> FusionOp {
     }
 }
 
-pub fn plan(operations: Vec<FusionOp>, output: u32) -> FusionGroupPlan {
+pub fn initialize_registry() {
     // These fixtures invoke fusion directly, bypassing the runtime dispatcher
     // and VM entrypoints that normally initialize the browser registry.
     #[cfg(target_arch = "wasm32")]
@@ -34,6 +34,10 @@ pub fn plan(operations: Vec<FusionOp>, output: u32) -> FusionGroupPlan {
         assert_eq!(declaration.binding, identity);
         assert_eq!(declaration.spec.name, name);
     }
+}
+
+pub fn plan(operations: Vec<FusionOp>, output: u32) -> FusionGroupPlan {
+    initialize_registry();
     FusionGroupPlan {
         index: 0,
         group: FusionGroup {
