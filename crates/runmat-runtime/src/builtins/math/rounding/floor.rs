@@ -224,7 +224,7 @@ async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             == runmat_accelerate_api::GpuTensorStorage::Real
     {
         let result = {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             provider.unary_floor(&handle).await
         };
         match result {
@@ -247,7 +247,7 @@ async fn floor_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
     let host = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
     };
     let floored = floor_host_value(host)?;

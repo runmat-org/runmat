@@ -11,7 +11,7 @@ pub(super) async fn fallback(
     metadata: &gpu_helpers::GpuHandleMetadataSnapshot,
 ) -> BuiltinResult<Value> {
     let gathered = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(handle);
         gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await
     };
     gpu_helpers::restore_handle_metadata(handle, metadata);

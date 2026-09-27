@@ -198,8 +198,8 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
             && common_binary::matching_physical_inputs(&a, &b))
     {
         let result = {
-            let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
-            let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&b);
+            let _left_metadata = gpu_helpers::ResidencyRestoreGuard::new(&a);
+            let _right_metadata = gpu_helpers::ResidencyRestoreGuard::new(&b);
             provider.elem_mod(&a, &b).await
         };
         match result {
@@ -234,8 +234,8 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
         }
     }
     let (left, right) = {
-        let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
-        let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&b);
+        let _left_metadata = gpu_helpers::ResidencyRestoreGuard::new(&a);
+        let _right_metadata = gpu_helpers::ResidencyRestoreGuard::new(&b);
         let left = gpu_helpers::gather_tensor_async(&a).await?;
         let right = gpu_helpers::gather_tensor_async(&b).await?;
         (left, right)

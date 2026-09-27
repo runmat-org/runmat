@@ -95,7 +95,7 @@ pub(super) async fn try_resident_numerator(
     }
     if float_handle_supported(numerator) {
         let result = {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(numerator);
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(numerator);
             provider.scalar_div(numerator, *scalar)
         };
         match result {
@@ -166,7 +166,7 @@ pub(super) async fn try_resident_denominator(
     }
     if float_handle_supported(denominator) {
         let result = {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(denominator);
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(denominator);
             provider.scalar_rdiv(denominator, *scalar)
         };
         match result {
@@ -207,8 +207,8 @@ async fn divide(
     left: &GpuTensorHandle,
     right: &GpuTensorHandle,
 ) -> anyhow::Result<GpuTensorHandle> {
-    let _left = gpu_helpers::HandleMetadataRestoreGuard::new(left);
-    let _right = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+    let _left = gpu_helpers::ResidencyRestoreGuard::new(left);
+    let _right = gpu_helpers::ResidencyRestoreGuard::new(right);
     provider.elem_div(left, right).await
 }
 

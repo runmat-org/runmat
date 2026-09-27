@@ -206,7 +206,7 @@ async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             == runmat_accelerate_api::GpuTensorStorage::Real
     {
         let result = {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             provider.unary_ceil(&handle).await
         };
         match result {
@@ -229,7 +229,7 @@ async fn ceil_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         }
     }
     let host = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
     };
     let ceiled = ceil_host_value(host)?;

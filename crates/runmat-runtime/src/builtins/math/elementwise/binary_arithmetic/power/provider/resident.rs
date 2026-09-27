@@ -55,7 +55,7 @@ async fn power_gpu_host(
             if host_tensor.shape == resident.shape && tensor_matches_handle(&host_tensor, &resident)
             {
                 let uploaded = {
-                    let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&resident);
+                    let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&resident);
                     gpu_helpers::upload_tensor_protecting(provider, &host_tensor, &[&resident])?
                 };
                 let temporary = Temporary::new(uploaded, provider, &[&resident]);
@@ -89,7 +89,7 @@ async fn try_resident_scalar(
     }
 
     let fill_result = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(resident);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(resident);
         provider.fill_like(resident, scalar)
     };
     let filled = match fill_result {
@@ -194,8 +194,8 @@ impl ResidentOperand {
         resident: &GpuTensorHandle,
         host: &GpuTensorHandle,
     ) -> anyhow::Result<GpuTensorHandle> {
-        let _resident = gpu_helpers::HandleMetadataRestoreGuard::new(resident);
-        let _host = gpu_helpers::HandleMetadataRestoreGuard::new(host);
+        let _resident = gpu_helpers::ResidencyRestoreGuard::new(resident);
+        let _host = gpu_helpers::ResidencyRestoreGuard::new(host);
         match self {
             Self::Base => provider.elem_pow(resident, host).await,
             Self::Exponent => provider.elem_pow(host, resident).await,

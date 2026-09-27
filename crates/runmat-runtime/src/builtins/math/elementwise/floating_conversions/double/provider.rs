@@ -32,7 +32,7 @@ pub(super) async fn double_from_gpu(
             "GPU input requires explicit storage",
         ));
     }
-    let _metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+    let _metadata_guard = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     let direct_eligible = provider.precision() == ProviderPrecision::F64

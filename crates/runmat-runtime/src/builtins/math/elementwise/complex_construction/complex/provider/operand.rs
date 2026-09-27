@@ -68,7 +68,7 @@ impl RealGpuOperand {
             RealOperand::Host(input) => {
                 let _metadata: Vec<_> = protected
                     .iter()
-                    .map(|handle| gpu_helpers::HandleMetadataRestoreGuard::new(handle))
+                    .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
                     .collect();
                 let handle = gpu_helpers::upload_tensor_protecting(provider, &input, protected)
                     .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;

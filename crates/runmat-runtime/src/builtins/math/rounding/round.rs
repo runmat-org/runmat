@@ -189,7 +189,7 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
     if !runmat_accelerate_api::handle_is_logical(&handle) {
         let storage = runmat_accelerate_api::handle_storage(&handle);
         let provider_result = {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+            let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
             match strategy.provider_digits() {
                 Some((digits, significant)) => {
                     provider.round_digits(&handle, digits, significant).await
@@ -223,7 +223,7 @@ async fn round_gpu(handle: GpuTensorHandle, strategy: RoundStrategy) -> BuiltinR
         }
     }
     let host = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await?
     };
     let rounded = round_host_value(host, strategy)?;

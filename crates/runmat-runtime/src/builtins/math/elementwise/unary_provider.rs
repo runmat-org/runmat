@@ -44,7 +44,7 @@ where
     F: FnOnce(Value) -> BuiltinResult<Value>,
 {
     let gathered = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(input);
         gpu_helpers::gather_value_async(&Value::GpuTensor(input.clone()))
             .await
             .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?

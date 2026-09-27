@@ -57,17 +57,15 @@ pub(super) fn try_pagefun_gpu(
                 provider,
                 &contract,
             ) {
-                gpu_helpers::free_rejected_provider_output(
-                    &handle,
-                    &[&handles[0], &handles[1]],
-                    provider,
-                );
-                return Err(pagefun_internal_error(
-                    "provider returned invalid page-product metadata or input alias",
+                return Err(gpu_helpers::reject_gpu_output(
+                    handle,
+                    pagefun_internal_error(
+                        "provider returned invalid page-product metadata or input alias",
+                    ),
                 ));
             }
-            gpu_helpers::propagate_output_provenance(&mut handle, handles.iter());
-            Ok(Some(gpu_helpers::resident_gpu_value(handle)))
+            gpu_helpers::propagate_output_provenance(&mut handle, handles.iter())?;
+            Ok(Some(gpu_helpers::resident_gpu_value(handle)?))
         }
         Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
         Err(err) => Err(pagefun_internal_error(format!(
@@ -134,7 +132,7 @@ pub(super) fn build_pagefun_request(
 pub(super) fn handle_matrix_meta(
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<(usize, usize, Vec<usize>)> {
-    let canonical = canonical_matrix_shape(&handle.shape);
+    let canonical = canonical_matrix_shape(handle.shape());
     if canonical.len() < 2 {
         return Err(pagefun_error_with_detail(
             &PAGEFUN_ERROR_INVALID_INPUT,

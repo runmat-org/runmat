@@ -84,7 +84,7 @@ async fn try_unary_provider(
     input: &GpuTensorHandle,
     owner: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
-    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
+    let metadata = gpu_helpers::ResidencyRestoreGuard::new(input);
     let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = owner.complex_from_real(input).await;
     drop(metadata);
@@ -128,8 +128,8 @@ async fn try_binary_provider(
     let real = operand::RealGpuOperand::from_admitted(admitted_real, owner, &protected)?;
     protected.push(&real.handle);
     let imaginary = operand::RealGpuOperand::from_admitted(admitted_imaginary, owner, &protected)?;
-    let real_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&real.handle);
-    let imaginary_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&imaginary.handle);
+    let real_metadata = gpu_helpers::ResidencyRestoreGuard::new(&real.handle);
+    let imaginary_metadata = gpu_helpers::ResidencyRestoreGuard::new(&imaginary.handle);
     let result = owner
         .complex_from_real_imag(&real.handle, &imaginary.handle)
         .await;
@@ -183,7 +183,7 @@ async fn unary_fallback(
     handle: GpuTensorHandle,
     owner: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+    let metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(owner, &handle).await;
     drop(metadata);
     let output = host::unary(gathered.map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?)?;

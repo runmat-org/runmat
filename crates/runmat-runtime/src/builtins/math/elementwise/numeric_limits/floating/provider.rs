@@ -35,7 +35,7 @@ pub(super) fn like(
         )
     })?;
     let shape = vec![1, 1];
-    let metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(prototype);
+    let metadata_guard = gpu_helpers::ResidencyRestoreGuard::new(prototype);
     let output = match (precision, storage) {
         (ProviderPrecision::F64, GpuTensorStorage::Real) => gpu_helpers::upload_tensor_protecting(
             provider,

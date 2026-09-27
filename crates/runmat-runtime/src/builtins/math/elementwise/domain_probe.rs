@@ -69,7 +69,7 @@ pub(super) async fn probe_gpu_lower_bound(
     }
 
     let reduction = {
-        let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+        let _metadata = gpu_helpers::ResidencyRestoreGuard::new(handle);
         provider.reduce_min(handle).await
     };
     let minimum = match reduction {
@@ -106,7 +106,7 @@ pub(super) async fn probe_gpu_lower_bound(
         provider,
         handle: minimum,
     };
-    let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+    let _metadata = gpu_helpers::ResidencyRestoreGuard::new(handle);
     let host = gpu_helpers::download_floating_projection_async(provider, &minimum.handle).await;
     let host = host.map_err(|error| GpuDomainProbeError::ProviderDownload(Box::new(error)))?;
     if host.data.iter().any(|value| value.is_nan()) {

@@ -68,7 +68,7 @@ pub(super) fn admit_real_resident(
 pub(super) async fn gather_real(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> BuiltinResult<Tensor> {
-    let _metadata = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+    let _metadata = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
     crate::builtins::common::gpu_helpers::gather_tensor_async(handle).await
 }
 

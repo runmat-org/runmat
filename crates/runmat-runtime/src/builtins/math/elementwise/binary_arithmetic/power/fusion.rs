@@ -62,8 +62,8 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
                     .map(super::provider::admission::representation)
                     .collect::<Result<Vec<_>, _>>()?,
             };
-            let left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(left);
-            let right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+            let left_metadata = gpu_helpers::ResidencyRestoreGuard::new(left);
+            let right_metadata = gpu_helpers::ResidencyRestoreGuard::new(right);
             let result = provider.classify_real_power(left, right).await;
             drop((left_metadata, right_metadata));
             match result {

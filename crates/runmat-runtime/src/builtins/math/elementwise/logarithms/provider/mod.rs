@@ -35,7 +35,7 @@ pub(super) async fn evaluate(
         }
         GpuLowerBoundResult::AtOrAbove => {
             let result = {
-                let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+                let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
                 operation.evaluate_provider(provider, &handle).await
             };
             match result {

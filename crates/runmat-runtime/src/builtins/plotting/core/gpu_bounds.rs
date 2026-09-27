@@ -93,7 +93,7 @@ pub(super) async fn axis_bounds_protecting(
     };
     let metadata = protected
         .iter()
-        .map(|handle| gpu::HandleMetadataRestoreGuard::new(handle))
+        .map(|handle| gpu::ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
     let mut owned = Temporaries {
         provider,

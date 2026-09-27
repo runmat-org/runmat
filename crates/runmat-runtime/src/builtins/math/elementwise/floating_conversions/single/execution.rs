@@ -14,7 +14,7 @@ pub(super) async fn convert(
     let protected: Vec<_> = borrowed.iter().collect();
     let _borrowed_metadata: Vec<_> = protected
         .iter()
-        .map(|handle| crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(handle))
+        .map(|handle| crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle))
         .collect();
     let converted = match value {
         Value::GpuTensor(handle) => single_from_gpu(handle, &protected).await?,

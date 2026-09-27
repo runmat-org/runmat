@@ -25,7 +25,7 @@ pub(super) async fn cast_gpu_value(
         return fallback_through_owner(provider, &handle, target, &input_metadata).await;
     }
 
-    let restore = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+    let restore = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let direct = provider
         .cast_to_integer(&handle, target.accelerator_type())
         .await;

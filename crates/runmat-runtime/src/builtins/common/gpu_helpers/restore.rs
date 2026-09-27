@@ -79,13 +79,13 @@ pub fn restore_class_preserving_value_protecting(
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    let source_guard = HandleMetadataRestoreGuard::new(source);
+    let source_guard = ResidencyRestoreGuard::new(source);
     let protected = std::iter::once(source)
         .chain(protected.iter().copied())
         .collect::<Vec<_>>();
     let _operand_guards = protected
         .iter()
-        .map(|handle| HandleMetadataRestoreGuard::new(handle))
+        .map(|handle| ResidencyRestoreGuard::new(handle))
         .collect::<Vec<_>>();
     let explicit = protected
         .iter()

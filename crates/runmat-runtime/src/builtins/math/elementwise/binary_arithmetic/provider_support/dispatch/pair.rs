@@ -147,8 +147,8 @@ fn expand_pair<'a>(
     left_repetitions: &[usize],
     right_repetitions: &[usize],
 ) -> BuiltinResult<Option<ExpandedPair<'a>>> {
-    let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(left);
-    let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(right);
+    let _left_metadata = gpu_helpers::ResidencyRestoreGuard::new(left);
+    let _right_metadata = gpu_helpers::ResidencyRestoreGuard::new(right);
     let mut expanded = ExpandedPair {
         provider,
         original_left: left,

@@ -21,7 +21,7 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
         )),
         Ok(GpuLowerBoundResult::AtOrAbove) => {
             let result = {
-                let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&input);
+                let _metadata = gpu_helpers::ResidencyRestoreGuard::new(&input);
                 provider.unary_sqrt(&input).await
             };
             match result {

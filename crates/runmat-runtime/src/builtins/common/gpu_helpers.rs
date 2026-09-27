@@ -95,6 +95,8 @@ pub use runmat_accelerate_api::ResidencyRestoreGuard;
 mod adoption;
 pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
 pub(crate) use adoption::propagate_output_provenance;
+mod rejection;
+pub(crate) use rejection::reject_gpu_output;
 
 pub fn expected_gpu_class_identity(
     precision: Option<ProviderPrecision>,
@@ -441,7 +443,7 @@ pub async fn download_value_preserving_residency_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
-    let source_guard = HandleMetadataRestoreGuard::new(handle);
+    let source_guard = ResidencyRestoreGuard::new(handle);
     if provider.device_id() != handle.device_id {
         return Err(
             build_runtime_error("gpu download: provider does not own the input handle")
@@ -577,7 +579,7 @@ pub async fn download_floating_projection_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<HostTensorOwned> {
-    let source_guard = HandleMetadataRestoreGuard::new(handle);
+    let source_guard = ResidencyRestoreGuard::new(handle);
     if provider.device_id() != handle.device_id {
         return Err(build_runtime_error(
             "floating projection: provider does not own the input handle",

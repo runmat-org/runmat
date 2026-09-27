@@ -44,7 +44,7 @@ impl Outputs {
         let guards: Vec<_> = self
             .protected()
             .into_iter()
-            .map(runmat_accelerate_api::HandleMetadataRestoreGuard::new)
+            .map(runmat_accelerate_api::ResidencyRestoreGuard::new)
             .collect();
         let result = future.await;
         drop(guards);

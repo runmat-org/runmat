@@ -39,8 +39,8 @@ pub(super) async fn try_real_pair(
         return Ok(None);
     }
     let domain = {
-        let _left = gpu_helpers::HandleMetadataRestoreGuard::new(lhs);
-        let _right = gpu_helpers::HandleMetadataRestoreGuard::new(rhs);
+        let _left = gpu_helpers::ResidencyRestoreGuard::new(lhs);
+        let _right = gpu_helpers::ResidencyRestoreGuard::new(rhs);
         match provider.classify_real_power(lhs, rhs).await {
             Ok(domain) => domain,
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
@@ -52,8 +52,8 @@ pub(super) async fn try_real_pair(
         }
     };
     let result = {
-        let _left = gpu_helpers::HandleMetadataRestoreGuard::new(lhs);
-        let _right = gpu_helpers::HandleMetadataRestoreGuard::new(rhs);
+        let _left = gpu_helpers::ResidencyRestoreGuard::new(lhs);
+        let _right = gpu_helpers::ResidencyRestoreGuard::new(rhs);
         provider.real_power_in_domain(lhs, rhs, domain).await
     };
     match result {

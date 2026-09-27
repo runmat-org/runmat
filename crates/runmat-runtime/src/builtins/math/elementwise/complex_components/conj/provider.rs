@@ -45,7 +45,7 @@ async fn try_provider(
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
     let storage = handle_storage(input);
-    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(input);
+    let metadata = gpu_helpers::ResidencyRestoreGuard::new(input);
     let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = provider.unary_conj(input).await;
     drop(metadata);
@@ -103,7 +103,7 @@ async fn gather_conjugate_restore(
     handle: GpuTensorHandle,
     provider: &'static dyn AccelProvider,
 ) -> BuiltinResult<Value> {
-    let metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
+    let metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
     drop(metadata);
     let host_value = gathered
