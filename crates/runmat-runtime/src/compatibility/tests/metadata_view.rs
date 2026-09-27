@@ -1,12 +1,15 @@
 //! Read-only projections of the two registration mechanisms during cutover.
 //! No dispatch, runtime context, alternate inventory, or cached authority lives here.
 
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor};
+use runmat_builtins::{
+    BuiltinExtensionDescriptor, BuiltinIntegerAuditDescriptor, BuiltinIntegerCapabilityDescriptor,
+};
 
 pub(super) struct IntegerMetadata {
     pub name: &'static str,
     pub integer_capabilities: &'static [BuiltinIntegerCapabilityDescriptor],
     pub integer_audit: Option<&'static BuiltinIntegerAuditDescriptor>,
+    pub extensions: &'static [BuiltinExtensionDescriptor],
 }
 
 pub(super) fn integer_metadata() -> Vec<IntegerMetadata> {
@@ -19,6 +22,7 @@ pub(super) fn integer_metadata() -> Vec<IntegerMetadata> {
             name: entry.identity.name,
             integer_capabilities: entry.integer_capabilities,
             integer_audit: entry.integer_audit,
+            extensions: entry.extensions,
         })
         .chain(
             runmat_builtins::builtin_functions()
@@ -27,6 +31,7 @@ pub(super) fn integer_metadata() -> Vec<IntegerMetadata> {
                     name: entry.name,
                     integer_capabilities: entry.integer_capabilities,
                     integer_audit: entry.integer_audit,
+                    extensions: entry.extensions,
                 }),
         )
         .collect()
@@ -45,6 +50,10 @@ fn projection_keeps_both_registration_mechanisms_without_dispatching() {
             serde_json::to_value(entry.integer_capabilities).unwrap()
         );
         assert_eq!(actual.integer_audit, entry.integer_audit);
+        assert_eq!(
+            serde_json::to_value(actual.extensions).unwrap(),
+            serde_json::to_value(entry.extensions).unwrap()
+        );
     }
     for (actual, entry) in actual.iter().skip(canonical.len()).zip(legacy.iter()) {
         assert_eq!(actual.name, entry.name);
@@ -53,6 +62,10 @@ fn projection_keeps_both_registration_mechanisms_without_dispatching() {
             serde_json::to_value(entry.integer_capabilities).unwrap()
         );
         assert_eq!(actual.integer_audit, entry.integer_audit);
+        assert_eq!(
+            serde_json::to_value(actual.extensions).unwrap(),
+            serde_json::to_value(entry.extensions).unwrap()
+        );
     }
 }
 
@@ -63,6 +76,7 @@ fn duplicate_metadata_definitions_are_consistent() {
         let metadata = (
             serde_json::to_value(entry.integer_capabilities).unwrap(),
             serde_json::to_value(entry.integer_audit).unwrap(),
+            serde_json::to_value(entry.extensions).unwrap(),
         );
         if let Some(previous) = seen.insert(entry.name, metadata.clone()) {
             assert_eq!(
