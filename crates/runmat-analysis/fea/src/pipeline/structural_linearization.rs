@@ -17,7 +17,7 @@ mod integration;
 mod thermal_source;
 pub use thermal_source::ThermalLinearizationSource;
 
-const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v2\0";
+const LINEARIZATION_PREFIX: &[u8] = b"runmat-fea-structural-linearization/v3\0";
 const LINEARIZATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(1024 * 1024 * 1024, 64_000_000, 65_536, 32);
 
@@ -132,14 +132,20 @@ impl StructuralLinearizationArtifact {
 
     pub(crate) fn from_thermal_solution(
         summary: &AssemblySummary,
-        source_run: AnalysisRunIdentity,
+        run: &crate::FeaRunResult,
         solution: &[f64],
         transition: crate::execution::CanonicalStateTransition,
-        structural_result_content: Digest,
+        model: &runmat_analysis_core::AnalysisModel,
     ) -> Result<Self, StructuralLinearizationError> {
         let topology = transition.target_topology_digest;
-        let source = ThermalLinearizationSource::new(transition, structural_result_content)?;
-        Self::from_bound_solution(summary, source_run, topology, solution, Some(source))
+        let source = ThermalLinearizationSource::from_result(model, transition, run)?;
+        Self::from_bound_solution(
+            summary,
+            run.identity.clone(),
+            topology,
+            solution,
+            Some(source),
+        )
     }
 
     fn from_bound_solution(
@@ -215,7 +221,7 @@ impl StructuralLinearizationArtifact {
             .numerical_identity()
             .map_err(|error| StructuralLinearizationError::Identity(error.to_string()))?;
         let mut artifact = Self {
-            schema_version: 2,
+            schema_version: 3,
             identity: StructuralLinearizationIdentity(Digest::sha256([])),
             source_run,
             thermal_source,
@@ -270,7 +276,7 @@ impl StructuralLinearizationArtifact {
             self.thermal_source.as_ref(),
         )?;
         let dimension = self.base_displacement.len();
-        if self.schema_version != 2
+        if self.schema_version != 3
             || dimension == 0
             || self.reference_load.len() != dimension
             || self

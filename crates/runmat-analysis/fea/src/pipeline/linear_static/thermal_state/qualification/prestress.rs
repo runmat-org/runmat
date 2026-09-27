@@ -4,6 +4,102 @@ use crate::execution::{
     SemanticStatePublicationSource,
 };
 use crate::pipeline::structural_linearization::StructuralLinearizationArtifact;
+use runmat_execution::Digest;
+
+#[test]
+fn portable_thermal_result_separates_physical_source_from_transport_commitment() {
+    use crate::execution::{
+        AnalysisWorkloadIdentity, StructuralLinearNumericalReceiptArtifact,
+        StructuralLinearWorkloadResult,
+    };
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let (model, mesh) = model_and_mesh(order, true);
+        let source = solve_temperature(&model, &mesh);
+        let solved = run_linear_static_from_thermal_state(
+            &model,
+            ComputeBackend::Cpu,
+            options(&mesh),
+            &source,
+        )
+        .unwrap();
+        let physical_identity = solved.solver_result_identity;
+        let constraints = solved
+            .run
+            .structural_constraint_result
+            .as_deref()
+            .unwrap()
+            .clone();
+        assert!(
+            StructuralLinearWorkloadResult::new(solved.run.clone(), constraints.clone()).is_err()
+        );
+        let result = StructuralLinearWorkloadResult::with_linearization(
+            solved.run,
+            constraints,
+            solved.linearization,
+        )
+        .unwrap();
+        let retained = result
+            .linearization
+            .as_ref()
+            .unwrap()
+            .thermal_source()
+            .unwrap();
+        retained.validate_model(&model).unwrap();
+        let mut foreign_model = model.clone();
+        foreign_model.materials[0]
+            .thermal
+            .as_mut()
+            .unwrap()
+            .expansion_coefficient_per_k *= 2.0;
+        assert!(retained.validate_model(&foreign_model).is_err());
+        let first = AnalysisWorkloadIdentity::for_test("thermal first placement").unwrap();
+        let second = AnalysisWorkloadIdentity::for_test("thermal second placement").unwrap();
+        let receipt = StructuralLinearNumericalReceiptArtifact::new(first, &result).unwrap();
+        let other = StructuralLinearNumericalReceiptArtifact::new(second, &result).unwrap();
+        assert_eq!(receipt.source_result(), physical_identity);
+        assert_eq!(other.source_result(), physical_identity);
+        assert_eq!(result.result_identity(first).unwrap(), physical_identity);
+        assert_ne!(receipt.identity(), other.identity());
+        receipt
+            .validate_against(physical_identity, &result)
+            .unwrap();
+        let decoded = StructuralLinearWorkloadResult::from_canonical_bytes(
+            &result.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        let portable_receipt = StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(
+            &receipt.canonical_bytes().unwrap(),
+        )
+        .unwrap();
+        portable_receipt
+            .validate_against(physical_identity, &decoded)
+            .unwrap();
+        let mut changed = receipt.clone();
+        changed.source_workload = second;
+        assert!(changed.validate().is_err());
+        changed = receipt.clone();
+        changed.source_payload_digest = Digest::sha256("foreign transport payload");
+        assert!(changed.validate().is_err());
+        let mut changed = result.clone();
+        let values = changed
+            .run
+            .fields
+            .iter_mut()
+            .find(|field| field.field_id == crate::FEA_FIELD_STRUCTURAL_DISPLACEMENT)
+            .unwrap();
+        let AnalysisFieldValues::HostF64(values) = &mut values.values else {
+            unreachable!()
+        };
+        values[0] += 1.0;
+        assert!(changed.validate().is_err());
+        assert!(receipt
+            .validate_against(physical_identity, &changed)
+            .is_err());
+        let mut stripped = result.clone();
+        stripped.linearization = None;
+        assert!(stripped.validate().is_err());
+    }
+}
 
 #[test]
 fn thermal_prestress_roundtrip_and_publication_bind_exact_structural_result() {

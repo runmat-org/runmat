@@ -36,6 +36,17 @@ pub(super) fn require_structural(
             "structural {procedure:?} execution requires exactly one canonical Structural or Thermomechanical procedure step, but multiple steps were found"
         )));
     }
+    require_structural_step(model, step, requirement)?;
+    Ok(step)
+}
+
+/// Apply the same structural admission to an explicitly selected, authored procedure.
+pub(super) fn require_structural_step(
+    model: &AnalysisModel,
+    step: &ProcedureStep,
+    requirement: FormulationRequirement,
+) -> Result<(), FeaRunError> {
+    let procedure = step.procedure;
     require_qualified_formulation(
         step.family,
         step.procedure,
@@ -76,7 +87,7 @@ pub(super) fn require_structural(
             "structural affine constraints are not yet admitted for {procedure:?}; modal, transient, and nonlinear operators require procedure-specific stiffness, mass, damping, tangent, and effective-load reduction"
         )));
     }
-    Ok(step)
+    Ok(())
 }
 
 pub(super) fn require_nonstructural(

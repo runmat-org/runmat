@@ -37,10 +37,11 @@ pub use pipeline::electromagnetic_frequency::{
     FeaElectromagneticFrequencyResponse,
 };
 pub use pipeline::linear_static::{
-    run_linear_static, run_linear_static_from_thermal_state, run_linear_static_with_options,
-    run_linear_static_with_prepared_constraint_plan,
+    run_linear_static, run_linear_static_from_thermal_state,
+    run_linear_static_from_thermal_state_with_prepared_constraint_plan,
+    run_linear_static_with_options, run_linear_static_with_prepared_constraint_plan,
     run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
-    StaticResourceAdmission, ThermoelasticStaticResult,
+    PreparedThermoelasticStaticInput, StaticResourceAdmission, ThermoelasticStaticResult,
 };
 pub use pipeline::modal::{
     execute_structural_modal_workload, execute_structural_prestressed_modal_workload,

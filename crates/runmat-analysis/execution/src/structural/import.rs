@@ -84,9 +84,11 @@ pub fn import_structural_linear_completion(
     let result = StructuralLinearWorkloadResult::from_canonical_bytes(&imported.payload())?;
     let numerical_receipt =
         StructuralLinearNumericalReceiptArtifact::from_canonical_bytes(&receipt_objects.payload())?;
-    if numerical_receipt.identity().digest() != receipt_output.logical_identity {
+    if numerical_receipt.identity().digest() != receipt_output.logical_identity
+        || numerical_receipt.source_workload != prepared.host.workload.identity
+    {
         return Err(AnalysisBridgeError::Identity(
-            "numerical receipt manifest differs from its canonical identity",
+            "numerical receipt manifest or source workload differs from its canonical identity",
         ));
     }
     numerical_receipt.validate_against(expected_result, &result)?;

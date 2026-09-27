@@ -12,10 +12,12 @@ use crate::solve::backend::kind::LinearAlgebraBackendKind;
 use crate::solve::preconditioner::SpdPreconditionerKind;
 
 use super::{AnalysisExecutionError, AnalysisExecutionResult};
+mod result_identity;
 use super::{
     AnalysisWorkloadIdentity, CanonicalStateTransition, NumericalReceiptIdentity,
     SolverResultIdentity,
 };
+use result_identity::ResultIdentitySource;
 
 const SOLVE_PREFIX: &[u8] = b"runmat-analysis-solve/v1\0";
 const SOLVE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
@@ -264,6 +266,7 @@ pub struct StructuralLinearNumericalReceiptArtifact {
     pub source_workload: AnalysisWorkloadIdentity,
     pub source_payload_digest: runmat_execution::Digest,
     pub source_result: SolverResultIdentity,
+    source_identity: ResultIdentitySource,
     receipt: StructuralLinearNumericalReceipt,
 }
 
@@ -275,6 +278,7 @@ struct StructuralLinearNumericalReceiptArtifactWire {
     source_workload: AnalysisWorkloadIdentity,
     source_payload_digest: runmat_execution::Digest,
     source_result: SolverResultIdentity,
+    source_identity: ResultIdentitySource,
     receipt: StructuralLinearNumericalReceipt,
 }
 
@@ -290,6 +294,7 @@ impl TryFrom<StructuralLinearNumericalReceiptArtifactWire>
             source_workload: wire.source_workload,
             source_payload_digest: wire.source_payload_digest,
             source_result: wire.source_result,
+            source_identity: wire.source_identity,
             receipt: wire.receipt,
         };
         artifact.validate()?;
@@ -344,6 +349,18 @@ impl StructuralLinearWorkloadResult {
         self.constraint_result
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if self.run.identity.realization().coupling
+            == runmat_analysis_core::CouplingImplementation::OneWaySolvedThermoelasticState
+            && self
+                .linearization
+                .as_ref()
+                .and_then(|value| value.thermal_source())
+                .is_none()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "solved thermal result requires retained physical source",
+            ));
+        }
         if self.run.structural_constraint_result.as_deref() != Some(&self.constraint_result) {
             return Err(AnalysisExecutionError::Identity(
                 "portable structural constraint result differs from its canonical run payload",
@@ -360,6 +377,11 @@ impl StructuralLinearWorkloadResult {
                 return Err(AnalysisExecutionError::Identity(
                     "structural linearization does not belong to its solver result",
                 ));
+            }
+            if let Some(source) = linearization.thermal_source() {
+                source
+                    .validate_result(&self.run)
+                    .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
             }
         }
         StructuralLinearNumericalReceipt::from_run(&self.run)?;
@@ -425,17 +447,19 @@ impl StructuralLinearNumericalReceiptArtifact {
     ) -> AnalysisExecutionResult<Self> {
         result.validate()?;
         let source_payload_digest = runmat_execution::Digest::sha256(result.canonical_bytes()?);
-        let source_result = SolverResultIdentity::new(source_workload, source_payload_digest)?;
+        let source_identity = ResultIdentitySource::from_result(result);
+        let source_result = source_identity.identity(source_workload, source_payload_digest)?;
         let receipt = StructuralLinearNumericalReceipt::from_run(&result.run)?;
-        let identity = NumericalReceiptIdentity::new(source_result, receipt.content_digest()?)?;
-        let artifact = Self {
-            schema_version: 1,
-            identity,
+        let mut artifact = Self {
+            schema_version: 2,
+            identity: NumericalReceiptIdentity::new(source_result, source_payload_digest)?,
             source_workload,
             source_payload_digest,
             source_result,
+            source_identity,
             receipt,
         };
+        artifact.identity = artifact.expected_identity()?;
         artifact.validate()?;
         Ok(artifact)
     }
@@ -454,11 +478,11 @@ impl StructuralLinearNumericalReceiptArtifact {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.receipt.validate()?;
-        let expected_source =
-            SolverResultIdentity::new(self.source_workload, self.source_payload_digest)?;
-        let expected =
-            NumericalReceiptIdentity::new(self.source_result, self.receipt.content_digest()?)?;
-        if self.schema_version != 1
+        let expected_source = self
+            .source_identity
+            .identity(self.source_workload, self.source_payload_digest)?;
+        let expected = self.expected_identity()?;
+        if self.schema_version != 2
             || self.source_result != expected_source
             || self.identity != expected
         {
@@ -476,6 +500,7 @@ impl StructuralLinearNumericalReceiptArtifact {
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
         if self.source_result != source_result
+            || self.source_identity != ResultIdentitySource::from_result(result)
             || self.source_payload_digest
                 != runmat_execution::Digest::sha256(result.canonical_bytes()?)
             || self.receipt != StructuralLinearNumericalReceipt::from_run(&result.run)?
@@ -534,16 +559,6 @@ impl StructuralLinearNumericalReceipt {
             ));
         }
         Ok(())
-    }
-
-    fn content_digest(self) -> AnalysisExecutionResult<runmat_execution::Digest> {
-        self.validate()?;
-        Ok(runmat_execution::Digest::sha256(encode_contract(
-            SOLVE_PREFIX,
-            "structural-linear-numerical-receipt-content",
-            &self,
-            SOLVE_LIMITS,
-        )?))
     }
 }
 

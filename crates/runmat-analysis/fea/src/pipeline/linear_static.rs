@@ -52,7 +52,11 @@ pub use prepared::{
     run_linear_static_with_prepared_constraint_plan_and_linearization, LinearStaticExecution,
     StaticResourceAdmission,
 };
-pub use thermal_state::{run_linear_static_from_thermal_state, ThermoelasticStaticResult};
+pub use thermal_state::{
+    run_linear_static_from_thermal_state,
+    run_linear_static_from_thermal_state_with_prepared_constraint_plan,
+    PreparedThermoelasticStaticInput, ThermoelasticStaticResult,
+};
 
 const VECTOR_COMPONENT_COUNT: usize = 3;
 
@@ -85,13 +89,20 @@ fn run_linear_static_with_constraint_plan(
     options: LinearStaticSolveOptions,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     admitted: Option<StaticResourceAdmission<'_>>,
-    thermal_source: Option<&crate::execution::CanonicalSemanticState>,
+    thermal_source: Option<thermal_state::ThermalStateSelection<'_>>,
 ) -> Result<LinearStaticComputation, FeaRunError> {
-    let execution_step = super::admission::require_structural(
-        model,
-        AnalysisProcedure::Static,
-        options.formulation_requirement,
-    )?;
+    let execution_step = match thermal_source.as_ref() {
+        Some(selection) => thermal_state::require_selected_step(
+            model,
+            selection.consumer_step_id,
+            options.formulation_requirement,
+        )?,
+        None => super::admission::require_structural(
+            model,
+            AnalysisProcedure::Static,
+            options.formulation_requirement,
+        )?,
+    };
     if thermal_source.is_none()
         && execution_step
             .state_inputs
@@ -132,26 +143,21 @@ fn run_linear_static_with_constraint_plan(
         admitted,
     )?;
     let assembly_constraint_plan = constraint_plan.or(preassembly.constraints.as_ref());
+    // Align the immutable source only after numerical resource admission has succeeded.
+    let thermal_transfer = thermal_source
+        .map(|selection| {
+            thermal_state::bind_source(
+                model,
+                selection.consumer_step_id,
+                &options,
+                selection.source,
+            )
+        })
+        .transpose()?;
 
     let excitations =
         realize_step_excitations(model, execution_step, ExcitationSamplePoint::Static)
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
-    let thermal_transfer = thermal_source
-        .map(|source| {
-            let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
-                FeaRunError::InvalidModel(
-                    "thermal state consumption requires a canonical solver mesh".into(),
-                )
-            })?;
-            crate::execution::BoundThermalStateTransfer::bind(
-                model,
-                &execution_step.step_id,
-                source,
-                mesh,
-            )
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))
-        })
-        .transpose()?;
     emit_phase(
         "fea.run_linear_static",
         FeaProgressPhase::ModelAssembly,
