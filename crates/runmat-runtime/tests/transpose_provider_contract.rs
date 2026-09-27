@@ -329,7 +329,7 @@ fn real_aliases_are_lawful_and_complex_rank_zero_is_actually_conjugated() {
     let Value::GpuTensor(output) = invoke("ctranspose", &input).unwrap() else {
         panic!("complex scalar result")
     };
-    assert_eq!(output.shape(), &[]);
+    assert!(output.shape().is_empty());
     assert!(!output.shares_allocation_with(&input));
     assert!(
         matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [3., 4.])
