@@ -46,6 +46,7 @@ mod tests {
                     elements: Some(4),
                     flops: Some(8),
                     batch: Some(1),
+                    numerical_domain: Default::default(),
                 },
             },
             preparation: CandidatePreparationState::Warm,

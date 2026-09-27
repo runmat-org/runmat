@@ -283,6 +283,7 @@ fn select_fusion_provider(
                 elements: Some(element_count),
                 flops: None,
                 batch: None,
+                numerical_domain: Default::default(),
             },
             preparation: CandidatePreparationState::Warm,
             cpu,

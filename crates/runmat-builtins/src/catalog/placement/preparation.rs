@@ -36,6 +36,8 @@ pub struct BuiltinPreparationForm {
 pub enum BuiltinPreparationOperation {
     Unary,
     ElementwiseBinary,
+    /// Real floating operands whose result domain depends on paired values.
+    RealPower,
     MatrixMultiply,
     Transpose,
     Reduction(BuiltinPreparationReduction),
@@ -72,7 +74,7 @@ impl BuiltinPreparationOperation {
     pub const fn data_arity(self) -> Option<usize> {
         match self {
             Self::Unary | Self::Transpose | Self::Reduction(_) => Some(1),
-            Self::ElementwiseBinary | Self::MatrixMultiply => Some(2),
+            Self::ElementwiseBinary | Self::RealPower | Self::MatrixMultiply => Some(2),
             Self::Sink(_) => None,
         }
     }

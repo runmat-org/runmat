@@ -38,7 +38,7 @@ pub const POWER_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             binding_variant: "default",
             signatures: &[0],
             data_arguments: &[0, 1],
-            operation: crate::BuiltinPreparationOperation::ElementwiseBinary,
+            operation: crate::BuiltinPreparationOperation::RealPower,
             provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
         }]),
         portability: BuiltinPortability::NativeAndWasm,

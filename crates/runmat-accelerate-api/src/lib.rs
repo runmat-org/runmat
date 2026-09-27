@@ -20,7 +20,7 @@ mod power;
 
 pub use native_device::*;
 pub use placement::*;
-pub use power::PowerResultDomain;
+pub use power::{NumericalDomainEvidence, PowerResultDomain};
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);

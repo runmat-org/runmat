@@ -43,6 +43,18 @@ fn request() -> AdmittedBuiltinPreparation {
     request_with(admission(), vec![Value::Num(3.0)]).unwrap()
 }
 
+#[test]
+fn numerical_evidence_defaults_unknown_and_cannot_cross_operation_roles() {
+    use runmat_accelerate_api::{NumericalDomainEvidence, PowerResultDomain};
+    assert_eq!(
+        request().numerical_domain(),
+        NumericalDomainEvidence::Unknown
+    );
+    assert!(request()
+        .with_numerical_domain(|_| Ok(NumericalDomainEvidence::RealPower(PowerResultDomain::Real)))
+        .is_err());
+}
+
 fn context() -> RuntimeContext {
     RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
 }

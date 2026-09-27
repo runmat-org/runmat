@@ -105,6 +105,7 @@ pub(super) fn prepare_with(
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
         Operation::Transpose => ArgumentOperation::Unary(UnaryOp::Transpose),
         Operation::ElementwiseBinary => ArgumentOperation::Binary(BinaryOp::Elementwise),
+        Operation::RealPower => ArgumentOperation::RealPower(request.numerical_domain()),
         Operation::MatrixMultiply => ArgumentOperation::Binary(BinaryOp::MatMul),
         Operation::Reduction(_) => ArgumentOperation::Reduction,
         Operation::Sink(_) => unreachable!("sinks handled independently of automatic promotion"),

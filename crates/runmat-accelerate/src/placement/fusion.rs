@@ -62,6 +62,7 @@ impl FusionPlacementObserver {
                 elements: elements.and_then(|value| u64::try_from(value).ok()),
                 flops: None,
                 batch: batch.and_then(|value| u64::try_from(value).ok()),
+                numerical_domain: Default::default(),
             },
         };
         let feasibility = provider.query_feasibility(&query);

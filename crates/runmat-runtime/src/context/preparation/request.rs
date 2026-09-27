@@ -24,9 +24,41 @@ pub struct AdmittedBuiltinPreparation {
     admission: BuiltinPreparationAdmission,
     form: &'static BuiltinPreparationForm,
     operands: Vec<Value>,
+    numerical_domain: runmat_accelerate_api::NumericalDomainEvidence,
 }
 
 impl AdmittedBuiltinPreparation {
+    /// Evaluate semantic evidence against this request's immutable operands.
+    /// Domain implementations cannot attach a detached cached boolean to a
+    /// later call, and services cannot replace these operands in place.
+    pub(crate) fn with_numerical_domain(
+        mut self,
+        classify: impl FnOnce(
+            &[Value],
+        )
+            -> Result<runmat_accelerate_api::NumericalDomainEvidence, RuntimeError>,
+    ) -> Result<Self, RuntimeError> {
+        use runmat_accelerate_api::NumericalDomainEvidence;
+        let evidence = classify(&self.operands)?;
+        if !matches!(
+            (self.form.operation, evidence),
+            (_, NumericalDomainEvidence::Unknown)
+                | (
+                    runmat_builtins::BuiltinPreparationOperation::RealPower,
+                    NumericalDomainEvidence::RealPower(_)
+                )
+        ) {
+            return Err(invalid(
+                "numerical evidence does not belong to preparation operation",
+            ));
+        }
+        self.numerical_domain = evidence;
+        Ok(self)
+    }
+
+    pub fn numerical_domain(&self) -> runmat_accelerate_api::NumericalDomainEvidence {
+        self.numerical_domain
+    }
     pub fn new(
         admission: BuiltinPreparationAdmission,
         operands: Vec<Value>,
@@ -123,6 +155,7 @@ impl AdmittedBuiltinPreparation {
             admission,
             form,
             operands,
+            numerical_domain: Default::default(),
         })
     }
 

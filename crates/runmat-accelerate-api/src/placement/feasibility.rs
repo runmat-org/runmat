@@ -23,6 +23,8 @@ pub struct ProviderWorkload {
     pub elements: Option<u64>,
     pub flops: Option<u64>,
     pub batch: Option<u64>,
+    #[serde(default)]
+    pub numerical_domain: crate::NumericalDomainEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

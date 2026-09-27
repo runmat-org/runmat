@@ -22,6 +22,16 @@ impl RuntimeAccelerationService for Recorder {
         assert_eq!(request.admission().input_count, 2);
         assert_eq!(request.admission().signature, 0);
         assert_eq!(request.form().data_arguments, &[0, 1]);
+        let expected = if request.form().operation
+            == runmat_builtins::BuiltinPreparationOperation::RealPower
+        {
+            runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                runmat_accelerate_api::PowerResultDomain::Real,
+            )
+        } else {
+            runmat_accelerate_api::NumericalDomainEvidence::Unknown
+        };
+        assert_eq!(request.numerical_domain(), expected);
         assert!(matches!(
             request.operands(),
             [Value::Tensor(_), Value::Tensor(_)]

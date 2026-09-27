@@ -75,6 +75,17 @@ where
     Fut: Future<Output = Result<Value, RuntimeError>>,
 {
     let request = AdmittedBuiltinPreparation::new(admission, operands)?;
+    execute_current_request(request, execute).await
+}
+
+pub(crate) async fn execute_current_request<F, Fut>(
+    request: AdmittedBuiltinPreparation,
+    execute: F,
+) -> Result<Value, RuntimeError>
+where
+    F: FnOnce(Vec<Value>) -> Fut,
+    Fut: Future<Output = Result<Value, RuntimeError>>,
+{
     match super::legacy::active() {
         Some(context) => execute_admitted(&context, request, execute).await,
         None => {
