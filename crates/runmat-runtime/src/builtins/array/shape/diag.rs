@@ -1839,6 +1839,14 @@ fn diag_cast_error(context: &str, err: CastError) -> RuntimeError {
         CastError::Internal(message) => {
             diag_error(MESSAGE_ID_INVALID_INPUT, format!("{context}: {message}"))
         }
+        CastError::Runtime(source) => {
+            let mut contextual = diag_error(
+                MESSAGE_ID_INVALID_INPUT,
+                format!("{context}: {}", source.message()),
+            );
+            contextual.source = Some(source);
+            contextual
+        }
     }
 }
 

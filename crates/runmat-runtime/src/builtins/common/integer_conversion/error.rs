@@ -39,4 +39,5 @@ impl fmt::Display for UnsupportedValueKind {
 pub(crate) enum CastError {
     Unsupported(UnsupportedValueKind),
     Internal(String),
+    Runtime(Box<crate::RuntimeError>),
 }

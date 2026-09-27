@@ -16,8 +16,8 @@ use std::sync::{
 
 #[derive(Clone, Copy)]
 enum ResultMode {
-    MissingStorage,
-    UnknownOwner,
+    WrongClass,
+    ForeignOwner,
     Alias,
     Failure,
     Unsupported,
@@ -29,7 +29,7 @@ struct Provider {
     mode: Mutex<ResultMode>,
     calls: AtomicUsize,
     downloads: AtomicUsize,
-    freed: Mutex<Vec<u64>>,
+    created: Mutex<Vec<runmat_accelerate_api::WeakGpuTensorHandle>>,
 }
 
 impl AccelProvider for Provider {
@@ -52,12 +52,18 @@ impl AccelProvider for Provider {
         self.downloads.fetch_add(1, Ordering::Relaxed);
         self.inner.download(handle)
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.lock().unwrap().push(handle.buffer_id);
-        // This deliberately malformed provider still owns its returned buffer.
-        let mut owned = handle.clone();
-        owned.device_id = self.device_id();
-        self.inner.free(&owned)
+    fn upload_numeric_raw(
+        &self,
+        view: &runmat_accelerate_api::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload_numeric_raw(view)
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::Relaxed);
+        self.inner.download_numeric(handle)
     }
     fn cast_to_integer<'a>(
         &'a self,
@@ -69,8 +75,7 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             match mode {
                 ResultMode::Pending => {
-                    runmat_accelerate_api::set_handle_logical(input, true);
-                    runmat_accelerate_api::record_handle_transpose(input, 99, 88);
+                    runmat_accelerate_api::clear_residency(input);
                     futures::future::pending().await
                 }
                 ResultMode::Alias => Ok(input.clone()),
@@ -78,13 +83,21 @@ impl AccelProvider for Provider {
                 ResultMode::Unsupported => Err(
                     runmat_accelerate_api::unsupported_provider_operation("cast unavailable"),
                 ),
-                ResultMode::MissingStorage | ResultMode::UnknownOwner => {
-                    let mut output = self.inner.cast_to_integer(input, target).await?;
-                    match mode {
-                        ResultMode::MissingStorage => output.descriptor.storage = None,
-                        ResultMode::UnknownOwner => output.device_id = u32::MAX,
-                        _ => unreachable!(),
-                    }
+                ResultMode::WrongClass | ResultMode::ForeignOwner => {
+                    let output = if matches!(mode, ResultMode::WrongClass) {
+                        self.inner.upload(&HostTensorView {
+                            data: &[3.0, -1.0],
+                            shape: input.shape(),
+                        })?
+                    } else {
+                        let foreign = InProcessProvider::new();
+                        let foreign_input = foreign.upload(&HostTensorView {
+                            data: &[3.0, -1.0],
+                            shape: input.shape(),
+                        })?;
+                        foreign.cast_to_integer(&foreign_input, target).await?
+                    };
+                    self.created.lock().unwrap().push(output.downgrade());
                     Ok(output)
                 }
             }
@@ -110,16 +123,16 @@ fn abandoning_pending_cast_restores_borrowed_metadata_and_allocation() {
         call.poll_unpin(&mut Context::from_waker(&waker)),
         Poll::Pending
     ));
-    assert!(runmat_accelerate_api::handle_is_logical(&input));
+    assert!(!runmat_accelerate_api::handle_is_logical(&input));
     drop(call);
     assert!(!runmat_accelerate_api::handle_is_logical(&input));
     assert_eq!(
         runmat_accelerate_api::handle_transpose_info(&input),
         original_transpose
     );
-    assert!(provider.freed.lock().unwrap().is_empty());
+    assert!(provider.created.lock().unwrap().is_empty());
     assert!(block_on(provider.inner.download(&input)).is_ok());
-    provider.free(&input).unwrap();
+    drop(input);
 }
 
 fn provider(mode: ResultMode) -> &'static Provider {
@@ -129,12 +142,12 @@ fn provider(mode: ResultMode) -> &'static Provider {
         mode: Mutex::new(mode),
         calls: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
-        freed: Mutex::new(Vec::new()),
+        created: Mutex::new(Vec::new()),
     });
     *provider.mode.lock().unwrap() = mode;
     provider.calls.store(0, Ordering::Relaxed);
     provider.downloads.store(0, Ordering::Relaxed);
-    provider.freed.lock().unwrap().clear();
+    provider.created.lock().unwrap().clear();
     provider
 }
 
@@ -151,8 +164,8 @@ fn input(provider: &Provider) -> GpuTensorHandle {
 fn malformed_fresh_outputs_are_freed_without_touching_borrowed_input() {
     let _lock = test_support::accel_test_lock();
     for mode in [
-        ResultMode::MissingStorage,
-        ResultMode::UnknownOwner,
+        ResultMode::WrongClass,
+        ResultMode::ForeignOwner,
         ResultMode::Alias,
     ] {
         let provider = provider(mode);
@@ -163,27 +176,38 @@ fn malformed_fresh_outputs_are_freed_without_touching_borrowed_input() {
             IntegerClass::Int8
         ))
         .is_err());
-        let freed = provider.freed.lock().unwrap().clone();
-        assert!(!freed.contains(&input.buffer_id));
-        assert_eq!(freed.len(), usize::from(!matches!(mode, ResultMode::Alias)));
+        let created = provider.created.lock().unwrap();
+        assert_eq!(
+            created.len(),
+            usize::from(!matches!(mode, ResultMode::Alias))
+        );
+        assert!(created.iter().all(|output| output.acquire().is_err()));
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
         assert!(block_on(provider.inner.download(&input)).is_ok());
-        provider.free(&input).unwrap();
+        drop(input);
     }
 }
 
 #[test]
-fn missing_input_storage_is_rejected_before_hook_or_download() {
+fn unavailable_input_owner_is_rejected_before_hook_or_download() {
     let _lock = test_support::accel_test_lock();
     let provider = provider(ResultMode::Failure);
     let _current = ThreadProviderGuard::set(Some(provider));
-    let input = input(provider);
-    let mut malformed = input.clone();
-    malformed.descriptor.storage = None;
-    assert!(block_on(cast_value(Value::GpuTensor(malformed), IntegerClass::Int8)).is_err());
+    let foreign = InProcessProvider::new();
+    let input = foreign
+        .upload(&HostTensorView {
+            data: &[2.0],
+            shape: &[1, 1],
+        })
+        .unwrap();
+    assert!(block_on(cast_value(
+        Value::GpuTensor(input.clone()),
+        IntegerClass::Int8
+    ))
+    .is_err());
     assert_eq!(provider.calls.load(Ordering::Relaxed), 0);
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
-    provider.free(&input).unwrap();
+    assert!(block_on(foreign.download(&input)).is_ok());
 }
 
 #[test]
@@ -200,7 +224,7 @@ fn only_typed_unsupported_permits_owner_download_fallback() {
         match mode {
             ResultMode::Failure => {
                 assert!(
-                    matches!(result, Err(super::super::CastError::Internal(ref message)) if message.contains("injected cast execution failure"))
+                    matches!(result, Err(super::super::CastError::Runtime(ref error)) if error.message().contains("injected cast execution failure"))
                 );
                 assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
             }
@@ -208,17 +232,17 @@ fn only_typed_unsupported_permits_owner_download_fallback() {
                 let Value::GpuTensor(output) = result.unwrap() else {
                     panic!("resident fallback")
                 };
-                assert_eq!(output.device_id, input.device_id);
+                assert_eq!(output.device_id(), input.device_id());
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(&output),
                     Some(IntegerElementType::I8)
                 );
                 assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
-                provider.free(&output).unwrap();
+                drop(output);
             }
             _ => unreachable!(),
         }
-        provider.free(&input).unwrap();
+        drop(input);
     }
 }
 
@@ -244,25 +268,52 @@ fn unsupported_singleton_cast_retains_exact_class_shape_owner_and_intent() {
                     shape: &shape,
                 })
                 .unwrap();
-            runmat_accelerate_api::set_handle_provenance(
-                &mut input,
-                runmat_accelerate_api::GpuHandleProvenance::Explicit,
-            );
+            input = input
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap();
             let Value::GpuTensor(output) =
                 block_on(cast_value(Value::GpuTensor(input.clone()), target)).unwrap()
             else {
                 panic!("singleton fallback must remain resident")
             };
-            assert_eq!(output.device_id, input.device_id);
-            assert_eq!(output.shape, shape);
+            assert_eq!(output.device_id(), input.device_id());
+            assert_eq!(output.shape(), shape);
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
             let downloaded = block_on(provider.inner.download_integer(&output)).unwrap();
             assert_eq!(downloaded.shape, shape);
             use super::super::class::IntegerClassExt;
             assert_eq!(downloaded.data.element_type(), target.accelerator_type());
             assert!(block_on(provider.inner.download(&input)).is_ok());
-            provider.free(&output).unwrap();
-            provider.free(&input).unwrap();
+            drop(output);
+            drop(input);
         }
     }
+}
+
+#[test]
+fn same_integer_class_cast_may_return_the_owned_input_alias() {
+    let _lock = test_support::accel_test_lock();
+    let provider = provider(ResultMode::Alias);
+    let _current = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .upload_integer(&HostIntegerTensorView {
+            data: runmat_accelerate_api::HostIntegerDataView::I8(&[3, -1]),
+            shape: &[1, 2],
+        })
+        .unwrap();
+    let Value::GpuTensor(output) = block_on(cast_value(
+        Value::GpuTensor(input.clone()),
+        IntegerClass::Int8,
+    ))
+    .unwrap() else {
+        panic!("integer identity cast must remain resident");
+    };
+    assert!(output.shares_allocation_with(&input));
+    drop(output);
+    let downloaded = block_on(provider.inner.download_integer(&input)).unwrap();
+    assert!(
+        matches!(downloaded.data, runmat_accelerate_api::HostIntegerDataOwned::I8(values) if values == [3, -1])
+    );
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+    drop(input);
 }

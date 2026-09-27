@@ -18,11 +18,10 @@ pub(super) async fn cast_gpu_value(
             CastError::Internal("no acceleration provider owns the input handle".into())
         })?;
 
-    let input_metadata = crate::builtins::common::gpu_helpers::snapshot_handle_metadata(&handle);
     let provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
-        return fallback_through_owner(provider, &handle, target, &input_metadata).await;
+        return fallback_through_owner(provider, &handle, target).await;
     }
 
     let restore = crate::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(&handle);
@@ -32,27 +31,37 @@ pub(super) async fn cast_gpu_value(
     drop(restore);
     match direct {
         Ok(mut output) if valid_output(&output, &handle, provider, target.accelerator_type()) => {
-            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-            Ok(crate::builtins::common::gpu_helpers::resident_gpu_value(
+            output = output.with_provenance(provenance).map_err(|error| {
+                retained_error(
+                    crate::build_runtime_error(format!(
+                        "cannot preserve integer conversion intent: {error}"
+                    ))
+                    .with_source(error)
+                    .build(),
+                )
+            })?;
+            crate::builtins::common::gpu_helpers::resident_gpu_value(output).map_err(retained_error)
+        }
+        Ok(output) => Err(retained_error(
+            crate::builtins::common::gpu_helpers::reject_gpu_output(
                 output,
-            ))
-        }
-        Ok(output) => {
-            crate::builtins::common::gpu_helpers::free_rejected_provider_output(
-                &output,
-                &[&handle],
-                provider,
-            );
-            Err(CastError::Internal(
-                "provider returned an invalid integer conversion result".into(),
-            ))
-        }
+                crate::build_runtime_error(
+                    "provider returned an invalid integer conversion result",
+                )
+                .build(),
+            ),
+        )),
+
         Err(error)
             if crate::builtins::common::gpu_helpers::provider_hook_is_unsupported(&error) =>
         {
-            fallback_through_owner(provider, &handle, target, &input_metadata).await
+            fallback_through_owner(provider, &handle, target).await
         }
-        Err(error) => Err(CastError::Internal(error.to_string())),
+        Err(error) => {
+            let mut contextual = crate::build_runtime_error(error.to_string()).build();
+            contextual.source = Some(error.into_boxed_dyn_error());
+            Err(retained_error(contextual))
+        }
     }
 }
 
@@ -70,22 +79,17 @@ async fn fallback_through_owner(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     handle: &GpuTensorHandle,
     target: IntegerClass,
-    input_metadata: &crate::builtins::common::gpu_helpers::GpuHandleMetadataSnapshot,
 ) -> Result<Value, CastError> {
     let gathered = crate::builtins::common::gpu_helpers::download_value_preserving_residency_async(
         provider, handle,
     )
     .await;
-    crate::builtins::common::gpu_helpers::restore_handle_metadata(handle, input_metadata);
-    let converted = cast_host_value(
-        gathered.map_err(|error| CastError::Internal(error.message().to_string()))?,
-        target,
-    )?;
+    let converted = cast_host_value(gathered.map_err(retained_error)?, target)?;
     // Host conversion collapses real singletons to Int. Resident conversion
     // must retain the source's complete shape and restore native integer data.
     let converted = match converted {
         Value::Int(value) => Value::Tensor(
-            runmat_value::Tensor::new_integer(target.storage(vec![value]), handle.shape.clone())
+            runmat_value::Tensor::new_integer(target.storage(vec![value]), handle.shape().to_vec())
                 .map_err(CastError::Internal)?,
         ),
         value => value,
@@ -95,7 +99,7 @@ async fn fallback_through_owner(
         converted,
         target.class_name(),
     )
-    .map_err(|error| CastError::Internal(error.message().to_string()))
+    .map_err(retained_error)
 }
 
 fn validate_input_metadata(handle: &GpuTensorHandle) -> Result<(), CastError> {
@@ -103,7 +107,7 @@ fn validate_input_metadata(handle: &GpuTensorHandle) -> Result<(), CastError> {
     let logical = runmat_accelerate_api::handle_is_logical(handle);
     let precision = runmat_accelerate_api::handle_precision(handle);
     if handle
-        .descriptor
+        .descriptor()
         .storage
         .is_some_and(|storage| representation_is_consistent(storage, precision, integer, logical))
         && crate::builtins::common::gpu_helpers::gpu_class_metadata_matches(
@@ -129,7 +133,10 @@ fn representation_is_consistent(
         GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
     );
     if integer.is_some() {
-        numeric_storage && precision.is_none() && !logical
+        numeric_storage
+            && precision.is_none()
+            && (!logical
+                || (integer == Some(IntegerElementType::U8) && storage == GpuTensorStorage::Real))
     } else {
         numeric_storage && precision.is_some() && (!logical || storage == GpuTensorStorage::Real)
     }
@@ -141,7 +148,7 @@ fn valid_output(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     target: IntegerElementType,
 ) -> bool {
-    output.descriptor.storage == Some(GpuTensorStorage::Real)
+    output.descriptor().storage == Some(GpuTensorStorage::Real)
         && crate::builtins::common::gpu_helpers::unary_gpu_output_matches(
             output,
             input,
@@ -151,7 +158,7 @@ fn valid_output(
                 precision: None,
                 integer: Some(target),
                 logical: false,
-                alias: crate::builtins::common::gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+                alias: crate::builtins::common::gpu_helpers::GpuOutputAliasPolicy::AllowInput,
             },
         )
 }
@@ -178,4 +185,8 @@ mod tests {
             false,
         ));
     }
+}
+
+fn retained_error(error: crate::RuntimeError) -> CastError {
+    CastError::Runtime(Box::new(error))
 }

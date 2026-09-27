@@ -62,6 +62,11 @@ macro_rules! define_integer_conversion_builtin {
                     format!("conversion to {} from {class} is not possible", $name),
                 ),
                 CastError::Internal(detail) => error(&$internal_error, detail),
+                CastError::Runtime(source) => {
+                    let mut contextual = error(&$internal_error, source.message());
+                    contextual.source = Some(source);
+                    contextual
+                }
             }
         }
 
