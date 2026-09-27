@@ -55,11 +55,17 @@ fn left_division_emits_rhs_over_lhs_for_scalars_and_broadcast_arrays() {
         for single in [false, true] {
             let cases = [
                 (
-                    [Value::Num(2.0), tensor(single, &[8., 16.], &[1, 2])],
+                    [
+                        tensor(single, &[2.0], &[1, 1]),
+                        tensor(single, &[8., 16.], &[1, 2]),
+                    ],
                     vec![4., 8.],
                 ),
                 (
-                    [tensor(single, &[2., 4.], &[2, 1]), Value::Num(32.0)],
+                    [
+                        tensor(single, &[2., 4.], &[2, 1]),
+                        tensor(single, &[32.0], &[1, 1]),
+                    ],
                     vec![16., 8.],
                 ),
                 (
@@ -80,6 +86,42 @@ fn left_division_emits_rhs_over_lhs_for_scalars_and_broadcast_arrays() {
                     .contains(&format!("({ty}(input1.data[i1]) / {ty}(input0.data[i0]))")));
                 assert_eq!(host_values(host("ldivide", &inputs)), expected);
             }
+        }
+    });
+}
+
+#[test]
+fn mixed_class_left_division_keeps_unknown_admission_and_host_semantics() {
+    runmat_gc::gc_test_context(|| {
+        let plan = binary(PrimitiveOp::ElemLeftDiv);
+        for (inputs, expected) in [
+            (
+                [Value::Num(2.0), tensor(true, &[8., 16.], &[1, 2])],
+                vec![4., 8.],
+            ),
+            (
+                [tensor(true, &[2., 4.], &[2, 1]), Value::Num(32.0)],
+                vec![16., 8.],
+            ),
+        ] {
+            let program = resolve(&plan, &inputs, ProviderPrecision::F64);
+            // The shared operator owner does not yet prove mixed-class
+            // promotion. Preserve that fact rather than inventing a class in
+            // the emitter to make this fixture compile a kernel.
+            assert!(matches!(
+                program.fact(2).unwrap().kind,
+                runmat_types::ValueKindFact::Unknown
+            ));
+            assert!(TypedProducer::emit(&plan, &program, ScalarType::F64, leaves(), None).is_err());
+            let actual = host("ldivide", &inputs);
+            assert_eq!(
+                runmat_runtime::value_fact::value_fact(&actual)
+                    .numeric()
+                    .unwrap()
+                    .class,
+                runmat_types::NumericClass::Single
+            );
+            assert_eq!(host_values(actual), expected);
         }
     });
 }
