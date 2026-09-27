@@ -1623,7 +1623,6 @@ mod tests {
         value_is_real, value_is_scalar_or_empty, value_is_text,
     };
     use runmat_value::{CellArray, HandleRef, StructValue, Tensor, Value};
-    use std::sync::Arc;
     #[cfg(feature = "native-accel")]
     use {
         once_cell::sync::Lazy,
