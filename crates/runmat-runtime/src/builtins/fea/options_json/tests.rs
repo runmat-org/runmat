@@ -6,8 +6,8 @@ const NAME: &str = "fea.authorStudy";
 
 fn record(id: u64) -> StructValue {
     let mut record = StructValue::new();
-    record.insert("RegionId".into(), Value::Int(IntValue::U64(id)));
-    record.insert("PressurePa".into(), Value::Num(2.5));
+    record.insert("RegionId", Value::Int(IntValue::U64(id)));
+    record.insert("PressurePa", Value::Num(2.5));
     record
 }
 
