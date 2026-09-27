@@ -10,6 +10,7 @@ mod tests;
 mod work;
 #[cfg(feature = "wgpu")]
 pub(crate) use work::wgpu_work;
+#[cfg(not(feature = "wgpu"))]
 pub(crate) use work::RoundDigitsWork;
 
 const ENTRIES: &[&runmat_builtins::BuiltinCatalogEntry] = &[

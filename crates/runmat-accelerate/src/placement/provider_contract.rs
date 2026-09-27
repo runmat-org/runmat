@@ -16,7 +16,7 @@ mod logical;
 pub(crate) mod logarithm_roots;
 pub(crate) mod power;
 pub(crate) mod real_unary;
-mod rounding;
+pub(crate) mod rounding;
 pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
