@@ -4,9 +4,11 @@
 //! retirement authority. This module owns no map, ambient provider lookup,
 //! thread, timer, or retry policy.
 
+mod cleanup;
 mod lease;
 mod owner;
 
+pub use cleanup::{catch_allocation_cleanup_unwind, AllocationCleanupPanicked};
 pub use lease::{AllocationLease, WeakAllocationLease};
 pub use owner::{
     AllocationOwner, AllocationOwnerThreadBound, AllocationRegistrationError,
