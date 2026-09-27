@@ -406,9 +406,20 @@ struct MedianWeights {
     builtin_path = "crate::builtins::math::reduction::median"
 )]
 pub(crate) async fn median_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let protected = rest
+        .iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let _residency = protected
+        .iter()
+        .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
+        .collect::<Vec<_>>();
     let parsed = parse_arguments(&rest).await?;
     match value {
-        Value::GpuTensor(handle) => median_gpu(handle, &parsed).await,
+        Value::GpuTensor(handle) => median_gpu(handle, &parsed, &protected).await,
         other => median_host(other, &parsed),
     }
 }
@@ -669,26 +680,27 @@ fn logical_tensor_from_gathered(tensor: Tensor) -> BuiltinResult<Tensor> {
         .map_err(|error| median_internal_error(format!("median: {error}")))
 }
 
-fn floating_tensor_from_logical_reduction(tensor: &Tensor) -> BuiltinResult<Tensor> {
+fn logical_value_from_reduction(tensor: &Tensor) -> BuiltinResult<Value> {
     let values = tensor
         .integer_storage()
         .and_then(|storage| match storage {
-            IntegerStorage::U8(values) => Some(
-                values
-                    .iter()
-                    .map(|&value| if value != 0 { 1.0 } else { 0.0 })
-                    .collect(),
-            ),
+            IntegerStorage::U8(values) => Some(values.clone()),
             _ => None,
         })
         .ok_or_else(|| {
             median_internal_error("median: logical GPU reduction did not preserve logical values")
         })?;
-    Tensor::new(values, tensor.shape.clone())
+    LogicalArray::new(values, tensor.shape.clone())
+        .map(Value::LogicalArray)
         .map_err(|error| median_internal_error(format!("median: {error}")))
 }
 
-async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinResult<Value> {
+async fn median_gpu(
+    handle: GpuTensorHandle,
+    args: &ParsedArguments,
+    protected: &[&GpuTensorHandle],
+) -> BuiltinResult<Value> {
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let is_logical = runmat_accelerate_api::handle_is_logical(&handle);
     let is_integer = runmat_accelerate_api::handle_integer_type(&handle).is_some();
     if !is_integer
@@ -696,9 +708,7 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
         && args.weights.is_none()
         && args.nan_mode == ReductionNaN::Include
     {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle)
-            .or_else(runmat_accelerate_api::provider)
-        {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
             if let Some(device_result) = median_gpu_try(provider, &handle, &args.axes).await {
                 return Ok(Value::GpuTensor(device_result));
             }
@@ -717,21 +727,12 @@ async fn median_gpu(handle: GpuTensorHandle, args: &ParsedArguments) -> BuiltinR
         args.nan_mode,
         args.weights.as_ref(),
     )?;
-    let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-        .ok_or_else(|| median_internal_error("median: GPU result has no owning provider"))?;
-    let upload_tensor = if is_logical {
-        floating_tensor_from_logical_reduction(&reduced)?
+    let result = if is_logical {
+        logical_value_from_reduction(&reduced)?
     } else {
-        reduced
+        Value::Tensor(reduced)
     };
-    let uploaded = gpu_helpers::upload_tensor(provider, &upload_tensor)
-        .map_err(|error| median_internal_error(format!("median: GPU upload failed: {error}")))?;
-    if is_logical {
-        gpu_helpers::logical_gpu_value(uploaded)
-    } else {
-        Ok(Value::GpuTensor(uploaded))
-    }
+    gpu_helpers::restore_class_preserving_value_protecting(&handle, result, "median", protected)
 }
 
 async fn median_gpu_try(
@@ -2157,7 +2158,7 @@ pub(crate) mod tests {
             shape: &tensor.shape,
         };
         let handle = provider.upload(&view).expect("upload");
-        let gpu_value = block_on(median_gpu(handle, &args_dim1)).expect("gpu median");
+        let gpu_value = block_on(median_gpu(handle, &args_dim1, &[])).expect("gpu median");
         let gathered = test_support::gather(gpu_value).expect("gather");
         match (cpu, gathered) {
             (Value::Tensor(ct), gt) => {
@@ -2189,6 +2190,7 @@ pub(crate) mod tests {
                 })
                 .expect("upload"),
             &args_all,
+            &[],
         ))
         .expect("gpu median all");
         let gathered_all = test_support::gather(gpu_all).expect("gather");
