@@ -3,6 +3,8 @@
 mod provider;
 #[path = "signal_output_ownership/preflight.rs"]
 mod preflight;
+#[path = "signal_output_ownership/spectral_producer.rs"]
+mod spectral_producer;
 #[path = "signal_output_ownership/siblings.rs"]
 mod siblings;
 #[path = "signal_output_ownership/welch.rs"]

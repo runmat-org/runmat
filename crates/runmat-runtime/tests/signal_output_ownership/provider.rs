@@ -14,6 +14,7 @@ pub enum Mode {
     Foreign,
     Dead,
     Alias,
+    ControlAlias,
     Siblings,
     ExplicitSibling,
     LowerShape,
@@ -27,6 +28,12 @@ pub enum Upload {
     Failure,
     Alias,
     SecondFailure,
+    Logical,
+    Foreign,
+    Dead,
+    Complex,
+    Integer,
+    Previous,
 }
 
 pub struct Provider {
@@ -46,6 +53,9 @@ pub struct Provider {
     pub malformed_stage: AtomicUsize,
     pub fail_download: AtomicBool,
     pub pending_download: AtomicBool,
+    pub legacy_coordinates: AtomicBool,
+    pub raw_uploads: AtomicUsize,
+    last_upload: Mutex<Option<(WeakAllocationLease, GpuTensorWireDescriptor)>>,
 }
 impl Provider {
     pub fn new(mode: Mode, upload: Upload) -> &'static Self {
@@ -66,6 +76,9 @@ impl Provider {
             malformed_stage: AtomicUsize::new(usize::MAX),
             fail_download: AtomicBool::new(false),
             pending_download: AtomicBool::new(false),
+            legacy_coordinates: AtomicBool::new(false),
+            raw_uploads: AtomicUsize::new(0),
+            last_upload: Mutex::new(None),
         }))
     }
     fn step(&self) -> anyhow::Result<usize> {
@@ -163,8 +176,17 @@ impl AccelProvider for Provider {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
-    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        panic!("native upload required")
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        assert!(
+            self.legacy_coordinates.load(Ordering::SeqCst),
+            "native upload required outside the unchanged coordinate ABI"
+        );
+        self.raw_uploads.fetch_add(1, Ordering::SeqCst);
+        self.upload_numeric_raw(&HostNumericTensorView {
+            data: HostNumericDataView::F64(host.data),
+            shape: host.shape,
+            storage: GpuTensorStorage::Real,
+        })
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("native download required")
@@ -193,7 +215,52 @@ impl AccelProvider for Provider {
                 .into())
             }
             Upload::Alias => return Ok(self.borrowed.lock().unwrap().as_ref().unwrap().clone()),
-            Upload::Good | Upload::SecondFailure => {}
+            Upload::Previous if upload != 0 => {
+                let previous = self.last_upload.lock().unwrap();
+                let (lease, wire) = previous.as_ref().expect("first coordinate");
+                let handle = lease.acquire_tensor(wire)?;
+                return Ok(handle.with_view(handle.view().clone().with_shape(host.shape.to_vec()))?);
+            }
+            Upload::Good
+            | Upload::SecondFailure
+            | Upload::Logical
+            | Upload::Foreign
+            | Upload::Dead
+            | Upload::Complex
+            | Upload::Integer
+            | Upload::Previous => {}
+        }
+        if matches!(
+            self.upload,
+            Upload::Logical | Upload::Foreign | Upload::Dead | Upload::Complex | Upload::Integer
+        ) {
+            let owner = if matches!(self.upload, Upload::Foreign) {
+                &self.foreign
+            } else {
+                &self.owner
+            };
+            let allocation = if matches!(self.upload, Upload::Logical) {
+                owner.allocate_logical_zeroed(host.shape.to_vec(), ProviderPrecision::F64)?
+            } else {
+                owner.allocate_zeroed(
+                    host.shape.to_vec(),
+                    if matches!(self.upload, Upload::Integer) {
+                        NumericElementType::I64
+                    } else {
+                        NumericElementType::F64
+                    },
+                    if matches!(self.upload, Upload::Complex) {
+                        GpuTensorStorage::ComplexInterleaved
+                    } else {
+                        GpuTensorStorage::Real
+                    },
+                )?
+            };
+            if matches!(self.upload, Upload::Dead) {
+                allocation.probe.mark_unavailable();
+            }
+            self.produced.lock().unwrap().push(allocation.probe);
+            return Ok(allocation.handle);
         }
         let data = match host.data {
             HostNumericDataView::F32(data) => HostNumericDataOwned::F32(data.to_vec()),
@@ -209,6 +276,12 @@ impl AccelProvider for Provider {
             },
             storage: host.storage,
         })?;
+        if matches!(self.upload, Upload::Previous) {
+            *self.last_upload.lock().unwrap() = Some((
+                output.handle.allocation_lease().downgrade(),
+                output.handle.wire_descriptor(),
+            ));
+        }
         self.produced.lock().unwrap().push(output.probe);
         Ok(output.handle)
     }
@@ -268,7 +341,11 @@ impl AccelProvider for Provider {
                 GpuTensorStorage::ComplexInterleaved,
                 stage,
             )?;
-            let ps = if matches!(self.mode, Mode::Alias) {
+            let ps = if matches!(self.mode, Mode::ControlAlias) {
+                self.borrowed.lock().unwrap().as_ref().unwrap().clone()
+            } else if matches!(self.mode, Mode::Siblings) {
+                s.clone()
+            } else if matches!(self.mode, Mode::Alias) {
                 request.input.clone()
             } else {
                 self.shaped(

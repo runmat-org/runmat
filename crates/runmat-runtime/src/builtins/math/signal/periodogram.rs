@@ -442,7 +442,17 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, rows, complex_input).await?;
-        if let Some(value) = output_gpu(handle, rows, cols, &options).await? {
+        let controls = rest
+            .iter()
+            .filter_map(|value| {
+                if let Value::GpuTensor(handle) = value {
+                    Some(handle)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(value) = output_gpu(handle, rows, cols, &options, &controls).await? {
             return Ok(value);
         }
         Some(options)
@@ -511,6 +521,7 @@ async fn output_gpu(
     rows: usize,
     cols: usize,
     options: &PeriodogramOptions,
+    controls: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
@@ -533,7 +544,9 @@ async fn output_gpu(
     let input_len = rows
         .checked_mul(cols)
         .ok_or_else(|| periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
-    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let provider =
+        super::resident_output::owner(handle, || periodogram_error(&PERIODOGRAM_ERROR_INTERNAL))?;
+    let request = ProviderSpectralRequest {
         input: handle,
         input_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -544,9 +557,8 @@ async fn output_gpu(
         frame_mode: ProviderSpectralFrameMode::FoldedColumns { input_rows: rows },
         range: gpu_range(options.range),
         denominator,
-    })
-    .await
-    {
+    };
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(request.clone()).await {
         Ok(estimate) => estimate,
         Err(error) if error.is_unsupported() => return Ok(None),
         Err(error) => {
@@ -559,8 +571,18 @@ async fn output_gpu(
             ))
         }
     };
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
-        return Err(periodogram_error(&PERIODOGRAM_ERROR_INTERNAL));
+    let output_error = || {
+        periodogram_error_with_detail(
+            &PERIODOGRAM_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate =
+        super::resident_output::spectral(estimate, &request, provider, controls, output_error)?;
+    let context = super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: controls,
     };
     let f_values = frequency_vector(nfft, options.frequency_units, options.range);
     let f_shape = [estimate.rows, 1usize];
@@ -582,6 +604,12 @@ async fn output_gpu(
             ))
         }
     };
+    let f = context.coordinate(
+        f,
+        f_shape.to_vec(),
+        &[&estimate.s, &estimate.ps],
+        output_error,
+    )?;
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     if let Some(out_count) = crate::output_count::current_output_count() {

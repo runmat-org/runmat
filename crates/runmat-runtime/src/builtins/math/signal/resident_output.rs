@@ -35,6 +35,27 @@ pub(super) struct OutputContext<'a> {
 }
 
 impl OutputContext<'_> {
+    /// The legacy coordinate upload chooses its native floating encoding. Admit
+    /// that actual encoding without treating provider preference as a public
+    /// output-class contract. Language-level coordinate precision is separate.
+    pub(super) fn coordinate(
+        &self,
+        output: GpuTensorHandle,
+        shape: Vec<usize>,
+        siblings: &[&GpuTensorHandle],
+        error: impl FnOnce() -> RuntimeError,
+    ) -> BuiltinResult<GpuTensorHandle> {
+        let contract = BinaryGpuOutputContract {
+            shape,
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(&output),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        };
+        self.admit(output, &contract, siblings, error)
+    }
+
     pub(super) fn admit(
         &self,
         mut output: GpuTensorHandle,

@@ -471,7 +471,17 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         let complex_input = runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
         let options = parse_options(rest, signal_len, complex_input).await?;
-        if let Some(value) = output_gpu(handle, &options, signal_len).await? {
+        let controls = rest
+            .iter()
+            .filter_map(|value| {
+                if let Value::GpuTensor(handle) = value {
+                    Some(handle)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        if let Some(value) = output_gpu(handle, &options, signal_len, &controls).await? {
             return Ok(value);
         }
         Some(options)
@@ -537,6 +547,7 @@ async fn output_gpu(
     handle: &runmat_accelerate_api::GpuTensorHandle,
     options: &SpectrogramOptions,
     signal_len: usize,
+    controls: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Option<Value>> {
     let FrequencyGrid::Uniform { nfft } = options.grid else {
         return Ok(None);
@@ -563,7 +574,9 @@ async fn output_gpu(
         }
     };
     let range = gpu_range(options.range);
-    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(ProviderSpectralRequest {
+    let provider =
+        super::resident_output::owner(handle, || spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL))?;
+    let request = ProviderSpectralRequest {
         input: handle,
         input_len: signal_len,
         input_complex: runmat_accelerate_api::handle_storage(handle)
@@ -574,9 +587,8 @@ async fn output_gpu(
         frame_mode: ProviderSpectralFrameMode::Sliding { hop: step },
         range,
         denominator,
-    })
-    .await
-    {
+    };
+    let estimate = match runmat_accelerate_api::uniform_spectral_estimate(request.clone()).await {
         Ok(estimate) => estimate,
         Err(error) if error.is_unsupported() => return Ok(None),
         Err(error) => {
@@ -589,8 +601,18 @@ async fn output_gpu(
             ))
         }
     };
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) else {
-        return Err(spectrogram_error(&SPECTROGRAM_ERROR_INTERNAL));
+    let output_error = || {
+        spectrogram_error_with_detail(
+            &SPECTROGRAM_ERROR_INTERNAL,
+            "provider returned malformed spectral output",
+        )
+    };
+    let estimate =
+        super::resident_output::spectral(estimate, &request, provider, controls, output_error)?;
+    let context = super::resident_output::OutputContext {
+        input: handle,
+        provider,
+        caller_inputs: controls,
     };
     let f_values = frequency_vector(nfft, options.units, options.range);
     let t_values = starts
@@ -617,6 +639,12 @@ async fn output_gpu(
             ))
         }
     };
+    let f = context.coordinate(
+        f,
+        f_shape.to_vec(),
+        &[&estimate.s, &estimate.ps],
+        output_error,
+    )?;
     let t = match provider.upload(&runmat_accelerate_api::HostTensorView {
         data: &t_values,
         shape: &t_shape,
@@ -635,6 +663,12 @@ async fn output_gpu(
             ))
         }
     };
+    let t = context.coordinate(
+        t,
+        t_shape.to_vec(),
+        &[&estimate.s, &estimate.ps, &f],
+        output_error,
+    )?;
     let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s)?;
     let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t)?;
