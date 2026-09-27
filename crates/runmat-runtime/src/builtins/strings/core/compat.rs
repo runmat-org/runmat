@@ -3398,8 +3398,9 @@ mod tests {
                     Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![1, 2]).unwrap())
                 );
             }
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 let error = block(isstrprop_builtin(
@@ -3609,9 +3610,12 @@ mod tests {
                 let Value::GpuTensor(returned) = output else {
                     panic!("expected unchanged resident integer handle");
                 };
-                assert_eq!(returned.buffer_id, handle.buffer_id);
-                assert_eq!(returned.device_id, handle.device_id);
-                assert_eq!(returned.shape, handle.shape);
+                assert_eq!(returned.buffer_id(), handle.buffer_id());
+                assert_eq!(returned.device_id(), handle.device_id());
+                assert_eq!(returned.shape(), handle.shape());
+                assert_eq!(returned.view_identity(), handle.view_identity());
+                assert!(returned.shares_allocation_with(&handle));
+                handle.allocation_lease().validate_live().unwrap();
             }
         });
     }
@@ -3696,12 +3700,16 @@ mod tests {
             ]
         );
 
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let nested = Value::Cell(CellArray::new(vec![resident.clone()], 1, 1).unwrap());
         let Value::Cell(preserved) = block(convert_contained_strings_to_chars_builtin(
             nested,
@@ -3860,12 +3868,16 @@ mod tests {
             arity_error.identifier(),
             DIGITS_PATTERN_ERROR_ARGUMENT_COUNT.identifier
         );
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let resident_error = block(digits_pattern_builtin(vec![resident])).unwrap_err();
         assert_eq!(
             resident_error.identifier(),

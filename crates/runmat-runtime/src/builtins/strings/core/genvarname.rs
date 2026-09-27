@@ -458,12 +458,16 @@ mod tests {
         }
 
         let resident = || {
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX,
-                descriptor: Default::default(),
-            })
+            Value::GpuTensor(
+                runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                    .allocate_zeroed(
+                        vec![1, 1],
+                        runmat_accelerate_api::NumericElementType::F64,
+                        runmat_accelerate_api::GpuTensorStorage::Real,
+                    )
+                    .expect("admit unregistered resident fixture")
+                    .handle,
+            )
         };
         let error =
             block_on(genvarname_builtin(resident(), Vec::new())).expect_err("resident name input");

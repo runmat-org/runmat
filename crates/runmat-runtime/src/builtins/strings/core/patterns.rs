@@ -462,8 +462,9 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("automatic integer count");
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             assert_eq!(
                 block_on(bounded_regex(
                     vec![Value::GpuTensor(handle.clone())],
@@ -475,8 +476,9 @@ mod tests {
                 r"\p{Alphabetic}{3}"
             );
 
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let error = block_on(bounded_regex(
                 vec![Value::GpuTensor(handle.clone())],
                 r"\p{Alphabetic}",
@@ -488,7 +490,7 @@ mod tests {
                 error.identifier(),
                 Some("RunMat:lettersPattern:InvalidCount")
             );
-            provider.free(&handle).expect("free count");
+            handle.release().expect("release fixture handle");
         });
     }
 }

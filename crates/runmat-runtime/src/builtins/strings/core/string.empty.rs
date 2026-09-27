@@ -552,7 +552,7 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
-            let _ = provider.free(&handle);
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -575,7 +575,7 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected string array, got {other:?}"),
             }
-            let _ = provider.free(&handle);
+            handle.release().expect("release fixture handle");
         });
     }
 

@@ -769,7 +769,7 @@ pub(crate) mod tests {
             )
             .expect("endsWith");
             assert_eq!(result, Value::Bool(true));
-            provider.free(&handle).expect("free gpu flag");
+            handle.release().expect("release fixture handle");
         });
     }
 
@@ -807,7 +807,7 @@ pub(crate) mod tests {
         )
         .expect("endsWith");
         assert_eq!(result, Value::Bool(true));
-        let _ = provider.free(&handle);
+        handle.release().expect("release fixture handle");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -952,12 +952,16 @@ pub(crate) mod tests {
 
     #[test]
     fn endswith_rejects_nested_resident_numeric_text_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let nested = Value::Cell(CellArray::new(vec![resident], 1, 1).unwrap());
         for (text, pattern) in [
             (nested.clone(), Value::String("x".into())),
@@ -971,12 +975,16 @@ pub(crate) mod tests {
     #[test]
     fn endswith_resident_control_rejects_before_provider_access_in_matlab_mode() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let err = run_endswith(
             Value::String("RunMat".into()),
             Value::String("mat".into()),
@@ -992,12 +1000,16 @@ pub(crate) mod tests {
     #[test]
     fn endswith_dispatch_preserves_residency_until_builtin_preflight() {
         assert_eq!(GPU_SPEC.residency, ResidencyPolicy::NewHandle);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 1,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .expect("admit unregistered resident fixture")
+                .handle,
+        );
         let prepared = futures::executor::block_on(runmat_accelerate::prepare_builtin_args(
             "endsWith",
             &[resident],
