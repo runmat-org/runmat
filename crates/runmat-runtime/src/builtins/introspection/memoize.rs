@@ -1648,7 +1648,6 @@ mod tests {
     fn requested_output_count_is_part_of_cache_key() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _lock = MEMOIZE_TEST_LOCK.lock().unwrap();
-        let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
@@ -1656,25 +1655,22 @@ mod tests {
         ));
         let f = memoized();
 
-        let one = block_on(crate::call_feval_async_with_outputs(
-            f.clone(),
-            &[Value::Num(2.0)],
-            1,
-        ))
-        .expect("one output");
-        let two = block_on(crate::call_feval_async_with_outputs(
-            f,
-            &[Value::Num(2.0)],
-            2,
-        ))
-        .expect("two outputs");
-
-        assert_eq!(one, Value::Num(3.0));
-        assert_eq!(
-            two,
-            Value::OutputList(vec![Value::Num(3.0), Value::Num(4.0)])
-        );
-        assert_eq!(*counter.lock().unwrap(), 2);
+        for _ in 0..2 {
+            for (count, expected) in [
+                (1, Value::Num(3.0)),
+                (2, Value::OutputList(vec![Value::Num(3.0), Value::Num(4.0)])),
+                (0, Value::OutputList(Vec::new())),
+            ] {
+                let output = block_on(crate::call_feval_async_with_outputs(
+                    f.clone(),
+                    &[Value::Num(2.0)],
+                    count,
+                ))
+                .expect("requested outputs");
+                assert_eq!(output, expected, "requested {count} outputs");
+            }
+            assert_eq!(*counter.lock().unwrap(), 3);
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1602,16 +1602,30 @@ pub(crate) async fn feval_builtin(f: Value, rest: Vec<Value>) -> crate::BuiltinR
             call_by_name(&c.function_name, &args, requested_outputs).await
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
-            let subscript = crate::object::indexing::ObjectSubscriptPath::single(
+            let path = crate::object::indexing::ObjectSubscriptPath::single(
                 crate::object::indexing::ObjectSubscript::parentheses(
                     crate::object::indexing::ObjectIndexSelector::IndexValues {
                         components: rest.into_iter().map(Into::into).collect(),
                     },
                 ),
+            );
+            let request = crate::object::protocol::SubscriptReadRequest::select_outputs(
+                requested_outputs,
+                crate::object::protocol::ObjectAccessContext::default(),
+            );
+            let usage = request.sequence_use;
+            let sequence = crate::object::protocol::read_subscript_path_sequence_with_access(
+                receiver, path, request,
             )
-            .to_standard_substruct_value()?;
-            crate::builtins::introspection::object_indexing::dispatch_subsref(receiver, subscript)
-                .await
+            .await?;
+            use crate::sequence::ResolveValueSequence;
+            let mut values =
+                sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
+            if requested_outputs == 1 {
+                Ok(values.remove(0))
+            } else {
+                Ok(Value::OutputList(values))
+            }
         }
         other => Err(runtime_descriptor_error_with_detail(
             "feval",

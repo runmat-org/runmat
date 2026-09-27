@@ -11,6 +11,23 @@ pub struct SubscriptReadRequest {
 }
 
 impl SubscriptReadRequest {
+    pub fn select_outputs(count: usize, access: super::super::ObjectAccessContext) -> Self {
+        Self {
+            sequence_use: if count == 0 {
+                runmat_types::SequenceUse::Discard
+            } else {
+                runmat_types::SequenceUse::SelectPrefix { count }
+            },
+            sequence_context: SequenceResolutionContext::default(),
+            indexing_context: if count == 0 {
+                runmat_types::ObjectIndexingContext::Statement
+            } else {
+                runmat_types::ObjectIndexingContext::Expression
+            },
+            access,
+        }
+    }
+
     pub fn require_single(access: super::super::ObjectAccessContext) -> Self {
         Self {
             sequence_use: runmat_types::SequenceUse::RequireSingle,

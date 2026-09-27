@@ -69,21 +69,12 @@ pub(crate) async fn dispatch_subsasgn(
 pub async fn subsref_builtin(obj: Value, subscript: Value) -> crate::BuiltinResult<Value> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
     let requested = crate::output_count::current_output_count();
-    let usage = match requested {
-        None => runmat_types::SequenceUse::RequireSingle,
-        Some(0) => runmat_types::SequenceUse::Discard,
-        Some(count) => runmat_types::SequenceUse::SelectPrefix { count },
+    let access = crate::object::protocol::ObjectAccessContext::default();
+    let request = match requested {
+        None => crate::object::protocol::SubscriptReadRequest::require_single(access),
+        Some(count) => crate::object::protocol::SubscriptReadRequest::select_outputs(count, access),
     };
-    let request = crate::object::protocol::SubscriptReadRequest {
-        sequence_use: usage,
-        sequence_context: crate::sequence::SequenceResolutionContext::default(),
-        indexing_context: if requested == Some(0) {
-            IndexingContext::Statement
-        } else {
-            IndexingContext::Expression
-        },
-        access: crate::object::protocol::ObjectAccessContext::default(),
-    };
+    let usage = request.sequence_use;
     let sequence =
         crate::object::protocol::read_subscript_path_sequence_with_access(obj, path, request)
             .await?;
