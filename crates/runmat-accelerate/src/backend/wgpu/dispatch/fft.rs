@@ -1,6 +1,6 @@
 use super::common::submit;
 
-pub fn run(
+pub(crate) fn run(
     emission: &runmat_accelerate_api::WgpuEmission<'_>,
     pending: &mut super::observation::PendingSubmissions,
     pipeline: &wgpu::ComputePipeline,
