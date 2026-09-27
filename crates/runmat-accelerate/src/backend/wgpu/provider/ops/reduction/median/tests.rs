@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn empty_output_does_not_allocate_dimension_sized_scratch() {
+    for (rows, cols, axis) in [(usize::MAX, 0, 0), (0, usize::MAX, 1)] {
+        let output = medians(
+            &[],
+            rows,
+            cols,
+            axis,
+            f64::NAN,
+            f64::is_nan,
+            compute_median_inplace,
+        );
+        assert!(output.is_empty());
+    }
+}
+
+#[test]
 fn native_slices_obey_zero_based_axes_and_single_arithmetic() {
     let values = [1.0f32, 100.0, 9.0, 8.0, 3.0, -20.0];
     assert_eq!(

@@ -120,6 +120,9 @@ fn medians<T: Copy>(
     } else {
         (rows, cols)
     };
+    if count == 0 {
+        return Vec::new();
+    }
     let mut scratch = Vec::with_capacity(width);
     (0..count)
         .map(|output| {
