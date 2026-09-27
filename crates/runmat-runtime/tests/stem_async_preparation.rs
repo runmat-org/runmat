@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
     ThreadProviderGuard,
 };
 use runmat_runtime::builtins::plotting::{
-    clear_figure, clone_figure, current_figure_handle, lock_plot_test_context,
+    clone_figure, lock_plot_test_context, new_figure_handle,
 };
 use runmat_value::{Tensor, Value};
 use std::sync::{
@@ -63,8 +63,7 @@ fn dispatched_stem_has_no_registry_mutation_until_preparation_completes() {
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
-    let _ = clear_figure(None);
-    let figure = current_figure_handle();
+    let figure = new_figure_handle();
     let count = || clone_figure(figure).unwrap().plots().count();
     let before = count();
     let input = provider
