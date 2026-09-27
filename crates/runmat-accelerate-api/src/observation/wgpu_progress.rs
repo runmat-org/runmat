@@ -15,13 +15,15 @@ pub trait WgpuObservationProgress: Send + Sync {
 }
 
 pub trait WgpuObservationProgressReservation: Send {
-    /// Nonblocking commit. Implementations invoke failure_cleanup if delivery or
-    /// device progress fails; it fails observation and safely cancels mapping,
-    /// never frees an allocation still retained by a callback. Dropping an
-    /// uncommitted reservation releases its mailbox capacity.
+    /// Nonblocking commit, called outside any device emission permit. Invoke
+    /// `completion` exactly once after progress returns, or with an error if
+    /// delivery/progress fails. The callback may acquire a fresh emission permit
+    /// to unmap its private fence; map callbacks themselves must only record
+    /// completion. A progress failure is not evidence of device loss.
+    /// Dropping an uncommitted reservation releases its mailbox capacity.
     fn submit(
         self: Box<Self>,
         submission: wgpu::SubmissionIndex,
-        failure_cleanup: Box<dyn FnOnce() + Send>,
+        completion: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
     ) -> Result<(), WgpuObservationProgressError>;
 }

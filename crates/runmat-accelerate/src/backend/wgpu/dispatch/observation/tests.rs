@@ -23,6 +23,22 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU device");
     let AccelContextHandle::Wgpu(context) =
         provider.export_context(AccelContextKind::Plotting).unwrap();
+    let emit_empty = || {
+        let mut pending = PendingSubmissions::new(context.access.clone());
+        context
+            .access
+            .with_shared(|emission| {
+                pending.submit(
+                    emission,
+                    emission
+                        .device()
+                        .create_command_encoder(&Default::default()),
+                )
+            })
+            .expect("emission available")
+            .expect("same device");
+        pending.commit();
+    };
     let value = ProviderRepresentation {
         element_type: ProviderElementType::F32,
         storage: ProviderStorage::DenseReal,
@@ -43,32 +59,26 @@ fn actual_private_fences_survive_cancel_and_unrelated_queue_submission() {
     };
     let mut first = begin();
     with_provider_observation(Some(first.recorder()), || {
-        submit(
-            &context.device,
-            &context.queue,
-            context.device.create_command_encoder(&Default::default()),
-        );
+        emit_empty();
     });
     first.fail(ProviderObservationFailure::Cancelled);
-    // Actual exported queue bypasses helper: observation cannot depend on a
-    // callback attached to the newest global queue prefix.
-    context.queue.submit(Some(
-        context
-            .device
-            .create_command_encoder(&Default::default())
-            .finish(),
-    ));
+    // Unrelated work uses the same access authority but no observation helper;
+    // measurement cannot depend on the newest global queue prefix.
+    context
+        .access
+        .with_shared(|emission| {
+            emission
+                .queue()
+                .submit(Some(emission.encode("unrelated", |_| {})));
+        })
+        .unwrap();
     assert_eq!(
         first.take_completed().unwrap().status,
         ProviderObservationStatus::Failed(ProviderObservationFailure::Cancelled)
     );
     let mut next = begin();
     with_provider_observation(Some(next.recorder()), || {
-        submit(
-            &context.device,
-            &context.queue,
-            context.device.create_command_encoder(&Default::default()),
-        );
+        emit_empty();
     });
     next.publish().unwrap();
     // No second caller poll/submit is needed to drive native completion.

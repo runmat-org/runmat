@@ -231,12 +231,11 @@ impl WgpuProvider {
             )
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
-        let device = Arc::new(device_raw);
+        let access = runmat_accelerate_api::WgpuDeviceAccess::new(device_raw, queue_raw);
         #[cfg(target_arch = "wasm32")]
-        install_device_error_handlers(&device);
-        let queue = Arc::new(queue_raw);
+        access.with_shared(|emission| install_device_error_handlers(emission.device()))?;
         let adapter = Arc::new(adapter);
-        let satisfied_limits = device.limits();
+        let satisfied_limits = access.with_shared(|emission| emission.device().limits())?;
 
         let workgroup_config = WorkgroupConfig::new(
             &satisfied_limits,
@@ -365,13 +364,15 @@ impl WgpuProvider {
             lane_count: sanitized_bootstrap.lane_count,
             spatial_tile: sanitized_bootstrap.spatial_tile,
         };
-        let pipelines = WgpuPipelines::new(
-            &device,
-            precision,
-            image_norm_bootstrap,
-            workgroup_config.scalar,
-            workgroup_config.matmul_tile,
-        );
+        let pipelines = access.with_shared(|emission| {
+            WgpuPipelines::new(
+                emission.device(),
+                precision,
+                image_norm_bootstrap,
+                workgroup_config.scalar,
+                workgroup_config.matmul_tile,
+            )
+        })?;
 
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
@@ -387,10 +388,12 @@ impl WgpuProvider {
             Arc::downgrade(&kernel_resources),
         ));
         #[cfg(not(target_arch = "wasm32"))]
-        let observation_stopped = install_device_error_handlers(&device, &allocations);
+        let observation_stopped = access.with_shared(|emission| {
+            install_device_error_handlers(emission.device(), &allocations)
+        })?;
         #[cfg(not(target_arch = "wasm32"))]
         let observation_progress = super::observation_progress::NativeObservationProgress::start(
-            device.clone(),
+            access.clone(),
             std::num::NonZeroU32::new(64).expect("nonzero observation mailbox bound"),
             observation_stopped,
         )
@@ -399,8 +402,7 @@ impl WgpuProvider {
 
         Ok(Self {
             instance,
-            device,
-            queue,
+            access,
             adapter,
             adapter_info,
             adapter_limits: satisfied_limits,

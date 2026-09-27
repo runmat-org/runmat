@@ -22,17 +22,23 @@ impl Drop for Slot {
     }
 }
 
-struct FailureCleanup(Option<Box<dyn FnOnce() + Send>>);
-impl Drop for FailureCleanup {
-    fn drop(&mut self) {
-        if let Some(cleanup) = self.0.take() {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup));
+type CompletionCallback = Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>;
+struct Completion(Option<CompletionCallback>);
+impl Completion {
+    fn finish(&mut self, status: Result<(), WgpuObservationProgressError>) {
+        if let Some(completion) = self.0.take() {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| completion(status)));
         }
+    }
+}
+impl Drop for Completion {
+    fn drop(&mut self) {
+        self.finish(Err(WgpuObservationProgressError::Stopped));
     }
 }
 struct Job<I = wgpu::SubmissionIndex> {
     submission: I,
-    failure: FailureCleanup,
+    completion: Completion,
     _slot: Slot,
 }
 
@@ -44,7 +50,7 @@ fn drive<I>(receiver: std::sync::mpsc::Receiver<Job<I>>, state: &State, mut poll
         let result =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| poll(&job.submission)));
         if result.is_ok() && !state.stopped.load(Ordering::Acquire) {
-            job.failure.0 = None;
+            job.completion.finish(Ok(()));
         } else {
             state.stopped.store(true, Ordering::Release);
         }
@@ -63,7 +69,7 @@ impl NativeObservationProgress {
     }
 
     pub(super) fn start(
-        device: Arc<wgpu::Device>,
+        access: runmat_accelerate_api::WgpuDeviceAccess,
         limit: NonZeroU32,
         stopped: Arc<AtomicBool>,
     ) -> std::io::Result<Arc<Self>> {
@@ -74,13 +80,16 @@ impl NativeObservationProgress {
             stopped,
         });
         let worker_state = state.clone();
-        // Detached worker owns Device, not Provider or a sender. Closing all
+        // Detached worker owns device access, not Provider or a sender. Closing all
         // senders drains queued work and exits; runtime Drop never joins it.
         let worker = std::thread::Builder::new()
             .name("runmat-gpu-observation".into())
             .spawn(move || {
                 drive(receiver, &worker_state, |submission| {
-                    device.poll(wgpu::Maintain::WaitForSubmissionIndex(submission.clone()));
+                    // Poll drives callbacks and may wait: never hold an emission
+                    // permit here. A native poll fatal is caught by `drive`,
+                    // separately from the device-lost callback's state.
+                    access.poll(wgpu::Maintain::WaitForSubmissionIndex(submission.clone()));
                 });
             })?;
         drop(worker);
@@ -116,26 +125,35 @@ struct Reservation {
     sender: SyncSender<Job>,
     slot: Slot,
 }
+
+fn commit_job<I>(
+    sender: &SyncSender<Job<I>>,
+    job: Job<I>,
+) -> Result<(), WgpuObservationProgressError> {
+    if job._slot.0.stopped.load(Ordering::Acquire) {
+        return Err(WgpuObservationProgressError::Stopped);
+    }
+    // On rejection the owned job runs completion outside the emission gate.
+    sender
+        .try_send(job)
+        .map_err(|_| WgpuObservationProgressError::Stopped)
+}
+
 impl WgpuObservationProgressReservation for Reservation {
     fn submit(
         self: Box<Self>,
         submission: wgpu::SubmissionIndex,
-        failure_cleanup: Box<dyn FnOnce() + Send>,
+        completion: CompletionCallback,
     ) -> Result<(), WgpuObservationProgressError> {
         let Self { sender, slot } = *self;
         let job = Job {
             submission,
-            failure: FailureCleanup(Some(failure_cleanup)),
+            completion: Completion(Some(completion)),
             _slot: slot,
         };
-        if job._slot.0.stopped.load(Ordering::Acquire) {
-            return Err(WgpuObservationProgressError::Stopped);
-        }
         // Reservation accounts for queued AND active jobs. Disconnect drops Job,
         // running cleanup and releasing the slot, without a blocking send.
-        sender
-            .try_send(job)
-            .map_err(|_| WgpuObservationProgressError::Stopped)
+        commit_job(&sender, job)
     }
 }
 

@@ -1,28 +1,43 @@
 use anyhow::{anyhow, Result};
 use bytemuck::{bytes_of, Pod};
-use futures::channel::oneshot;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
 use runmat_accelerate_api::{
     unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage, IntegerElementType,
-    NumericElementType, ProviderPrecision,
+    NumericElementType, ProviderPrecision, WgpuEmission,
 };
-#[cfg(target_arch = "wasm32")]
-use runmat_time::Instant;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
-#[cfg(target_arch = "wasm32")]
-use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 use super::backend_shared::NEXT_SUBMISSION_ID;
 use super::backend_types::{BufferEntry, NumericBufferRegistration, WgpuProvider};
+use crate::backend::wgpu::dispatch::observation::PendingSubmissions;
 use crate::backend::wgpu::residency::BufferUsageClass;
 use crate::backend::wgpu::types::NumericPrecision;
 use crate::fusion::active_fusion;
 
+#[path = "core/readback.rs"]
+mod readback;
+
 impl WgpuProvider {
+    /// Operation entry only. Nested helpers borrow these same two arguments;
+    /// they never acquire another read lock behind a pending scoped writer.
+    pub(super) fn with_emission<T>(
+        &self,
+        action: impl for<'p> FnOnce(&WgpuEmission<'p>, &mut PendingSubmissions) -> T,
+    ) -> Result<T> {
+        // Declared outside the gate so unwind cleanup also runs after unlock.
+        let mut pending = PendingSubmissions::new(self.access.clone());
+        let result = self
+            .access
+            .with_shared(|emission| action(emission, &mut pending));
+        pending.commit();
+        #[cfg(target_arch = "wasm32")]
+        self.access.poll(wgpu::Maintain::Poll);
+        Ok(result?)
+    }
     pub(super) fn inherit_elementwise_layout(
         &self,
         output: GpuTensorHandle,
@@ -34,33 +49,13 @@ impl WgpuProvider {
             Ok(output)
         }
     }
-    pub(super) async fn map_readback_bytes(
-        &self,
+    pub(super) fn map_readback_bytes<'a>(
+        &'a self,
         staging: wgpu::Buffer,
         size_bytes: u64,
-        context: &str,
-    ) -> Result<Vec<u8>> {
-        let size_usize = usize::try_from(size_bytes)
-            .map_err(|_| anyhow!("{context}: readback size overflow"))?;
-        let slice = staging.slice(..);
-        let (tx, rx) = oneshot::channel();
-        slice.map_async(wgpu::MapMode::Read, move |res| {
-            let _ = tx.send(res);
-        });
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.device.poll(wgpu::Maintain::Wait);
-        }
-        let map_result = rx
-            .await
-            .map_err(|_| anyhow!("{context}: map_async callback dropped"))?;
-        map_result.map_err(|e: wgpu::BufferAsyncError| anyhow!(e))?;
-        let data = slice.get_mapped_range();
-        let mut out = vec![0u8; size_usize];
-        out.copy_from_slice(&data);
-        drop(data);
-        staging.unmap();
-        Ok(out)
+        context: &'a str,
+    ) -> impl std::future::Future<Output = Result<Vec<u8>>> + 'a {
+        readback::read(self.access.clone(), staging, size_bytes, context)
     }
 
     pub(super) fn map_readback_bytes_sync(
@@ -71,7 +66,9 @@ impl WgpuProvider {
     ) -> Result<Vec<u8>> {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = (staging, size_bytes);
+            let _ = size_bytes;
+            self.access
+                .with_cleanup(|cleanup| cleanup.release_buffer(staging))?;
             Err(anyhow!("{context}: readback requires async path on wasm"))
         }
         #[cfg(not(target_arch = "wasm32"))]
@@ -85,12 +82,6 @@ impl WgpuProvider {
     pub(super) const IMAGE_NORMALIZE_TARGET_SAMPLES_PER_LANE: f64 = 256.0;
     pub(super) const IMAGE_NORMALIZE_TARGET_LOOP_ITERS_PER_LANE: f64 = 16.0;
 
-    pub(crate) fn device_ref(&self) -> &wgpu::Device {
-        self.device.as_ref()
-    }
-    pub(crate) fn queue_ref(&self) -> &wgpu::Queue {
-        self.queue.as_ref()
-    }
     pub(super) fn register_existing_buffer(
         &self,
         buffer: Arc<wgpu::Buffer>,
@@ -282,23 +273,33 @@ impl WgpuProvider {
 
     pub(super) fn create_storage_buffer_for_usage(
         &self,
+        emission: &WgpuEmission<'_>,
         usage: BufferUsageClass,
         len: usize,
         label: &str,
-    ) -> (Arc<wgpu::Buffer>, bool) {
-        self.allocations
-            .acquire(self.device_ref(), usage, len, self.element_size, label)
+    ) -> Result<(Arc<wgpu::Buffer>, bool)> {
+        emission.ensure_device(&self.access)?;
+        Ok(self
+            .allocations
+            .acquire(emission.device(), usage, len, self.element_size, label))
     }
 
-    pub(super) fn create_storage_buffer(&self, len: usize, label: &str) -> Arc<wgpu::Buffer> {
-        self.create_storage_buffer_for_usage(BufferUsageClass::Generic, len, label)
-            .0
+    pub(super) fn create_storage_buffer(
+        &self,
+        emission: &WgpuEmission<'_>,
+        len: usize,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
+        Ok(self
+            .create_storage_buffer_for_usage(emission, BufferUsageClass::Generic, len, label)?
+            .0)
     }
 
     /// Allocate a raw-word buffer used by exact integer kernels. Integer
     /// storage is packed as u32 words, independently of float precision.
     pub(super) fn create_integer_word_buffer(
         &self,
+        emission: &WgpuEmission<'_>,
         words: usize,
         label: &str,
     ) -> Result<Arc<wgpu::Buffer>> {
@@ -307,7 +308,8 @@ impl WgpuProvider {
         if bytes > self.adapter_limits.max_buffer_size {
             return Err(anyhow!("{label}: integer buffer exceeds GPU limits"));
         }
-        Ok(Arc::new(self.device.create_buffer(
+        emission.ensure_device(&self.access)?;
+        Ok(Arc::new(emission.device().create_buffer(
             &wgpu::BufferDescriptor {
                 label: Some(label),
                 size: bytes,
@@ -319,18 +321,30 @@ impl WgpuProvider {
         )))
     }
 
-    pub(super) fn uniform_buffer<T: Pod>(&self, data: &T, label: &str) -> wgpu::Buffer {
-        self.device
+    pub(super) fn uniform_buffer<T: Pod>(
+        &self,
+        emission: &WgpuEmission<'_>,
+        data: &T,
+        label: &str,
+    ) -> Result<wgpu::Buffer> {
+        emission.ensure_device(&self.access)?;
+        Ok(emission
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents: bytes_of(data),
                 usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            })
+            }))
     }
 
-    pub(super) fn prepare_matmul_pipeline(&self) {
-        let mut enc = self
-            .device_ref()
+    pub(super) fn prepare_matmul_pipeline(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+    ) -> Result<()> {
+        emission.ensure_device(&self.access)?;
+        let mut enc = emission
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-warmup"),
             });
@@ -341,19 +355,25 @@ impl WgpuProvider {
             });
             pass.set_pipeline(&self.pipelines.matmul.pipeline);
         }
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
 
-        let enc = self
-            .device_ref()
+        let enc = emission
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-flush-gap"),
             });
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
+        Ok(())
     }
 
-    pub(super) fn prepare_matmul_vec4_pipeline(&self) {
-        let mut enc = self
-            .device_ref()
+    pub(super) fn prepare_matmul_vec4_pipeline(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+    ) -> Result<()> {
+        emission.ensure_device(&self.access)?;
+        let mut enc = emission
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-warmup"),
             });
@@ -364,17 +384,24 @@ impl WgpuProvider {
             });
             pass.set_pipeline(&self.pipelines.matmul_vec4.pipeline);
         }
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
 
-        let enc = self
-            .device_ref()
+        let enc = emission
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("runmat-matmul-vec4-flush-gap"),
             });
-        self.submit(enc);
+        self.submit(emission, pending, enc)?;
+        Ok(())
     }
 
-    pub(super) fn submit(&self, encoder: wgpu::CommandEncoder) -> u32 {
+    pub(super) fn submit(
+        &self,
+        emission: &WgpuEmission<'_>,
+        pending: &mut PendingSubmissions,
+        encoder: wgpu::CommandEncoder,
+    ) -> Result<u32> {
+        emission.ensure_device(&self.access)?;
         let submission_id = NEXT_SUBMISSION_ID.fetch_add(1, AtomicOrdering::Relaxed);
         let _span = info_span!(
             "gpu.dispatch",
@@ -383,36 +410,13 @@ impl WgpuProvider {
         )
         .entered();
         log::trace!("wgpu submit {}: begin", submission_id);
-        let submission_index = crate::backend::wgpu::dispatch::observation::submit(
-            self.device_ref(),
-            self.queue_ref(),
-            encoder,
-        );
+        let submission_index = pending.submit(emission, encoder)?;
         log::trace!(
-            "wgpu submit {}: submitted, polling (index={:?})",
+            "wgpu submit {}: submitted (index={:?}); progress after emission",
             submission_id,
             submission_index
         );
-        // On Web/WASM, blocking `Maintain::Wait` can starve the worker event loop, preventing
-        // plot presentation and other cooperative tasks from running. Prefer non-blocking polls.
-        #[cfg(target_arch = "wasm32")]
-        let poll_start = Instant::now();
-        #[cfg(target_arch = "wasm32")]
-        self.device.poll(wgpu::Maintain::Poll);
-        #[cfg(target_arch = "wasm32")]
-        log::trace!("wgpu submit {}: poll complete", submission_id);
-        #[cfg(target_arch = "wasm32")]
-        {
-            let elapsed = poll_start.elapsed();
-            if elapsed > Duration::from_millis(250) {
-                log::warn!(
-                    "wgpu submit {}: device.poll took {}ms on wasm target",
-                    submission_id,
-                    elapsed.as_millis()
-                );
-            }
-        }
-        submission_id
+        Ok(submission_id)
     }
     pub(super) fn get_entry(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
         let entry = self.get_entry_raw(handle)?;

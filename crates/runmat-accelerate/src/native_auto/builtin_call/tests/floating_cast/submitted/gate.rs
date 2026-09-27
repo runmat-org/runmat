@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 struct Pending {
     reservation: Box<dyn WgpuObservationProgressReservation>,
     submission: wgpu::SubmissionIndex,
-    cleanup: Box<dyn FnOnce() + Send>,
+    cleanup: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
 }
 
 pub(super) struct Gate {
@@ -59,7 +59,7 @@ impl WgpuObservationProgressReservation for Reservation {
     fn submit(
         self: Box<Self>,
         submission: wgpu::SubmissionIndex,
-        cleanup: Box<dyn FnOnce() + Send>,
+        cleanup: Box<dyn FnOnce(Result<(), WgpuObservationProgressError>) + Send>,
     ) -> Result<(), WgpuObservationProgressError> {
         let mut pending = self.pending.lock().unwrap();
         assert!(

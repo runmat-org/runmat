@@ -44,18 +44,49 @@ fn stopped_progress_never_accepts_new_observed_submissions() {
 fn failure_cleanup_runs_once_and_does_not_unwind_through_sender() {
     let count = Arc::new(AtomicU32::new(0));
     let observed = count.clone();
-    drop(FailureCleanup(Some(Box::new(move || {
+    drop(Completion(Some(Box::new(move |status| {
+        assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
         observed.fetch_add(1, Ordering::AcqRel);
         panic!("injected device-loss cleanup failure");
     }))));
     assert_eq!(count.load(Ordering::Acquire), 1);
     let observed = count.clone();
-    let mut successful = FailureCleanup(Some(Box::new(move || {
+    let mut successful = Completion(Some(Box::new(move |status| {
+        assert_eq!(status, Ok(()));
         observed.fetch_add(1, Ordering::AcqRel);
     })));
-    successful.0 = None;
+    successful.finish(Ok(()));
     drop(successful);
-    assert_eq!(count.load(Ordering::Acquire), 1);
+    assert_eq!(count.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn rejected_commit_invokes_completion_once_and_releases_capacity() {
+    for stopped in [false, true] {
+        let state = Arc::new(State {
+            used: AtomicU32::new(1),
+            limit: 1,
+            stopped: Arc::new(AtomicBool::new(stopped)),
+        });
+        let completed = Arc::new(AtomicU32::new(0));
+        let observed = completed.clone();
+        let (sender, receiver) = sync_channel(1);
+        drop(receiver);
+        let result = commit_job(
+            &sender,
+            Job {
+                submission: 11_u32,
+                completion: Completion(Some(Box::new(move |status| {
+                    assert_eq!(status, Err(WgpuObservationProgressError::Stopped));
+                    observed.fetch_add(1, Ordering::AcqRel);
+                }))),
+                _slot: Slot(state.clone()),
+            },
+        );
+        assert_eq!(result, Err(WgpuObservationProgressError::Stopped));
+        assert_eq!(completed.load(Ordering::Acquire), 1);
+        assert_eq!(state.used.load(Ordering::Acquire), 0);
+    }
 }
 
 #[test]
@@ -73,7 +104,8 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
             sender
                 .send(Job {
                     submission,
-                    failure: FailureCleanup(Some(Box::new(move || {
+                    completion: Completion(Some(Box::new(move |status| {
+                        assert!(status.is_err());
                         failed.fetch_add(1, Ordering::AcqRel);
                     }))),
                     _slot: Slot(state.clone()),
@@ -109,8 +141,10 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
         sender
             .send(Job {
                 submission,
-                failure: FailureCleanup(Some(Box::new(move || {
-                    failed.fetch_add(1, Ordering::AcqRel);
+                completion: Completion(Some(Box::new(move |status| {
+                    if status.is_err() {
+                        failed.fetch_add(1, Ordering::AcqRel);
+                    }
                 }))),
                 _slot: Slot(state.clone()),
             })

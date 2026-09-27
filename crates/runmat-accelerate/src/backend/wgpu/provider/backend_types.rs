@@ -25,8 +25,9 @@ pub(super) type MomentsCache = HashMap<MomentsKey, MomentsValue>;
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
     pub(super) instance: Arc<wgpu::Instance>,
-    pub(super) device: Arc<wgpu::Device>,
-    pub(super) queue: Arc<wgpu::Queue>,
+    /// The same authority is exported to renderers and retained by progress.
+    /// Nested emitters borrow its permit; they must not reacquire the gate.
+    pub(super) access: runmat_accelerate_api::WgpuDeviceAccess,
     pub(super) adapter: Arc<wgpu::Adapter>,
     pub(super) adapter_info: wgpu::AdapterInfo,
     pub(super) adapter_limits: wgpu::Limits,
