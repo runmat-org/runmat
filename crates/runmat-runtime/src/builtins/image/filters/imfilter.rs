@@ -681,10 +681,6 @@ fn preflight_resident_input(handle: &GpuTensorHandle, name: &str) -> BuiltinResu
     Ok(())
 }
 
-fn same_handle(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.shares_allocation_with(rhs)
-}
-
 async fn imfilter_gpu_host_fallback(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     image_handle: &GpuTensorHandle,
