@@ -352,13 +352,16 @@ fn logical_transpose_retains_producer_class_without_conjugation() {
                 shape: &[2, 3],
             })
             .unwrap();
+        assert!(handle_is_logical(&input));
+        assert_eq!(input.physical().element_type(), NumericElementType::F64);
         let Value::GpuTensor(output) = invoke(name, &input).unwrap() else {
             panic!("resident logical result")
         };
         assert!(handle_is_logical(&output));
         assert_eq!(output.shape(), [3, 2]);
+        assert_eq!(output.physical().element_type(), input.physical().element_type());
         assert!(
-            matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::U8(values) if values == [1, 1, 0, 0, 1, 0])
+            matches!(block_on(provider.inner.download_numeric(&output)).unwrap().data, HostNumericDataOwned::F64(values) if values == [1., 1., 0., 0., 1., 0.])
         );
         assert_eq!(provider.counts(), (1, 0, 0, 0));
         drop(output);
