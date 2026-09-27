@@ -64,6 +64,20 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
     pub fn new(
         preparation: StructuralPrestressedFrequencyStudyPreparation,
     ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, None)
+    }
+
+    pub fn new_with_thermal_source(
+        preparation: StructuralPrestressedFrequencyStudyPreparation,
+        source: crate::ThermalPrestressSource,
+    ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, Some(source))
+    }
+
+    fn with_source(
+        preparation: StructuralPrestressedFrequencyStudyPreparation,
+        thermal_source: Option<crate::ThermalPrestressSource>,
+    ) -> AnalysisBridgeResult<Self> {
         preparation.workloads.validate()?;
         preparation
             .mesh
@@ -75,21 +89,16 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
                 "prestressed-frequency coordination requires a heterogeneous authored sequence",
             ));
         };
-        let ordered = preparation.workloads.step_ids()?;
-        let [preload_step, frequency_step] = ordered.as_slice() else {
+        let prefix = preparation.workloads.prestress_prefix()?;
+        let [frequency_step] = prefix.consumer_step_ids.as_slice() else {
             return Err(invalid(
-                "direct prestressed-frequency coordination requires exactly two authored steps",
-            ));
-        };
-        let StructuralStepWorkload::Linear { workload } = &workloads[preload_step] else {
-            return Err(invalid(
-                "the first authored step must be a structural preload",
+                "direct prestressed-frequency coordination requires one preload consumer",
             ));
         };
         let StructuralStepWorkload::PrestressedFrequency { template } = &workloads[frequency_step]
         else {
             return Err(invalid(
-                "the second authored step must be unresolved prestressed harmonic response",
+                "the preload consumer must be unresolved prestressed harmonic response",
             ));
         };
         if !matches!(
@@ -97,14 +106,15 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
             StructuralPrestressedFrequencySolverTemplate::Direct { .. }
         ) {
             return Err(invalid(
-                "two-step prestressed harmonic coordination requires a direct solver",
+                "direct prestressed harmonic coordination requires a direct solver",
             ));
         }
-        let producer =
-            StructuralPrestressProducerCoordinator::new(StructuralPrestressProducerPreparation {
+        let producer = StructuralPrestressProducerCoordinator::new(
+            StructuralPrestressProducerPreparation {
+                thermal_workload: prefix.thermal.cloned(),
                 authored_study_digest: preparation.authored_study_digest,
                 frozen_project_digest: preparation.frozen_project_digest,
-                preload_workload: (**workload).clone(),
+                preload_workload: prefix.preload.clone(),
                 mesh: preparation.mesh.clone(),
                 artifact_access: preparation.artifact_access,
                 program_revision: preparation.program_revision,
@@ -113,7 +123,9 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
                 required_capabilities: preparation.required_capabilities,
                 accelerator_requests: preparation.accelerator_requests,
                 local_execution: preparation.local_execution,
-            })?;
+            },
+            thermal_source,
+        )?;
         Ok(Self {
             mesh: preparation.mesh,
             producer,
@@ -124,6 +136,14 @@ impl StructuralPrestressedFrequencyStudyCoordinator {
 
     pub fn prepare_preload(&mut self) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
         self.producer.prepare_preload()
+    }
+
+    pub fn preload_dependencies(&self) -> Vec<AnalysisTaskIdentity> {
+        self.producer.preload_dependencies()
+    }
+
+    pub fn thermal_source(&self) -> Option<&crate::ThermalPrestressSource> {
+        self.producer.thermal_source()
     }
 
     pub fn complete_preload(

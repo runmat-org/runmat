@@ -20,7 +20,11 @@ use crate::{
     StructuralLinearProgramPreparation,
 };
 
+mod thermal_source;
+pub use thermal_source::ThermalPrestressSource;
+
 pub(crate) struct StructuralPrestressProducerPreparation {
+    pub thermal_workload: Option<runmat_analysis_fea::execution::ThermalWorkload>,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub preload_workload: StructuralLinearWorkload,
@@ -55,11 +59,14 @@ pub(crate) struct StructuralPrestressProducerCoordinator {
     state: Option<ImportedSemanticState>,
     state_task: Option<AnalysisTaskIdentity>,
     phase: ProducerPhase,
+    thermal_source: Option<ThermalPrestressSource>,
+    thermal_input: Option<thermal_source::BoundThermalPrestressSource>,
 }
 
 impl StructuralPrestressProducerCoordinator {
     pub(crate) fn new(
         preparation: StructuralPrestressProducerPreparation,
+        thermal_source: Option<ThermalPrestressSource>,
     ) -> AnalysisBridgeResult<Self> {
         preparation
             .mesh
@@ -79,6 +86,15 @@ impl StructuralPrestressProducerCoordinator {
                 "structural prestress production requires bounded chunks and exactly one geometric-stiffness output",
             ));
         }
+        let thermal_input = match (&preparation.thermal_workload, &thermal_source) {
+            (Some(workload), Some(source)) => Some(source.bind(workload, &preparation)?),
+            (None, None) => None,
+            _ => {
+                return Err(invalid(
+                    "thermal prestress inventory and authenticated source must agree",
+                ))
+            }
+        };
         Ok(Self {
             preparation,
             preload: None,
@@ -87,6 +103,8 @@ impl StructuralPrestressProducerCoordinator {
             state: None,
             state_task: None,
             phase: ProducerPhase::ReadyForPreload,
+            thermal_source,
+            thermal_input,
         })
     }
 
@@ -103,7 +121,10 @@ impl StructuralPrestressProducerCoordinator {
             artifact_access: self.preparation.artifact_access.clone(),
             workload: self.preparation.preload_workload.clone(),
             mesh: Some(self.preparation.mesh.clone()),
-            state_input: None,
+            state_input: self
+                .thermal_input
+                .as_ref()
+                .map(|source| source.objects.clone()),
             chunk_bytes: self.preparation.chunk_bytes,
             inventory_limits: self.preparation.inventory_limits,
             required_capabilities: self.preparation.required_capabilities.clone(),
@@ -133,7 +154,7 @@ impl StructuralPrestressProducerCoordinator {
         )?;
         self.preload_task = Some(AnalysisTaskIdentity::new(
             prepared.host.workload.identity,
-            Vec::new(),
+            self.preload_dependencies(),
         )?);
         self.preload_host = Some(prepared.host.clone());
         self.preload = Some(preload);
@@ -232,6 +253,18 @@ impl StructuralPrestressProducerCoordinator {
 
     pub(crate) const fn inventory_limits(&self) -> ObjectInventoryLimits {
         self.preparation.inventory_limits
+    }
+
+    pub(crate) fn preload_dependencies(&self) -> Vec<AnalysisTaskIdentity> {
+        self.thermal_input
+            .as_ref()
+            .map(|source| source.dependency)
+            .into_iter()
+            .collect()
+    }
+
+    pub(crate) fn thermal_source(&self) -> Option<&ThermalPrestressSource> {
+        self.thermal_source.as_ref()
     }
 }
 

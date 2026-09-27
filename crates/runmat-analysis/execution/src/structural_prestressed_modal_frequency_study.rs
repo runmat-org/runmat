@@ -27,6 +27,20 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
     pub fn new(
         preparation: StructuralPrestressedFrequencyStudyPreparation,
     ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, None)
+    }
+
+    pub fn new_with_thermal_source(
+        preparation: StructuralPrestressedFrequencyStudyPreparation,
+        source: crate::ThermalPrestressSource,
+    ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, Some(source))
+    }
+
+    fn with_source(
+        preparation: StructuralPrestressedFrequencyStudyPreparation,
+        thermal_source: Option<crate::ThermalPrestressSource>,
+    ) -> AnalysisBridgeResult<Self> {
         preparation.workloads.validate()?;
         preparation
             .mesh
@@ -38,16 +52,13 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
                 "prestressed modal-frequency coordination requires a heterogeneous sequence",
             ));
         };
-        let ordered = preparation.workloads.step_ids()?;
-        let [preload_step, modal_step, frequency_step] = ordered.as_slice() else {
+        let prefix = preparation.workloads.prestress_prefix()?;
+        let [modal_step, frequency_step] = prefix.consumer_step_ids.as_slice() else {
             return Err(invalid(
-                "prestressed modal-frequency coordination requires exactly three authored steps",
+                "prestressed modal-frequency coordination requires modal and frequency preload consumers",
             ));
         };
         if !matches!(
-            workloads.get(preload_step),
-            Some(StructuralStepWorkload::Linear { .. })
-        ) || !matches!(
             workloads.get(modal_step),
             Some(StructuralStepWorkload::PrestressedModal { .. })
         ) {
@@ -69,7 +80,7 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
         }
         let frequency_template = (**template).clone();
         let mesh_digest = Digest::from_bytes(*preparation.mesh.canonical_digest.bytes());
-        let modal = StructuralPrestressedModalStudyCoordinator::new(
+        let modal = StructuralPrestressedModalStudyCoordinator::with_source(
             StructuralPrestressedModalStudyPreparation {
                 authored_study_digest: preparation.authored_study_digest,
                 frozen_project_digest: preparation.frozen_project_digest,
@@ -83,6 +94,7 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
                 accelerator_requests: preparation.accelerator_requests,
                 local_execution: preparation.local_execution,
             },
+            thermal_source,
         )?;
         Ok(Self {
             mesh_digest,
@@ -93,6 +105,16 @@ impl StructuralPrestressedModalFrequencyStudyCoordinator {
 
     pub fn prepare_preload(&mut self) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
         self.modal.prepare_preload()
+    }
+
+    pub fn preload_dependencies(
+        &self,
+    ) -> Vec<runmat_analysis_fea::execution::AnalysisTaskIdentity> {
+        self.modal.preload_dependencies()
+    }
+
+    pub fn thermal_source(&self) -> Option<&crate::ThermalPrestressSource> {
+        self.modal.thermal_source()
     }
 
     pub fn complete_preload(

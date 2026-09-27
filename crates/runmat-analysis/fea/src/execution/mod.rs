@@ -218,7 +218,8 @@ pub use structural_state_profiles::{
     structural_state_publication_profiles_encoding_profile, structural_state_publication_requests,
 };
 pub use study_workloads::{
-    StructuralStepWorkload, StructuralStudyWorkloads, StructuralTransientBlockPlan,
+    StructuralPrestressPrefix, StructuralStepWorkload, StructuralStudyWorkloads,
+    StructuralTransientBlockPlan,
 };
 pub use sweep::{
     ComposedSweepResult, SweepCompositionPolicy, SweepDefinition, SweepEntryDisposition,

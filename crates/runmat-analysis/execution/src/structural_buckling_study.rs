@@ -65,6 +65,20 @@ pub struct StructuralBucklingStudyCoordinator {
 
 impl StructuralBucklingStudyCoordinator {
     pub fn new(preparation: StructuralBucklingStudyPreparation) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, None)
+    }
+
+    pub fn new_with_thermal_source(
+        preparation: StructuralBucklingStudyPreparation,
+        source: crate::ThermalPrestressSource,
+    ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, Some(source))
+    }
+
+    fn with_source(
+        preparation: StructuralBucklingStudyPreparation,
+        thermal_source: Option<crate::ThermalPrestressSource>,
+    ) -> AnalysisBridgeResult<Self> {
         preparation.workloads.validate()?;
         preparation
             .mesh
@@ -76,27 +90,23 @@ impl StructuralBucklingStudyCoordinator {
                 "buckling coordination requires a heterogeneous authored sequence",
             ));
         };
-        let ordered = preparation.workloads.step_ids()?;
-        let [preload_step, buckling_step] = ordered.as_slice() else {
+        let prefix = preparation.workloads.prestress_prefix()?;
+        let [buckling_step] = prefix.consumer_step_ids.as_slice() else {
             return Err(invalid(
                 "buckling coordination requires exactly one preload and one buckling step",
             ));
         };
-        let StructuralStepWorkload::Linear { workload } = &workloads[preload_step] else {
-            return Err(invalid(
-                "the first authored step must be a structural preload",
-            ));
-        };
         let StructuralStepWorkload::Buckling { template } = &workloads[buckling_step] else {
             return Err(invalid(
-                "the second authored step must be an unresolved buckling solve",
+                "the preload consumer must be an unresolved buckling solve",
             ));
         };
-        let producer =
-            StructuralPrestressProducerCoordinator::new(StructuralPrestressProducerPreparation {
+        let producer = StructuralPrestressProducerCoordinator::new(
+            StructuralPrestressProducerPreparation {
+                thermal_workload: prefix.thermal.cloned(),
                 authored_study_digest: preparation.authored_study_digest,
                 frozen_project_digest: preparation.frozen_project_digest,
-                preload_workload: (**workload).clone(),
+                preload_workload: prefix.preload.clone(),
                 mesh: preparation.mesh.clone(),
                 artifact_access: preparation.artifact_access.clone(),
                 program_revision: preparation.program_revision.clone(),
@@ -105,7 +115,9 @@ impl StructuralBucklingStudyCoordinator {
                 required_capabilities: preparation.required_capabilities.clone(),
                 accelerator_requests: preparation.accelerator_requests.clone(),
                 local_execution: preparation.local_execution,
-            })?;
+            },
+            thermal_source,
+        )?;
         Ok(Self {
             authored_study_digest: preparation.authored_study_digest,
             frozen_project_digest: preparation.frozen_project_digest,
@@ -125,6 +137,14 @@ impl StructuralBucklingStudyCoordinator {
 
     pub fn prepare_preload(&mut self) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
         self.producer.prepare_preload()
+    }
+
+    pub fn preload_dependencies(&self) -> Vec<AnalysisTaskIdentity> {
+        self.producer.preload_dependencies()
+    }
+
+    pub fn thermal_source(&self) -> Option<&crate::ThermalPrestressSource> {
+        self.producer.thermal_source()
     }
 
     pub fn complete_preload(

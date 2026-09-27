@@ -111,6 +111,26 @@ fn plan_heterogeneous(
     let residual_directions = response_spectrum_residual_directions(study)?;
     let mut workloads = BTreeMap::new();
     for step in &study.model.sequence.steps {
+        if step.family == runmat_analysis_core::PhysicsFamily::Thermal {
+            let workload = super::super::plan_thermal_step(
+                study,
+                &step.step_id.0,
+                super::super::ThermalStudyPlanningPolicy {
+                    backend: policy.backend,
+                    formulation_requirement: policy.formulation_requirement,
+                },
+            )
+            .map_err(|error| {
+                crate::execution::AnalysisExecutionError::Invalid(error.to_string())
+            })?;
+            workloads.insert(
+                step.step_id.clone(),
+                StructuralStepWorkload::Thermal {
+                    workload: Box::new(workload),
+                },
+            );
+            continue;
+        }
         let workload = match (step.procedure, step.solution_space) {
             (AnalysisProcedure::Static, SolutionSpace::Direct) => StructuralStepWorkload::Linear {
                 workload: Box::new(linear_workload(study, step, policy)?),

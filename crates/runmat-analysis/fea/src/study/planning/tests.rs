@@ -7,6 +7,8 @@ use runmat_analysis_core::{
     StateTransition, StateTransitionMethod, StructuralRandomResponseSettings,
     TopologyTransitionPolicy, TransitionId,
 };
+
+mod thermal;
 use runmat_meshing_core::StableDigest;
 
 use crate::{

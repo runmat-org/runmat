@@ -2,6 +2,7 @@
 mod coordinated_observations;
 mod history_finalization;
 mod observations;
+mod prestress;
 
 use runmat_analysis_core::{
     AnalysisSequence, FormulationRequirement, IndependentDomain, ProcedureStep, StateId,

@@ -63,7 +63,46 @@ fn plan_selected(
     if policy.formulation_requirement != study.formulation_requirement {
         return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
     }
-    let sequence = &study.model.sequence;
+    let (step, procedure, residual_target) = authored_controls(&study.model, step_id)?;
+    let workload = ThermalWorkload {
+        model: study.model.clone(),
+        step_id: step.step_id.clone(),
+        backend: policy.backend,
+        formulation_requirement: policy.formulation_requirement,
+        procedure,
+        residual_target,
+    };
+    validate_sources(&workload, mixed_context)?;
+    Ok(workload)
+}
+
+/// Shared selected-step authority for canonical heterogeneous inventories.
+impl ThermalWorkload {
+    pub(crate) fn validate_selected_study_intent(&self) -> Result<(), ThermalStudyPlanningError> {
+        let workload = self;
+        let (_, procedure, residual_target) =
+            authored_controls(&workload.model, &workload.step_id.0)?;
+        if workload.procedure != procedure || workload.residual_target != residual_target {
+            return Err(ThermalStudyPlanningError::Source(
+                "thermal numerical controls differ from authored intent".into(),
+            ));
+        }
+        validate_sources(workload, true)
+    }
+}
+
+fn authored_controls<'a>(
+    model: &'a runmat_analysis_core::AnalysisModel,
+    step_id: &str,
+) -> Result<
+    (
+        &'a runmat_analysis_core::ProcedureStep,
+        ThermalProcedureControl,
+        f64,
+    ),
+    ThermalStudyPlanningError,
+> {
+    let sequence = &model.sequence;
     let mut matches = sequence
         .steps
         .iter()
@@ -152,20 +191,19 @@ fn plan_selected(
         })
         .reduce(f64::min)
         .ok_or(ThermalStudyPlanningError::MissingRelativeAlgebraicTarget)?;
-    let workload = ThermalWorkload {
-        model: study.model.clone(),
-        step_id: step.step_id.clone(),
-        backend: policy.backend,
-        formulation_requirement: policy.formulation_requirement,
-        procedure,
-        residual_target,
-    };
+    Ok((step, procedure, residual_target))
+}
+
+fn validate_sources(
+    workload: &ThermalWorkload,
+    mixed_context: bool,
+) -> Result<(), ThermalStudyPlanningError> {
     workload.validate()?;
     let schedule = workload
         .solve_schedule()
         .map_err(|error| ThermalStudyPlanningError::Schedule(error.to_string()))?;
-    sources::validate(&workload, &schedule, mixed_context)?;
-    Ok(workload)
+    sources::validate(workload, &schedule, mixed_context)?;
+    Ok(())
 }
 
 #[derive(Debug, Error)]

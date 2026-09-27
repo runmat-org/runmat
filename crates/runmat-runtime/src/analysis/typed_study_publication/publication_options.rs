@@ -114,6 +114,9 @@ fn heterogeneous_options(
     String,
 > {
     Ok(match workload {
+        StructuralStepWorkload::Thermal { .. } => {
+            return Err("thermal-prefixed publication requires the retained compiled thermal lifecycle and coupled completion root".into());
+        }
         StructuralStepWorkload::Linear { workload } => (
             workload.backend,
             workload.formulation_requirement,

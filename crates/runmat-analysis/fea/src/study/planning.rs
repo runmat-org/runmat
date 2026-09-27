@@ -124,7 +124,12 @@ fn linear_workload(
     step: &ProcedureStep,
     policy: StructuralStudyPlanningPolicy,
 ) -> Result<StructuralLinearWorkload, StructuralStudyPlanningError> {
-    if !is_linear_static_step(step) {
+    let thermal_preload = step.family
+        == PhysicsFamily::Coupled(runmat_analysis_core::CoupledPhysicsFamily::Thermomechanical)
+        && step.procedure == AnalysisProcedure::Static
+        && step.solution_space == SolutionSpace::Direct
+        && matches!(step.state_inputs.as_slice(), [input] if input.required_kind == runmat_analysis_core::StateKind::Thermal && input.use_as == runmat_analysis_core::StateUse::Prestress);
+    if !(is_linear_static_step(step) || thermal_preload) {
         return Err(unsupported(step));
     }
     let algebra_backend = match policy.backend {

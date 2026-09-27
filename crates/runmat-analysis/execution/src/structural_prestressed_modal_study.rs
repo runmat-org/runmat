@@ -73,6 +73,20 @@ impl StructuralPrestressedModalStudyCoordinator {
     pub fn new(
         preparation: StructuralPrestressedModalStudyPreparation,
     ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, None)
+    }
+
+    pub fn new_with_thermal_source(
+        preparation: StructuralPrestressedModalStudyPreparation,
+        source: crate::ThermalPrestressSource,
+    ) -> AnalysisBridgeResult<Self> {
+        Self::with_source(preparation, Some(source))
+    }
+
+    pub(super) fn with_source(
+        preparation: StructuralPrestressedModalStudyPreparation,
+        thermal_source: Option<crate::ThermalPrestressSource>,
+    ) -> AnalysisBridgeResult<Self> {
         preparation.workloads.validate()?;
         preparation
             .mesh
@@ -84,32 +98,26 @@ impl StructuralPrestressedModalStudyCoordinator {
                 "prestressed-modal coordination requires a heterogeneous authored sequence",
             ));
         };
-        let ordered = preparation.workloads.step_ids()?;
-        let (preload_step, modal_step) = match ordered.as_slice() {
-            [preload_step, modal_step] | [preload_step, modal_step, _] => {
-                (preload_step, modal_step)
-            }
+        let prefix = preparation.workloads.prestress_prefix()?;
+        let modal_step = match prefix.consumer_step_ids.as_slice() {
+            [modal_step] | [modal_step, _] => modal_step,
             _ => {
                 return Err(invalid(
                     "prestressed-modal coordination requires a preload and modal prefix",
                 ))
             }
         };
-        let StructuralStepWorkload::Linear { workload } = &workloads[preload_step] else {
-            return Err(invalid(
-                "the first authored step must be a structural preload",
-            ));
-        };
         let StructuralStepWorkload::PrestressedModal { template } = &workloads[modal_step] else {
             return Err(invalid(
-                "the second authored step must be unresolved prestressed-modal extraction",
+                "the preload consumer must be unresolved prestressed-modal extraction",
             ));
         };
-        let producer =
-            StructuralPrestressProducerCoordinator::new(StructuralPrestressProducerPreparation {
+        let producer = StructuralPrestressProducerCoordinator::new(
+            StructuralPrestressProducerPreparation {
+                thermal_workload: prefix.thermal.cloned(),
                 authored_study_digest: preparation.authored_study_digest,
                 frozen_project_digest: preparation.frozen_project_digest,
-                preload_workload: (**workload).clone(),
+                preload_workload: prefix.preload.clone(),
                 mesh: preparation.mesh.clone(),
                 artifact_access: preparation.artifact_access.clone(),
                 program_revision: preparation.program_revision.clone(),
@@ -118,7 +126,9 @@ impl StructuralPrestressedModalStudyCoordinator {
                 required_capabilities: preparation.required_capabilities.clone(),
                 accelerator_requests: preparation.accelerator_requests.clone(),
                 local_execution: preparation.local_execution,
-            })?;
+            },
+            thermal_source,
+        )?;
         Ok(Self {
             authored_study_digest: preparation.authored_study_digest,
             frozen_project_digest: preparation.frozen_project_digest,
@@ -141,6 +151,14 @@ impl StructuralPrestressedModalStudyCoordinator {
 
     pub fn prepare_preload(&mut self) -> AnalysisBridgeResult<PreparedStructuralLinearProgram> {
         self.producer.prepare_preload()
+    }
+
+    pub fn preload_dependencies(&self) -> Vec<AnalysisTaskIdentity> {
+        self.producer.preload_dependencies()
+    }
+
+    pub fn thermal_source(&self) -> Option<&crate::ThermalPrestressSource> {
+        self.producer.thermal_source()
     }
 
     pub fn complete_preload(

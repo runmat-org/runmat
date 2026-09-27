@@ -58,6 +58,7 @@ mod structural_modal_producer;
 mod structural_modal_response_spectrum_study;
 mod structural_modal_transient_study;
 mod structural_prestress_producer;
+pub use structural_prestress_producer::ThermalPrestressSource;
 mod structural_prestressed_frequency_study;
 mod structural_prestressed_modal_frequency_study;
 mod structural_prestressed_modal_study;

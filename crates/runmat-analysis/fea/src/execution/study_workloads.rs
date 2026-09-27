@@ -11,13 +11,16 @@ use super::{
     StructuralModalResponseSpectrumTemplate, StructuralModalTransientTemplate,
     StructuralModalWorkload, StructuralPrestressedFrequencySolverTemplate,
     StructuralPrestressedFrequencyTemplate, StructuralPrestressedModalTemplate,
-    StructuralRandomResponseTemplate, StructuralTransientWorkload,
+    StructuralRandomResponseTemplate, StructuralTransientWorkload, ThermalWorkload,
 };
 
 const STUDY_WORKLOADS_PREFIX: &[u8] = b"runmat-structural-study-workloads\0";
 const STUDY_WORKLOADS_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 const MAXIMUM_TRANSIENT_BLOCK_INTERVALS: u64 = 1_000_000;
+
+mod prestress_prefix;
+pub use prestress_prefix::StructuralPrestressPrefix;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,6 +90,9 @@ impl StructuralTransientBlockPlan {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum StructuralStepWorkload {
+    Thermal {
+        workload: Box<ThermalWorkload>,
+    },
     Linear {
         workload: Box<StructuralLinearWorkload>,
     },
@@ -120,6 +126,9 @@ pub enum StructuralStepWorkload {
 impl StructuralStepWorkload {
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         match self {
+            Self::Thermal { workload } => workload
+                .validate_selected_study_intent()
+                .map_err(|error| invalid(error.to_string())),
             Self::Linear { workload } => workload.validate_sequence_template(),
             Self::ModalExtraction { workload } => workload.validate(),
             Self::ModalTransient {
@@ -140,6 +149,7 @@ impl StructuralStepWorkload {
 
     pub fn authored_model(&self) -> &AnalysisModel {
         match self {
+            Self::Thermal { workload } => &workload.model,
             Self::Linear { workload } => &workload.model,
             Self::ModalExtraction { workload } => workload.model(),
             Self::ModalTransient { template, .. } => &template.model,
@@ -154,6 +164,7 @@ impl StructuralStepWorkload {
 
     pub fn step_id(&self) -> &ProcedureStepId {
         match self {
+            Self::Thermal { workload } => &workload.step_id,
             Self::Linear { workload } => &workload.step_id,
             Self::ModalExtraction { workload } => workload.step_id(),
             Self::ModalTransient { template, .. } => &template.step_id,
@@ -168,6 +179,7 @@ impl StructuralStepWorkload {
 
     pub const fn backend(&self) -> crate::ComputeBackend {
         match self {
+            Self::Thermal { workload } => workload.backend,
             Self::Linear { workload } => workload.backend,
             Self::ModalExtraction { workload } => workload.backend(),
             Self::ModalTransient { template, .. } => template.backend,
@@ -182,6 +194,7 @@ impl StructuralStepWorkload {
 
     fn replace_model(&mut self, model: AnalysisModel) -> AnalysisExecutionResult<()> {
         match self {
+            Self::Thermal { workload } => workload.model = model,
             Self::Linear { workload } => workload.model = model,
             Self::ModalExtraction { workload } => workload.replace_model(model)?,
             Self::ModalTransient { template, .. } => template.model = model,
@@ -432,36 +445,8 @@ fn validate_heterogeneous_sequence(
                 ))
         })
         .collect::<AnalysisExecutionResult<Vec<_>>>()?;
-    let supported = match ordered.as_slice() {
-        [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalTransient { .. }]
-        | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalFrequency { .. }]
-        | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::ModalResponseSpectrum { .. }]
-        | [StructuralStepWorkload::ModalExtraction { .. }, StructuralStepWorkload::RandomResponse { .. }]
-        | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::Buckling { .. }]
-        | [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedModal { .. }] => {
-            true
-        }
-        [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedFrequency { template }] =>
-        {
-            matches!(
-                &template.solver,
-                StructuralPrestressedFrequencySolverTemplate::Direct { .. }
-            )
-        }
-        [StructuralStepWorkload::Linear { .. }, StructuralStepWorkload::PrestressedModal { .. }, StructuralStepWorkload::PrestressedFrequency { template }] =>
-        {
-            matches!(
-                &template.solver,
-                StructuralPrestressedFrequencySolverTemplate::ModalReduced
-            )
-        }
-        _ => false,
-    };
-    if !supported {
-        return Err(invalid(
-            "heterogeneous structural execution does not support this authored procedure chain",
-        ));
-    }
+    let mechanical = prestress_prefix::mechanical_suffix(model, &ordered)?;
+    prestress_prefix::validate_consumer_chain(mechanical)?;
     Ok(model)
 }
 
