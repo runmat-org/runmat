@@ -122,7 +122,6 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                     let template = &template;
                     async move { apply_output_template(result, template, &protected).await }
                 },
-                |error| tan_error_with_detail(&TAN_ERROR_INTERNAL, error),
             )
             .await
         },

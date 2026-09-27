@@ -5,9 +5,6 @@ use runmat_value::{IntegerStorage, Tensor, Value};
 
 use super::{gpu_helpers, tensor};
 
-mod owned;
-pub use owned::ResidentResultGuard;
-
 #[cfg(test)]
 mod tests;
 

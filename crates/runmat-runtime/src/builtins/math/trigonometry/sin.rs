@@ -124,7 +124,6 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                     let template = &output;
                     async move { apply_output_template(result, template, &protected).await }
                 },
-                |error| sin_error_with_detail(&SIN_ERROR_INTERNAL, error),
             )
             .await
         },

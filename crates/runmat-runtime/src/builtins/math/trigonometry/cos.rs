@@ -122,7 +122,6 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                     let template = &template;
                     async move { apply_output_template(result, template, &protected).await }
                 },
-                |error| cos_error_with_detail(&COS_ERROR_INTERNAL, error),
             )
             .await
         },

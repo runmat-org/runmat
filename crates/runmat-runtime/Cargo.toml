@@ -156,6 +156,7 @@ occt-native = ["runmat-geometry-io/occt-native"]
 occt-wasm-host = ["runmat-geometry-io/occt-wasm-host"]
 
 [dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 async-trait = "0.1"
 runmat-macros = { workspace = true } 
 matfile = "0.5.0"

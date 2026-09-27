@@ -1,12 +1,14 @@
 //! Parsed representation controls for the trigonometric `like` extension.
 use crate::builtins::common::gpu_helpers;
-use crate::{BuiltinResult, RuntimeError};
+use crate::BuiltinResult;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 use std::future::Future;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ownership_tests;
 
 #[derive(Clone)]
 pub(crate) enum Template {
@@ -94,7 +96,6 @@ pub(crate) async fn evaluate<C, CF, A, AF>(
     template: &Template,
     compute: C,
     adapt: A,
-    error: impl FnOnce(String) -> RuntimeError,
 ) -> BuiltinResult<Value>
 where
     C: FnOnce(Value, Vec<GpuTensorHandle>) -> CF,
@@ -117,11 +118,6 @@ where
     if let Value::GpuTensor(handle) = &result {
         adaptation_protected.push(handle.clone());
     }
-    let borrowed: Vec<_> = protected.iter().collect();
-    let guard =
-        crate::builtins::common::resident_output::ResidentResultGuard::new(&result, &borrowed)
-            .map_err(error)?;
     let output = adapt(result, adaptation_protected).await?;
-    guard.publish(&output);
     Ok(output)
 }

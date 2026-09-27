@@ -20,11 +20,6 @@ pub(super) async fn convert(
         Value::GpuTensor(handle) => single_from_gpu(handle, &protected).await?,
         host => host::convert(host)?,
     };
-    let owned =
-        crate::builtins::common::resident_output::ResidentResultGuard::new(&converted, &protected)
-            .map_err(|detail| {
-                single_error_with_detail(&runmat_builtins::SINGLE_ERROR_INTERNAL, detail)
-            })?;
     let intermediate = match &converted {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
@@ -34,6 +29,5 @@ pub(super) async fn convert(
         template_protected.push(handle);
     }
     let result = apply_output_template(converted, &template, &template_protected).await?;
-    owned.publish(&result);
     Ok(result)
 }

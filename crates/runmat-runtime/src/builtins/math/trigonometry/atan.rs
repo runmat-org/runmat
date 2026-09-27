@@ -124,7 +124,6 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                     let template = &template;
                     async move { apply_output_template(result, template, &protected).await }
                 },
-                |error| atan_error_with_detail(&ATAN_ERROR_INTERNAL, error),
             )
             .await
         },
