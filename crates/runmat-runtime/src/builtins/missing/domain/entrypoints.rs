@@ -25,15 +25,13 @@ pub(super) async fn missing_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             "missing",
         )?;
     }
-    let packed = Value::OutputList(args);
-    let gathered = gather_if_needed_async(&packed)
-        .await
-        .map_err(|err| invalid_argument(format!("missing: failed to gather arguments: {err}")))?;
-    let args = match gathered {
-        Value::OutputList(values) => values,
-        _ => Vec::new(),
-    };
-    let shape = parse_size_args(&args)?;
+    let mut gathered = Vec::with_capacity(args.len());
+    for argument in &args {
+        gathered.push(gather_if_needed_async(argument).await.map_err(|err| {
+            invalid_argument(format!("missing: failed to gather arguments: {err}"))
+        })?);
+    }
+    let shape = parse_size_args(&gathered)?;
     missing_string_array(shape)
 }
 

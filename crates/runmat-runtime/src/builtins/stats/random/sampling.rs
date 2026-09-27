@@ -2270,21 +2270,26 @@ impl BootstatRow {
 }
 
 async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
-    let mut value = gather_if_needed_async(&value)
-        .await
-        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
-    if let Value::OutputList(values) = value {
-        if values.len() != 1 {
+    // Adapt callback output arity before passing a scalar value to gathering.
+    let value = match value {
+        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        Value::OutputList(_) => {
             return Err(sampling_error(
                 "bootstrp",
                 "bootstrp: bootfun must return exactly one output",
             ));
         }
-        value = values.into_iter().next().unwrap_or(Value::Num(0.0));
-        value = gather_if_needed_async(&value)
-            .await
-            .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
+        value => value,
+    };
+    if matches!(value, Value::OutputList(_)) {
+        return Err(sampling_error(
+            "bootstrp",
+            "bootstrp: bootfun must return exactly one output",
+        ));
     }
+    let value = gather_if_needed_async(&value)
+        .await
+        .map_err(|err| sampling_error("bootstrp", format!("bootstrp: {err}")))?;
     match value {
         Value::OutputList(_) => Err(sampling_error(
             "bootstrp",
@@ -2542,6 +2547,34 @@ mod tests {
                 "Replace"
             )
             .unwrap());
+        }
+    }
+
+    #[test]
+    fn bootstrap_callback_arity_is_adapted_before_scalar_gather() {
+        let exact = u64::MAX;
+        for value in [
+            Value::Int(IntValue::U64(exact)),
+            Value::OutputList(vec![Value::Int(IntValue::U64(exact))]),
+        ] {
+            let row = block_on(bootstat_row(value)).expect("one exact callback value");
+            let BootstatRow::Numeric(NumericStorage::U64(values)) = row else {
+                panic!("callback output must preserve its native uint64 class");
+            };
+            assert_eq!(values, vec![exact]);
+        }
+        for values in [
+            Vec::new(),
+            vec![Value::Num(1.0), Value::Num(2.0)],
+            vec![Value::OutputList(vec![Value::Num(1.0)])],
+        ] {
+            let error = match block_on(bootstat_row(Value::OutputList(values))) {
+                Ok(_) => panic!("invalid callback arity must fail"),
+                Err(error) => error,
+            };
+            assert!(error
+                .message()
+                .contains("bootfun must return exactly one output"));
         }
     }
 
