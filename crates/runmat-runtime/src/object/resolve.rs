@@ -20,6 +20,9 @@ use runmat_value::{Closure, StructValue, Tensor, Value};
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 
+#[path = "resolve/property_store.rs"]
+mod property_store;
+
 fn mex(identifier: &str, message: &str) -> RuntimeError {
     crate::runtime_error::semantic_error(identifier, message)
 }
@@ -421,7 +424,7 @@ where
     OnWrite: FnMut(&Value, &Value),
 {
     match base {
-        Value::Object(mut obj) => {
+        Value::Object(obj) => {
             let base = Value::Object(obj.clone());
             let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
                 caller_function_name,
@@ -444,65 +447,7 @@ where
                 )
                 .await;
             }
-            if let Some((p, owner)) = crate::class_registry::lookup_property(
-                &obj.class_name,
-                &runmat_types::MemberName::from(field.as_str()),
-            ) {
-                if p.is_static {
-                    return Err(mex(
-                        "RunMat:PropertyStaticAccess",
-                        &format!(
-                            "Property '{}' is static; use classref('{}').{}",
-                            field, obj.class_name, field
-                        ),
-                    ));
-                }
-                if p.is_constant {
-                    return Err(mex(
-                        IDENT_PROPERTY_READ_ONLY,
-                        &format!("Property '{}' is constant", field),
-                    ));
-                }
-                if !access_permitted(&owner, &p.set_access, caller_function_name) {
-                    return Err(mex(
-                        IDENT_PROPERTY_PRIVATE_ACCESS,
-                        &format!("Property '{}' is private", field),
-                    ));
-                }
-                if p.is_dependent {
-                    let setter = crate::object_property_setter_name(&field);
-                    if crate::class_registry::lookup_method(
-                        &obj.class_name,
-                        &runmat_types::MethodName::from(setter.as_str()),
-                    )
-                    .is_some()
-                    {
-                        return call_object_property_setter_with_outputs(
-                            Value::Object(obj.clone()),
-                            &field,
-                            rhs.clone(),
-                            1,
-                        )
-                        .await
-                        .and_then(require_single_sequence);
-                    }
-                }
-                if let Some(oldv) = obj.properties.get(&field) {
-                    on_write(oldv, &rhs);
-                }
-                obj.properties.insert(field, rhs);
-                Ok(Value::Object(obj))
-            } else if dynamicprops::dynamic_property_exists(&obj, &field) {
-                if let Some(oldv) = obj.properties.get(&field) {
-                    on_write(oldv, &rhs);
-                }
-                dynamicprops::dynamic_property_assign(&mut obj, &field, rhs)?;
-                Ok(Value::Object(obj))
-            } else if crate::class_registry::get_class(&obj.class_name).is_some() {
-                Err(format!("Undefined property '{}' for class {}", field, obj.class_name).into())
-            } else {
-                Err(format!("Unknown class {}", obj.class_name).into())
-            }
+            property_store::store_value(obj, field, rhs, caller_function_name, &mut on_write).await
         }
         Value::ClassRef(cls) => {
             if let Some((p, owner)) = crate::class_registry::lookup_property(
@@ -556,21 +501,13 @@ where
                 )
                 .await;
             }
-            crate::call_builtin_async_with_outputs(
-                "setfield",
-                &[Value::HandleObject(handle), Value::String(field), rhs],
-                1,
-            )
-            .await
+            property_store::store_handle(handle, field, rhs, caller_function_name).await
         }
-        Value::Listener(listener) => {
-            crate::call_builtin_async_with_outputs(
-                "setfield",
-                &[Value::Listener(listener), Value::String(field), rhs],
-                1,
-            )
-            .await
-        }
+        Value::Listener(_) => Err(crate::build_runtime_error(
+            "setfield: listeners do not support direct field assignment",
+        )
+        .with_identifier("RunMat:setfield:NonStructAssignment")
+        .build()),
         Value::Foreign(reference) => {
             crate::foreign::store_foreign_member(reference, field, rhs).await
         }

@@ -470,6 +470,18 @@ pub fn dynamic_property_assign(
     name: &str,
     value: Value,
 ) -> BuiltinResult<bool> {
+    if !validate_dynamic_property_assignment(obj, name)? {
+        return Ok(false);
+    }
+    obj.properties.insert(name.to_string(), value);
+    Ok(true)
+}
+
+/// Shared admission for stores whose owner must publish with its own GC barrier.
+pub(crate) fn validate_dynamic_property_assignment(
+    obj: &ObjectInstance,
+    name: &str,
+) -> BuiltinResult<bool> {
     let Some(def) = obj.dynamic_property(name) else {
         return Ok(false);
     };
@@ -480,7 +492,6 @@ pub fn dynamic_property_assign(
             format!("Property '{name}' is private"),
         ));
     }
-    obj.properties.insert(name.to_string(), value);
     Ok(true)
 }
 
