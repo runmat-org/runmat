@@ -3054,7 +3054,7 @@ pub trait AccelProvider: AcceleratorThreadBound {
         })
     }
     fn lu<'a>(&'a self, _a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("lu not supported by provider")) })
+        unsupported_future("lu not supported by provider")
     }
 
     fn chol<'a>(

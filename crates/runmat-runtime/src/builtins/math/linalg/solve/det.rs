@@ -4,7 +4,9 @@ use std::collections::HashSet;
 
 use nalgebra::{DMatrix, LU};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::GpuTensorHandle;
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -25,6 +27,10 @@ use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "det";
+
+#[cfg(test)]
+#[path = "det/owning_tests.rs"]
+mod owning_tests;
 
 const DET_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "det-integer-input",
@@ -121,13 +127,6 @@ enum Determinant {
 }
 
 impl Determinant {
-    fn apply_sign(self, sign: f64) -> Self {
-        match self {
-            Self::Real(value) => Self::Real(value * sign),
-            Self::Complex(re, im) => Self::Complex(re * sign, im * sign),
-        }
-    }
-
     fn into_value(self) -> Value {
         match self {
             Self::Real(value) => Value::Num(value),
@@ -187,12 +186,6 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     det_error_with_message(message, &DET_ERROR_INVALID_INPUT)
 }
 
-fn interaction_pending_error() -> RuntimeError {
-    build_runtime_error("interaction pending...")
-        .with_builtin(NAME)
-        .build()
-}
-
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::math::linalg::solve::det")]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: NAME,
@@ -250,12 +243,7 @@ async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match det_gpu_via_provider(provider, &handle).await {
             Ok(Some(value)) => return Ok(value),
             Ok(None) => {}
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(interaction_pending_error());
-                }
-                return Err(err);
-            }
+            Err(err) => return Err(err),
         }
     }
 
@@ -264,23 +252,8 @@ async fn det_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         gpu_helpers::gather_value_async(&proxy).await?
     };
 
-    let det_result = determinant_from_value(gathered_value)?;
-    match det_result {
-        Determinant::Real(det) => {
-            {
-                match upload_scalar(provider, det, &handle) {
-                    Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-                    Err(err) => {
-                        if err.message() == "interaction pending..." {
-                            return Err(interaction_pending_error());
-                        }
-                    }
-                }
-            }
-            Ok(Value::Num(det))
-        }
-        Determinant::Complex(re, im) => Ok(Value::Complex(re, im)),
-    }
+    let det_result = determinant_from_value(gathered_value)?.into_value_for_prototype(&handle)?;
+    gpu_helpers::restore_class_preserving_value(&handle, det_result, NAME)
 }
 
 fn ensure_extensions(value: &Value) -> BuiltinResult<()> {
@@ -424,12 +397,7 @@ fn upload_scalar(
     value: f64,
     prototype: &GpuTensorHandle,
 ) -> BuiltinResult<GpuTensorHandle> {
-    let data = [value];
     let shape = [1usize, 1usize];
-    let view = HostTensorView {
-        data: &data,
-        shape: &shape,
-    };
     let expected_precision = if runmat_accelerate_api::handle_integer_type(prototype).is_some()
         || runmat_accelerate_api::handle_is_logical(prototype)
     {
@@ -437,16 +405,17 @@ fn upload_scalar(
     } else {
         runmat_accelerate_api::handle_precision(prototype).unwrap_or_else(|| provider.precision())
     };
-    if provider.precision() != expected_precision {
-        return Err(builtin_error(format!(
-            "{NAME}: input provider cannot restore the requested result precision"
-        )));
+    let tensor = match expected_precision {
+        runmat_accelerate_api::ProviderPrecision::F32 => {
+            Tensor::from_f32(vec![value as f32], shape.to_vec())
+        }
+        runmat_accelerate_api::ProviderPrecision::F64 => Tensor::new(vec![value], shape.to_vec()),
     }
-    let handle = provider
-        .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
+    .map_err(builtin_error)?;
+    let mut handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])?;
     let valid = handle.shape() == shape
         && handle.device_id() == prototype.device_id()
+        && !handle.shares_allocation_with(prototype)
         && runmat_accelerate_api::handle_storage(&handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(&handle).is_none()
@@ -455,12 +424,14 @@ fn upload_scalar(
         && runmat_accelerate_api::provider_for_handle(&handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !valid {
-        let owner = runmat_accelerate_api::provider_for_handle(&handle).unwrap_or(provider);
-        let _ = owner.free(&handle);
-        return Err(builtin_error(format!(
-            "{NAME}: provider returned an incompatible scalar result"
-        )));
+        return Err(gpu_helpers::reject_gpu_output(
+            handle,
+            builtin_error(format!(
+                "{NAME}: provider returned an incompatible scalar result"
+            )),
+        ));
     }
+    gpu_helpers::propagate_output_provenance(&mut handle, [prototype])?;
     Ok(handle)
 }
 
@@ -481,109 +452,28 @@ async fn det_gpu_via_provider(
 
     let lu_result = match provider.lu(handle).await {
         Ok(result) => result,
-        Err(_) => return Ok(None),
+        Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => return Ok(None),
+        Err(source) => {
+            let mut error = builtin_error(format!("{NAME}: provider LU failed: {source}"));
+            error.source = Some(source.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
+        }
     };
     if !validate_lu_result(&lu_result, provider, handle, rows) {
-        free_lu_result_unique(&lu_result, provider, handle);
-        return Ok(None);
+        let mut error = builtin_error(format!("{NAME}: provider returned invalid LU factors"));
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(error);
     }
 
-    let outcome = {
-        async {
-            enum UpperFactor {
-                Real(Tensor),
-                Complex(ComplexTensor),
-            }
-
-            let upper_factor = match gpu_helpers::gather_tensor_async(&lu_result.upper).await {
-                Ok(tensor) => UpperFactor::Real(tensor),
-                Err(err) => {
-                    if err.message() == "interaction pending..." {
-                        return Err(interaction_pending_error());
-                    }
-                    let value = Value::GpuTensor(lu_result.upper.clone());
-                    match gpu_helpers::gather_value_async(&value).await {
-                        Ok(Value::Tensor(tensor)) => UpperFactor::Real(tensor),
-                        Ok(Value::ComplexTensor(tensor)) => UpperFactor::Complex(tensor),
-                        Ok(Value::Num(n)) => {
-                            let tensor = Tensor::new(vec![n], vec![1, 1]).map_err(builtin_error)?;
-                            UpperFactor::Real(tensor)
-                        }
-                        Ok(_) => return Ok(None),
-                        Err(err) => {
-                            if err.message() == "interaction pending..." {
-                                return Err(interaction_pending_error());
-                            }
-                            return Ok(None);
-                        }
-                    }
-                }
-            };
-
-            let pivot_tensor = match gpu_helpers::gather_tensor_async(&lu_result.perm_vector).await
-            {
-                Ok(tensor) => tensor,
-                Err(err) => {
-                    if err.message() == "interaction pending..." {
-                        return Err(interaction_pending_error());
-                    }
-                    return Ok(None);
-                }
-            };
-
-            let determinant = match upper_factor {
-                UpperFactor::Real(tensor) => match diagonal_product_real(&tensor, rows) {
-                    Ok(value) => Determinant::Real(value),
-                    Err(err) => {
-                        if err.message() == "interaction pending..." {
-                            return Err(interaction_pending_error());
-                        }
-                        return Ok(None);
-                    }
-                },
-                UpperFactor::Complex(tensor) => match diagonal_product_complex(&tensor, rows) {
-                    Ok((re, im)) => Determinant::Complex(re, im),
-                    Err(err) => {
-                        if err.message() == "interaction pending..." {
-                            return Err(interaction_pending_error());
-                        }
-                        return Ok(None);
-                    }
-                },
-            };
-
-            let permutation_sign = match permutation_sign_from_tensor(&pivot_tensor, rows) {
-                Ok(value) => value,
-                Err(err) => {
-                    if err.message() == "interaction pending..." {
-                        return Err(interaction_pending_error());
-                    }
-                    return Ok(None);
-                }
-            };
-
-            let determinant = determinant.apply_sign(permutation_sign);
-
-            match determinant {
-                Determinant::Real(value) => match upload_scalar(provider, value, handle) {
-                    Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-                    Err(err) => {
-                        if err.message() == "interaction pending..." {
-                            Err(interaction_pending_error())
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                },
-                Determinant::Complex(re, im) => Ok(Some(Value::Complex(re, im))),
-            }
-        }
-        .await
-    };
-
-    free_lu_result_unique(&lu_result, provider, handle);
-
-    outcome
+    // The admitted provider contract above is real-only. The factor bundle owns
+    // every allocation across both downloads, including cancellation and errors.
+    let upper = gpu_helpers::gather_tensor_async(&lu_result.upper).await?;
+    let pivots = gpu_helpers::gather_tensor_async(&lu_result.perm_vector).await?;
+    let determinant = diagonal_product_real(&upper, rows)?;
+    let sign = permutation_sign_from_tensor(&pivots, rows)?;
+    let output = upload_scalar(provider, determinant * sign, handle)?;
+    gpu_helpers::resident_gpu_value(output).map(Some)
 }
 
 fn lu_handles(result: &runmat_accelerate_api::ProviderLuResult) -> [&GpuTensorHandle; 5] {
@@ -635,22 +525,6 @@ fn validate_lu_result(
     true
 }
 
-fn free_lu_result_unique(
-    result: &runmat_accelerate_api::ProviderLuResult,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-    input: &GpuTensorHandle,
-) {
-    let mut freed = HashSet::new();
-    for handle in lu_handles(result) {
-        let identity = (handle.device_id(), handle.buffer_id());
-        if identity == (input.device_id(), input.buffer_id()) || !freed.insert(identity) {
-            continue;
-        }
-        let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-        let _ = owner.free(handle);
-    }
-}
-
 fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64> {
     if dimension == 0 {
         return Ok(1.0);
@@ -671,29 +545,6 @@ fn diagonal_product_real(upper: &Tensor, dimension: usize) -> BuiltinResult<f64>
         product *= floating_scalar_to_f64(value)?;
     }
     Ok(product)
-}
-
-fn diagonal_product_complex(upper: &ComplexTensor, dimension: usize) -> BuiltinResult<(f64, f64)> {
-    if dimension == 0 {
-        return Ok((1.0, 0.0));
-    }
-    let rows = upper.rows;
-    let cols = upper.cols;
-    if rows < dimension || cols < dimension {
-        return Err(builtin_error(format!(
-            "{NAME}: upper factor shape mismatch"
-        )));
-    }
-    let mut product = Complex64::new(1.0, 0.0);
-    for i in 0..dimension {
-        let idx = i + i * rows;
-        let (re, im) = *upper
-            .materialize_f64()
-            .get(idx)
-            .ok_or_else(|| builtin_error(format!("{NAME}: upper factor diagonal out of range")))?;
-        product *= Complex64::new(re, im);
-    }
-    Ok((product.re, product.im))
 }
 
 fn permutation_sign_from_tensor(pivots: &Tensor, expected_len: usize) -> BuiltinResult<f64> {
@@ -932,10 +783,17 @@ pub(crate) mod tests {
             duplicate.lower = duplicate.combined.clone();
             assert!(!validate_lu_result(&duplicate, provider, &input, 2));
 
-            let mistyped = valid.clone();
-            runmat_accelerate_api::set_handle_logical(&mistyped.upper, true);
+            let mut mistyped = valid.clone();
+            mistyped.upper = runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0, 0, 1],
+                    shape: &[2, 2],
+                },
+                &[&input],
+            )
+            .expect("genuine logical factor");
             assert!(!validate_lu_result(&mistyped, provider, &input, 2));
-            runmat_accelerate_api::set_handle_logical(&mistyped.upper, false);
 
             let aliasing = ProviderLuResult {
                 combined: input.clone(),
@@ -944,9 +802,10 @@ pub(crate) mod tests {
                 perm_matrix: perm_matrix.clone(),
                 perm_vector: perm_vector.clone(),
             };
-            free_lu_result_unique(&aliasing, provider, &input);
+            drop(aliasing);
             assert!(block_on(provider.download(&input)).is_ok());
-            assert!(block_on(provider.download(&combined)).is_err());
+            // Independently retained factor aliases remain published owners.
+            assert!(block_on(provider.download(&combined)).is_ok());
         });
     }
 
