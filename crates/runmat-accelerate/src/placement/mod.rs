@@ -36,6 +36,8 @@ pub use event::{
     PlacementReport, PlacementTrace, PlacementVariant, PLACEMENT_REPORT_SCHEMA_VERSION,
 };
 pub(crate) use planner::{select_candidate, PlacementPolicy};
+#[cfg(test)]
+pub(crate) use recorder::ScopedRecorder;
 pub use recorder::{
     begin_trace, complete_trace, record_event, report, reset, PlacementTraceContext,
 };

@@ -1949,7 +1949,7 @@ mod tests {
 
     #[test]
     fn feasibility_rejection_prevents_provider_execution_and_is_observable() {
-        crate::placement::reset();
+        let _recorder = crate::placement::ScopedRecorder::new();
         REJECTING_PROVIDER.uploads.store(0, Ordering::Relaxed);
         let thresholds = ThresholdConfig {
             binary_min_elems: 1,
@@ -1966,7 +1966,12 @@ mod tests {
         assert!(matches!(right, Value::Tensor(_)));
         assert_eq!(REJECTING_PROVIDER.uploads.load(Ordering::Relaxed), 0);
         let report = crate::placement::report();
-        let trace = report.traces.last().expect("placement trace");
+        assert_eq!(
+            report.traces.len(),
+            1,
+            "this invocation owns exactly one trace"
+        );
+        let trace = &report.traces[0];
         assert!(trace.events.iter().any(|event| {
             event.kind == PlacementEventKind::Fallback
                 && event.reason.as_deref() == Some("provider_operation_unsupported")
