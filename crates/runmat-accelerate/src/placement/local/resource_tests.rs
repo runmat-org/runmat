@@ -49,6 +49,29 @@ impl AccelProvider for Provider {
         snapshot.concurrency.transactional_results = true;
         snapshot
     }
+    fn operation_observation_capability(
+        &self,
+        _: &ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::observation::ProviderObservationCapability {
+        use runmat_accelerate_api::observation::*;
+        ProviderObservationCapability::Supported(ProviderObservationOverhead {
+            submissions: 2,
+            requested_peak_buffer_bytes: 16,
+            clear_commands: 2,
+            map_callbacks: 2,
+        })
+    }
+    fn estimate_cost(
+        &self,
+        query: &ProviderCostQuery,
+    ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        query
+            .context
+            .observation
+            .map(|overhead| runmat_accelerate_api::ProviderCostEstimate {
+                cost: cost(1, overhead.requested_peak_buffer_bytes),
+            })
+    }
     fn placement_resources(&self) -> ProviderResourceSnapshot {
         ProviderResourceSnapshot {
             device_id: self.device_id(),
@@ -97,6 +120,16 @@ fn plan(
     automatic: bool,
     scratch: u64,
 ) -> LocalPlacementOutcome {
+    plan_with_program(provider, capture, automatic, scratch, None)
+}
+
+fn plan_with_program(
+    provider: &Provider,
+    capture: &Rc<Capture>,
+    automatic: bool,
+    scratch: u64,
+    program: Option<runmat_accelerate_api::ProviderPreparationProgram<'_>>,
+) -> LocalPlacementOutcome {
     let runtime = RuntimeContext::new(Rc::new(
         runmat_runtime::execution::RuntimeExecutionService::new(),
     ))
@@ -112,7 +145,7 @@ fn plan(
             outputs: vec![],
             workload: ProviderWorkload::default(),
             preparation: CandidatePreparationState::Ready,
-            preparation_program: None,
+            preparation_program: program,
             cpu: ExecutionCandidateDescriptor {
                 identity: "cpu.fixture".into(),
                 region: None,
@@ -140,6 +173,67 @@ fn is_provider(outcome: LocalPlacementOutcome) -> bool {
         panic!("expected selected candidate")
     };
     selected.kind.is_provider()
+}
+
+#[test]
+fn observation_scratch_participates_in_admission_before_any_execution() {
+    use runmat_accelerate_api::ProviderPreparationProgram;
+    for capacity in [23, 24] {
+        let provider = Provider {
+            output: Some(8),
+            capacity,
+        };
+        // Uninstrumented numerical feasibility is independent of optional
+        // completion tracking; its 8-byte output fits either resource limit.
+        let capture = Rc::new(Capture::default());
+        assert!(is_provider(plan(&provider, &capture, true, 0)));
+        let observed = Rc::new(Capture::default());
+        let outcome = plan_with_program(
+            &provider,
+            &observed,
+            true,
+            0,
+            Some(ProviderPreparationProgram::Elementwise {
+                shader: "fixture, never compiled",
+            }),
+        );
+        assert_eq!(is_provider(outcome), capacity == 24);
+        let requests = observed.requests.borrow();
+        let demand = requests[0].graph.nodes[0].candidates[1].resources;
+        assert_eq!(demand.retained_bytes, 8);
+        assert_eq!(demand.scratch_bytes, 16);
+    }
+}
+
+#[test]
+fn explicit_unobserved_selection_does_not_price_or_start_fences() {
+    let provider = Provider {
+        output: Some(8),
+        capacity: 24,
+    };
+    let capture = Rc::new(Capture::default());
+    let outcome = plan_with_program(
+        &provider,
+        &capture,
+        false,
+        0,
+        Some(
+            runmat_accelerate_api::ProviderPreparationProgram::Elementwise {
+                shader: "never compiled",
+            },
+        ),
+    );
+    let LocalPlacementOutcome::Selected {
+        provider_observation,
+        provider_cost,
+        ..
+    } = outcome
+    else {
+        panic!("explicit provider selection");
+    };
+    assert!(!provider_observation);
+    assert_eq!(provider_cost.scratch_bytes, 0);
+    assert!(capture.requests.borrow().is_empty());
 }
 
 #[test]
