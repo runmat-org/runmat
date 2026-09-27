@@ -39,8 +39,8 @@ fn arrayfun_wgpu_sin_matches_cpu() {
             "expected {expect}, got {actual}"
         );
     }
-    let _ = provider.free(&handle);
-    let _ = provider.free(&out_handle);
+    drop(handle);
+    drop(out_handle);
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -91,9 +91,9 @@ fn arrayfun_wgpu_plus_matches_cpu() {
             "expected {expect}, got {actual}"
         );
     }
-    let _ = provider.free(&handle_a);
-    let _ = provider.free(&handle_b);
-    let _ = provider.free(&out_handle);
+    drop(handle_a);
+    drop(handle_b);
+    drop(out_handle);
 }
 
 #[test]
@@ -138,8 +138,8 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
         };
         let gathered = test_support::gather(Value::GpuTensor(output.clone())).expect("gather");
         assert_eq!(gathered.integer_storage(), Some(&storage));
-        let _ = provider.free(&handle);
-        let _ = provider.free(&output);
+        drop(handle);
+        drop(output);
     }
 
     let row = Tensor::new_integer(
@@ -175,6 +175,6 @@ fn arrayfun_wgpu_fallback_preserves_every_integer_class() {
             9_007_199_254_741_015,
         ]))
     );
-    let _ = provider.free(&row_handle);
-    let _ = provider.free(&output);
+    drop(row_handle);
+    drop(output);
 }

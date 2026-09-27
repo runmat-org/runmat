@@ -22,7 +22,7 @@ fn arrayfun_gpu_options_are_mode_gated() {
             error.identifier(),
             ARRAYFUN_GPU_OPTIONS_EXTENSION.error_identifier
         );
-        let _ = provider.free(&handle);
+        drop(handle);
     });
 }
 
@@ -55,8 +55,8 @@ fn arrayfun_provider_fallback_preserves_every_integer_class() {
             let gathered =
                 test_support::gather(Value::GpuTensor(output.clone())).expect("gather output");
             assert_eq!(gathered.integer_storage(), Some(&storage));
-            let _ = provider.free(&handle);
-            let _ = provider.free(&output);
+            drop(handle);
+            drop(output);
         }
     });
 }
@@ -94,8 +94,8 @@ fn arrayfun_gpu_overload_uses_documented_compatible_size_expansion_exactly() {
                 9_007_199_254_741_015,
             ]))
         );
-        let _ = provider.free(&row_handle);
-        let _ = provider.free(&output);
+        drop(row_handle);
+        drop(output);
     });
 }
 
@@ -150,7 +150,7 @@ fn arrayfun_gpu_roundtrip() {
                 let gathered = test_support::gather(Value::GpuTensor(gpu.clone())).unwrap();
                 let expected: Vec<f64> = values(&tensor).into_iter().map(f64::sin).collect();
                 assert_eq!(values(&gathered), expected);
-                let _ = provider.free(&gpu);
+                drop(gpu);
             }
             other => panic!("expected gpu tensor, got {other:?}"),
         }

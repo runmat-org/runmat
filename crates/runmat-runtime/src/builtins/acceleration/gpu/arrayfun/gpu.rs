@@ -32,23 +32,32 @@ pub(super) async fn try_fast_path(
     let Some(operation) = arrayfun_gpu_callback(identity) else {
         return Ok(None);
     };
-    if crate::user_functions::resolve_semantic_function_by_name(identity.name).is_some()
-        || crate::builtins::common::spec::selected_builtin_binding(identity.name, None, None)
-            .is_none()
-    {
+    if crate::user_functions::resolve_semantic_function_by_name(identity.name).is_some() {
         return Ok(None);
     }
+    let Some(binding) =
+        crate::builtins::common::spec::selected_builtin_binding(identity.name, None, None)
+    else {
+        return Ok(None);
+    };
     if !admission::equivalent(operation, identity.name, inputs) {
         return Ok(None);
     }
     if matches!(operation, ArrayfunGpuCallback::Unary(ArrayfunGpuUnary::Log))
         && !crate::builtins::math::elementwise::logarithms::log::mapped_batch_equivalent(&inputs[0])
-            .await?
+            .await
+            .map_err(callback_error)?
     {
         return Ok(None);
     }
     // Canonical dispatch owns preparation, class promotion, exact provider,
     // unsupported fallback and output admission. Never retry an execution error.
-    let result = callable.call(inputs).await?;
+    let result = crate::dispatcher::call_selected_builtin_async_with_outputs(binding, inputs, 1)
+        .await
+        .map_err(callback_error)?;
     normalize::uniform(result, &shape, inputs).await.map(Some)
+}
+
+fn callback_error(error: crate::RuntimeError) -> crate::RuntimeError {
+    super::error::arrayfun_flow_with_source(format!("arrayfun: {}", error.message()), error)
 }

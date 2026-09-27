@@ -244,6 +244,7 @@ struct ResolvedBuiltinName<'a> {
 }
 
 mod preparation;
+mod selected_execution;
 use preparation::SelectedBindingOrigin;
 
 impl<'a> ResolvedBuiltinName<'a> {
@@ -360,35 +361,12 @@ async fn call_builtin_async_impl(
     // implementations to allow overrides when names collide.
     let mut last_error = RuntimeError::new("unknown error");
     for (origin, implementation) in implementations {
-        // Resolve methods and scoped overrides before legacy preparation. This
-        // bridge preserves the old transfer contract only for selected inventory
-        // implementations; canonical bodies own their admitted preparation.
+        // Preparation failures remain terminal, rather than overload retries.
         let prepared = preparation::prepare_selected(origin, name, args).await?;
-        let execution_args = prepared.as_deref().unwrap_or(args);
-        let f = implementation;
-        match (f)(execution_args).await {
+        match selected_execution::execute(implementation, prepared.as_deref().unwrap_or(args)).await
+        {
             Ok(result) => return compatibility_checked_builtin_result(name, args, result),
-            Err(err) => {
-                if should_retry_with_gpu_gather(&err, execution_args) {
-                    if let Some(recorder) =
-                        runmat_accelerate_api::observation::current_provider_observation()
-                    {
-                        recorder.execution_disposition(runmat_accelerate_api::observation::ProviderExecutionDisposition::SharedRuntimeFallback);
-                    }
-                    match gather_args_for_retry_async(execution_args).await {
-                        Ok(Some(gathered_args)) => match (f)(&gathered_args).await {
-                            Ok(result) => {
-                                return compatibility_checked_builtin_result(name, args, result);
-                            }
-                            Err(retry_err) => last_error = retry_err,
-                        },
-                        Ok(None) => last_error = err,
-                        Err(gather_err) => last_error = gather_err,
-                    }
-                } else {
-                    last_error = err;
-                }
-            }
+            Err(error) => last_error = error,
         }
     }
 
@@ -992,6 +970,31 @@ pub async fn call_builtin_async_with_outputs(
     output_count: usize,
 ) -> Result<Value, RuntimeError> {
     call_builtin_async_impl(name, args, Some(output_count)).await
+}
+
+/// Invoke the implementation already selected for this invocation. Re-resolving
+/// a scoped service here would invalidate operand-domain batching admission.
+pub(crate) async fn call_selected_builtin_async_with_outputs(
+    binding: crate::builtin::RuntimeBuiltinBinding,
+    args: &[Value],
+    output_count: usize,
+) -> Result<Value, RuntimeError> {
+    let name = binding.identity.builtin.name;
+    let _output_guard = crate::output_count::push_output_count(Some(output_count));
+    if let Some(result) = try_distributed_builtin(name, args, Some(output_count)).await? {
+        return Ok(result);
+    }
+    if let Some(result) =
+        try_call_registered_instance_method(name, args, Some(output_count)).await?
+    {
+        return compatibility_checked_builtin_result(name, args, result);
+    }
+    let prepared =
+        preparation::prepare_selected(SelectedBindingOrigin::CanonicalOrScoped, name, args).await?;
+    let result =
+        selected_execution::execute(binding.implementation, prepared.as_deref().unwrap_or(args))
+            .await?;
+    compatibility_checked_builtin_result(name, args, result)
 }
 
 fn should_retry_with_gpu_gather(err: &RuntimeError, args: &[Value]) -> bool {
