@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 mod native_device;
+pub mod observation;
 mod handle_metadata;
 mod numeric_upload;
 mod placement;

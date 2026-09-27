@@ -14,6 +14,7 @@ wgpu = ["dep:wgpu"]
 [dependencies]
 runmat-execution = { workspace = true }
 runmat-types = { workspace = true }
+runmat-time = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
