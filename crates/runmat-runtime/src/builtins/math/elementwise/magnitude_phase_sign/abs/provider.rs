@@ -15,46 +15,42 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
     let precision = runmat_accelerate_api::handle_precision(&handle);
     if integer.is_none() && !logical && precision == Some(provider.precision()) {
-        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let result = provider.unary_abs(&handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         match result {
             Ok(mut output) if valid_output(&output, &handle, provider) => {
-                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
-                gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
-                return Err(OPERATION.error(
+                let mut error = OPERATION.error(
                     &ABS_ERROR_INTERNAL,
                     "provider unary_abs returned malformed output",
-                ));
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
-                return Err(OPERATION.error(
+                let mut failure = OPERATION.error(
                     &ABS_ERROR_INTERNAL,
                     format!("provider unary_abs failed: {error}"),
-                ));
+                );
+                failure.source = Some(error.into_boxed_dyn_error());
+                failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(failure);
             }
         }
     }
 
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-    let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered_result =
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-    let gathered =
-        gathered_result.map_err(|error| OPERATION.error(&ABS_ERROR_INTERNAL, error.message()))?;
+    let gathered = gathered_result?;
     let host = host::abs_host_value(gathered)?;
     let tensor = tensor::value_into_tensor_for(BUILTIN_NAME, host)
         .map_err(|error| OPERATION.error(&ABS_ERROR_INTERNAL, error))?;
-    let mut output = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|error| OPERATION.error(&ABS_ERROR_INTERNAL, error))?;
+    let mut output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[&handle])?;
     let expected_precision = if integer.is_some() {
         None
     } else if logical {
@@ -63,13 +59,15 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         precision
     };
     if !valid_real_output(&output, &handle, provider, expected_precision, integer) {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
-        return Err(OPERATION.error(
-            &ABS_ERROR_INTERNAL,
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            OPERATION.error(
+                &ABS_ERROR_INTERNAL,
+                "provider upload returned malformed fallback output",
+            ),
         ));
     }
-    runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+    gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -103,7 +101,7 @@ fn valid_real_output(
             precision,
             integer,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }

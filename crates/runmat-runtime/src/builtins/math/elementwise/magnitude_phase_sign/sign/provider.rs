@@ -23,40 +23,40 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let kernel_compatible =
         !logical && (integer.is_some() || precision == Some(provider.precision()));
     if kernel_compatible {
-        let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-        let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let result = provider.unary_sign(&handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         match result {
             Ok(mut output) if valid_sign_gpu_output(&output, &handle, provider) => {
-                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
                 if storage == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved {
                     return gpu_helpers::complex_gpu_value(output);
                 }
                 return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
-                gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
-                return Err(OPERATION.error(
+                let mut error = OPERATION.error(
                     &SIGN_ERROR_INTERNAL,
                     "provider unary_sign returned malformed output",
-                ));
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
-                return Err(OPERATION.error(
+                let mut failure = OPERATION.error(
                     &SIGN_ERROR_INTERNAL,
                     format!("provider unary_sign failed: {error}"),
-                ));
+                );
+                failure.source = Some(error.into_boxed_dyn_error());
+                failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(failure);
             }
         }
     }
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered_result =
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-    let gathered = gathered_result.map_err(|err| OPERATION.error(&SIGN_ERROR_INTERNAL, err))?;
+    let gathered = gathered_result?;
     let host = match gathered {
         Value::Complex(re, im) => {
             let (re_out, im_out) = host::sign_complex(re, im);
@@ -66,7 +66,6 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         other => host::sign_real(other),
     }?;
     gpu_helpers::restore_class_preserving_value(&handle, host, BUILTIN_NAME)
-        .map_err(|err| OPERATION.error(&SIGN_ERROR_INTERNAL, err.message()))
 }
 
 fn valid_sign_gpu_output(
@@ -83,7 +82,7 @@ fn valid_sign_gpu_output(
             precision: runmat_accelerate_api::handle_precision(input),
             integer: runmat_accelerate_api::handle_integer_type(input),
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }
