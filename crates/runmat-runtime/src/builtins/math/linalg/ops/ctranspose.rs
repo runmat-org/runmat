@@ -458,7 +458,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         return Ok(Value::GpuTensor(handle));
     }
 
-    let owner = runmat_accelerate_api::provider_for_handle(&handle);
+    let owner = gpu_helpers::exact_provider_for_handle(&handle);
     if let Some(provider) = owner {
         let mut expected_shape = handle.shape().to_vec();
         if expected_shape.len() >= 2 {
@@ -563,7 +563,7 @@ fn native_ctranspose_output_matches(
             == runmat_accelerate_api::handle_integer_type(input)
         && runmat_accelerate_api::handle_is_logical(output)
             == runmat_accelerate_api::handle_is_logical(input)
-        && runmat_accelerate_api::provider_for_handle(output)
+        && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
@@ -1170,7 +1170,7 @@ pub(crate) mod tests {
             buffer_id: u64::MAX - 396,
             descriptor: Default::default(),
         };
-        assert!(runmat_accelerate_api::provider_for_handle(&handle).is_none());
+        assert!(gpu_helpers::exact_provider_for_handle(&handle).is_none());
         call_ctranspose(Value::GpuTensor(handle))
             .expect_err("an unowned handle must not dispatch through the ambient provider");
     }

@@ -897,7 +897,7 @@ fn valid_dot_uploaded_output(
 fn resolved_actual_dot_owner(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
+    gpu_helpers::exact_provider_for_handle(handle)
         .filter(|owner| owner.device_id() == handle.device_id())
 }
 

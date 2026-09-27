@@ -379,8 +379,8 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             && lhs_handle.device_id() == rhs_handle.device_id()
         {
             if let (Some(provider), Some(rhs_provider)) = (
-                runmat_accelerate_api::provider_for_handle(lhs_handle),
-                runmat_accelerate_api::provider_for_handle(rhs_handle),
+                gpu_helpers::exact_provider_for_handle(lhs_handle),
+                gpu_helpers::exact_provider_for_handle(rhs_handle),
             ) {
                 if !std::ptr::eq(provider, rhs_provider) {
                     // Mixed-owner handles must gather independently.
@@ -464,7 +464,7 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     };
 
     if let (Some(owner), Value::ComplexTensor(tensor)) = (owner.as_ref(), &value) {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(owner) {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(owner) {
             let expected = if single_output {
                 runmat_accelerate_api::ProviderPrecision::F32
             } else {
@@ -493,7 +493,7 @@ fn native_result_matches_provider(
             == runmat_accelerate_api::GpuTensorStorage::Real
         && !runmat_accelerate_api::handle_is_logical(handle)
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
-        && runmat_accelerate_api::provider_for_handle(handle)
+        && gpu_helpers::exact_provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
 
@@ -765,7 +765,7 @@ fn promote_real_result_to_gpu(
     single_output: bool,
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let provider = match owner.and_then(runmat_accelerate_api::provider_for_handle) {
+    let provider = match owner.and_then(gpu_helpers::exact_provider_for_handle) {
         Some(provider) => provider,
         None => return Ok(tensor::tensor_into_value(tensor)),
     };

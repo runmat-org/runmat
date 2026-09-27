@@ -322,7 +322,7 @@ async fn trace_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     let floating_input = runmat_accelerate_api::handle_integer_type(&handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(&handle);
     if diag_len != 0 && floating_input {
-        if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
+        if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
             if let Ok(diagonal) = provider.diag_extract(&handle, 0) {
                 let reduced = provider.reduce_sum(&diagonal).await;
                 drop(diagonal);
