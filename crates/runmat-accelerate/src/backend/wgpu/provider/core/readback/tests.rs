@@ -13,13 +13,16 @@ fn production_decoder_failure_and_unwind_unmap_same_staging_buffer() {
     let buffer = std::sync::Arc::new(
         access
             .with_shared(|emission| {
-                emission
+                let buffer = emission
                     .device()
                     .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                         label: Some("same-staging-readback-lifecycle"),
                         contents: bytemuck::cast_slice(&expected),
                         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                    })
+                    });
+                // Submit the initialization upload before testing mapping cleanup.
+                emission.queue().submit(std::iter::empty());
+                buffer
             })
             .expect("same-device staging"),
     );

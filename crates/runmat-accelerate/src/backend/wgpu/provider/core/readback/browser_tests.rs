@@ -18,13 +18,15 @@ async fn pending_owned_readback_cancellation_unmaps_same_device_buffer() {
     let expected = [1.25f32, -3.5, 0.0, 9.0];
     let buffer = access
         .with_shared(|emission| {
-            emission
+            let buffer = emission
                 .device()
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("provider-browser-cancel-readback"),
                     contents: bytemuck::cast_slice(&expected),
                     usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-                })
+                });
+            emission.queue().submit(std::iter::empty());
+            buffer
         })
         .expect("same-device staging creation");
     // WGPU 24's buffer clone retains the same native backing; keep one test
