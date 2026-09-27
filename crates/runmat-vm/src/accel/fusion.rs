@@ -712,6 +712,7 @@ mod tests {
         static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
         runmat_gc::gc_test_context(|| {
             let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+            runmat_accelerate::ensure_residency_hooks();
             let upload = |value| {
                 PROVIDER
                     .upload(&HostTensorView {
@@ -735,7 +736,10 @@ mod tests {
                 )
                 .unwrap(),
             )];
-            let _frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
+            let frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
+            drop(frame_roots);
+            let old_weak = old_only.downgrade();
+            let shared_weak = shared.downgrade();
             let mut context = ExecutionContext::default();
             write_elementwise_materialized_stores(
                 vec![(
@@ -751,8 +755,7 @@ mod tests {
                 &mut vars,
                 &mut context,
             );
-            // Writeback is published, but final-output adoption still owns the
-            // retirement boundary: neither original allocation is freed yet.
+            // Both external handles are genuine owners; writeback cannot free either.
             assert!(block_on(PROVIDER.download(&shared)).is_ok());
             assert!(block_on(PROVIDER.download(&old_only)).is_ok());
             assert!(fusion_residency::is_resident(&old_only));
@@ -760,11 +763,17 @@ mod tests {
                 block_on(PROVIDER.download(&shared)).unwrap().data,
                 vec![7.0]
             );
-            assert!(block_on(PROVIDER.download(&old_only)).is_err());
+            drop(old_only);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(old_weak.acquire().is_err());
             assert!(fusion_residency::is_resident(&shared));
-            assert!(!fusion_residency::is_resident(&old_only));
-            PROVIDER.free(&shared).unwrap();
-            fusion_residency::clear(&shared);
+            drop(shared);
+            assert!(
+                shared_weak.acquire().is_ok(),
+                "published variable owns the output"
+            );
+            drop(vars);
+            assert!(shared_weak.acquire().is_err());
         });
     }
 

@@ -157,23 +157,39 @@ fn value_family(value: &Value) -> &'static str {
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use runmat_accelerate_api::{GpuHandleProvenance, GpuTensorHandle};
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuHandleProvenance, GpuTensorStorage,
+        NumericElementType,
+    };
 
     use super::*;
 
     #[test]
     fn explicit_device_intent_has_a_distinct_placement_rejection() {
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
         let value = Value::GpuTensor(
-            GpuTensorHandle::new(vec![2, 2], 1, 7).with_provenance(GpuHandleProvenance::Explicit),
+            allocation
+                .handle
+                .with_provenance(GpuHandleProvenance::Explicit)
+                .unwrap(),
         );
         assert!(runmat_runtime::dispatcher::value_contains_explicit_gpu(
             &value
         ));
         assert!(!runmat_runtime::dispatcher::value_contains_explicit_gpu(
             &Value::GpuTensor(
-                GpuTensorHandle::new(vec![2, 2], 1, 8)
-                    .with_provenance(GpuHandleProvenance::Automatic),
+                allocation
+                    .handle
+                    .with_provenance(GpuHandleProvenance::Automatic)
+                    .unwrap(),
             )
         ));
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }
