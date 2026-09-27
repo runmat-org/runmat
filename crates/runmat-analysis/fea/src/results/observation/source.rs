@@ -205,6 +205,23 @@ impl ObservationFieldSelection {
                 "thermal catalog differs from workload, mesh, producer, or schedule",
             ));
         }
+        Self::thermal_metadata(
+            manifest,
+            projection.projection_digest,
+            sample_ordinal,
+            selected,
+        )
+    }
+
+    /// Reconstruct selection metadata only. The supplied projection identity must be
+    /// authenticated against the producing workload and mesh by the calling boundary.
+    pub(crate) fn thermal_metadata(
+        manifest: &ThermalSolverResultManifest,
+        projection_digest: Digest,
+        sample_ordinal: usize,
+        selected: Vec<RecoveredFieldIdentity>,
+    ) -> AnalysisExecutionResult<Self> {
+        manifest.validate()?;
         let catalog = manifest
             .fields
             .get(sample_ordinal)
@@ -220,13 +237,13 @@ impl ObservationFieldSelection {
             ));
         }
         Self::new(
-            producer,
+            manifest.producer,
             ObservationFieldSource::ThermalResult {
                 workload: manifest.source_workload,
                 result: manifest.identity(),
                 numerical_intent: manifest.numerical_intent,
-                mesh_digest: projection.mesh_digest,
-                projection_digest: projection.projection_digest,
+                mesh_digest: StableDigest::from_bytes(*manifest.topology_digest.bytes()),
+                projection_digest,
                 sample_ordinal,
             },
             fields,

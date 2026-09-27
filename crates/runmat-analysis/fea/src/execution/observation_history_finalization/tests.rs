@@ -9,6 +9,25 @@ use crate::{ComputeBackend, ThermalProcedureControl};
 use runmat_analysis_core::*;
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
+// A genuine but wrong-family authority for thermal catalog rejection checks.
+fn structural_source_fixture() -> crate::execution::StructuralLinearWorkload {
+    let model = crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let workload = crate::execution::StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model,
+        backend: ComputeBackend::Cpu,
+        formulation_requirement: FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: ObservationExecutionPolicy::serial(),
+        require_solver_mesh_for_solid: true,
+        initial_guess_transition: None,
+    };
+    workload.validate().unwrap();
+    workload
+}
+
 fn fixture(
     retention: RetentionPolicy,
     series: SeriesReduction,
@@ -292,7 +311,9 @@ fn publication_catalog_preserves_history_authority_and_exact_coverage() {
         .validate_for(
             step,
             ObservationHistorySourceContext::Structural {
-                model: &workload.model,
+                source: crate::execution::StructuralObservationSource::Linear(
+                    &structural_source_fixture()
+                ),
                 mesh: Some(&mesh)
             }
         )
@@ -527,7 +548,9 @@ fn finalization_binds_catalog_checkpoint_and_authored_series() {
             &checkpoint,
             &catalog,
             ObservationHistorySourceContext::Structural {
-                model: &workload.model,
+                source: crate::execution::StructuralObservationSource::Linear(
+                    &structural_source_fixture()
+                ),
                 mesh: Some(&mesh)
             }
         )

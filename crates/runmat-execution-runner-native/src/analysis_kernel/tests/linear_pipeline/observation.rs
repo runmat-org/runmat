@@ -96,6 +96,8 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
     )
     .unwrap();
     let mut contribution_objects = Vec::new();
+    let mut partition_reduction_plans = Vec::new();
+    let mut partition_reduction_attempts = Vec::new();
     for partition in &partition_plan.partitions {
         let required_indices = runmat_analysis_fea::results::observation::structural_observation_partition_source_indices(
             &source_request.plan,
@@ -221,6 +223,8 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
             })
             .unwrap();
         contribution_objects.push(prepare_kernel_output(&outputs[0]));
+        partition_reduction_attempts.push(executed_attempt(&resource_plan));
+        partition_reduction_plans.push(resource_plan);
     }
 
     let contributions = contribution_objects
@@ -286,6 +290,8 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
             inputs: &reduction_inputs,
         })
         .unwrap();
+    partition_reduction_attempts.push(executed_attempt(&reduction_resource_plan));
+    partition_reduction_plans.push(reduction_resource_plan);
     let distributed_result =
         runmat_analysis_fea::results::observation::ObservationResult::from_canonical_bytes(
             reduction_outputs[0].whole_payload().unwrap(),
@@ -393,12 +399,15 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
                     runmat_analysis_fea::results::observation::ObservationSamplePublication {
                         request: source_request,
                         manifest,
+                        partition_evidence: vec![distributed_result.partition_evidence.clone()],
                     },
                 ),
             ),
         ],
         runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
-            model: &solved.solve.model,
+            source: runmat_analysis_fea::execution::StructuralObservationSource::Linear(
+                &solved.solve,
+            ),
             mesh: Some(&solver_mesh),
         },
     )
@@ -407,6 +416,25 @@ pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) ->
         catalog,
         assembly_plan: assembly_resource_plan,
         assembly_attempt,
+        partition_reduction_plans,
+        partition_reduction_attempts,
+    }
+}
+
+// The native kernel ran these exact plans. As elsewhere in this direct-kernel fixture,
+// reserved intervals model accounting; they are not scheduler-measured resource use.
+fn executed_attempt(
+    plan: &runmat_analysis_fea::planning::resource::FeaResourcePlan,
+) -> ResourceUsageAttempt {
+    ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[
+            b"kernel-observation-executed-attempt",
+            plan.identity.digest().bytes(),
+        ]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+        plan: plan.identity,
+        resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
+            .unwrap(),
     }
 }
 

@@ -30,6 +30,7 @@ mod observation_assembly;
 mod observation_history_checkpoint;
 mod observation_history_finalization;
 mod observation_partition;
+mod observation_source;
 mod publication;
 mod random_response_interval;
 mod random_response_result;
@@ -166,6 +167,7 @@ pub use observation_history_finalization::{
 pub use observation_partition::{
     ObservationPartitionEvaluationRequest, ObservationPartitionReductionRequest,
 };
+pub use observation_source::StructuralObservationSource;
 pub use publication::ResultPublicationRequest;
 pub use random_response_interval::{
     StructuralRandomResponseIntervalRequest, StructuralRandomResponseIntervalResult,

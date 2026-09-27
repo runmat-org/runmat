@@ -9,8 +9,12 @@ use crate::planning::resource::{
 use crate::results::observation::{ObservationPublicationCatalog, ObservationPublicationEntry};
 use runmat_execution::Digest;
 
+mod partition;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum Task {
+    Partition(Digest),
+    Reduction(Digest),
     Checkpoint(Digest),
     Finalization(Digest),
     Assembly(Digest),
@@ -18,6 +22,12 @@ enum Task {
 
 fn task(plan: &FeaResourcePlan) -> Option<Task> {
     match plan.input.phase {
+        FeaResourcePhase::StructuralObservationPartition(request) => {
+            Some(Task::Partition(request.digest()))
+        }
+        FeaResourcePhase::StructuralObservationReduction(request) => {
+            Some(Task::Reduction(request.digest()))
+        }
         FeaResourcePhase::StructuralObservationHistoryCheckpoint(request) => {
             Some(Task::Checkpoint(request.digest()))
         }
@@ -42,9 +52,9 @@ pub(crate) fn observation_usage_index_bytes(plan_count: usize) -> Option<u64> {
         .checked_mul(std::mem::size_of::<&FeaResourcePlan>() as u64)
 }
 
-/// Requires every canonical one-sample checkpoint, finalization and sample assembly attempt.
-/// Partition/reduction lineage and failed-attempt completeness need additional source authority;
-/// neither is inferred from the presence of these terminal tasks.
+/// Requires canonical partition, reduction, checkpoint, finalization and assembly accounting.
+/// Catalog source validation authenticates the producing policy and selected field blocks.
+/// This does not independently attest numerical execution or completeness of failed retries.
 pub fn validate_observation_publication_usage(
     observations: &ObservationPublicationCatalog,
     usage: &ResourceUsageEvidence,
@@ -75,6 +85,7 @@ pub fn validate_observation_publication_usage(
         }
         Ok(())
     };
+    partition::validate_partition_tasks(observations, &require)?;
     for entry in observations.entries() {
         match entry {
             ObservationPublicationEntry::Sample(sample) => {

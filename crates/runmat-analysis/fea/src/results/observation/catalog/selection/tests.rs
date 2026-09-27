@@ -68,7 +68,9 @@ fn structural_selection_preserves_catalog_order_and_all_required_samples() {
     assert_eq!(selected, expected);
     assert_eq!(selected.len(), 2);
     let old = ObservationFieldSelection::structural(&request, &manifest, expected).unwrap();
-    let canonical = ObservationFieldSelection::structural(&request, &manifest, selected).unwrap();
+    let canonical = catalog
+        .canonical_selection(&plan, ObservationSelectionCoordinate::StructuralRecovery)
+        .unwrap();
     catalog
         .validate_canonical_selection(&plan, &canonical)
         .unwrap();
@@ -153,9 +155,15 @@ fn thermal_selection_is_sample_local_and_rejects_foreign_coordinates() {
         let old =
             ObservationFieldSelection::thermal(&workload, &manifest, &mesh, ordinal, expected)
                 .unwrap();
-        let canonical =
-            ObservationFieldSelection::thermal(&workload, &manifest, &mesh, ordinal, selected)
-                .unwrap();
+        let canonical = catalog
+            .canonical_selection(
+                &plan,
+                ObservationSelectionCoordinate::ThermalSample { ordinal },
+            )
+            .unwrap();
+        canonical
+            .validate_thermal(&workload, &manifest, &mesh)
+            .unwrap();
         catalog
             .validate_canonical_selection(&plan, &canonical)
             .unwrap();

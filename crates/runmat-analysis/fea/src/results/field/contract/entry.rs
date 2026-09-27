@@ -3,6 +3,7 @@ use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
 use serde::ser::SerializeSeq;
 
 use super::*;
+use crate::results::field::RECOVERED_FIELD_PARTITION_ENTITY_COUNT;
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]

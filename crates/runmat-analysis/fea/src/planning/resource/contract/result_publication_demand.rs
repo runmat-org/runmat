@@ -17,6 +17,7 @@ pub struct ResultPublicationResourceDemand {
     pub accounting_interval_workspace_bytes: ByteCount,
     pub nested_plan_workspace_bytes: ByteCount,
     pub observation_task_index_workspace_bytes: ByteCount,
+    pub observation_execution_workspace_bytes: ByteCount,
     pub source_validation_workspace_bytes: ByteCount,
     pub inputs: PreparedInputResourceFacts,
     pub output: PreparedOutputResourceFacts,

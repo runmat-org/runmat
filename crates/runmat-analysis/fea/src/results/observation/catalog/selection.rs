@@ -17,6 +17,44 @@ pub enum ObservationSelectionCoordinate {
 }
 
 impl ObservationFieldCatalog {
+    /// Reconstruct exact canonical selection without fetching numerical blocks. Catalog and
+    /// plan integrity are checked, but this does not authenticate receipts, authored workload,
+    /// or mesh-derived topology. Callers must separately validate the source context/plan.
+    pub fn canonical_selection(
+        &self,
+        plan: &ResolvedObservationPlan,
+        coordinate: ObservationSelectionCoordinate,
+    ) -> AnalysisExecutionResult<ObservationFieldSelection> {
+        self.validate()?;
+        plan.validate_identity().map_err(invalid)?;
+        let selected = self.canonical_selected_fields(plan, coordinate)?;
+        match (&self.source, coordinate) {
+            (
+                ObservationFieldCatalogSource::Structural {
+                    recovery_request,
+                    manifest,
+                },
+                ObservationSelectionCoordinate::StructuralRecovery,
+            ) => ObservationFieldSelection::structural(recovery_request, manifest, selected),
+            (
+                ObservationFieldCatalogSource::Thermal { manifest },
+                ObservationSelectionCoordinate::ThermalSample { ordinal },
+            ) => {
+                // Solid observation plans carry the analysis projection digest, whereas the
+                // thermal source manifest topology digest names the underlying solver mesh.
+                ObservationFieldSelection::thermal_metadata(
+                    manifest,
+                    plan.topology_digest,
+                    ordinal,
+                    selected,
+                )
+            }
+            _ => Err(invalid(
+                "canonical selection coordinate differs from catalog kind",
+            )),
+        }
+    }
+
     /// Require exact canonical membership and order. This does not replace source metadata
     /// authentication, selection integrity validation, or authored-plan reprojection.
     pub fn validate_canonical_selection(

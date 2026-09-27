@@ -66,6 +66,7 @@ fn terminal_usage(
         request,
         accuracy,
         valid_usage,
+        None,
         source_facts(
             request,
             accuracy,

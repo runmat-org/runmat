@@ -81,6 +81,7 @@ fn fixture() -> (
         &request,
         &accuracy,
         &baseline,
+        None,
         facts(profile.encoded_bytes_upper_bound),
     )
     .unwrap();

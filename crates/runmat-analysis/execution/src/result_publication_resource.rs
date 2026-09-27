@@ -80,16 +80,12 @@ pub fn build_prepared_result_publication_resource_plan(
             &unique(AnalysisNumericalObjectKind::ObservationCatalog)?.payload(),
         ).map_err(AnalysisBridgeError::from)
     }).transpose()?;
-    if ResultPublicationRequest::new(accuracy, observations.as_ref(), usage)? != *request {
-        return Err(AnalysisBridgeError::Identity(
-            "publication request differs from source-bound task accounting",
-        ));
-    }
     let profile = published_result_encoding_profile(request, accuracy, usage)?;
     Ok(build_result_publication_resource_plan(
         request,
         accuracy,
         usage,
+        observations.as_ref(),
         PreparedPhaseResourceFacts {
             inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
             output: projected_output_resource_facts(profile.encoded_bytes_upper_bound)?,

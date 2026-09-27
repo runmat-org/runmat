@@ -31,6 +31,8 @@ struct ObservedPipeline {
     catalog: runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
     assembly_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
     assembly_attempt: ResourceUsageAttempt,
+    partition_reduction_plans: Vec<runmat_analysis_fea::planning::resource::FeaResourcePlan>,
+    partition_reduction_attempts: Vec<ResourceUsageAttempt>,
 }
 
 #[test]

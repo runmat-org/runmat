@@ -1,7 +1,8 @@
 //! Admitted finalization consumes a checkpoint; it never reruns the producing solve.
 use super::*;
 use runmat_analysis_fea::execution::{
-    ObservationHistoryFinalizationRequest, ObservationHistorySourceContext, ThermalWorkload,
+    ObservationHistoryFinalizationRequest, ObservationHistorySourceContext,
+    StructuralObservationSource, ThermalWorkload,
 };
 use runmat_analysis_fea::planning::resource::{
     build_observation_history_finalization_resource_plan,
@@ -90,14 +91,14 @@ pub(super) fn execute(
             Ok(mesh)
         })
         .transpose()?;
-    let structural_model = if let Some(objects) = linear_objects {
-        Some(
+    let linear = linear_objects
+        .map(|objects| {
             runmat_analysis_fea::execution::StructuralLinearWorkload::from_canonical_bytes(
                 &objects.payload(),
-            )?
-            .model,
-        )
-    } else if let Some(objects) = frequency_objects {
+            )
+        })
+        .transpose()?;
+    let frequency = if let Some(objects) = frequency_objects {
         let workload =
             runmat_analysis_fea::execution::StructuralFrequencyWorkload::from_canonical_bytes(
                 &objects.payload(),
@@ -107,21 +108,29 @@ pub(super) fn execute(
                 "history frequency workload identity differs",
             ));
         }
-        Some(workload.model().clone())
+        Some(workload)
     } else {
         None
     };
+    let structural_source = linear
+        .as_ref()
+        .map(StructuralObservationSource::Linear)
+        .or_else(|| {
+            frequency
+                .as_ref()
+                .map(StructuralObservationSource::Frequency)
+        });
     let context = match (
         catalog.source(),
         thermal.as_ref(),
-        structural_model.as_ref(),
+        structural_source,
         mesh.as_ref(),
     ) {
         (ObservationFieldCatalogSource::Thermal { .. }, Some(workload), None, Some(mesh)) => {
             ObservationHistorySourceContext::Thermal { workload, mesh }
         }
-        (ObservationFieldCatalogSource::Structural { .. }, None, Some(model), mesh) => {
-            ObservationHistorySourceContext::Structural { model, mesh }
+        (ObservationFieldCatalogSource::Structural { .. }, None, Some(source), mesh) => {
+            ObservationHistorySourceContext::Structural { source, mesh }
         }
         _ => {
             return Err(AnalysisBridgeError::Identity(

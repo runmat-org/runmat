@@ -304,8 +304,8 @@ pub fn validate_structural_resource_usage(
     Ok(())
 }
 
-/// Requires source-derived checkpoint/finalization/assembly accounting and reconciles governed
-/// acceleration. Earlier CPU partition/reduction lineage remains a separate publication gate.
+/// Requires source-derived partition/reduction/checkpoint/finalization/assembly accounting,
+/// then reconciles governed acceleration with its exact admitted allocations.
 pub fn validate_observation_resource_usage(
     observations: &ObservationPublicationCatalog,
     usage: &ResourceUsageEvidence,

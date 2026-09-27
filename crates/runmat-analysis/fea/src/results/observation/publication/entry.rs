@@ -118,6 +118,8 @@ impl SeriesReductionPublication {
 pub struct ObservationSamplePublication {
     pub request: ObservationEvaluationRequest,
     pub manifest: ObservationArtifactManifest,
+    /// Execution provenance is separate from placement-neutral numerical result identities.
+    pub partition_evidence: Vec<ObservationPartitionEvidence>,
 }
 impl ObservationSamplePublication {
     pub fn new(
@@ -128,6 +130,11 @@ impl ObservationSamplePublication {
         let value = Self {
             request,
             manifest: artifact.manifest().map_err(invalid)?,
+            partition_evidence: artifact
+                .results()
+                .iter()
+                .map(|result| result.partition_evidence.clone())
+                .collect(),
         };
         value.validate()?;
         Ok(value)
@@ -154,10 +161,42 @@ impl ObservationSamplePublication {
         let sample = self.manifest.results[0].sample;
         // Manifests carry no event proof; do not synthesize attribution from a coordinate.
         let expected = self.request.scheduled_observations(sample, None)?;
-        if expected.len() != self.manifest.results.len() {
+        if expected.len() != self.manifest.results.len()
+            || self.partition_evidence.len() != self.manifest.results.len()
+        {
             return Err(invalid("sample manifest omits scheduled observations"));
         }
-        for (observation, entry) in expected.into_iter().zip(&self.manifest.results) {
+        for ((observation, entry), evidence) in expected
+            .into_iter()
+            .zip(&self.manifest.results)
+            .zip(&self.partition_evidence)
+        {
+            evidence.validate().map_err(invalid)?;
+            let source = self
+                .request
+                .selection
+                .fields()
+                .iter()
+                .find(|field| field.field == evidence.source_field)
+                .ok_or_else(|| {
+                    invalid("sample execution evidence source field is outside selection")
+                })?;
+            if evidence.identity != entry.partition_evidence
+                || evidence.sample != entry.sample
+                || evidence.event_attribution.is_some()
+                || source.sample != entry.sample
+                || source.definition.identity() != observation.source_field_definition_identity
+                || evidence.source_partitions.iter().any(|partition| {
+                    !source
+                        .partitions
+                        .iter()
+                        .any(|descriptor| descriptor.partition == *partition)
+                })
+            {
+                return Err(invalid(
+                    "sample execution evidence differs from result or selected source descriptors",
+                ));
+            }
             if entry.observation_id != observation.spec.observation_id
                 || entry.sample != sample
                 || entry.quantity != observation.spec.quantity

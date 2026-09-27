@@ -163,6 +163,7 @@ fn borrowed_receipt_profile_matches_shared_actual_serializer_and_canonical_plan(
             &request,
             &accuracy,
             &usage,
+            None,
             source_facts(
                 &request,
                 &accuracy,
@@ -210,9 +211,14 @@ fn receipt_and_validation_underreservation_are_rejected() {
         profile.encoded_bytes_upper_bound,
     );
     output_facts.output.encoded_payload_bytes_upper_bound.0 -= 1;
-    assert!(
-        build_result_publication_resource_plan(&request, &accuracy, &usage, output_facts).is_err()
-    );
+    assert!(build_result_publication_resource_plan(
+        &request,
+        &accuracy,
+        &usage,
+        None,
+        output_facts
+    )
+    .is_err());
     let mut output_facts = source_facts(
         &request,
         &accuracy,
@@ -225,13 +231,19 @@ fn receipt_and_validation_underreservation_are_rejected() {
         .0 = profile.materialization_resident_bytes_estimate
         + output_facts.output.transport_closure_bytes_upper_bound.0
         - 1;
-    assert!(
-        build_result_publication_resource_plan(&request, &accuracy, &usage, output_facts).is_err()
-    );
+    assert!(build_result_publication_resource_plan(
+        &request,
+        &accuracy,
+        &usage,
+        None,
+        output_facts
+    )
+    .is_err());
     let plan = build_result_publication_resource_plan(
         &request,
         &accuracy,
         &usage,
+        None,
         source_facts(
             &request,
             &accuracy,
@@ -248,6 +260,16 @@ fn receipt_and_validation_underreservation_are_rejected() {
         demand.observation_task_index_workspace_bytes.0,
         (usage.plans.len() * std::mem::size_of::<&FeaResourcePlan>()) as u64
     );
+    assert_eq!(demand.observation_execution_workspace_bytes, ByteCount(0));
+    let mut omitted_workspace = input.clone();
+    let FeaResourceDemand::ResultPublication(omitted) = &mut omitted_workspace.demand else {
+        panic!("publication demand")
+    };
+    omitted.observation_execution_workspace_bytes = ByteCount(1);
+    assert!(build_resource_plan(omitted_workspace).is_err());
+    let FeaResourceDemand::ResultPublication(demand) = &mut input.demand else {
+        panic!("publication demand")
+    };
     demand.source_validation_workspace_bytes.0 -= 1;
     assert!(build_resource_plan(input).is_err());
 }
@@ -266,6 +288,7 @@ fn validation_reservation_scales_with_measured_attempt_inventory_not_receipt_siz
             &request,
             &accuracy,
             &usage,
+            None,
             source_facts(
                 &request,
                 &accuracy,

@@ -1,6 +1,7 @@
 use runmat_analysis_fea::execution::AnalysisNumericalObjectKind;
 use runmat_analysis_fea::results::field::{
-    RecoveredFieldArtifactEntry, RecoveredFieldPartition, RecoveredFieldPartitionSet,
+    select_canonical_field_partitions, RecoveredFieldArtifactEntry, RecoveredFieldPartition,
+    RecoveredFieldPartitionSet,
 };
 use runmat_execution::value::ValueRef;
 use runmat_execution_artifact::cache::CacheImport;
@@ -41,26 +42,15 @@ pub(crate) fn import_required_field_partitions(
     if !matches!(
         source_kind,
         AnalysisNumericalObjectKind::Field | AnalysisNumericalObjectKind::SolverResult
-    ) || required_indices.is_empty()
-        || required_indices
-            .windows(2)
-            .any(|indices| indices[0] >= indices[1])
-    {
+    ) {
         return Err(AnalysisBridgeError::Invalid(
-            "observation source indices must be nonempty and strictly increasing".into(),
+            "observation source must be a recovered field or solver result".into(),
         ));
     }
-    let descriptors = entry
-        .partitions
-        .iter()
-        .filter(|descriptor| descriptor.intersects(required_indices))
-        .collect::<Vec<_>>();
-    if descriptors.is_empty() {
-        return Err(AnalysisBridgeError::Identity(
-            "observation partition has no intersecting field storage block",
-        ));
-    }
-    let partitions = descriptors
+    let selection = select_canonical_field_partitions(entry, required_indices)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let partitions = selection
+        .descriptors
         .into_iter()
         .map(|descriptor| {
             let imported = import_analysis_partition(
@@ -81,8 +71,12 @@ pub(crate) fn import_required_field_partitions(
                 || partition.source_field != entry.field
                 || partition.definition != entry.definition
                 || partition.sample != entry.sample
-                || partition.source_indices.first().copied() != Some(descriptor.first_source_index)
-                || partition.source_indices.len() != descriptor.entity_count
+                || partition
+                    .source_indices
+                    .iter()
+                    .copied()
+                    .ne(descriptor.first_source_index
+                        ..descriptor.first_source_index + descriptor.entity_count)
             {
                 return Err(AnalysisBridgeError::Identity(
                     "field storage block differs from its recovered-field manifest",
@@ -91,8 +85,14 @@ pub(crate) fn import_required_field_partitions(
             Ok(partition)
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
-    RecoveredFieldPartitionSet::new(partitions)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    let set = RecoveredFieldPartitionSet::new(partitions)
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if set.identity != selection.identity {
+        return Err(AnalysisBridgeError::Identity(
+            "imported field partition set differs from canonical metadata selection",
+        ));
+    }
+    Ok(set)
 }
 
 #[cfg(test)]

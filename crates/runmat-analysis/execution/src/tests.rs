@@ -2055,6 +2055,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     }
     let distributed_source_request = observation_fanout.source_request.clone();
     let mut contribution_groups = BTreeMap::new();
+    let mut partition_reduction_plans = Vec::new();
     for partition in observation_fanout.partitions {
         let contribution =
             runmat_analysis_fea::results::observation::evaluate_structural_observation_partition(
@@ -2091,6 +2092,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             .or_insert_with(|| (partition.partition_plan.clone(), Vec::new()))
             .1
             .push(imported);
+        partition_reduction_plans.push(partition.resource_plan);
     }
     let mut distributed_results = Vec::new();
     for (_, (partition_plan, contributions)) in contribution_groups {
@@ -2165,6 +2167,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
             )
             .unwrap(),
         );
+        partition_reduction_plans.push(reduction.resource_plan);
     }
     assert!(partition_dependencies.is_empty());
     let distributed_results_by_id = distributed_results
@@ -2303,12 +2306,17 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
                         runmat_analysis_fea::results::observation::ObservationSamplePublication {
                             request: assembly.source_request.clone(),
                             manifest: imported_observations.manifest.clone(),
+                            partition_evidence: observation_artifact
+                                .results()
+                                .iter()
+                                .map(|result| result.partition_evidence.clone())
+                                .collect(),
                         },
                     ),
                 ),
             ],
             runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
-                model: &solve.model,
+                source: runmat_analysis_fea::execution::StructuralObservationSource::Linear(&solve),
                 mesh: Some(&mesh),
             },
         )
@@ -2543,6 +2551,55 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     let alternate_resource_usage = extend_resource_usage(
         &alternate_resource_usage,
         &assembly_usage,
+        &access(),
+        output_policy,
+    )
+    .unwrap();
+
+    // Assembly alone cannot account for the partition and reduction tasks above.
+    assert!(
+        runmat_analysis_fea::execution::ResultPublicationRequest::new(
+            &accuracy_artifact,
+            Some(&publication_catalog),
+            &resource_usage.evidence,
+        )
+        .is_err()
+    );
+    // Modeled reserved intervals for this serial adapter fixture, not measured scheduler data.
+    let task_count = partition_reduction_plans.len() as u64;
+    let execution_usage = PlannedResourceUsageGraph::new(
+        partition_reduction_plans
+            .into_iter()
+            .map(|plan| {
+                let accounting = runmat_execution_runner::AttemptResourceAccounting {
+                    attempt_id: runmat_execution::identity::AttemptId::derive(&[
+                        b"observation-execution-attempt",
+                        plan.identity.digest().bytes(),
+                    ]),
+                    worker_id: runmat_execution::identity::WorkerId::derive(&[
+                        b"structural-worker",
+                    ]),
+                    resources:
+                        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+                            plan.request.clone(),
+                            1,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap(),
+                };
+                PlannedResourceUsageAttempt { plan, accounting }
+            })
+            .collect(),
+        task_count,
+    )
+    .unwrap();
+    let resource_usage =
+        extend_resource_usage(&resource_usage, &execution_usage, &access(), output_policy).unwrap();
+    let alternate_resource_usage = extend_resource_usage(
+        &alternate_resource_usage,
+        &execution_usage,
         &access(),
         output_policy,
     )

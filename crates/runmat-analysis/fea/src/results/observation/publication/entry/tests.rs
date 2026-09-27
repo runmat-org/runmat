@@ -45,6 +45,14 @@ fn fixture(
     selected_time: f64,
     mixed: bool,
 ) -> (ObservationEvaluationRequest, Vec<ObservationResult>) {
+    fixture_with_policy(selected_time, mixed, ObservationExecutionPolicy::serial())
+}
+
+fn fixture_with_policy(
+    selected_time: f64,
+    mixed: bool,
+    policy: ObservationExecutionPolicy,
+) -> (ObservationEvaluationRequest, Vec<ObservationResult>) {
     let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
     let projection = AnalysisProjection::derive(&mesh).unwrap();
     let mut step = ProcedureStep::thermal_transient("heat");
@@ -102,12 +110,9 @@ fn fixture(
         .observations
         .iter()
         .map(|observation| {
-            let partition_plan = ObservationPartitionPlan::derive(
-                &plan,
-                &observation.spec.observation_id,
-                ObservationExecutionPolicy::serial(),
-            )
-            .unwrap();
+            let partition_plan =
+                ObservationPartitionPlan::derive(&plan, &observation.spec.observation_id, policy)
+                    .unwrap();
             let contributions = partition_plan
                 .partitions
                 .iter()
@@ -195,6 +200,11 @@ fn sample_publication_rejects_valid_source_selection_at_wrong_coordinate() {
     let publication = ObservationSamplePublication {
         request: request.clone(),
         manifest: artifact.manifest().unwrap(),
+        partition_evidence: artifact
+            .results()
+            .iter()
+            .map(|result| result.partition_evidence.clone())
+            .collect(),
     };
     assert!(publication.validate().is_err());
     assert!(ObservationAssemblyRequest::new(&request, artifact.results()).is_err());
@@ -212,7 +222,50 @@ fn sample_publication_requires_scheduled_history_alongside_field() {
     let publication = ObservationSamplePublication {
         request: request.clone(),
         manifest: incomplete.manifest().unwrap(),
+        partition_evidence: incomplete
+            .results()
+            .iter()
+            .map(|result| result.partition_evidence.clone())
+            .collect(),
     };
     assert!(publication.validate().is_err());
     assert!(ObservationAssemblyRequest::new(&request, incomplete.results()).is_err());
+}
+
+#[test]
+fn sample_publication_retains_exact_execution_evidence_separately_from_values() {
+    let (request, results) = fixture(1.0, true);
+    let serial = artifact(&request, results);
+    let publication = ObservationSamplePublication::new(request.clone(), &serial).unwrap();
+    publication.validate_artifact(&serial).unwrap();
+    let (split_request, split_results) = fixture_with_policy(
+        1.0,
+        true,
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(2).unwrap()),
+    );
+    assert_eq!(request, split_request);
+    let split = artifact(&split_request, split_results);
+    for (left, right) in serial.results().iter().zip(split.results()) {
+        assert_eq!(left.logical_identity, right.logical_identity);
+        assert_ne!(
+            left.partition_evidence.identity,
+            right.partition_evidence.identity
+        );
+    }
+    let split_publication = ObservationSamplePublication::new(split_request, &split).unwrap();
+    assert!(publication.validate_artifact(&split).is_err());
+    let mut substituted = publication.clone();
+    substituted.partition_evidence = split_publication.partition_evidence;
+    assert!(substituted.validate().is_err());
+    let mut omitted = publication.clone();
+    omitted.partition_evidence.pop();
+    assert!(omitted.validate().is_err());
+    let mut reordered = publication.clone();
+    reordered.partition_evidence.swap(0, 1);
+    assert!(reordered.validate().is_err());
+    let mut extra = publication;
+    extra
+        .partition_evidence
+        .push(extra.partition_evidence[0].clone());
+    assert!(extra.validate().is_err());
 }

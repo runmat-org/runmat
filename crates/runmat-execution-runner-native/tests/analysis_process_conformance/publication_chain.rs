@@ -215,6 +215,15 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
                 .unwrap(),
         );
     }
+    let partition_evidence: BTreeMap<_, _> = reduced
+        .iter()
+        .map(|imported| {
+            (
+                imported.result.observation_id.clone(),
+                imported.result.partition_evidence.clone(),
+            )
+        })
+        .collect();
     let observations = prepare_observation_assembly(ObservationAssemblyPreparation {
         source_host: fields.host.clone(),
         source_request: fanout.source_request,
@@ -264,12 +273,20 @@ pub(super) async fn execute_publication_chain<D: PublicationChainDriver>(
                         runmat_analysis_fea::results::observation::ObservationSamplePublication {
                             request: observations.source_request.clone(),
                             manifest: imported_observations.manifest.clone(),
+                            partition_evidence: imported_observations
+                                .manifest
+                                .results
+                                .iter()
+                                .map(|entry| partition_evidence[&entry.observation_id].clone())
+                                .collect(),
                         },
                     ),
                 ),
             ],
             runmat_analysis_fea::execution::ObservationHistorySourceContext::Structural {
-                model: &workload.model,
+                source: runmat_analysis_fea::execution::StructuralObservationSource::Linear(
+                    &workload,
+                ),
                 mesh: decoded_mesh.as_ref(),
             },
         )

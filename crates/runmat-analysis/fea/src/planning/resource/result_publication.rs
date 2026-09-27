@@ -1,6 +1,7 @@
 //! Final receipt admission derived from immutable accuracy and measured source evidence.
 use super::*;
 use crate::execution::ResultPublicationRequest;
+use crate::results::observation::ObservationPublicationCatalog;
 use crate::results::{accuracy::AccuracyArtifact, publication::published_result_encoding_profile};
 use runmat_canonical_codec::profile_serialized;
 
@@ -11,9 +12,22 @@ pub fn build_result_publication_resource_plan(
     request: &ResultPublicationRequest,
     accuracy: &AccuracyArtifact,
     usage: &ResourceUsageEvidence,
+    observations: Option<&ObservationPublicationCatalog>,
     facts: PreparedPhaseResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
     let invalid = |error: &dyn std::fmt::Display| ResourcePlanningError::Invalid(error.to_string());
+    if ResultPublicationRequest::new(accuracy, observations, usage).map_err(|e| invalid(&e))?
+        != *request
+    {
+        return Err(ResourcePlanningError::Invalid(
+            "publication admission sources differ from the source-bound request".into(),
+        ));
+    }
+    let observation_execution_workspace = observations
+        .map(ObservationPublicationCatalog::execution_workspace_bytes_estimate)
+        .transpose()
+        .map_err(|e| invalid(&e))?
+        .unwrap_or(0);
     let profile =
         published_result_encoding_profile(request, accuracy, usage).map_err(|e| invalid(&e))?;
     // validate_identity rebuild retains cloned plans and attempts while aggregating a separate
@@ -42,6 +56,7 @@ pub fn build_result_publication_resource_plan(
         .checked_add(interval_workspace)
         .and_then(|v| v.checked_add(nested_plan_workspace))
         .and_then(|v| v.checked_add(observation_index_workspace))
+        .and_then(|v| v.checked_add(observation_execution_workspace))
         .ok_or(ResourcePlanningError::Overflow(
             "result publication validation workspace",
         ))?;
@@ -60,6 +75,7 @@ pub fn build_result_publication_resource_plan(
             accounting_interval_workspace_bytes: ByteCount(interval_workspace),
             nested_plan_workspace_bytes: ByteCount(nested_plan_workspace),
             observation_task_index_workspace_bytes: ByteCount(observation_index_workspace),
+            observation_execution_workspace_bytes: ByteCount(observation_execution_workspace),
             source_validation_workspace_bytes: ByteCount(validation),
             inputs: facts.inputs,
             output: facts.output,

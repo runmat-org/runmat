@@ -10,6 +10,12 @@ use super::{
     RecoveredFieldView,
 };
 
+mod selection;
+pub use selection::{
+    select_canonical_field_partitions, validate_canonical_field_partition_descriptors,
+    RecoveredFieldPartitionSelection,
+};
+
 const FIELD_PARTITION_SET_PREFIX: &[u8] = b"runmat-fea-recovered-field-partition-set/v1\0";
 const FIELD_PARTITION_SET_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 4_000_000, 32);
@@ -41,13 +47,6 @@ impl RecoveredFieldPartitionDescriptor {
     pub fn contains(&self, source_index: usize) -> bool {
         source_index >= self.first_source_index
             && source_index < self.first_source_index.saturating_add(self.entity_count)
-    }
-
-    pub fn intersects(&self, sorted_source_indices: &[usize]) -> bool {
-        let start = sorted_source_indices.partition_point(|index| *index < self.first_source_index);
-        sorted_source_indices
-            .get(start)
-            .is_some_and(|index| self.contains(*index))
     }
 }
 
@@ -172,25 +171,50 @@ impl RecoveredFieldPartitionSet {
     }
 
     fn derive_identity(&self) -> Result<RecoveredFieldPartitionSetIdentity, RecoveredFieldError> {
-        encode_contract(
-            FIELD_PARTITION_SET_PREFIX,
-            "recovered-field-partition-set-identity",
-            &(
-                self.schema_version,
-                self.source_field,
-                &self.definition,
-                self.sample,
-                self.partitions
-                    .iter()
-                    .map(|partition| partition.identity)
-                    .collect::<Vec<_>>(),
-            ),
-            FIELD_PARTITION_SET_LIMITS,
+        derive_partition_set_identity(
+            self.schema_version,
+            self.source_field,
+            &self.definition,
+            self.sample,
+            PartitionIdentities::Payloads(&self.partitions),
         )
-        .map(Digest::sha256)
-        .map(RecoveredFieldPartitionSetIdentity)
-        .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }
+}
+
+enum PartitionIdentities<'a> {
+    Payloads(&'a [RecoveredFieldPartition]),
+    Descriptors(&'a [&'a RecoveredFieldPartitionDescriptor]),
+}
+
+impl Serialize for PartitionIdentities<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Payloads(partitions) => {
+                serializer.collect_seq(partitions.iter().map(|p| p.identity))
+            }
+            Self::Descriptors(partitions) => {
+                serializer.collect_seq(partitions.iter().map(|p| p.partition))
+            }
+        }
+    }
+}
+
+fn derive_partition_set_identity(
+    schema_version: u16,
+    source_field: RecoveredFieldIdentity,
+    definition: &RecoveredFieldDefinition,
+    sample: RecoveredFieldSample,
+    partitions: PartitionIdentities<'_>,
+) -> Result<RecoveredFieldPartitionSetIdentity, RecoveredFieldError> {
+    encode_contract(
+        FIELD_PARTITION_SET_PREFIX,
+        "recovered-field-partition-set-identity",
+        &(schema_version, source_field, definition, sample, partitions),
+        FIELD_PARTITION_SET_LIMITS,
+    )
+    .map(Digest::sha256)
+    .map(RecoveredFieldPartitionSetIdentity)
+    .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
 }
 
 pub fn canonical_field_partitions(

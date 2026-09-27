@@ -19,13 +19,29 @@ const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000
 #[derive(Clone, Copy)]
 pub enum ObservationHistorySourceContext<'a> {
     Structural {
-        model: &'a runmat_analysis_core::AnalysisModel,
+        source: super::StructuralObservationSource<'a>,
         mesh: Option<&'a SolverMeshArtifact>,
     },
     Thermal {
         workload: &'a ThermalWorkload,
         mesh: &'a SolverMeshArtifact,
     },
+}
+
+impl ObservationHistorySourceContext<'_> {
+    pub const fn observation_execution(self) -> ObservationExecutionPolicy {
+        match self {
+            Self::Structural { source, .. } => source.observation_execution(),
+            Self::Thermal { .. } => ObservationExecutionPolicy::serial(),
+        }
+    }
+
+    pub fn validate(self) -> AnalysisExecutionResult<()> {
+        match self {
+            Self::Structural { source, .. } => source.validate(),
+            Self::Thermal { workload, .. } => workload.validate(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -167,9 +183,13 @@ impl ObservationHistoryFinalizationRequest {
                     recovery_request,
                     manifest,
                 },
-                ObservationHistorySourceContext::Structural { model, mesh },
+                ObservationHistorySourceContext::Structural { source, mesh },
             ) => {
-                catalog.validate_structural_plan(&self.plan, model, mesh)?;
+                source.validate()?;
+                if source.procedure_step()?.step_id != self.plan.step_id {
+                    return Err(invalid("structural source workload selects another step"));
+                }
+                catalog.validate_structural_plan(&self.plan, source.model(), mesh)?;
                 if recovery_request.producer != self.producer
                     || manifest.topology_digest != self.plan.topology_digest
                 {

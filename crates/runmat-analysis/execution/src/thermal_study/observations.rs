@@ -392,6 +392,21 @@ impl Workflow {
                         ObservationSamplePublication {
                             request: task.source_request.clone(),
                             manifest: artifact.manifest.clone(),
+                            partition_evidence: artifact
+                                .manifest
+                                .results
+                                .iter()
+                                .map(|entry| {
+                                    self.reduced
+                                        .get(&entry.observation_id)
+                                        .map(|(reduced, _)| {
+                                            reduced.result.partition_evidence.clone()
+                                        })
+                                        .ok_or(AnalysisBridgeError::Identity(
+                                            "assembled sample has no retained reduction evidence",
+                                        ))
+                                })
+                                .collect::<AnalysisBridgeResult<Vec<_>>>()?,
                         },
                     )));
                 self.completed.samples.push(artifact);

@@ -12,8 +12,8 @@ use thiserror::Error;
 use crate::execution::{FieldRecoveryRequestIdentity, FieldRecoverySource};
 
 use super::partition_set::{
-    canonical_field_partition_descriptors, RecoveredFieldPartitionDescriptor,
-    RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+    canonical_field_partition_descriptors, validate_canonical_field_partition_descriptors,
+    RecoveredFieldPartitionDescriptor,
 };
 
 const FIELD_PREFIX: &[u8] = b"runmat-fea-recovered-field/v1\0";
@@ -504,26 +504,13 @@ impl RecoveredFieldArtifactManifest {
             let expected_entity_count = self
                 .entity_counts
                 .entity_count(entry.definition.entity_domain());
-            let mut next_source_index = 0usize;
-            for (ordinal, partition) in entry.partitions.iter().enumerate() {
-                let is_last = ordinal + 1 == entry.partitions.len();
-                if partition.entity_count == 0
-                    || partition.first_source_index != next_source_index
-                    || (!is_last
-                        && partition.entity_count != RECOVERED_FIELD_PARTITION_ENTITY_COUNT)
-                    || partition.entity_count > RECOVERED_FIELD_PARTITION_ENTITY_COUNT
-                    || !partition_ids.insert(partition.partition)
-                {
-                    return Err(RecoveredFieldError::InvalidArtifact(
-                        "field storage partitions do not canonically cover their entity domain"
-                            .into(),
-                    ));
-                }
-                next_source_index = next_source_index
-                    .checked_add(partition.entity_count)
-                    .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
-            }
-            if entry.partitions.is_empty() || next_source_index != expected_entity_count {
+            let covered = validate_canonical_field_partition_descriptors(&entry.partitions)?;
+            if covered != expected_entity_count
+                || entry
+                    .partitions
+                    .iter()
+                    .any(|partition| !partition_ids.insert(partition.partition))
+            {
                 return Err(RecoveredFieldError::InvalidArtifact(
                     "field storage partitions do not cover their complete entity domain".into(),
                 ));

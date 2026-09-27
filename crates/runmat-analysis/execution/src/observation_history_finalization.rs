@@ -220,9 +220,19 @@ pub fn prepare_observation_history_finalization_task(
                     .ok_or_else(|| invalid("thermal history mesh absent"))?,
             }
         }
-        AdmittedObservationWorkload::Linear(_) | AdmittedObservationWorkload::Frequency(_) => {
+        AdmittedObservationWorkload::Linear(workload) => {
             ObservationHistorySourceContext::Structural {
-                model: decoded_workload.model(),
+                source: runmat_analysis_fea::execution::StructuralObservationSource::Linear(
+                    workload,
+                ),
+                mesh: decoded_mesh.as_ref(),
+            }
+        }
+        AdmittedObservationWorkload::Frequency(workload) => {
+            ObservationHistorySourceContext::Structural {
+                source: runmat_analysis_fea::execution::StructuralObservationSource::Frequency(
+                    workload,
+                ),
                 mesh: decoded_mesh.as_ref(),
             }
         }

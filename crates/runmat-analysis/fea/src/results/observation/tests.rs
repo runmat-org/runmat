@@ -2362,6 +2362,20 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
     request.quantity = ObservationQuantity::Displacement;
     request.value_shape = ObservationValueShape::Vector3;
     model.sequence.steps[0].observations = vec![ObservationRequest::Field(request)];
+    // The direct evaluator uses serial partition ownership; retain that exact policy.
+    let workload = crate::execution::StructuralLinearWorkload {
+        schema_version: 1,
+        step_id: model.sequence.steps[0].step_id.clone(),
+        model: model.clone(),
+        backend: crate::ComputeBackend::Cpu,
+        formulation_requirement: runmat_analysis_core::FormulationRequirement::Experimental,
+        preconditioner: crate::solve::preconditioner::SpdPreconditionerKind::Jacobi,
+        algebra_backend: crate::solve::backend::kind::LinearAlgebraBackendKind::CpuReference,
+        observation_execution: ObservationExecutionPolicy::serial(),
+        require_solver_mesh_for_solid: false,
+        initial_guess_transition: None,
+    };
+    workload.validate().unwrap();
     let constraint_plan =
         crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(&model, None)
             .unwrap();
@@ -2468,7 +2482,7 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         step,
         vec![ObservationPublicationEntry::Sample(Box::new(sample))],
         crate::execution::ObservationHistorySourceContext::Structural {
-            model: &model,
+            source: crate::execution::StructuralObservationSource::Linear(&workload),
             mesh: None,
         },
     )
@@ -2480,6 +2494,21 @@ fn explicit_structural_nodes_resolve_and_evaluate_without_a_solver_mesh() {
         .unwrap(),
         publication
     );
+    let mut foreign_policy = workload.clone();
+    foreign_policy.observation_execution =
+        ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(2).unwrap());
+    foreign_policy.validate().unwrap();
+    assert!(publication
+        .validate_for(
+            step,
+            crate::execution::ObservationHistorySourceContext::Structural {
+                source: crate::execution::StructuralObservationSource::Linear(&foreign_policy),
+                mesh: None,
+            },
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("execution policy differs"));
     let mut forged = plan;
     let ResolvedObservationTarget::Nodes { indices, .. } = &mut forged.observations[0].target
     else {

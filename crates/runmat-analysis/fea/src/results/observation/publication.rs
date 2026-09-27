@@ -12,7 +12,7 @@ use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-const PREFIX: &[u8] = b"runmat-observation-publication-catalog/v1\0";
+const PREFIX: &[u8] = b"runmat-observation-publication-catalog/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
 fn invalid(error: impl std::fmt::Display) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(format!("observation publication: {error}"))
@@ -33,10 +33,12 @@ impl ObservationPublicationCatalogIdentity {
 }
 
 mod entry;
+mod execution;
 pub use entry::{
     ObservationHistoryPublication, ObservationSamplePublication, SeriesReductionPublication,
     SeriesReductionPublicationContribution,
 };
+use execution::ObservationResultExecution;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -68,6 +70,8 @@ pub struct ObservationPublicationCatalog {
     source: ObservationFieldCatalog,
     declarations: Vec<ObservationRequest>,
     entries: Vec<ObservationPublicationEntry>,
+    execution_policy: ObservationExecutionPolicy,
+    execution: Vec<ObservationResultExecution>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +83,8 @@ struct CatalogWire {
     source: ObservationFieldCatalog,
     declarations: Vec<ObservationRequest>,
     entries: Vec<ObservationPublicationEntry>,
+    execution_policy: ObservationExecutionPolicy,
+    execution: Vec<ObservationResultExecution>,
 }
 impl TryFrom<CatalogWire> for ObservationPublicationCatalog {
     type Error = AnalysisExecutionError;
@@ -91,6 +97,8 @@ impl TryFrom<CatalogWire> for ObservationPublicationCatalog {
             source: wire.source,
             declarations: wire.declarations,
             entries: wire.entries,
+            execution_policy: wire.execution_policy,
+            execution: wire.execution,
         };
         value.validate()?;
         Ok(value)
@@ -114,14 +122,17 @@ impl ObservationPublicationCatalog {
         }
         entries.sort_by(|a, b| a.first_id().cmp(&b.first_id()));
         let mut value = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: ObservationPublicationCatalogIdentity(Digest::sha256([])),
             producer,
             plan,
             source,
             declarations: step.observations.clone(),
             entries,
+            execution_policy: context.observation_execution(),
+            execution: Vec::new(),
         };
+        value.execution = value.derive_execution(context)?;
         value.identity = value.derive_identity()?;
         value.validate_for(step, context)?;
         Ok(value)
@@ -162,6 +173,7 @@ impl ObservationPublicationCatalog {
         step: &ProcedureStep,
         context: ObservationHistorySourceContext<'_>,
     ) -> AnalysisExecutionResult<()> {
+        context.validate()?;
         self.validate_authored_step(step)?;
         match (self.source.source(), context) {
             (
@@ -194,9 +206,12 @@ impl ObservationPublicationCatalog {
             }
             (
                 ObservationFieldCatalogSource::Structural { .. },
-                ObservationHistorySourceContext::Structural { model, mesh },
+                ObservationHistorySourceContext::Structural { source, mesh },
             ) => {
-                if !model.sequence.steps.iter().any(|authored| authored == step) {
+                let model = source.model();
+                if source.procedure_step()? != step
+                    || !model.sequence.steps.iter().any(|authored| authored == step)
+                {
                     return Err(invalid("structural publication authored step differs"));
                 }
                 self.source
@@ -204,12 +219,13 @@ impl ObservationPublicationCatalog {
             }
             _ => return Err(invalid("publication source context differs")),
         }
+        self.validate_execution_for(context)?;
         Ok(())
     }
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         self.plan.validate_identity().map_err(invalid)?;
         self.source.validate()?;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || self.identity != self.derive_identity()?
             || self.declarations.len() != self.plan.observations.len()
         {
@@ -378,6 +394,7 @@ impl ObservationPublicationCatalog {
                 "publication does not cover every authored observation",
             ));
         }
+        self.visit_execution(|_, _, _, _| Ok(()))?;
         Ok(())
     }
     fn derive_identity(&self) -> AnalysisExecutionResult<ObservationPublicationCatalogIdentity> {
@@ -390,6 +407,8 @@ impl ObservationPublicationCatalog {
                 self.source.identity(),
                 &self.declarations,
                 &self.entries,
+                self.execution_policy,
+                &self.execution,
             ),
         )
         .map(ObservationPublicationCatalogIdentity)

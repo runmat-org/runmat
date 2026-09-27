@@ -12,6 +12,7 @@ pub(super) fn build_result_publication_plan(
             demand.accounting_interval_workspace_bytes.0,
             demand.nested_plan_workspace_bytes.0,
             demand.observation_task_index_workspace_bytes.0,
+            demand.observation_execution_workspace_bytes.0,
         ],
         "result publication validation workspace",
     )?;

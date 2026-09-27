@@ -237,13 +237,95 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
     attempts.push(observed.assembly_attempt.clone());
     let resource_usage = runmat_analysis_fea::planning::resource::record_resource_graph_usage(
         &solved.prepared.resource_plan,
-        vec![plan, observed.assembly_plan.clone()],
+        vec![plan.clone(), observed.assembly_plan.clone()],
         host.workload.identity.digest(),
         solved.source_result.digest(),
         attempts,
         3,
     )
     .unwrap();
+    assert!(
+        ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).is_err(),
+        "solve, accuracy and assembly cannot omit executed partition/reduction tasks"
+    );
+    let mut plans = vec![plan, observed.assembly_plan.clone()];
+    plans.extend(observed.partition_reduction_plans.iter().cloned());
+    let mut attempts = resource_usage.attempts.clone();
+    attempts.extend(observed.partition_reduction_attempts.iter().cloned());
+    let rebuild = |plans: Vec<_>, attempts: Vec<_>| {
+        let count = attempts.len() as u64;
+        runmat_analysis_fea::planning::resource::record_resource_graph_usage(
+            &solved.prepared.resource_plan,
+            plans,
+            host.workload.identity.digest(),
+            solved.source_result.digest(),
+            attempts,
+            count,
+        )
+        .unwrap()
+    };
+    // Two actual partition executions plus their reduction: omit every task independently,
+    // rebuilding canonical identities and totals so rejection cannot be blamed on stale hashes.
+    assert_eq!(observed.partition_reduction_plans.len(), 3);
+    for omitted in &observed.partition_reduction_plans {
+        let incomplete = rebuild(
+            plans
+                .iter()
+                .filter(|candidate| candidate.identity != omitted.identity)
+                .cloned()
+                .collect(),
+            attempts
+                .iter()
+                .filter(|attempt| attempt.plan != omitted.identity)
+                .cloned()
+                .collect(),
+        );
+        assert!(
+            ResultPublicationRequest::new(&accuracy, Some(observations), &incomplete).is_err(),
+            "publication accepted omitted task {:?}",
+            omitted.input.phase
+        );
+    }
+    for original in &observed.partition_reduction_plans {
+        let mut input = original.input.clone();
+        match &mut input.demand {
+            runmat_analysis_fea::planning::resource::FeaResourceDemand::StructuralObservationPartition(value) => {
+                value.topology_digest = digest("foreign-observation-topology");
+            }
+            runmat_analysis_fea::planning::resource::FeaResourceDemand::StructuralObservationReduction(value) => {
+                value.topology_digest = digest("foreign-observation-topology");
+            }
+            _ => panic!("expected an executed partition or reduction"),
+        }
+        let conflicting =
+            runmat_analysis_fea::planning::resource::build_resource_plan(input).unwrap();
+        let mut conflicting_plans = plans.clone();
+        conflicting_plans.push(conflicting.clone());
+        let mut conflicting_attempts = attempts.clone();
+        conflicting_attempts.push(ResourceUsageAttempt {
+            attempt_id: runmat_execution::identity::AttemptId::derive(&[
+                b"conflicting-observation-attempt",
+                conflicting.identity.digest().bytes(),
+            ]),
+            worker_id: runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+            plan: conflicting.identity,
+            resources: ResourceAccounting::for_reserved_interval(
+                conflicting.request.clone(),
+                1,
+                0,
+                0,
+                0,
+            )
+            .unwrap(),
+        });
+        let conflicting_usage = rebuild(conflicting_plans, conflicting_attempts);
+        assert!(
+            ResultPublicationRequest::new(&accuracy, Some(observations), &conflicting_usage)
+                .is_err(),
+            "correct task accounting must not hide conflicting demand"
+        );
+    }
+    let resource_usage = rebuild(plans, attempts);
     let publication_request =
         ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).unwrap();
     let publication_request_objects = runmat_analysis_execution::prepare_analysis_objects(
@@ -281,6 +363,32 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
     assert_ne!(
         admission_plan.identity,
         solved.prepared.resource_plan.identity
+    );
+    let mut understated_input = admission_plan.input.clone();
+    let runmat_analysis_fea::planning::resource::FeaResourceDemand::ResultPublication(demand) =
+        &mut understated_input.demand
+    else {
+        panic!("expected publication admission");
+    };
+    assert!(demand.observation_execution_workspace_bytes.0 > 0);
+    demand.observation_execution_workspace_bytes.0 -= 1;
+    demand.source_validation_workspace_bytes.0 -= 1;
+    let understated_plan =
+        runmat_analysis_fea::planning::resource::build_resource_plan(understated_input).unwrap();
+    let missing_catalog: Vec<_> = publication_inputs
+        .iter()
+        .filter(|input| input.manifest.kind != AnalysisNumericalObjectKind::ObservationCatalog)
+        .cloned()
+        .collect();
+    assert!(
+        runmat_analysis_execution::build_prepared_result_publication_resource_plan(
+            &publication_request,
+            &accuracy,
+            &resource_usage,
+            &missing_catalog,
+        )
+        .is_err(),
+        "publication admission cannot replace the catalog with its request hash"
     );
     publication_inputs.push(
         runmat_analysis_execution::prepare_analysis_objects(
@@ -322,7 +430,11 @@ pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
     altered_input.worker.fixed_memory_bytes.0 += 1;
     let altered_plan =
         runmat_analysis_fea::planning::resource::build_resource_plan(altered_input).unwrap();
-    for substituted_plan in [&solved.prepared.resource_plan, &altered_plan] {
+    for substituted_plan in [
+        &solved.prepared.resource_plan,
+        &altered_plan,
+        &understated_plan,
+    ] {
         let mut substituted_inputs = publication_inputs.clone();
         substituted_inputs[4] = runmat_analysis_execution::prepare_analysis_objects(
             AnalysisNumericalObjectKind::ResourcePlan,

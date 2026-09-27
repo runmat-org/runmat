@@ -19,8 +19,10 @@ pub use contract::{
 pub use partition::{RecoveredFieldPartition, RecoveredFieldPartitionIdentity};
 pub use partition_set::{
     canonical_field_partition_descriptors, canonical_field_partitions, reconstruct_recovered_field,
-    RecoveredFieldPartitionDescriptor, RecoveredFieldPartitionSet,
-    RecoveredFieldPartitionSetIdentity, RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
+    select_canonical_field_partitions, validate_canonical_field_partition_descriptors,
+    RecoveredFieldPartitionDescriptor, RecoveredFieldPartitionSelection,
+    RecoveredFieldPartitionSet, RecoveredFieldPartitionSetIdentity,
+    RECOVERED_FIELD_PARTITION_ENTITY_COUNT,
 };
 pub use topology::StructuralRecoveredFieldTopology;
 pub use view::{CanonicalFieldPartitions, RecoveredFieldView};

@@ -1,11 +1,11 @@
 //! Structural receipts name the producing host contract. Authenticate its selected original
 //! inputs before using their authored requirements; a catalog cannot supply its own authority.
-use runmat_analysis_core::{AnalysisModel, FormulationRequirement, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AccuracyEvaluationRequest, AccuracySourceKind, AccuracySourceReceipt,
     AnalysisNumericalObjectKind as Kind, AnalysisWorkKind, ObservationHistorySourceContext,
     SequenceIdentity, StepIdentity, StructuralLinearWorkload,
-    StructuralModalResponseSpectrumWorkload, StructuralRandomResponseWorkload,
+    StructuralModalResponseSpectrumWorkload, StructuralObservationSource,
+    StructuralRandomResponseWorkload,
 };
 use runmat_analysis_fea::results::observation::ObservationPublicationCatalog;
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
@@ -142,9 +142,7 @@ pub(super) fn validate(
             validate_authored(
                 request,
                 observations,
-                &workload.model,
-                workload.procedure_step()?,
-                workload.formulation_requirement,
+                StructuralObservationSource::Linear(&workload),
                 mesh.as_ref(),
             )
         }
@@ -154,9 +152,7 @@ pub(super) fn validate(
             validate_authored(
                 request,
                 observations,
-                workload.model(),
-                workload.procedure_step()?,
-                workload.formulation_requirement(),
+                StructuralObservationSource::ModalResponseSpectrum(&workload),
                 mesh.as_ref(),
             )
         }
@@ -166,9 +162,7 @@ pub(super) fn validate(
             validate_authored(
                 request,
                 observations,
-                workload.model(),
-                workload.procedure_step()?,
-                workload.formulation_requirement(),
+                StructuralObservationSource::RandomResponse(&workload),
                 mesh.as_ref(),
             )
         }
@@ -179,11 +173,13 @@ pub(super) fn validate(
 fn validate_authored(
     request: &AccuracyEvaluationRequest,
     observations: Option<&ObservationPublicationCatalog>,
-    model: &AnalysisModel,
-    step: &ProcedureStep,
-    formulation: FormulationRequirement,
+    source: StructuralObservationSource<'_>,
     mesh: Option<&SolverMeshArtifact>,
 ) -> AnalysisBridgeResult<()> {
+    source.validate()?;
+    let model = source.model();
+    let step = source.procedure_step()?;
+    let formulation = source.formulation_requirement();
     let producer = StepIdentity::from_solver_contract(
         SequenceIdentity::from_solver_contract(&model.sequence)?,
         step,
@@ -205,7 +201,7 @@ fn validate_authored(
         )?;
         catalog.validate_for(
             step,
-            ObservationHistorySourceContext::Structural { model, mesh },
+            ObservationHistorySourceContext::Structural { source, mesh },
         )?;
     }
     Ok(())
