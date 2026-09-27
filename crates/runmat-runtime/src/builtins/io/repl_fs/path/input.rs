@@ -23,7 +23,7 @@ pub(super) fn admit(value: Value) -> BuiltinResult<AdmittedText> {
             Ok(AdmittedText::Text(chars.data.iter().collect()))
         }
         Value::Tensor(tensor) => numeric_text(tensor).map(AdmittedText::Text),
-        Value::GpuTensor(ref handle) if numeric_row(&handle.shape) => {
+        Value::GpuTensor(ref handle) if numeric_row(handle.shape()) => {
             require_numeric_extension()?;
             Ok(AdmittedText::Resident(value))
         }
@@ -49,11 +49,13 @@ async fn resident_numeric_text(value: Value) -> BuiltinResult<String> {
     let gathered = crate::gather_if_needed_async(&value)
         .await
         .map_err(|error| {
-            runtime_descriptor_error_with_detail(
+            let mut context = runtime_descriptor_error_with_detail(
                 BUILTIN_NAME,
                 &runmat_builtins::PATH_ERROR_PROVIDER_FAILED,
                 error.message(),
-            )
+            );
+            context.source = Some(Box::new(error));
+            context
         })?;
     match gathered {
         Value::Tensor(tensor) => decode_numeric_row(&tensor),

@@ -50,7 +50,7 @@ fn preflight(value: &Value) -> crate::BuiltinResult<()> {
         Value::StringArray(array) if array.data.len() == 1 => Ok(()),
         Value::CharArray(chars) if is_row(&chars.shape) => Ok(()),
         Value::Tensor(tensor) if is_row(&tensor.shape) => require_numeric_extension(),
-        Value::GpuTensor(handle) if is_row(&handle.shape) => require_numeric_extension(),
+        Value::GpuTensor(handle) if is_row(handle.shape()) => require_numeric_extension(),
         _ => Err(super::errors::descriptor(
             &runmat_builtins::SAVEPATH_ERROR_ARGUMENT_TYPE,
         )),
@@ -67,10 +67,12 @@ async fn decode_text(value: Value) -> crate::BuiltinResult<String> {
             let gathered = crate::gather_if_needed_async(&value)
                 .await
                 .map_err(|error| {
-                    super::errors::detail(
+                    let mut context = super::errors::detail(
                         &runmat_builtins::SAVEPATH_ERROR_PROVIDER,
                         error.message(),
-                    )
+                    );
+                    context.source = Some(Box::new(error));
+                    context
                 })?;
             let Value::Tensor(tensor) = gathered else {
                 return Err(type_error());

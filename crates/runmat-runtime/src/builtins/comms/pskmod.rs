@@ -5,6 +5,7 @@ use std::f64::consts::TAU;
 
 use runmat_accelerate_api::{
     GpuTensorHandle, IntegerElementType, ProviderBitModulationRequest, ProviderModulationRequest,
+    ProviderPrecision,
 };
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -257,8 +258,7 @@ async fn pskmod_gpu(
     options: ParsedOptions,
 ) -> BuiltinResult<Value> {
     let provider = runmat_accelerate_api::provider_for_handle(&handle)
-        .or_else(runmat_accelerate_api::provider)
-        .ok_or_else(|| pskmod_error("pskmod: no acceleration provider registered"))?;
+        .ok_or_else(|| pskmod_error("pskmod: no owning acceleration provider registered"))?;
     let constellation = constellation_table(order, &options)?;
     if let Some(class) = runmat_accelerate_api::handle_integer_type(&handle) {
         validate_gpu_symbol_class(class)?;
@@ -268,41 +268,71 @@ async fn pskmod_gpu(
     {
         return Err(pskmod_error("pskmod: logical X requires InputType='bit'"));
     }
-    match options.input_type {
-        InputType::Integer => {
-            let request = ProviderModulationRequest {
-                input: &handle,
-                constellation: &constellation,
-            };
-            if let Ok(out) = provider.modulate_constellation(request).await {
-                if valid_gpu_output(provider, &handle, &out, options.output_dtype, &handle.shape) {
-                    return gpu_helpers::complex_gpu_value(out);
+    // These hooks produce provider-native complex storage. Other requested
+    // classes retain the existing typed host modulation/upload route.
+    let target_precision = match options.output_dtype {
+        OutputDType::Double => ProviderPrecision::F64,
+        OutputDType::Single => ProviderPrecision::F32,
+    };
+    if provider.precision() == target_precision {
+        let mut output_shape = handle.shape().to_vec();
+        let result = match options.input_type {
+            InputType::Integer => Some(
+                provider
+                    .modulate_constellation(ProviderModulationRequest {
+                        input: &handle,
+                        constellation: &constellation,
+                    })
+                    .await,
+            ),
+            InputType::Bit => {
+                let input_rows = handle.shape().first().copied().unwrap_or(0);
+                let bits = bits_per_symbol(order)?;
+                if input_rows > 0 {
+                    if !input_rows.is_multiple_of(bits) {
+                        return Err(pskmod_error(
+                            "pskmod: bit rows must be a multiple of bits per symbol",
+                        ));
+                    }
+                    output_shape[0] = input_rows / bits;
+                    Some(
+                        provider
+                            .modulate_bits_constellation(ProviderBitModulationRequest {
+                                input: &handle,
+                                input_rows,
+                                bits_per_symbol: bits,
+                                constellation: &constellation,
+                            })
+                            .await,
+                    )
+                } else {
+                    None
                 }
-                gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
             }
-        }
-        InputType::Bit => {
-            let input_rows = handle.shape.first().copied().unwrap_or(0);
-            if input_rows > 0 {
-                let request = ProviderBitModulationRequest {
-                    input: &handle,
-                    input_rows,
-                    bits_per_symbol: bits_per_symbol(order)?,
-                    constellation: &constellation,
-                };
-                if let Ok(out) = provider.modulate_bits_constellation(request).await {
-                    let mut output_shape = handle.shape.clone();
-                    output_shape[0] = input_rows / bits_per_symbol(order)?;
-                    if valid_gpu_output(
+        };
+        if let Some(result) = result {
+            match result {
+                Ok(out) => {
+                    if !valid_gpu_output(
                         provider,
                         &handle,
                         &out,
                         options.output_dtype,
                         &output_shape,
                     ) {
-                        return gpu_helpers::complex_gpu_value(out);
+                        return Err(gpu_helpers::reject_gpu_output(
+                            out,
+                            pskmod_error("pskmod: provider returned an invalid modulation result"),
+                        ));
                     }
-                    gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
+                    return gpu_helpers::complex_gpu_value(out);
+                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => {
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        pskmod_error(format!("pskmod: provider modulation failed: {error}")),
+                        runmat_accelerate_api::ProviderExecutionError::from(error),
+                    ));
                 }
             }
         }
@@ -313,8 +343,7 @@ async fn pskmod_gpu(
     let Value::ComplexTensor(tensor) = result else {
         return Err(pskmod_error("pskmod: expected complex modulation output"));
     };
-    let out = gpu_helpers::upload_complex_tensor(provider, &tensor)
-        .map_err(|err| pskmod_error(format!("pskmod: {err}")))?;
+    let out = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[&handle])?;
     gpu_helpers::complex_gpu_value(out)
 }
 
@@ -330,8 +359,8 @@ fn valid_gpu_output(
         OutputDType::Single => runmat_accelerate_api::NumericElementType::F32,
     };
     !gpu_helpers::same_gpu_handle(input, handle)
-        && handle.device_id == provider.device_id()
-        && handle.shape == shape
+        && handle.device_id() == provider.device_id()
+        && handle.shape() == shape
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && gpu_helpers::numeric_descriptor_matches(
@@ -1005,7 +1034,56 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::ProviderPrecision;
+
+    #[test]
+    fn provider_execution_error_keeps_source_and_borrowed_input_live() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[99.0],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let error = block_on(super::pskmod_builtin(
+                Value::GpuTensor(input.clone()),
+                Value::Num(4.0),
+                vec![],
+            ))
+            .unwrap_err();
+            assert!(std::error::Error::source(&error).is_some());
+            assert!(error.message().contains("symbols must be in range"));
+            assert_eq!(
+                block_on(provider.download(&input)).unwrap().data,
+                vec![99.0]
+            );
+        });
+    }
+
+    #[test]
+    fn malformed_alias_rejection_preserves_original_allocation() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload(&runmat_accelerate_api::HostTensorView {
+                    data: &[0.0, 1.0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            assert!(!valid_gpu_output(
+                provider,
+                &input,
+                &input,
+                OutputDType::Double,
+                &[1, 2]
+            ));
+            let error =
+                gpu_helpers::reject_gpu_output(input.clone(), pskmod_error("malformed alias"));
+            assert!(error.message().contains("malformed alias"));
+            assert_eq!(
+                block_on(provider.download(&input)).unwrap().data,
+                vec![0.0, 1.0]
+            );
+        });
+    }
 
     fn pskmod(x: Value, order: usize, rest: Vec<Value>) -> ComplexTensor {
         match block_on(super::pskmod_builtin(x, Value::Num(order as f64), rest)).expect("pskmod") {
@@ -1285,8 +1363,8 @@ mod tests {
             };
             assert_eq!(actual.shape, expected.shape);
             assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-            provider.free(&input_handle).ok();
-            provider.free(&output_handle).ok();
+            drop(input_handle);
+            drop(output_handle);
         });
     }
 
@@ -1382,8 +1460,8 @@ mod tests {
                 };
                 assert_eq!(actual.shape, expected.shape);
                 assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-                provider.free(&input_handle).ok();
-                provider.free(&output_handle).ok();
+                drop(input_handle);
+                drop(output_handle);
             }
             Err(err) => {
                 tracing::warn!("Skipping pskmod_wgpu_input_returns_complex_resident_output: {err}");
@@ -1434,8 +1512,8 @@ mod tests {
                 };
                 assert_eq!(actual.shape, expected.shape);
                 assert_complex_close(&actual.materialize_f64(), &expected.materialize_f64());
-                provider.free(&input_handle).ok();
-                provider.free(&output_handle).ok();
+                drop(input_handle);
+                drop(output_handle);
             }
             Err(err) => {
                 tracing::warn!(

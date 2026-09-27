@@ -69,8 +69,8 @@ fn admit(
         }
         Value::GpuTensor(ref handle) => {
             admit_numeric(builtin, policy)?;
-            if crate::builtins::common::shape::effective_rank(&handle.shape) > 2
-                || handle.shape.first().copied().unwrap_or(1) > 1
+            if crate::builtins::common::shape::effective_rank(handle.shape()) > 2
+                || handle.shape().first().copied().unwrap_or(1) > 1
             {
                 return Err(DecodeError::InvalidInput);
             }

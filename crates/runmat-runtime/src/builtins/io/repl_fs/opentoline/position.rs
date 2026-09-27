@@ -7,7 +7,7 @@ pub(super) enum AdmittedPosition {
 pub(super) fn admit_position(value: &Value, label: &str) -> BuiltinResult<AdmittedPosition> {
     if let Value::GpuTensor(handle) = value {
         if handle
-            .shape
+            .shape()
             .iter()
             .try_fold(1usize, |count, dim| count.checked_mul(*dim))
             != Some(1)

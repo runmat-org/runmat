@@ -442,7 +442,7 @@ fn ensure_write_extensions(data: &Value) -> BuiltinResult<()> {
     let is_nonvector = match data {
         Value::Tensor(tensor) => !is_vector_shape(&tensor.shape),
         Value::SparseTensor(tensor) => !is_vector_shape(&[tensor.rows, tensor.cols]),
-        Value::GpuTensor(handle) => !is_vector_shape(&handle.shape),
+        Value::GpuTensor(handle) => !is_vector_shape(handle.shape()),
         _ => false,
     };
     if is_nonvector {

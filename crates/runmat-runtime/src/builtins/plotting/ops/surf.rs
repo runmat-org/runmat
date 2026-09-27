@@ -550,7 +550,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     let mut x_axis_f32: Vec<f32> = Vec::new();
     let mut y_axis_f32: Vec<f32> = Vec::new();
 
-    let x_axis_gpu = match x_axis {
+    let x_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match x_axis {
         AxisSource::Gpu(h) => {
             let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
@@ -580,7 +580,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         }
     };
 
-    let y_axis_gpu = match y_axis {
+    let y_axis_gpu: Option<runmat_plot::gpu::GpuInputBuffer> = match y_axis {
         AxisSource::Gpu(h) => {
             let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
                 plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))

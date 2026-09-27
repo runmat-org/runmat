@@ -521,7 +521,7 @@ fn option_value_is_scalar(value: &Value) -> bool {
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::CharArray(chars) => chars.rows == 1,
         Value::StringArray(strings) => strings.data.len() == 1,
-        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>() == 1,
+        Value::GpuTensor(handle) => handle.shape().iter().all(|&extent| extent == 1),
         _ => false,
     }
 }
