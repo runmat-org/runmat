@@ -7,6 +7,71 @@ use runmat_runtime::builtins::math::poly::polyfit::{
 };
 use runmat_value::{Tensor, Value};
 use std::error::Error;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// InProcess intentionally has no polyfit override. This fixture adds exactly
+// that hook over genuine InProcess allocations and the production pure solver.
+struct SolverProvider {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    calls: AtomicUsize,
+}
+impl AccelProvider for SolverProvider {
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "pure polyfit owning adapter".into()
+    }
+    fn upload(
+        &self,
+        view: &runmat_accelerate_api::HostTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload(view)
+    }
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload_numeric_raw(view)
+    }
+    fn download<'a>(
+        &'a self,
+        _: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        panic!("operational solver errors must not gather or replay")
+    }
+    fn polyfit<'a>(
+        &'a self,
+        x: &'a runmat_accelerate_api::GpuTensorHandle,
+        y: &'a runmat_accelerate_api::GpuTensorHandle,
+        degree: usize,
+        weights: Option<&'a runmat_accelerate_api::GpuTensorHandle>,
+    ) -> runmat_accelerate_api::AccelProviderFuture<'a, runmat_accelerate_api::ProviderPolyfitResult>
+    {
+        Box::pin(async move {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let x = self.inner.download(x).await?;
+            let y = self.inner.download(y).await?;
+            let weights = match weights {
+                Some(handle) => Some(self.inner.download(handle).await?),
+                None => None,
+            };
+            let solved = polyfit_host_real_for_provider(
+                &x.data,
+                &y.data,
+                degree,
+                weights.as_ref().map(|w| w.data.as_slice()),
+            )?;
+            Ok(runmat_accelerate_api::ProviderPolyfitResult {
+                coefficients: solved.coefficients,
+                r_matrix: solved.r_matrix,
+                normr: solved.normr,
+                df: solved.df,
+                mu: solved.mu,
+            })
+        })
+    }
+}
 
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
@@ -37,12 +102,13 @@ fn pure_solver_preserves_coefficients_and_typed_validation() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn public_weight_errors_match_host_and_retain_provider_cause_and_inputs() {
-    let provider = Box::leak(Box::new(
-        runmat_accelerate::simple_provider::InProcessProvider::new(),
-    ));
+    let provider = Box::leak(Box::new(SolverProvider {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+    }));
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
-    for weights in [[1., -1., 1.], [1., f64::NAN, 1.]] {
+    for (case, weights) in [[1., -1., 1.], [1., f64::NAN, 1.]].into_iter().enumerate() {
         let data = [[0., 1., 2.], [1., 3., 5.], weights];
         let inputs = data
             .iter()
@@ -93,6 +159,7 @@ fn public_weight_errors_match_host_and_retain_provider_cause_and_inputs() {
             cursor = cursor.source().expect("exact solver cause retained");
         }
         assert!(provider_seen, "must exercise the resident provider path");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), case + 1);
         for input in &inputs {
             input.allocation_lease().validate_live().unwrap();
         }
