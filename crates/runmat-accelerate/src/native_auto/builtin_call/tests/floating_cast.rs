@@ -5,6 +5,8 @@ use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedB
 use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServiceFuture};
 
 mod fallback;
+#[cfg(not(target_arch = "wasm32"))]
+mod submitted;
 
 struct Adapter(&'static dyn AccelProvider, u16);
 impl RuntimeAccelerationService for Adapter {
