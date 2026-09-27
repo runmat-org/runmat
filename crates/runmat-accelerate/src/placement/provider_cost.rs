@@ -140,6 +140,7 @@ pub(crate) fn wgpu_cost_estimate(
         || coordinate_work.is_some()
         || digit_work.is_some()
         || remainder_work.is_some()
+        || query.operation.workload.scalar_work_units.is_some()
     {
         None
     } else {
@@ -262,7 +263,13 @@ fn operation_prior_ns(query: &ProviderCostQuery) -> u64 {
     let flops = query.operation.workload.flops.unwrap_or(elements);
     match query.operation.family {
         ProviderOperationFamily::Upload | ProviderOperationFamily::Download => 0,
-        ProviderOperationFamily::Fusion | ProviderOperationFamily::Graph => elements.max(5_000),
+        ProviderOperationFamily::Fusion => query
+            .operation
+            .workload
+            .scalar_work_units
+            .unwrap_or(elements)
+            .max(5_000),
+        ProviderOperationFamily::Graph => elements.max(5_000),
         ProviderOperationFamily::Elementwise => elements.saturating_mul(2).max(5_000),
         ProviderOperationFamily::Reduction => elements.saturating_mul(3).max(8_000),
         ProviderOperationFamily::MatrixMultiply | ProviderOperationFamily::Library => {
