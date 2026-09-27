@@ -279,7 +279,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Real and logical gpuArray inputs use provider diag hooks for native vector placement, rectangular placement, vector mode, and matrix diagonal extraction. Complex, character, and conversion-heavy template forms use the host fallback.",
 };
 
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag")]
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::diag", epilogue = crate::builtins::common::spec::FusionEpilogueOperation::Diagonal)]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "diag",
     shape: ShapeRequirements::Any,

@@ -5,6 +5,20 @@ fn old_spec_declarations_have_no_structural_operation() {
     let args: RegisterSpecAttrArgs = syn::parse_quote!(builtin_path = "crate::operation");
     assert!(args.structural.is_none());
     assert!(args.semantics.is_none());
+    assert!(args.epilogue.is_none());
+}
+
+#[test]
+fn epilogue_declaration_is_typed_optional_and_unique() {
+    let args: RegisterSpecAttrArgs = syn::parse_quote!(
+        builtin_path = "crate::operation",
+        epilogue = FusionEpilogueOperation::Diagonal
+    );
+    assert!(matches!(args.epilogue, Some(syn::Expr::Path(_))));
+    assert!(syn::parse_str::<RegisterSpecAttrArgs>(
+        "epilogue = Operation::A, epilogue = Operation::B"
+    )
+    .is_err());
 }
 
 #[test]

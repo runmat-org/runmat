@@ -844,6 +844,7 @@ struct RegisterSpecAttrArgs {
     builtin_path: Option<LitStr>,
     semantics: Option<Expr>,
     structural: Option<Expr>,
+    epilogue: Option<Expr>,
 }
 
 #[cfg(test)]
@@ -856,6 +857,7 @@ impl Parse for RegisterSpecAttrArgs {
         let mut builtin_path = None;
         let mut semantics = None;
         let mut structural = None;
+        let mut epilogue = None;
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
@@ -871,6 +873,14 @@ impl Parse for RegisterSpecAttrArgs {
                     ));
                 }
                 structural = Some(input.parse()?);
+            } else if ident == "epilogue" {
+                if epilogue.is_some() {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "duplicate epilogue declaration",
+                    ));
+                }
+                epilogue = Some(input.parse()?);
             } else if ident == "builtin_path" {
                 let lit: LitStr = input.parse()?;
                 builtin_path = Some(lit);
@@ -886,6 +896,7 @@ impl Parse for RegisterSpecAttrArgs {
             builtin_path,
             semantics,
             structural,
+            epilogue,
         })
     }
 }
@@ -898,8 +909,9 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
         builtin_path,
         semantics,
         structural,
+        epilogue,
     } = args;
-    if semantics.is_some() || structural.is_some() {
+    if semantics.is_some() || structural.is_some() || epilogue.is_some() {
         return syn::Error::new(
             proc_macro2::Span::call_site(),
             "semantics and structural operations belong to a fusion registration",
@@ -979,7 +991,11 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         builtin_path,
         semantics,
         structural,
+        epilogue,
     } = args;
+    let epilogue = epilogue
+        .map(|value| quote! { Some(#value) })
+        .unwrap_or_else(|| quote! { None });
     let structural = structural
         .map(|value| quote! { Some(#value) })
         .unwrap_or_else(|| quote! { None });
@@ -1011,6 +1027,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
                     spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
                     semantics: #semantics,
                     structural: #structural,
+                    epilogue: #epilogue,
                     source_file: file!(), module_path: module_path!(),
                 }
             );
@@ -1038,6 +1055,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
                 spec: &#spec_for_native,
                 semantics: #semantics,
                 structural: #structural,
+                epilogue: #epilogue,
                 builtin_path: #builtin_path_lit,
                 declaration: #declaration,
                 source_file: file!(),

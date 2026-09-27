@@ -1,6 +1,6 @@
 use super::{
-    builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionSemanticDeclaration,
-    FusionStructuralOperation,
+    builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionEpilogueOperation,
+    FusionSemanticDeclaration, FusionStructuralOperation,
 };
 use runmat_builtins::{
     builtin_catalog_entry_by_name, builtin_implementation_provenance, BuiltinBindingIdentity,
@@ -21,6 +21,7 @@ pub struct CanonicalFusionDeclaration {
     pub spec: &'static BuiltinFusionSpec,
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
+    pub epilogue: Option<FusionEpilogueOperation>,
 }
 
 impl std::fmt::Debug for CanonicalFusionDeclaration {
@@ -88,5 +89,6 @@ pub fn canonical_fusion_declaration(
         spec: registration.spec,
         semantics: registration.semantics,
         structural: registration.structural,
+        epilogue: registration.epilogue,
     })
 }

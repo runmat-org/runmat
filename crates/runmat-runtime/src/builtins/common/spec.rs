@@ -3,9 +3,13 @@ use std::fmt;
 mod canonical;
 mod admission;
 mod structural;
+mod epilogue;
 pub use admission::*;
 pub use canonical::{
     canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,
+};
+pub use epilogue::{
+    fusion_binding_is_selected, fusion_epilogue_operation, FusionEpilogueOperation,
 };
 pub use structural::FusionStructuralOperation;
 
@@ -255,6 +259,7 @@ pub struct FusionSpecInventory {
     pub spec: &'static BuiltinFusionSpec,
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
+    pub epilogue: Option<FusionEpilogueOperation>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -275,6 +280,7 @@ pub(crate) struct FusionSpecRegistration {
     pub spec: &'static BuiltinFusionSpec,
     pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub structural: Option<FusionStructuralOperation>,
+    pub epilogue: Option<FusionEpilogueOperation>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -330,6 +336,7 @@ pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = Fusion
         spec: entry.spec,
         semantics: entry.semantics,
         structural: entry.structural,
+        epilogue: entry.epilogue,
         builtin_path: entry.builtin_path,
         declaration: entry.declaration,
         source_file: entry.source_file,

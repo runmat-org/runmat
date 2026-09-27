@@ -38,7 +38,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::power",
-    semantics = fusion::SEMANTICS
+    semantics = fusion::SEMANTICS,
+    epilogue = crate::builtins::common::spec::FusionEpilogueOperation::RealPower
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "power",
