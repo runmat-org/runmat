@@ -290,8 +290,7 @@ fn mod_real_scalar_f32(a: f32, b: f32) -> f32 {
         }
         return if a.signum() == b.signum() { a } else { b };
     }
-    let direct = a - b * (a / b).floor();
-    let mut remainder = if direct.is_finite() { direct } else { a % b };
+    let mut remainder = super::floating_remainder::reduce_f32(a, b);
     if !remainder.is_finite() && !a.is_finite() {
         return f32::NAN;
     }
@@ -315,11 +314,7 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;
     }
-    // Preserve the rounded-quotient cancellation for ordinary finite inputs
-    // (including represented multiples such as 2/0.1). If division or the
-    // product overflows, reduce without forming that unrepresentable quotient.
-    let direct = a - b * (a / b).floor();
-    let mut remainder = if direct.is_finite() { direct } else { a % b };
+    let mut remainder = super::floating_remainder::reduce_f64(a, b);
     if remainder == 0.0 {
         remainder = 0.0;
     }

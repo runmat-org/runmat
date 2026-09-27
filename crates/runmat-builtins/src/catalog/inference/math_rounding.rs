@@ -150,12 +150,10 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
             materialize_rounding_result(&mut output);
-            output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {}
         ValueKindFact::Logical | ValueKindFact::Character => {
             materialize_rounding_result(&mut output);
-            output.residency = input.residency.clone();
         }
         ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
         _ => {
@@ -233,7 +231,6 @@ pub(super) fn infer_rounding(
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
             materialize_rounding_result(&mut output);
-            output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {
             // Every real fixed-width integer is already integral. The runtime
@@ -241,7 +238,6 @@ pub(super) fn infer_rounding(
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             materialize_rounding_result(&mut output);
-            output.residency = input.residency.clone();
         }
         ValueKindFact::Object(object)
             if object
@@ -270,6 +266,15 @@ pub(super) fn infer_rounding(
 }
 
 fn materialize_rounding_result(output: &mut ValueFact) {
+    if output.numeric().is_some_and(|numeric| {
+        numeric.domain == NumericDomain::Real
+            && matches!(numeric.class, NumericClass::Double | NumericClass::Single)
+    }) && output.storage != StorageFact::Scalar
+    {
+        // Eligible dense floating operands can be automatically prepared.
+        // Static type/shape facts do not choose the executing provider.
+        output.residency = ResidencyFact::Unknown;
+    }
     let character = output.kind == ValueKindFact::Character;
     let complex_storage = output
         .numeric()

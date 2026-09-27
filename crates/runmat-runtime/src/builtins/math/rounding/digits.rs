@@ -2,7 +2,7 @@
 //! Providers reuse these host semantics rather than copying the builtin parser.
 
 macro_rules! floating_digits {
-    ($decimal:ident, $significant:ident, $scaled:ident, $ty:ty, $maximum:expr, $subnormal:expr) => {
+    ($decimal:ident, $significant:ident, $scaled:ident, $ty:ty, $maximum:expr, $subnormal:expr, $roundtrip:expr) => {
         /// Round a represented floating value to the admitted decimal count.
         pub fn $decimal(value: $ty, digits: i32) -> $ty {
             $scaled(value, i64::from(digits))
@@ -16,12 +16,21 @@ macro_rules! floating_digits {
             if value == 0.0 {
                 return 0.0;
             }
+            // A round-trip decimal representation already identifies this
+            // binary value uniquely; additional digits cannot change it.
+            if digits >= $roundtrip {
+                return value;
+            }
             let order = value.abs().log10().floor() as i64;
             $scaled(value, i64::from(digits) - 1 - order)
         }
 
         fn $scaled(value: $ty, digits: i64) -> $ty {
             if !value.is_finite() || value == 0.0 {
+                return value;
+            }
+            let order = value.abs().log10().floor() as i64;
+            if digits >= i64::from($roundtrip) - order {
                 return value;
             }
             if digits > $subnormal {
@@ -47,8 +56,8 @@ macro_rules! floating_digits {
     };
 }
 
-floating_digits!(decimal_f64, significant_f64, scaled_f64, f64, 308, 324);
-floating_digits!(decimal_f32, significant_f32, scaled_f32, f32, 38, 45);
+floating_digits!(decimal_f64, significant_f64, scaled_f64, f64, 308, 324, 17);
+floating_digits!(decimal_f32, significant_f32, scaled_f32, f32, 38, 45, 9);
 
 #[cfg(test)]
 mod tests {
@@ -56,6 +65,10 @@ mod tests {
 
     #[test]
     fn extreme_digits_do_not_overflow_control_arithmetic_or_finite_values() {
+        assert_eq!(decimal_f64(23.75, 20).to_bits(), 23.75_f64.to_bits());
+        assert_eq!(significant_f64(23.75, 22).to_bits(), 23.75_f64.to_bits());
+        assert_eq!(decimal_f32(23.75, 20).to_bits(), 23.75_f32.to_bits());
+        assert_eq!(significant_f32(23.75, 22).to_bits(), 23.75_f32.to_bits());
         assert_eq!(significant_f64(1.25, i32::MAX), 1.25);
         assert_eq!(significant_f32(1.25, i32::MAX), 1.25);
         assert_eq!(decimal_f64(f64::MAX, 2), f64::MAX);
