@@ -3014,7 +3014,7 @@ pub(crate) mod tests {
             .iter()
             .map(|sig| sig.label)
             .collect();
-        assert!(method_labels.contains(&"value = containers.Map.subsref(M, kind, payload)"));
+        assert!(method_labels.contains(&"value = containers.Map.subsref(M, S)"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

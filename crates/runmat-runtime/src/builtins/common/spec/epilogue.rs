@@ -1,7 +1,4 @@
 //! Operation-owned fixed-phase epilogues, independent of scalar/reduction templates.
-#[cfg(test)]
-mod tests;
-
 /// These declarations authorize a form, not arbitrary arguments: the execution
 /// planner must validate represented classes, exact arity and phase ordering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

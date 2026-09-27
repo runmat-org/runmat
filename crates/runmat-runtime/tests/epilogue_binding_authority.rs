@@ -1,6 +1,7 @@
-use super::*;
-use crate::{
+//! Inventory and implementation identity must be tested against one runtime library.
+use runmat_runtime::{
     builtin::{RuntimeBuiltinBinding, RuntimeBuiltinFuture},
+    builtins::common::spec::{fusion_epilogue_operation, FusionEpilogueOperation},
     context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts},
 };
 use std::rc::Rc;
@@ -19,17 +20,17 @@ fn replacement(_: &[runmat_value::Value]) -> RuntimeBuiltinFuture {
     Box::pin(async { Ok(runmat_value::Value::Num(99.0)) })
 }
 fn context(bindings: Vec<RuntimeBuiltinBinding>) -> RuntimeContext {
-    RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
-        .with_service_ports(
-            RuntimeServicePorts::default().with_builtin(Rc::new(Selected(bindings))),
-        )
+    RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(RuntimeServicePorts::default().with_builtin(Rc::new(Selected(bindings))))
 }
 
 #[test]
 fn exact_binding_allows_compiled_implementation_but_never_scoped_override() {
     runmat_gc::gc_test_context(|| {
         let name = runmat_builtins::POWER_CATALOG_ENTRY.identity.name;
-        let original = crate::builtin::runtime_builtin_bindings_by_name(name);
+        let original = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name);
         assert_eq!(original.len(), 1);
         assert_eq!(
             fusion_epilogue_operation(name, Some(&context(original.clone()))),
