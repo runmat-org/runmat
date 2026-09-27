@@ -51,13 +51,14 @@ pub(super) fn feasibility(
     snapshot: &ProviderCapabilitySnapshot,
     query: &ProviderFeasibilityQuery,
 ) -> Option<ProviderFeasibility> {
-    OPERATIONS
+    let operation = OPERATIONS
         .iter()
         .find(|&&operation| identity(operation) == query.operation.0)?;
-    Some(evaluate(profile, precision, snapshot, query))
+    Some(evaluate(*operation, profile, precision, snapshot, query))
 }
 
 fn evaluate(
+    operation: Operation,
     profile: HookProfile,
     precision: ProviderPrecision,
     snapshot: &ProviderCapabilitySnapshot,
@@ -102,6 +103,10 @@ fn evaluate(
     let left = &query.inputs[0].shape;
     let right = &query.inputs[1].shape;
     let rank = left.len().max(right.len());
+    let expands = matches!(
+        operation,
+        Operation::Add | Operation::Subtract | Operation::Multiply
+    );
     if left != right && (left.len() < 2 || right.len() < 2) {
         // Runtime repmat currently retains the physical leading extent of a
         // rank-one handle; it cannot implement row-shorthand alignment safely.
@@ -113,7 +118,12 @@ fn evaluate(
     #[cfg(feature = "wgpu")]
     if matches!(profile, HookProfile::Wgpu)
         && left != right
-        && rank > crate::backend::wgpu::params::REPMAT_MAX_RANK
+        && rank
+            > if expands {
+                crate::backend::wgpu::params::REPMAT_MAX_RANK
+            } else {
+                crate::backend::wgpu::params::BCAST_MAX_RANK
+            }
     {
         return reject(
             ProviderRejectionCode::UnsupportedRank,
@@ -166,7 +176,7 @@ fn evaluate(
         accounted.outputs.push(output);
     }
     let mut expansions = 0;
-    for input in &query.inputs {
+    for input in query.inputs.iter().filter(|_| expands) {
         if input
             .shape
             .iter()

@@ -103,6 +103,21 @@ fn broadcast_resources_include_expanded_buffers_and_missing_output_description()
     assert_eq!(estimate.transient_bytes, Some(184));
     assert_eq!(estimate.output_bytes, Some(48));
     assert_eq!(estimate.dispatches, Some(3));
+    for operation in [Operation::RightDivide, Operation::LeftDivide] {
+        request.operation = ProviderOperationIdentity::new(identity(operation));
+        let ProviderFeasibility::Supported { estimate } = feasibility(
+            HookProfile::InProcess,
+            provider.precision(),
+            &snapshot,
+            &request,
+        )
+        .unwrap() else {
+            panic!("direct broadcast division")
+        };
+        assert_eq!(estimate.transient_bytes, Some(88));
+        assert_eq!(estimate.output_bytes, Some(48));
+        assert_eq!(estimate.dispatches, Some(1));
+    }
     request.inputs[0].shape = vec![0, 1];
     assert!(feasibility(
         HookProfile::InProcess,
@@ -122,6 +137,32 @@ fn broadcast_resources_include_expanded_buffers_and_missing_output_description()
     )
     .unwrap()
     .is_supported());
+}
+
+#[test]
+fn division_hook_broadcasts_without_replicating_inputs() {
+    let provider = InProcessProvider::new();
+    let left = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[2.0, 4.0]),
+            shape: &[2, 1],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let right = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[1.0, 2.0, 4.0]),
+            shape: &[1, 3],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let result = block_on(provider.elem_div(&left, &right)).unwrap();
+    let downloaded = block_on(provider.download(&result)).unwrap();
+    assert_eq!(downloaded.shape, vec![2, 3]);
+    assert_eq!(downloaded.data, vec![2.0, 4.0, 1.0, 2.0, 0.5, 1.0]);
+    for handle in [&result, &left, &right] {
+        provider.free(handle).unwrap();
+    }
 }
 
 #[test]
