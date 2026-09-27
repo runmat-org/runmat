@@ -27,7 +27,9 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("exprnd: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-exprnd-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-rng-exprnd-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
@@ -44,78 +46,81 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("exprnd: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len)
-                .map_err(|_| anyhow!("exprnd: chunk length exceeds GPU dispatch limits"))?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("exprnd: tensor offset exceeds GPU limits"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len)
+                    .map_err(|_| anyhow!("exprnd: chunk length exceeds GPU dispatch limits"))?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("exprnd: tensor offset exceeds GPU limits"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: mu,
-                        param2: 0.0,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-exprnd-f64-params")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: mu as f32,
-                        param2: 0.0,
-                        _pad0: 0,
-                        _pad1: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-exprnd-f32-params")
-                }
-            };
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: mu,
+                            param2: 0.0,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-exprnd-f64-params")?
+                    }
+                    NumericPrecision::F32 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: mu as f32,
+                            param2: 0.0,
+                            _pad0: 0,
+                            _pad1: 0,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-exprnd-f32-params")?
+                    }
+                };
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-rng-exprnd-bind"),
-                    layout: &self.pipelines.random_exprnd.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-rng-exprnd-bind"),
+                        layout: &self.pipelines.random_exprnd.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.random_exprnd.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-rng-exprnd-encoder",
-                "runmat-rng-exprnd-pass",
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &self.pipelines.random_exprnd.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-rng-exprnd-encoder",
+                    "runmat-rng-exprnd-pass",
+                )?;
 
-            chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
-            offset += chunk_len;
-        }
+                chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -130,7 +135,9 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("normrnd: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normrnd-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-rng-normrnd-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
@@ -147,80 +154,83 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("normrnd: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len)
-                .map_err(|_| anyhow!("normrnd: chunk length exceeds GPU dispatch limits"))?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("normrnd: tensor offset exceeds GPU limits"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len)
+                    .map_err(|_| anyhow!("normrnd: chunk length exceeds GPU dispatch limits"))?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("normrnd: tensor offset exceeds GPU limits"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: mu,
-                        param2: sigma,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-normrnd-f64-params")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: mu as f32,
-                        param2: sigma as f32,
-                        _pad0: 0,
-                        _pad1: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-normrnd-f32-params")
-                }
-            };
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: mu,
+                            param2: sigma,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-normrnd-f64-params")?
+                    }
+                    NumericPrecision::F32 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: mu as f32,
+                            param2: sigma as f32,
+                            _pad0: 0,
+                            _pad1: 0,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-normrnd-f32-params")?
+                    }
+                };
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-rng-normrnd-bind"),
-                    layout: &self.pipelines.random_normrnd.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-rng-normrnd-bind"),
+                        layout: &self.pipelines.random_normrnd.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.random_normrnd.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-rng-normrnd-encoder",
-                "runmat-rng-normrnd-pass",
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &self.pipelines.random_normrnd.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-rng-normrnd-encoder",
+                    "runmat-rng-normrnd-pass",
+                )?;
 
-            // Box-Muller emits two normals per two uniform samples.
-            let delta = u64::from(chunk_u32).div_ceil(2) * 2;
-            chunk_state = advance_rng_state(chunk_state, delta);
-            offset += chunk_len;
-        }
+                // Box-Muller emits two normals per two uniform samples.
+                let delta = u64::from(chunk_u32).div_ceil(2) * 2;
+                chunk_state = advance_rng_state(chunk_state, delta);
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -235,7 +245,9 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = product_checked(shape)
             .ok_or_else(|| anyhow!("unifrnd: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-unifrnd-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-rng-unifrnd-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
@@ -252,78 +264,81 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("unifrnd: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len)
-                .map_err(|_| anyhow!("unifrnd: chunk length exceeds GPU dispatch limits"))?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("unifrnd: tensor offset exceeds GPU limits"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len)
+                    .map_err(|_| anyhow!("unifrnd: chunk length exceeds GPU dispatch limits"))?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("unifrnd: tensor offset exceeds GPU limits"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF64 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: a,
-                        param2: b,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-unifrnd-f64-params")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::RandomDistParamsF32 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        key0,
-                        key1,
-                        param1: a as f32,
-                        param2: b as f32,
-                        _pad0: 0,
-                        _pad1: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-rng-unifrnd-f32-params")
-                }
-            };
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF64 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: a,
+                            param2: b,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-unifrnd-f64-params")?
+                    }
+                    NumericPrecision::F32 => {
+                        let params = crate::backend::wgpu::params::RandomDistParamsF32 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            key0,
+                            key1,
+                            param1: a as f32,
+                            param2: b as f32,
+                            _pad0: 0,
+                            _pad1: 0,
+                        };
+                        self.uniform_buffer(emission, &params, "runmat-rng-unifrnd-f32-params")?
+                    }
+                };
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-rng-unifrnd-bind"),
-                    layout: &self.pipelines.random_unifrnd.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-rng-unifrnd-bind"),
+                        layout: &self.pipelines.random_unifrnd.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.random_unifrnd.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-rng-unifrnd-encoder",
-                "runmat-rng-unifrnd-pass",
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &self.pipelines.random_unifrnd.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-rng-unifrnd-encoder",
+                    "runmat-rng-unifrnd-pass",
+                )?;
 
-            chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
-            offset += chunk_len;
-        }
+                chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -345,7 +360,9 @@ impl WgpuProvider {
             }
             return self.upload_exec(&HostTensorView { data: &out, shape });
         }
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-uniform-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-rng-uniform-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
@@ -362,59 +379,63 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("rand: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len)
-                .map_err(|_| anyhow!("rand: chunk length exceeds GPU dispatch limits"))?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("rand: tensor offset exceeds GPU limits"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len)
+                    .map_err(|_| anyhow!("rand: chunk length exceeds GPU dispatch limits"))?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("rand: tensor offset exceeds GPU limits"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params = crate::backend::wgpu::params::RandomScalarParams {
-                offset: offset_u32,
-                chunk: chunk_u32,
-                key0,
-                key1,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-rng-uniform-params");
+                let params = crate::backend::wgpu::params::RandomScalarParams {
+                    offset: offset_u32,
+                    chunk: chunk_u32,
+                    key0,
+                    key1,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-rng-uniform-params")?;
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-rng-uniform-bind"),
-                    layout: &self.pipelines.random_uniform.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-rng-uniform-bind"),
+                        layout: &self.pipelines.random_uniform.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.random_uniform.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-rng-uniform-encoder",
-                "runmat-rng-uniform-pass",
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &self.pipelines.random_uniform.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-rng-uniform-encoder",
+                    "runmat-rng-uniform-pass",
+                )?;
 
-            chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
-            offset += chunk_len;
-        }
+                chunk_state = advance_rng_state(chunk_state, u64::from(chunk_u32));
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -451,7 +472,9 @@ impl WgpuProvider {
             }
             return self.upload_exec(&HostTensorView { data: &out, shape });
         }
-        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-rng-normal-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, total_len, "runmat-rng-normal-out")
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, shape.to_vec(), 0);
         }
@@ -468,60 +491,64 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("randn: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len)
-                .map_err(|_| anyhow!("randn: chunk length exceeds GPU dispatch limits"))?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("randn: tensor offset exceeds GPU limits"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len)
+                    .map_err(|_| anyhow!("randn: chunk length exceeds GPU dispatch limits"))?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("randn: tensor offset exceeds GPU limits"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params = crate::backend::wgpu::params::RandomScalarParams {
-                offset: offset_u32,
-                chunk: chunk_u32,
-                key0,
-                key1,
-            };
-            let params_buffer = self.uniform_buffer(&params, "runmat-rng-normal-params");
+                let params = crate::backend::wgpu::params::RandomScalarParams {
+                    offset: offset_u32,
+                    chunk: chunk_u32,
+                    key0,
+                    key1,
+                };
+                let params_buffer =
+                    self.uniform_buffer(emission, &params, "runmat-rng-normal-params")?;
 
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-rng-normal-bind"),
-                    layout: &self.pipelines.random_normal.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-rng-normal-bind"),
+                        layout: &self.pipelines.random_normal.get(emission)?.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &self.pipelines.random_normal.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-rng-normal-encoder",
-                "runmat-rng-normal-pass",
-            );
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &self.pipelines.random_normal.get(emission)?.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-rng-normal-encoder",
+                    "runmat-rng-normal-pass",
+                )?;
 
-            let delta = u64::from(chunk_u32) * 2;
-            chunk_state = advance_rng_state(chunk_state, delta);
-            offset += chunk_len;
-        }
+                let delta = u64::from(chunk_u32) * 2;
+                chunk_state = advance_rng_state(chunk_state, delta);
+                offset += chunk_len;
+            }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -539,8 +566,13 @@ impl WgpuProvider {
             .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
         let start = Instant::now();
         let state_entry = self.get_entry(state)?;
-        let out_buffer =
-            self.create_storage_buffer_checked(total_len, "runmat-stochastic-evolution-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(
+                emission,
+                total_len,
+                "runmat-stochastic-evolution-out",
+            )
+        })??;
         if total_len == 0 {
             return self.register_existing_buffer(out_buffer, state_entry.shape.clone(), 0);
         }
@@ -557,95 +589,106 @@ impl WgpuProvider {
             .map_err(|_| anyhow!("stochastic_evolution: provider RNG mutex poisoned"))?;
         let mut chunk_state = *rng_guard;
 
-        let pipeline = &self.pipelines.stochastic_evolution;
-        let mut offset = 0usize;
-        while offset < total_len {
-            let remaining = total_len - offset;
-            let chunk_len = remaining.min(chunk_capacity);
-            let chunk_u32 = u32::try_from(chunk_len).map_err(|_| {
-                anyhow!("stochastic_evolution: chunk length exceeds GPU dispatch limits")
-            })?;
-            let offset_u32 = u32::try_from(offset)
-                .map_err(|_| anyhow!("stochastic_evolution: offset exceeds GPU limits"))?;
-            let len_u32 = u32::try_from(total_len)
-                .map_err(|_| anyhow!("stochastic_evolution: len overflow"))?;
-            let (key0, key1) = philox_keys_from_state(chunk_state);
+        self.with_emission(|emission, pending| -> Result<()> {
+            let pipeline = self.pipelines.stochastic_evolution.get(emission)?;
+            let mut offset = 0usize;
+            while offset < total_len {
+                let remaining = total_len - offset;
+                let chunk_len = remaining.min(chunk_capacity);
+                let chunk_u32 = u32::try_from(chunk_len).map_err(|_| {
+                    anyhow!("stochastic_evolution: chunk length exceeds GPU dispatch limits")
+                })?;
+                let offset_u32 = u32::try_from(offset)
+                    .map_err(|_| anyhow!("stochastic_evolution: offset exceeds GPU limits"))?;
+                let len_u32 = u32::try_from(total_len)
+                    .map_err(|_| anyhow!("stochastic_evolution: len overflow"))?;
+                let (key0, key1) = philox_keys_from_state(chunk_state);
 
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::StochasticEvolutionParamsF64 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        len: len_u32,
-                        steps,
-                        key0,
-                        key1,
-                        _pad0: 0,
-                        _pad1: 0,
-                        drift,
-                        scale,
-                    };
-                    self.uniform_buffer(&params, "runmat-stochastic-evolution-f64-params")
+                let params_buffer = match self.precision {
+                    NumericPrecision::F64 => {
+                        let params = crate::backend::wgpu::params::StochasticEvolutionParamsF64 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            len: len_u32,
+                            steps,
+                            key0,
+                            key1,
+                            _pad0: 0,
+                            _pad1: 0,
+                            drift,
+                            scale,
+                        };
+                        self.uniform_buffer(
+                            emission,
+                            &params,
+                            "runmat-stochastic-evolution-f64-params",
+                        )?
+                    }
+                    NumericPrecision::F32 => {
+                        let params = crate::backend::wgpu::params::StochasticEvolutionParamsF32 {
+                            offset: offset_u32,
+                            chunk: chunk_u32,
+                            len: len_u32,
+                            steps,
+                            key0,
+                            key1,
+                            _pad0: 0,
+                            _pad1: 0,
+                            drift: drift as f32,
+                            scale: scale as f32,
+                        };
+                        self.uniform_buffer(
+                            emission,
+                            &params,
+                            "runmat-stochastic-evolution-f32-params",
+                        )?
+                    }
+                };
+
+                let bind_group = emission
+                    .device()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-stochastic-evolution-bind"),
+                        layout: &pipeline.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: state_entry.buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: out_buffer.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
+
+                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                    chunk_u32,
+                    crate::backend::wgpu::config::WORKGROUP_SIZE,
+                );
+                crate::backend::wgpu::dispatch::creation::run(
+                    emission,
+                    pending,
+                    &pipeline.pipeline,
+                    &bind_group,
+                    workgroups,
+                    "runmat-stochastic-evolution-encoder",
+                    "runmat-stochastic-evolution-pass",
+                )?;
+
+                if steps > 0 {
+                    let advance = u64::from(chunk_u32) * u64::from(steps);
+                    chunk_state = advance_rng_state(chunk_state, advance);
                 }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::StochasticEvolutionParamsF32 {
-                        offset: offset_u32,
-                        chunk: chunk_u32,
-                        len: len_u32,
-                        steps,
-                        key0,
-                        key1,
-                        _pad0: 0,
-                        _pad1: 0,
-                        drift: drift as f32,
-                        scale: scale as f32,
-                    };
-                    self.uniform_buffer(&params, "runmat-stochastic-evolution-f32-params")
-                }
-            };
-
-            let bind_group = self
-                .device_ref()
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-stochastic-evolution-bind"),
-                    layout: &pipeline.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: state_entry.buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: out_buffer.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
-
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                chunk_u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
-            crate::backend::wgpu::dispatch::creation::run(
-                self.device_ref(),
-                self.queue_ref(),
-                &pipeline.pipeline,
-                &bind_group,
-                workgroups,
-                "runmat-stochastic-evolution-encoder",
-                "runmat-stochastic-evolution-pass",
-            );
-
-            if steps > 0 {
-                let advance = u64::from(chunk_u32) * u64::from(steps);
-                chunk_state = advance_rng_state(chunk_state, advance);
+                offset += chunk_len;
             }
-            offset += chunk_len;
-        }
 
+            Ok(())
+        })??;
         *rng_guard = chunk_state;
         drop(rng_guard);
 
@@ -668,7 +711,9 @@ impl WgpuProvider {
 
         let effective_k = k.min(n);
         let shape_vec = vec![1, effective_k];
-        let out_buffer = self.create_storage_buffer_checked(effective_k, "runmat-randperm-out")?;
+        let out_buffer = self.with_emission(|emission, _| {
+            self.create_storage_buffer_checked(emission, effective_k, "runmat-randperm-out")
+        })??;
         if effective_k == 0 {
             return self.register_existing_buffer(out_buffer, shape_vec, 0);
         }
@@ -683,35 +728,38 @@ impl WgpuProvider {
             seed,
             _pad: 0,
         };
-        let params_buffer = self.uniform_buffer(&params, "runmat-randperm-params");
+        self.with_emission(|emission, pending| -> Result<()> {
+            let params_buffer = self.uniform_buffer(emission, &params, "runmat-randperm-params")?;
 
-        let bind_group = self
-            .device_ref()
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-randperm-bind"),
-                layout: &self.pipelines.randperm.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-randperm-bind"),
+                    layout: &self.pipelines.randperm.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
 
-        crate::backend::wgpu::dispatch::creation::run(
-            self.device_ref(),
-            self.queue_ref(),
-            &self.pipelines.randperm.pipeline,
-            &bind_group,
-            1,
-            "runmat-randperm-encoder",
-            "runmat-randperm-pass",
-        );
+            crate::backend::wgpu::dispatch::creation::run(
+                emission,
+                pending,
+                &self.pipelines.randperm.get(emission)?.pipeline,
+                &bind_group,
+                1,
+                "runmat-randperm-encoder",
+                "runmat-randperm-pass",
+            )?;
 
+            Ok(())
+        })??;
         *rng_guard = advance_rng_state(*rng_guard, effective_k as u64);
         drop(rng_guard);
 
