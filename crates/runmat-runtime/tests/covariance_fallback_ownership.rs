@@ -15,6 +15,7 @@ enum Mode {
     UploadFailure,
     UnsupportedWeight,
     Pending,
+    PendingFallback,
 }
 struct Provider {
     inner: InProcessProvider,
@@ -99,14 +100,20 @@ impl AccelProvider for Provider {
         Ok(output)
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.downloads.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.downloads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.mode, Mode::PendingFallback) && attempt == 1 {
+            return Box::pin(std::future::pending());
+        }
         self.inner.download(input)
     }
     fn download_numeric<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
-        self.downloads.fetch_add(1, Ordering::SeqCst);
+        let attempt = self.downloads.fetch_add(1, Ordering::SeqCst);
+        if matches!(self.mode, Mode::PendingFallback) && attempt == 1 {
+            return Box::pin(std::future::pending());
+        }
         self.inner.download_numeric(input)
     }
     fn covariance<'a>(
@@ -130,7 +137,7 @@ fn matrix(provider: &Provider) -> GpuTensorHandle {
     provider.input(&[1., 2., 3., 4., 2., 4., 6., 8.], &[4, 2])
 }
 fn host_weights() -> Value {
-    Value::Tensor(Tensor::new(vec![1.; 4], vec![4, 1]).unwrap())
+    Value::Tensor(Tensor::new(vec![1., 2., 3., 4.], vec![4, 1]).unwrap())
 }
 
 #[test]
@@ -228,7 +235,7 @@ fn typed_unsupported_weight_upload_uses_supported_host_compute_and_restore() {
     for (actual, expected) in host
         .data
         .iter()
-        .zip([5. / 3., 10. / 3., 10. / 3., 20. / 3.])
+        .zip([10. / 9., 20. / 9., 20. / 9., 40. / 9.])
     {
         assert!((actual - expected).abs() < 1e-12);
     }
@@ -320,11 +327,64 @@ fn invalid_pair_geometry_and_empty_weight_cardinality_precede_all_hooks() {
         1,
     ))
     .unwrap_err();
-    assert_eq!(
-        error.identifier(),
-        Some("RunMat:cov:WeightVectorLengthMismatch")
-    );
+    let host_error = block_on(call_builtin_async_with_outputs(
+        "cov",
+        &[
+            Value::Tensor(Tensor::new(vec![1.], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![2.], vec![1, 1]).unwrap()),
+            Value::Tensor(Tensor::new(vec![], vec![0, 1]).unwrap()),
+        ],
+        1,
+    ))
+    .unwrap_err();
+    assert_eq!(error.identifier(), Some("RunMat:cov:InvalidArgument"));
+    assert_eq!(error.identifier(), host_error.identifier());
+    assert_eq!(error.message(), host_error.message());
     assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn cancelling_pending_fallback_download_preserves_all_original_leases() {
+    use std::{
+        future::Future,
+        task::{Context, Poll},
+    };
+    let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
+    let provider = Provider::new(Mode::PendingFallback);
+    let _active = ThreadProviderGuard::set(Some(provider));
+    let input = matrix(provider);
+    let weights = provider.input(&[1., 2., 3., 4.], &[4, 1]);
+    let input_weak = input.allocation_lease().downgrade();
+    let weight_weak = weights.allocation_lease().downgrade();
+    let args = vec![
+        Value::GpuTensor(input.clone()),
+        Value::GpuTensor(weights.clone()),
+    ];
+    let mut call = Box::pin(call_builtin_async_with_outputs("cov", &args, 1));
+    let waker = futures::task::noop_waker();
+    match call.as_mut().poll(&mut Context::from_waker(&waker)) {
+        Poll::Pending => {}
+        Poll::Ready(result) => panic!("expected pending fallback weight download, got {result:?}"),
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(provider.downloads.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+    drop(call);
+    assert_eq!(
+        block_on(provider.inner.download(&input)).unwrap().data,
+        [1., 2., 3., 4., 2., 4., 6., 8.]
+    );
+    assert_eq!(
+        block_on(provider.inner.download(&weights)).unwrap().data,
+        [1., 2., 3., 4.]
+    );
+    assert!(input_weak.acquire().is_some());
+    assert!(weight_weak.acquire().is_some());
+    assert!(provider.uploaded.lock().unwrap().is_empty());
+    drop(args);
+    drop((input, weights));
+    assert!(input_weak.acquire().is_none());
+    assert!(weight_weak.acquire().is_none());
 }

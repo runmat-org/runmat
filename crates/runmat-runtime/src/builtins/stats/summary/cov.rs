@@ -918,29 +918,32 @@ async fn materialize_gpu_weight_vector(
 }
 
 fn validate_gpu_weight_shape(handle: &GpuTensorHandle, expected_rows: usize) -> BuiltinResult<()> {
-    if handle.shape().len() > 2 {
+    validate_weight_shape(handle.shape(), expected_rows)
+}
+
+fn validate_weight_shape(shape: &[usize], expected_rows: usize) -> BuiltinResult<()> {
+    if shape.len() > 2 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "weight vector must be one-dimensional",
         ));
     }
-    let rows = if handle.shape().is_empty() {
-        1
-    } else {
-        handle.shape()[0]
-    };
-    let cols = if handle.shape().len() >= 2 {
-        handle.shape()[1]
-    } else {
-        1
-    };
+    let count = covariance_element_count(shape)?;
+    if count == 0 {
+        return Err(cov_error_with_detail(
+            &COV_ERROR_INVALID_ARGUMENT,
+            "weight vector cannot be empty",
+        ));
+    }
+    let rows = shape.first().copied().unwrap_or(1);
+    let cols = shape.get(1).copied().unwrap_or(1);
     if rows != 1 && cols != 1 {
         return Err(cov_error_with_detail(
             &COV_ERROR_INVALID_ARGUMENT,
             "weight vector must be one-dimensional",
         ));
     }
-    if covariance_element_count(handle.shape())? != expected_rows {
+    if count != expected_rows {
         return Err(cov_error_with_detail(
             &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
             format!("expected {expected_rows} elements"),
@@ -999,18 +1002,7 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
         }
         other => tensor::value_into_tensor_for("cov", other).map_err(cov_internal_error)?,
     };
-    if tensor.shape.len() > 2 {
-        return Err(cov_error_with_detail(
-            &COV_ERROR_INVALID_ARGUMENT,
-            "weight vector must be one-dimensional",
-        ));
-    }
-    if tensor.rows() != expected_rows && tensor.cols() != expected_rows {
-        return Err(cov_error_with_detail(
-            &COV_ERROR_WEIGHT_VECTOR_LENGTH_MISMATCH,
-            format!("expected {expected_rows} elements"),
-        ));
-    }
+    validate_weight_shape(&tensor.shape, expected_rows)?;
     let values = tensor::tensor_into_values_f64(tensor);
     for (idx, weight) in values.iter().enumerate() {
         if !weight.is_finite() || *weight < 0.0 {
@@ -1019,12 +1011,6 @@ async fn value_to_weight_vector(value: Value, expected_rows: usize) -> BuiltinRe
                 format!("weights must be non-negative finite values (index {idx})"),
             ));
         }
-    }
-    if values.is_empty() {
-        return Err(cov_error_with_detail(
-            &COV_ERROR_INVALID_ARGUMENT,
-            "weight vector cannot be empty",
-        ));
     }
     Ok(values)
 }
