@@ -25,10 +25,6 @@ impl runmat_accelerate_api::AccelProvider for F32OnlyProvider {
         Box::pin(async { Err(anyhow::anyhow!("download unsupported")) })
     }
 
-    fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn device_info(&self) -> String {
         "f32-only-test".to_string()
     }
