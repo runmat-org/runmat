@@ -3,6 +3,10 @@ use crate::catalog::inference::argument_error;
 use crate::BuiltinCatalogEntry;
 use runmat_types::*;
 
+mod geometry;
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy)]
 pub(super) enum Spectrum {
     Periodogram,
@@ -60,11 +64,7 @@ pub(super) fn infer(
             let Some(class) = class else {
                 return ValueFact::unknown(DynamicReason::RuntimeValue);
             };
-            let shape = match slot {
-                1 => ShapeFact::from(vec![None, Some(1)]),
-                2 => ShapeFact::from(vec![Some(1), None]),
-                _ => ShapeFact::from(vec![None, None]),
-            };
+            let shape = geometry::output_shape(request, spectrum, slot);
             let domain = if matches!(spectrum, Spectrum::Spectrogram) && slot == 0 {
                 NumericDomain::Complex
             } else {
