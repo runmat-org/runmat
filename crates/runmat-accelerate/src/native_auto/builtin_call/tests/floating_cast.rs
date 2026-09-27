@@ -4,6 +4,8 @@ use super::*;
 use runmat_runtime::context::preparation::{AdmittedBuiltinPreparation, PreparedBuiltinOperands};
 use runmat_runtime::context::{RuntimeAccelerationService, RuntimeServiceFuture};
 
+mod fallback;
+
 struct Adapter(&'static dyn AccelProvider, u16);
 impl RuntimeAccelerationService for Adapter {
     fn supports_operation(&self, _: &str) -> bool {
