@@ -13,6 +13,8 @@ pub(crate) fn wgpu_cost_estimate(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
 ) -> ProviderCostEstimate {
+    let fusion_work =
+        super::provider_contract::fusion_elementwise::physical_work(provider, &query.operation);
     let power_work = {
         #[cfg(feature = "wgpu")]
         {
@@ -51,6 +53,10 @@ pub(crate) fn wgpu_cost_estimate(
                 work.dispatches,
             )
         });
+    dispatches = fusion_work
+        .as_ref()
+        .and_then(|work| work.dispatches)
+        .unwrap_or(dispatches);
     let mut readbacks = u32::from(readback_bytes > 0);
     let mut queue_submissions = dispatches;
     if let Some(work) = &unary_work {
@@ -82,13 +88,19 @@ pub(crate) fn wgpu_cost_estimate(
     // A single elementwise enqueue sample does not measure the composite
     // classification/reduction/readback/kernel route. Keep its prior explicit
     // until the existing invocation feedback supplies a matching observation.
-    let observed_execution_ns = if power_work.is_some() || unary_work.is_some() {
+    let observed_execution_ns = if power_work.is_some() || unary_work.is_some() || fusion_work.is_some() {
         None
     } else {
         average_ns(stats)
     };
     let execution_ns = observed_execution_ns
-        .unwrap_or_else(|| operation_prior_ns(query))
+        .unwrap_or_else(|| {
+            operation_prior_ns(query).saturating_mul(if fusion_work.is_some() {
+                u64::from(dispatches)
+            } else {
+                1
+            })
+        })
         .saturating_add(probe_elements.saturating_mul(3));
     let compile_or_prepare_ns = match query.preparation {
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
@@ -267,5 +279,48 @@ mod tests {
         assert!(estimate.cost.components.upload_ns > 0);
         assert!(estimate.cost.components.download_ns > 0);
         assert_eq!(estimate.cost.components.downstream_ns, 5_000);
+    }
+
+    #[test]
+    fn fused_output_adapter_dispatches_and_physical_upload_bytes_reach_costing() {
+        use runmat_accelerate_api::{
+            ProviderElementType, ProviderLayout, ProviderRepresentation, ProviderResidency,
+            ProviderStorage,
+        };
+        let provider = crate::simple_provider::InProcessProvider::new();
+        let input = ProviderRepresentation {
+            element_type: ProviderElementType::F32,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 8],
+            residency: ProviderResidency::Host,
+        };
+        let mut output = input.clone();
+        output.residency = ProviderResidency::Device;
+        let mut query = ProviderCostQuery {
+            operation: ProviderFeasibilityQuery {
+                operation: ProviderOperationIdentity::new("fusion.elementwise"),
+                family: ProviderOperationFamily::Fusion,
+                inputs: vec![input],
+                outputs: vec![output],
+                workload: ProviderWorkload {
+                    elements: Some(8),
+                    ..Default::default()
+                },
+            },
+            preparation: CandidatePreparationState::Warm,
+            required_upload_bytes: 64,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+        };
+        let adapted = wgpu_cost_estimate(&provider, &query).cost;
+        assert_eq!(adapted.components.queue_ns, 20_000);
+        assert_eq!(adapted.components.allocation_ns, 10_000);
+        assert_eq!(adapted.components.upload_ns, transfer_prior_ns(64));
+        assert_eq!(adapted.source, EstimateSource::StaticPrior);
+        query.operation.outputs[0].element_type = ProviderElementType::F64;
+        let native = wgpu_cost_estimate(&provider, &query).cost;
+        assert_eq!(native.components.queue_ns, 10_000);
+        assert!(adapted.components.execution_ns > native.components.execution_ns);
     }
 }

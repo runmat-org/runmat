@@ -62,6 +62,7 @@ async fn execute_elementwise_outputs(
             request.plan,
             &request.inputs,
             provider.precision(),
+            request.placement,
         )
         .await?;
         let classes = output_ids

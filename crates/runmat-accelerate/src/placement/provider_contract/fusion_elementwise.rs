@@ -4,6 +4,18 @@
 //! F64 allocation.
 use super::*;
 
+/// Shared costing consumes the same physical plan as feasibility. This is a
+/// prior for the complete route, not timing evidence from one kernel enqueue.
+pub(crate) fn physical_work(
+    provider: &(impl AccelProvider + ?Sized),
+    query: &ProviderFeasibilityQuery,
+) -> Option<ProviderResourceEstimate> {
+    match validate(provider, true, query)? {
+        ProviderFeasibility::Supported { estimate } => Some(estimate),
+        ProviderFeasibility::Rejected { .. } => None,
+    }
+}
+
 pub(super) fn validate(
     provider: &(impl AccelProvider + ?Sized),
     wgpu: bool,
@@ -50,6 +62,15 @@ pub(super) fn validate(
         );
     }
     for input in &query.inputs {
+        if !matches!(
+            input.residency,
+            ProviderResidency::Host | ProviderResidency::Device
+        ) {
+            return reject(
+                ProviderRejectionCode::UnsupportedOperation,
+                "fusion.elementwise.unresolved_residency",
+            );
+        }
         let Ok(input_shape) = input
             .shape
             .iter()

@@ -32,6 +32,7 @@ pub(crate) struct ResolvedProgram {
     pub bindings: Vec<BuiltinBindingIdentity>,
     declarations: HashMap<ValueId, CanonicalFusionDeclaration>,
     evidence: BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
+    admission_work: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -43,16 +44,34 @@ impl ResolvedProgram {
         plan: &FusionGroupPlan,
         inputs: &[Value],
         provider_precision: ProviderPrecision,
+        correlation: Option<crate::placement::PlacementCorrelationId>,
     ) -> Result<Self> {
-        Self::resolve_with_policy(plan, inputs, provider_precision, PrecisionPolicy::current())
-            .await
+        Self::resolve_observed(
+            plan,
+            inputs,
+            provider_precision,
+            PrecisionPolicy::current(),
+            correlation,
+        )
+        .await
     }
 
+    #[cfg(test)]
     pub async fn resolve_with_policy(
         plan: &FusionGroupPlan,
         inputs: &[Value],
         provider_precision: ProviderPrecision,
         precision_policy: PrecisionPolicy,
+    ) -> Result<Self> {
+        Self::resolve_observed(plan, inputs, provider_precision, precision_policy, None).await
+    }
+
+    async fn resolve_observed(
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        provider_precision: ProviderPrecision,
+        precision_policy: PrecisionPolicy,
+        correlation: Option<crate::placement::PlacementCorrelationId>,
     ) -> Result<Self> {
         if inputs.len() != plan.inputs.len() {
             return Err(anyhow!("fusion operand count does not match the plan"));
@@ -82,6 +101,7 @@ impl ResolvedProgram {
         let mut bindings = Vec::new();
         let mut declarations = HashMap::new();
         let mut evidence = BTreeMap::new();
+        let mut admission_work = BTreeMap::new();
         for operation in &plan.operations {
             let (input_ids, output) = match operation {
                 FusionOp::Primitive { inputs, output, .. }
@@ -141,13 +161,16 @@ impl ResolvedProgram {
                                     .or_else(|| plan.const_values.get(id))
                             })
                             .collect();
+                        let mut observed = super::admission::AdmissionObservation::new(correlation);
                         let admitted = admit(FusionAdmissionContext {
                             operands: &values,
                             facts: &arguments,
+                            work: &mut observed.work,
                         })
                         .await
-                        .map_err(FusionAdmissionFailure)?
-                        .ok_or_else(|| {
+                        .map_err(FusionAdmissionFailure)?;
+                        admission_work.insert(*output, observed.completed());
+                        let admitted = admitted.ok_or_else(|| {
                             anyhow!("fusion operation requires unavailable domain evidence")
                         })?;
                         fact.kind = admitted.output_kind;
@@ -174,6 +197,7 @@ impl ResolvedProgram {
             provider_precision,
             declarations,
             evidence,
+            admission_work,
         })
     }
 
@@ -247,6 +271,7 @@ impl ResolvedProgram {
             self.provider_precision,
             revisions,
             &self.evidence,
+            &self.admission_work,
         ))?))
     }
 }

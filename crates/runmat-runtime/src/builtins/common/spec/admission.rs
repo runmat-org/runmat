@@ -9,6 +9,22 @@ use std::{future::Future, pin::Pin};
 pub struct FusionAdmissionContext<'a> {
     pub operands: &'a [Option<&'a Value>],
     pub facts: &'a [ValueFact],
+    /// Record before executing work so cancellation and failure are observable.
+    pub work: &'a mut FusionAdmissionWork,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub enum FusionAdmissionWork {
+    #[default]
+    None,
+    Host {
+        elements: u64,
+    },
+    ProviderProbe {
+        binding: BuiltinBindingIdentity,
+        precision: runmat_accelerate_api::ProviderPrecision,
+        inputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
+    },
 }
 
 pub struct FusionAdmissionEvidence {

@@ -19,6 +19,7 @@ use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, Reduction
 use runmat_accelerate_api::CovNormalization;
 
 mod expression;
+mod admission;
 pub(crate) mod semantics;
 mod typed_shader;
 

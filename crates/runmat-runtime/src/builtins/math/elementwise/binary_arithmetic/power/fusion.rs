@@ -53,6 +53,26 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
             }
             let provider = gpu_helpers::exact_provider_for_binary_inputs(left, right)
                 .map_err(anyhow::Error::msg)?;
+            *context.work = FusionAdmissionWork::ProviderProbe {
+                binding: SEMANTICS.binding,
+                precision,
+                inputs: [left, right]
+                    .into_iter()
+                    .map(|handle| {
+                        Ok::<_, anyhow::Error>(runmat_accelerate_api::ProviderRepresentation {
+                            element_type: precision.into(),
+                            storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                            layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                            shape: handle
+                                .shape
+                                .iter()
+                                .map(|extent| u64::try_from(*extent))
+                                .collect::<Result<Vec<_>, _>>()?,
+                            residency: runmat_accelerate_api::ProviderResidency::Device,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            };
             let left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(left);
             let right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(right);
             let result = provider.classify_real_power(left, right).await;
@@ -69,6 +89,9 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
                 return Ok(None);
             };
             let plan = BroadcastPlan::new(&left.shape, &right.shape).map_err(anyhow::Error::msg)?;
+            *context.work = FusionAdmissionWork::Host {
+                elements: u64::try_from(plan.len())?,
+            };
             let value = |tensor: &Tensor, index| {
                 let value = tensor::tensor_value_f64(tensor, index);
                 match precision {

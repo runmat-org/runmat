@@ -109,6 +109,50 @@ fn real_inputs_do_not_fabricate_power_domain_evidence() {
 }
 
 #[test]
+fn domain_rejection_retains_completed_admission_work_without_gpu_success() {
+    use crate::placement::{begin_trace, report, PlacementEventKind};
+    let plan = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::ElemPow,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let trace = begin_trace("fusion.power_complex_admission", None);
+    let correlation = trace.correlation();
+    let result = futures::executor::block_on(ResolvedProgram::resolve(
+        &plan,
+        &[Value::Num(-1.0), Value::Num(0.5)],
+        ProviderPrecision::F64,
+        Some(correlation),
+    ));
+    assert!(result.is_err());
+    trace.complete(None, None);
+    let report = report();
+    let recorded = report
+        .traces
+        .iter()
+        .find(|trace| trace.correlation == correlation)
+        .unwrap();
+    let event = recorded
+        .events
+        .iter()
+        .find(|event| event.kind == PlacementEventKind::Prepare)
+        .unwrap();
+    assert_eq!(event.reason.as_deref(), Some("domain_host_preparation"));
+    assert!(event.duration_ns.is_some());
+    assert!(event
+        .attributes
+        .iter()
+        .any(|attribute| attribute.key == "completed" && attribute.value == 1));
+    assert!(!recorded
+        .events
+        .iter()
+        .any(|event| event.kind == PlacementEventKind::Kernel));
+}
+
+#[test]
 fn power_uses_exact_paired_evidence_and_the_shared_exceptional_value_helper() {
     let power_plan = plan(
         vec![FusionOp::Primitive {

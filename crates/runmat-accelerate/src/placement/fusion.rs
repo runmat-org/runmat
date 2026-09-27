@@ -158,6 +158,43 @@ impl FusionPlacementObserver {
         );
     }
 
+    pub(crate) fn admission(
+        &self,
+        started: Instant,
+        work: &runmat_runtime::builtins::common::spec::FusionAdmissionWork,
+        completed: bool,
+    ) {
+        use runmat_runtime::builtins::common::spec::FusionAdmissionWork;
+        let (reason, elements) = match work {
+            FusionAdmissionWork::None => return,
+            FusionAdmissionWork::Host { elements } => ("domain_host_preparation", Some(*elements)),
+            FusionAdmissionWork::ProviderProbe { inputs, .. } => (
+                "domain_provider_probe_wall",
+                inputs.iter().try_fold(0u64, |sum, input| {
+                    sum.checked_add(input.checked_element_count()?)
+                }),
+            ),
+        };
+        let mut attributes = vec![PlacementAttribute {
+            key: "completed".into(),
+            value: u64::from(completed),
+        }];
+        if let Some(elements) = elements {
+            attributes.push(PlacementAttribute {
+                key: "input_elements".into(),
+                value: elements,
+            });
+        }
+        self.event(
+            PlacementEventKind::Prepare,
+            Some(PlacementVariant::ProviderFusion),
+            Some(reason),
+            Some(duration_ns_saturating(started.elapsed())),
+            None,
+            &attributes,
+        );
+    }
+
     pub(crate) fn upload(&self, started: Instant, bytes: Option<u64>) {
         self.timed(PlacementEventKind::Upload, started, bytes, None);
     }
