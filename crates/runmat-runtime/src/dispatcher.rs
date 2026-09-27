@@ -231,7 +231,8 @@ pub fn gather_if_needed(_value: &Value) -> Result<Value, RuntimeError> {
 }
 
 /// Call a registered language builtin by name.
-/// Supports function overloading by trying different argument patterns.
+/// Selects one implementation by the current binding authority. Supported
+/// argument forms are admitted by that implementation, not by replaying errors.
 /// Returns an error if no builtin with that name and compatible arguments is found.
 pub fn call_builtin(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
     futures::executor::block_on(call_builtin_async(name, args))
@@ -334,8 +335,7 @@ async fn call_builtin_async_impl(
             categorized.push(b);
         }
     }
-    let matching_count = matching_bindings.len() + no_category.len() + categorized.len();
-    let implementations = matching_bindings
+    let mut implementations = matching_bindings
         .into_iter()
         .rev()
         .map(|binding| {
@@ -357,40 +357,18 @@ async fn call_builtin_async_impl(
                 }),
         );
 
-    // Try each builtin until one succeeds. Within each group, prefer later-registered
-    // implementations to allow overrides when names collide.
-    let mut last_error = RuntimeError::new("unknown error");
-    for (origin, implementation) in implementations {
-        // Preparation failures remain terminal, rather than overload retries.
-        let prepared = preparation::prepare_selected(origin, name, args).await?;
-        match selected_execution::execute(implementation, prepared.as_deref().unwrap_or(args)).await
-        {
-            Ok(result) => return compatibility_checked_builtin_result(name, args, result),
-            Err(error) => last_error = error,
-        }
-    }
-
-    // A single implementation already knows whether its inputs are invalid or
-    // whether execution failed. Preserve that error verbatim instead of
-    // presenting it as overload resolution noise.
-    if matching_count == 1 || last_error.identifier().is_some() {
-        return Err(last_error);
-    }
-
-    // If none succeeded, return the last error
-    let identifier = last_error
-        .identifier()
-        .unwrap_or("RunMat:NoMatchingOverload")
-        .to_string();
-    let mut builder = build_runtime_error(format!(
-        "No matching overload for `{}` with {} args: {}",
-        name,
-        args.len(),
-        last_error.message()
-    ))
-    .with_source(last_error);
-    builder = builder.with_identifier(identifier);
-    Err(builder.build())
+    // Preserve existing authority/list priority, but select before preparation
+    // or execution can have effects. Neither ordinary RuntimeError nor a macro
+    // wrapper's conversion error is evidence that another candidate is safe.
+    // The earlier empty-registry branch guarantees a winner exists here.
+    let (origin, implementation) = implementations
+        .next()
+        .expect("nonempty builtin authority has a selected implementation");
+    let prepared = preparation::prepare_selected(origin, name, args).await?;
+    // Explicit Requested gather adaptation stays within this one implementation.
+    let result =
+        selected_execution::execute(implementation, prepared.as_deref().unwrap_or(args)).await?;
+    compatibility_checked_builtin_result(name, args, result)
 }
 
 async fn try_distributed_builtin(

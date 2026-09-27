@@ -52,7 +52,7 @@ pub fn runtime_builtin_bindings_by_name(name: &str) -> Vec<RuntimeBuiltinBinding
 static NAME_INDEX: std::sync::LazyLock<Vec<RuntimeBuiltinBinding>> =
     std::sync::LazyLock::new(|| {
         let mut entries = runtime_builtin_bindings();
-        // Stable sorting preserves dispatcher retry order among equal names.
+        // Stable sorting preserves dispatcher selection priority among equal names.
         entries.sort_by(|left, right| {
             compare_names(left.identity.builtin.name, right.identity.builtin.name)
         });
