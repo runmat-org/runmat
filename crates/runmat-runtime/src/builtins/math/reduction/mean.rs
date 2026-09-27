@@ -673,7 +673,7 @@ pub(crate) async fn mean_builtin(value: Value, rest: Vec<Value>) -> crate::Built
     if matches!(parsed.output, OutputTemplate::Native) {
         if let Value::GpuTensor(handle) = &value {
             if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-                return mean_native_integer_gpu(handle.clone(), &parsed).await;
+                return native_resident::evaluate(handle.clone(), &parsed).await;
             }
         }
         if let Some(result) = mean_native_integer(&value, &parsed)? {
@@ -722,57 +722,8 @@ fn mean_native_integer(value: &Value, parsed: &ParsedArguments) -> BuiltinResult
         .map_err(mean_internal_error)
 }
 
-async fn mean_native_integer_gpu(
-    handle: GpuTensorHandle,
-    parsed: &ParsedArguments,
-) -> BuiltinResult<Value> {
-    if let Some(weights) = parsed.weights.as_ref() {
-        let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-            mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
-        })?;
-        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        let storage = gathered
-            .integer_storage()
-            .cloned()
-            .ok_or_else(|| mean_internal_error("mean: expected gathered integer storage"))?;
-        let dim = match &parsed.axes {
-            MeanAxes::Default => default_dimension_from_shape(&gathered.shape),
-            MeanAxes::Dim(dim) => *dim,
-            MeanAxes::Vec(_) | MeanAxes::All => {
-                return Err(mean_invalid_argument(
-                    "mean: Weights cannot be combined with vecdim or 'all'",
-                ));
-            }
-        };
-        let result = weighted_integer_mean(&storage, &gathered.shape, dim, weights)?;
-        let uploaded = gpu_helpers::upload_tensor(provider, &result).map_err(|error| {
-            mean_internal_error(format!(
-                "mean: failed to upload weighted native result: {error}"
-            ))
-        })?;
-        return Ok(Value::GpuTensor(uploaded));
-    }
-    let dims = resolve_native_dims(handle.shape(), &parsed.axes)?;
-    if dims.is_empty() {
-        return Ok(Value::GpuTensor(handle));
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
-        mean_internal_error("mean: native integer gpuArray requires an acceleration provider")
-    })?;
-    let result = if dims.len() == handle.shape().len() {
-        provider.reduce_integer_mean_native(&handle).await
-    } else if dims.len() == 1 {
-        provider
-            .reduce_integer_mean_native_dim(&handle, dims[0])
-            .await
-    } else {
-        provider
-            .reduce_integer_mean_native_dims(&handle, &dims)
-            .await
-    }
-    .map_err(|err| mean_internal_error(format!("mean: {err}")))?;
-    Ok(Value::GpuTensor(result))
-}
+#[path = "mean/native_resident.rs"]
+mod native_resident;
 
 fn resolve_native_dims(shape: &[usize], axes: &MeanAxes) -> BuiltinResult<Vec<usize>> {
     let mut dims = match axes {
