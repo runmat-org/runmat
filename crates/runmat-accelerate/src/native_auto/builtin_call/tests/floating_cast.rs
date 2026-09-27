@@ -96,7 +96,6 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
 #[test]
 #[ignore = "requires actual WGPU device; execute explicitly for template adaptation qualification"]
 fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_receipt() {
-    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     use runmat_accelerate_api::{
         GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
     };
@@ -129,6 +128,7 @@ fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_recei
                 .clone()
                 .with_acceleration(Rc::new(Adapter(provider, 0))),
         );
+        context.set_runmat_extensions_enabled(true);
         // Host-like must download the resident result; device-like must upload
         // the host result. Neither is the form1 no-adaptation physical route.
         let args = [
