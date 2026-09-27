@@ -9,6 +9,10 @@ pub struct InvalidNumericUploadResult {
     cleanup: Option<crate::allocation::GpuHandleReleaseError>,
 }
 impl InvalidNumericUploadResult {
+    pub(crate) fn reject(handle: GpuTensorHandle, detail: String) -> anyhow::Error {
+        let cleanup = handle.release().err();
+        Self { detail, cleanup }.into()
+    }
     /// Failed retirement retains the exact owner through this error carrier.
     pub fn cleanup_error(&self) -> Option<&crate::allocation::GpuHandleReleaseError> {
         self.cleanup.as_ref()
@@ -69,8 +73,7 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     };
     // Release only the result's owning reference. Borrowed aliases retain
     // their own leases; no ambient or producing-provider free authority exists.
-    let cleanup = handle.release().err();
-    Err(InvalidNumericUploadResult { detail, cleanup }.into())
+    Err(InvalidNumericUploadResult::reject(handle, detail))
 }
 
 #[cfg(test)]

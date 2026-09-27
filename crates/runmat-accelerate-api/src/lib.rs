@@ -21,6 +21,7 @@ pub use allocation::{
     GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
 };
 mod native_device;
+mod logical_upload;
 pub mod observation;
 mod residency;
 mod numeric_upload;
@@ -28,6 +29,7 @@ mod placement;
 mod power;
 mod numerical_domain;
 
+pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
 pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
@@ -1443,6 +1445,22 @@ fn unsupported_future<T>(message: &'static str) -> AccelProviderFuture<'static, 
 
 /// Device/provider interface that backends implement and register into the runtime layer
 pub trait AccelProvider: Send + Sync {
+    /// Upload a canonical host logical value through shared admission.
+    fn upload_logical(&self, host: &HostLogicalTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        upload_logical_protecting(self, host, &[])
+    }
+
+    /// Producer-owned logical registration. Implementations choose their real
+    /// U8/F32/F64 encoding and publish a logically classified owning view.
+    /// Numeric upload followed by caller relabeling is not this contract.
+    fn upload_logical_raw(
+        &self,
+        _host: &HostLogicalTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(unsupported_provider_operation(
+            "provider does not implement logical upload",
+        ))
+    }
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
 
