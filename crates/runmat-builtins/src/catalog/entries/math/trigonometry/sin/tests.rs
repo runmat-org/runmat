@@ -2,9 +2,13 @@ use crate::*;
 use runmat_types::EffectKind;
 
 #[test]
-fn admitted_hyperbolic_float_facts_keep_class_shape_but_not_input_placement() {
+fn admitted_trigonometric_float_facts_keep_class_shape_but_not_input_placement() {
     use runmat_types::*;
     for entry in [
+        &SIN_CATALOG_ENTRY,
+        &COS_CATALOG_ENTRY,
+        &TAN_CATALOG_ENTRY,
+        &ATAN_CATALOG_ENTRY,
         &SINH_CATALOG_ENTRY,
         &COSH_CATALOG_ENTRY,
         &ASINH_CATALOG_ENTRY,

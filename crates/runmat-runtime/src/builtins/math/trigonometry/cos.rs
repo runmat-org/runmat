@@ -98,6 +98,20 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Cos) {
         return apply_output_template(symbolic, &template).await;
     }
+    let base = if rest.is_empty() {
+        super::inverse_helpers::preparation::unary(
+            runmat_builtins::COS_CATALOG_ENTRY.identity,
+            value,
+            cos_admitted,
+        )
+        .await?
+    } else {
+        cos_admitted(value).await?
+    };
+    apply_output_template(base, &template).await
+}
+
+async fn cos_admitted(value: Value) -> BuiltinResult<Value> {
     let base = match value {
         Value::GpuTensor(handle) => cos_gpu(handle).await?,
         Value::Complex(re, im) => Value::Complex(cos_complex_re(re, im), cos_complex_im(re, im)),
@@ -111,7 +125,7 @@ async fn cos_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => cos_real(other)?,
     };
-    apply_output_template(base, &template).await
+    Ok(base)
 }
 
 async fn ensure_cos_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {

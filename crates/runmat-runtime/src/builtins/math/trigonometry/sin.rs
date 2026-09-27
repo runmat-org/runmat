@@ -100,6 +100,20 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sin) {
         return apply_output_template(symbolic, &output).await;
     }
+    let base = if rest.is_empty() {
+        super::inverse_helpers::preparation::unary(
+            runmat_builtins::SIN_CATALOG_ENTRY.identity,
+            value,
+            sin_admitted,
+        )
+        .await?
+    } else {
+        sin_admitted(value).await?
+    };
+    apply_output_template(base, &output).await
+}
+
+async fn sin_admitted(value: Value) -> BuiltinResult<Value> {
     let base = match value {
         Value::GpuTensor(handle) => sin_gpu(handle).await?,
         Value::Complex(re, im) => Value::Complex(sin_complex_re(re, im), sin_complex_im(re, im)),
@@ -113,7 +127,7 @@ async fn sin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => sin_real(other)?,
     };
-    apply_output_template(base, &output).await
+    Ok(base)
 }
 
 async fn ensure_sin_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {

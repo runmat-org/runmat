@@ -137,5 +137,14 @@ pub(super) fn infer_inverse_trigonometric(
     if accepts_like {
         apply_inverse_trigonometric_like(request, &mut output, name, &mut diagnostics);
     }
+    if accepts_like
+        && request.arguments.len() == 1
+        && (matches!(input.kind, ValueKindFact::Unknown)
+            || matches!(input.kind, ValueKindFact::Numeric(numeric)
+                if matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+                    && numeric.domain != NumericDomain::Complex))
+    {
+        output.residency = runmat_types::ResidencyFact::Unknown;
+    }
     finish_fixed(entry, request, output, diagnostics)
 }

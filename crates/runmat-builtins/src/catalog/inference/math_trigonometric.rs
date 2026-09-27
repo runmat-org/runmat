@@ -77,7 +77,11 @@ pub(super) fn infer_trigonometric(
 
     match request.arguments.as_slice() {
         [_] => {
-            if matches!(output.residency, ResidencyFact::Device { .. }) {
+            if matches!(output.residency, ResidencyFact::Device { .. })
+                || matches!(input.kind, ValueKindFact::Numeric(numeric)
+                    if matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+                        && numeric.domain != NumericDomain::Complex)
+            {
                 output.residency = ResidencyFact::Unknown;
             }
         }

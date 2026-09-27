@@ -16,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 
-const NAMES: &[&str] = &["sinh", "cosh", "asinh", "tanh"];
+const NAMES: &[&str] = &["sin", "cos", "tan", "atan", "sinh", "cosh", "asinh", "tanh"];
 type Events = Rc<RefCell<Vec<&'static str>>>;
 struct Observer(Events);
 impl BuiltinPreparationObservation for Observer {
@@ -113,7 +113,14 @@ fn floating_trig_admission_and_output_errors_precede_preparation() {
             ))
             .unwrap();
             if outputs == 1 {
-                assert_eq!(result, Value::Num(if *name == "cosh" { 1.0 } else { 0.0 }));
+                assert_eq!(
+                    result,
+                    Value::Num(if matches!(*name, "cos" | "cosh") {
+                        1.0
+                    } else {
+                        0.0
+                    })
+                );
             }
             assert_eq!(&*events.borrow(), &["prepare", "begin", "success"]);
             events.borrow_mut().clear();
@@ -140,6 +147,10 @@ fn floating_trig_preparation_preserves_empty_nd_shape_single_and_values() {
             assert_eq!(result.numeric_dtype(), runmat_value::NumericDType::F32);
             for (&actual, source) in result.as_f32_slice().unwrap().iter().zip(data) {
                 let expected = match *name {
+                    "sin" => source.sin(),
+                    "cos" => source.cos(),
+                    "tan" => source.tan(),
+                    "atan" => source.atan(),
                     "sinh" => source.sinh(),
                     "cosh" => source.cosh(),
                     "asinh" => source.asinh(),

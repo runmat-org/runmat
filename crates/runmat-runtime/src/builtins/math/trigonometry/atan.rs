@@ -101,6 +101,20 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let template = parse_output_template(&rest)?;
     crate::builtins::common::validation::reject_typed_complex_integer(&value, "atan")?;
+    let base = if rest.is_empty() {
+        super::inverse_helpers::preparation::unary(
+            runmat_builtins::ATAN_CATALOG_ENTRY.identity,
+            value,
+            atan_admitted,
+        )
+        .await?
+    } else {
+        atan_admitted(value).await?
+    };
+    apply_output_template(base, &template).await
+}
+
+async fn atan_admitted(value: Value) -> BuiltinResult<Value> {
     let base = match value {
         Value::GpuTensor(handle) => atan_gpu(handle).await?,
         Value::Complex(re, im) => {
@@ -117,7 +131,7 @@ async fn atan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => atan_real(other)?,
     };
-    apply_output_template(base, &template).await
+    Ok(base)
 }
 
 async fn atan_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {

@@ -96,6 +96,20 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Tan) {
         return apply_output_template(symbolic, &template).await;
     }
+    let base = if rest.is_empty() {
+        super::inverse_helpers::preparation::unary(
+            runmat_builtins::TAN_CATALOG_ENTRY.identity,
+            value,
+            tan_admitted,
+        )
+        .await?
+    } else {
+        tan_admitted(value).await?
+    };
+    apply_output_template(base, &template).await
+}
+
+async fn tan_admitted(value: Value) -> BuiltinResult<Value> {
     let base = match value {
         Value::GpuTensor(handle) => tan_gpu(handle).await?,
         Value::Complex(re, im) => {
@@ -112,7 +126,7 @@ async fn tan_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         }
         other => tan_real(other)?,
     };
-    apply_output_template(base, &template).await
+    Ok(base)
 }
 
 async fn ensure_tan_extensions(value: &Value, rest: &[Value]) -> BuiltinResult<()> {
