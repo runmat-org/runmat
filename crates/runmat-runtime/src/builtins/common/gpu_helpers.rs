@@ -90,10 +90,11 @@ pub fn select_resident_output_source(
     Ok(selected.map(|(handle, _)| handle))
 }
 
-pub use runmat_accelerate_api::{
-    restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
-    HandleMetadataRestoreGuard,
-};
+pub use runmat_accelerate_api::ResidencyRestoreGuard;
+
+mod adoption;
+pub use adoption::{complex_gpu_value, logical_gpu_value, resident_gpu_value};
+pub(crate) use adoption::propagate_output_provenance;
 
 pub fn expected_gpu_class_identity(
     precision: Option<ProviderPrecision>,
@@ -853,52 +854,6 @@ pub fn upload_exact_integer_scalar_like(
         }
         _ => Ok(None),
     }
-}
-
-/// Wrap a GPU tensor handle, marking it as resident for downstream fusion-aware
-/// consumers and tests.
-pub fn resident_gpu_value(mut handle: GpuTensorHandle) -> Value {
-    let provenance = runmat_accelerate_api::handle_provenance(&handle)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    handle.descriptor.provenance = Some(provenance);
-    runmat_accelerate_api::mark_residency(&handle);
-    Value::GpuTensor(handle)
-}
-
-/// Propagate explicit device intent through a provider operation.
-///
-/// Provider-created handles begin with automatic provenance. Runtime operations
-/// must promote the result to explicit provenance whenever any resident input
-/// came from an explicit `gpuArray` boundary; otherwise introspection and
-/// fallback policy would incorrectly treat a user-owned device value as an
-/// internal optimization.
-pub(crate) fn propagate_output_provenance<'a>(
-    output: &mut GpuTensorHandle,
-    inputs: impl IntoIterator<Item = &'a GpuTensorHandle>,
-) {
-    let provenance = if inputs
-        .into_iter()
-        .any(runmat_accelerate_api::handle_is_explicit)
-    {
-        runmat_accelerate_api::GpuHandleProvenance::Explicit
-    } else {
-        runmat_accelerate_api::GpuHandleProvenance::Automatic
-    };
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
-}
-
-/// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that
-/// predicates like `islogical` can inspect the handle without downloading it.
-pub fn logical_gpu_value(handle: GpuTensorHandle) -> Value {
-    runmat_accelerate_api::set_handle_logical(&handle, true);
-    resident_gpu_value(handle)
-}
-
-/// Wrap a GPU tensor handle as a complex gpuArray value.
-pub fn complex_gpu_value(mut handle: GpuTensorHandle) -> Value {
-    runmat_accelerate_api::set_handle_logical(&handle, false);
-    handle.descriptor.storage = Some(GpuTensorStorage::ComplexInterleaved);
-    resident_gpu_value(handle)
 }
 
 #[cfg(test)]
