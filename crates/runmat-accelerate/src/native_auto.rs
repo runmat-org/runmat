@@ -1329,6 +1329,7 @@ impl NativeAutoOffload {
                 cpu_cost,
                 provider_cost,
                 feedback,
+                provider_query: _,
             }) => {
                 evaluation.recommend_gpu = selected.kind.is_provider();
                 evaluation.reason = DecisionReason::CostModel;
