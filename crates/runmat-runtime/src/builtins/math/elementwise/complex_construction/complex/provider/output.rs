@@ -18,7 +18,7 @@ pub(super) fn valid_unary(
             precision: runmat_accelerate_api::handle_precision(input),
             integer: None,
             logical: false,
-            alias: GpuOutputAliasPolicy::RequireDistinct,
+            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }
@@ -42,7 +42,7 @@ pub(super) fn valid_binary(
             precision,
             integer: None,
             logical: false,
-            alias: GpuOutputAliasPolicy::RequireDistinct,
+            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }

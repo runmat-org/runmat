@@ -27,7 +27,7 @@ impl<'a> RealOperand<'a> {
 
     pub(super) fn shape(&self) -> &[usize] {
         match self {
-            Self::Resident(handle) => &handle.shape,
+            Self::Resident(handle) => handle.shape(),
             Self::Host(tensor) => &tensor.shape,
         }
     }
@@ -35,8 +35,6 @@ impl<'a> RealOperand<'a> {
 
 pub(super) struct RealGpuOperand {
     pub(super) handle: GpuTensorHandle,
-    owned: bool,
-    protected: Vec<GpuTensorHandle>,
 }
 
 impl RealGpuOperand {
@@ -61,8 +59,6 @@ impl RealGpuOperand {
                 }
                 Ok(Self {
                     handle: handle.clone(),
-                    owned: false,
-                    protected: Vec::new(),
                 })
             }
             RealOperand::Host(input) => {
@@ -71,25 +67,13 @@ impl RealGpuOperand {
                     .map(|handle| gpu_helpers::ResidencyRestoreGuard::new(handle))
                     .collect();
                 let handle = gpu_helpers::upload_tensor_protecting(provider, &input, protected)
-                    .map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?;
-                runmat_accelerate_api::set_handle_logical(&handle, false);
-                Ok(Self {
-                    handle,
-                    owned: true,
-                    protected: protected.iter().map(|handle| (*handle).clone()).collect(),
-                })
+                    .map_err(|source| {
+                        let mut failure = error(&COMPLEX_ERROR_INTERNAL, source.to_string());
+                        failure.source = Some(Box::new(source));
+                        failure
+                    })?;
+                Ok(Self { handle })
             }
-        }
-    }
-}
-
-impl Drop for RealGpuOperand {
-    fn drop(&mut self) {
-        if self.owned {
-            gpu_helpers::free_unprotected_exact_owner(
-                &self.handle,
-                &self.protected.iter().collect::<Vec<_>>(),
-            );
         }
     }
 }
@@ -114,4 +98,31 @@ pub(super) fn floating_result_precision(
 fn is_single(value: &Value) -> bool {
     matches!(value, Value::Tensor(tensor) if tensor.numeric_dtype() == NumericDType::F32)
         || matches!(value, Value::GpuTensor(handle) if handle_precision(handle) == Some(ProviderPrecision::F32))
+}
+
+#[cfg(test)]
+mod lease_tests {
+    use super::*;
+    use runmat_accelerate_api::{
+        test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+    };
+
+    #[test]
+    fn operand_drop_preserves_borrowed_alias_and_retires_last_upload_owner() {
+        let owner = TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let borrowed = RealGpuOperand {
+            handle: allocation.handle.clone(),
+        };
+        drop(borrowed);
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.validate_live().unwrap();
+        let owned = RealGpuOperand {
+            handle: allocation.handle,
+        };
+        drop(owned);
+        assert_eq!(allocation.probe.retirements(), 1);
+    }
 }

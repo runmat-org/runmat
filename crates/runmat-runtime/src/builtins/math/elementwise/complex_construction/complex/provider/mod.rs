@@ -2,8 +2,8 @@ mod operand;
 mod output;
 
 use runmat_accelerate_api::{
-    handle_integer_type, handle_is_logical, handle_precision, handle_provenance, handle_storage,
-    set_handle_provenance, AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage,
+    handle_integer_type, handle_is_logical, handle_precision, handle_storage, AccelProvider,
+    GpuTensorHandle, GpuTensorStorage,
 };
 use runmat_builtins::{COMPLEX_ERROR_INTERNAL, COMPLEX_ERROR_INVALID_INPUT};
 use runmat_value::Value;
@@ -85,26 +85,22 @@ async fn try_unary_provider(
     owner: &'static dyn AccelProvider,
 ) -> BuiltinResult<Option<Value>> {
     let metadata = gpu_helpers::ResidencyRestoreGuard::new(input);
-    let provenance = handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
     let result = owner.complex_from_real(input).await;
     drop(metadata);
     match result {
         Ok(mut output) if output::valid_unary(&output, input, owner) => {
-            set_handle_provenance(&mut output, provenance);
-            Ok(Some(gpu_helpers::resident_gpu_value(output)))
+            gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+            gpu_helpers::complex_gpu_value(output).map(Some)
         }
-        Ok(output) => {
-            gpu_helpers::free_rejected_provider_output(&output, &[input], owner);
-            Err(error(
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            error(
                 &COMPLEX_ERROR_INTERNAL,
                 "provider complex_from_real returned malformed output",
-            ))
-        }
-        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
-        Err(detail) => Err(error(
-            &COMPLEX_ERROR_INTERNAL,
-            format!("provider complex_from_real failed: {detail}"),
+            ),
         )),
+        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
+        Err(detail) => Err(provider_error("complex_from_real", detail)),
     }
 }
 
@@ -146,27 +142,28 @@ async fn try_binary_provider(
                 owner,
             ) =>
         {
-            let provenance = handle_provenance(source).unwrap_or(GpuHandleProvenance::Automatic);
-            set_handle_provenance(&mut output, provenance);
-            Ok(Some(gpu_helpers::resident_gpu_value(output)))
+            gpu_helpers::propagate_output_provenance(&mut output, [source])?;
+            gpu_helpers::complex_gpu_value(output).map(Some)
         }
-        Ok(output) => {
-            gpu_helpers::free_rejected_provider_output(
-                &output,
-                &[&real.handle, &imaginary.handle],
-                owner,
-            );
-            Err(error(
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            error(
                 &COMPLEX_ERROR_INTERNAL,
                 "provider complex_from_real_imag returned malformed output",
-            ))
-        }
-        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
-        Err(detail) => Err(error(
-            &COMPLEX_ERROR_INTERNAL,
-            format!("provider complex_from_real_imag failed: {detail}"),
+            ),
         )),
+        Err(detail) if gpu_helpers::provider_hook_is_unsupported(&detail) => Ok(None),
+        Err(detail) => Err(provider_error("complex_from_real_imag", detail)),
     }
+}
+
+fn provider_error(operation: &str, source: anyhow::Error) -> crate::RuntimeError {
+    let mut failure = error(
+        &COMPLEX_ERROR_INTERNAL,
+        format!("provider {operation} failed: {source}"),
+    );
+    failure.source = Some(source.into_boxed_dyn_error());
+    failure
 }
 
 fn resident_inputs<'a>(real: &'a Value, imaginary: &'a Value) -> Vec<&'a GpuTensorHandle> {
@@ -186,7 +183,11 @@ async fn unary_fallback(
     let metadata = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered = gpu_helpers::download_value_preserving_residency_async(owner, &handle).await;
     drop(metadata);
-    let output = host::unary(gathered.map_err(|detail| error(&COMPLEX_ERROR_INTERNAL, detail))?)?;
+    let output = host::unary(gathered.map_err(|source| {
+        let mut failure = error(&COMPLEX_ERROR_INTERNAL, source.to_string());
+        failure.source = Some(Box::new(source));
+        failure
+    })?)?;
     gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME)
 }
 
