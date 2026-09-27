@@ -40,6 +40,11 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
         let raw_values = self.get_entry_raw(values)?;
+        if matrix.view().is_logical() && !self.allocations.requires_logical_encoding(values)? {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "logical scatter row/column requires canonical logical values",
+            ));
+        }
         if raw_matrix.integer_type().is_none()
             && (raw_matrix.precision != NumericPrecision::F32
                 || raw_values.precision != NumericPrecision::F32
@@ -191,7 +196,16 @@ impl WgpuProvider {
             &bg,
             groups,
         );
-        self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
+        if matrix.view().is_logical() {
+            self.register_logical_buffer(
+                out_buffer,
+                vec![rows, cols],
+                rows * cols,
+                BufferUsageClass::Generic,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
+        }
     }
     pub(crate) fn sub2ind_exec(
         &self,
@@ -592,6 +606,11 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let raw_matrix = self.get_entry_raw(matrix)?;
         let raw_values = self.get_entry_raw(values)?;
+        if matrix.view().is_logical() && !self.allocations.requires_logical_encoding(values)? {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "logical scatter row/column requires canonical logical values",
+            ));
+        }
         if raw_matrix.integer_type().is_none()
             && (raw_matrix.precision != NumericPrecision::F32
                 || raw_values.precision != NumericPrecision::F32
@@ -745,7 +764,16 @@ impl WgpuProvider {
             &bg,
             groups,
         );
-        self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
+        if matrix.view().is_logical() {
+            self.register_logical_buffer(
+                out_buffer,
+                vec![rows, cols],
+                rows * cols,
+                BufferUsageClass::Generic,
+            )
+        } else {
+            self.register_existing_buffer(out_buffer, vec![rows, cols], rows * cols)
+        }
     }
 
     pub(crate) fn gather_linear_exec(
@@ -1285,6 +1313,58 @@ mod tests {
             linear_values_entry_len(None, GpuTensorStorage::ComplexInterleaved, 3),
             Some(6)
         );
+    }
+
+    #[test]
+    #[ignore = "requires an actual WGPU device"]
+    fn functional_scatter_preserves_logical_output_and_borrowed_source() {
+        use runmat_accelerate_api::{AccelProvider, HostLogicalTensorView};
+        let provider = register_wgpu_provider(WgpuProviderOptions::default())
+            .expect("actual WGPU qualification requires a device");
+        let source = provider
+            .upload_logical(&HostLogicalTensorView {
+                data: &[0, 1, 1, 0],
+                shape: &[2, 2],
+            })
+            .unwrap();
+        let values = provider
+            .upload_logical(&HostLogicalTensorView {
+                data: &[1, 1],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        let result = provider.scatter_column(&source, 0, &values);
+        if provider.precision() == runmat_accelerate_api::ProviderPrecision::F64 {
+            assert!(
+                runmat_accelerate_api::is_unsupported_provider_operation(&result.unwrap_err()),
+                "the current floating scatter shader is F32-only"
+            );
+        } else {
+            let output = result.unwrap();
+            assert!(output.view().is_logical());
+            assert!(!output.shares_allocation_with(&source));
+            assert_eq!(
+                futures::executor::block_on(provider.download(&output))
+                    .unwrap()
+                    .data,
+                vec![1.0, 1.0, 1.0, 0.0]
+            );
+        }
+        assert_eq!(
+            futures::executor::block_on(provider.download(&source))
+                .unwrap()
+                .data,
+            vec![0.0, 1.0, 1.0, 0.0]
+        );
+        let numeric = provider
+            .upload(&runmat_accelerate_api::HostTensorView {
+                data: &[2.0, 3.0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &provider.scatter_column(&source, 0, &numeric).unwrap_err()
+        ));
     }
 
     #[test]
