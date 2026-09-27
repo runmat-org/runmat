@@ -1,9 +1,11 @@
 use super::{admission::AdmittedCall, class, BinaryArithmeticInferencePolicy};
-use crate::catalog::inference::{argument_error, finish_fixed, preserved_binary_residency};
-use crate::BuiltinCatalogEntry;
+use crate::catalog::inference::{argument_error, finish_fixed};
+use crate::{
+    BinaryArithmeticInferenceRule, BuiltinCatalogEntry, BuiltinInferenceRule, MathInferenceRule,
+};
 use runmat_types::{
-    broadcast_shape, CallInference, CallRequest, DynamicReason, NumericDomain, ResidencyFact,
-    ShapeFact, ValueFact, ValueKindFact,
+    broadcast_shape, CallInference, CallRequest, ContiguityFact, DynamicReason, LayoutFact,
+    NumericDomain, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(
@@ -25,7 +27,21 @@ pub(super) fn infer(
             ShapeFact::Unknown
         }
     };
-    output.residency = preserved_binary_residency(&left.residency, &right.residency);
+    // Device provenance and the eventual automatic placement decision are not
+    // represented in ValueFact. Input residency alone cannot promise residency
+    // after provider fallback or automatic preparation.
+    let floating_pair = [left, right].iter().all(|fact| {
+        fact.numeric()
+            .is_some_and(|n| n.class.integer_class().is_none() && n.domain == NumericDomain::Real)
+    });
+    output.residency = if !floating_pair
+        && left.residency == ResidencyFact::Host
+        && right.residency == ResidencyFact::Host
+    {
+        ResidencyFact::Host
+    } else {
+        ResidencyFact::Unknown
+    };
     match class::result(policy, left, right) {
         Ok(kind) => output.kind = kind,
         Err(DynamicReason::UnsupportedRepresentation) => {
@@ -39,6 +55,28 @@ pub(super) fn infer(
         Err(reason) => output.certainty = runmat_types::CertaintyFact::Dynamic(reason),
     }
     crate::catalog::inference::materialize(&mut output);
+    if left.storage == StorageFact::Sparse || right.storage == StorageFact::Sparse {
+        let preserves_sparse = matches!(
+            entry.contract.inference_rule,
+            BuiltinInferenceRule::Math(MathInferenceRule::BinaryArithmetic(
+                BinaryArithmeticInferenceRule::Add
+                    | BinaryArithmeticInferenceRule::Subtract
+                    | BinaryArithmeticInferenceRule::Multiply
+            ))
+        ) && left.storage == StorageFact::Sparse
+            && right.storage == StorageFact::Sparse
+            && left.shape.element_count().is_some()
+            && left.shape.is_proven_equivalent(&right.shape);
+        output.storage = if preserves_sparse {
+            StorageFact::Sparse
+        } else {
+            StorageFact::Unknown
+        };
+        // Sparse/dense selection can depend on operand values (for example,
+        // adding zero versus a nonzero scalar to implicit sparse zeros).
+        output.layout = LayoutFact::Unknown;
+        output.contiguity = ContiguityFact::Unknown;
+    }
     apply_prototype(admitted.prototype, &mut output, &mut diagnostics);
     finish_fixed(entry, request, output, diagnostics)
 }

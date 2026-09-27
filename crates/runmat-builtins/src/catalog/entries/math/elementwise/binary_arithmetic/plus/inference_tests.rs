@@ -7,6 +7,31 @@ use runmat_types::{
 };
 
 #[test]
+fn sparse_storage_is_not_inferred_as_a_dense_or_scalar_buffer() {
+    use runmat_types::StorageFact;
+    for name in ["plus", "minus", "times"] {
+        let entry = crate::builtin_catalog_entry_by_name(name).unwrap();
+        for shape in [&[Some(1), Some(1)][..], &[Some(2), Some(3)][..]] {
+            let mut sparse = numeric(NumericClass::Double, NumericDomain::Real, shape);
+            sparse.storage = StorageFact::Sparse;
+            let inferred =
+                infer_catalog_call(entry, &request(vec![sparse.clone(), sparse.clone()]));
+            assert_eq!(inferred.outputs[0].storage, StorageFact::Sparse, "{name}");
+            let scalar = ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            }));
+            let mixed = infer_catalog_call(entry, &request(vec![sparse, scalar]));
+            assert_eq!(mixed.outputs[0].storage, StorageFact::Unknown, "{name}");
+        }
+        let mut unknown = numeric(NumericClass::Double, NumericDomain::Real, &[None, None]);
+        unknown.storage = StorageFact::Sparse;
+        let inferred = infer_catalog_call(entry, &request(vec![unknown.clone(), unknown]));
+        assert_eq!(inferred.outputs[0].storage, StorageFact::Unknown, "{name}");
+    }
+}
+
+#[test]
 fn tracks_broadcast_class_domain_and_residency() {
     let mut left = numeric(
         NumericClass::Single,
@@ -34,12 +59,7 @@ fn tracks_broadcast_class_domain_and_residency() {
             domain: NumericDomain::Complex,
         })
     );
-    assert_eq!(
-        inferred.outputs[0].residency,
-        ResidencyFact::Device {
-            provider: Some("p".into()),
-        }
-    );
+    assert_eq!(inferred.outputs[0].residency, ResidencyFact::Unknown);
 }
 
 #[test]
