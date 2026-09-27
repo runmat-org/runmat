@@ -44,16 +44,18 @@ struct PreparedInput {
     owned: Option<GpuTensorHandle>,
 }
 
-fn mark_fusion_output(handle: &mut GpuTensorHandle, inputs: &[Value]) {
+fn mark_fusion_output(handle: &mut GpuTensorHandle, inputs: &[Value]) -> Result<()> {
     let explicit = inputs.iter().any(|value| {
         matches!(value, Value::GpuTensor(input) if runmat_accelerate_api::handle_is_explicit(input))
     });
-    if explicit {
-        runmat_accelerate_api::mark_handle_explicit(handle);
+    let provenance = if explicit {
+        runmat_accelerate_api::GpuHandleProvenance::Explicit
     } else {
-        runmat_accelerate_api::mark_handle_automatic(handle);
-    }
+        runmat_accelerate_api::GpuHandleProvenance::Automatic
+    };
+    *handle = handle.with_provenance(provenance)?;
     fusion_residency::mark(handle);
+    Ok(())
 }
 
 pub struct FusionExecutionRequest<'a> {
@@ -1266,7 +1268,11 @@ mod tests {
             execute_reduction;
         fn check_elementwise_signature(request: FusionExecutionRequest<'_>) {
             fn require_future(
-                _: impl std::future::Future<Output = Result<ElementwiseExecutionResult>>,
+                _: impl std::future::Future<
+                    Output = runmat_accelerate_api::ProviderExecutionResult<
+                        ElementwiseExecutionResult,
+                    >,
+                >,
             ) {
             }
             require_future(execute_elementwise(request));

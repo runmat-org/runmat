@@ -1,35 +1,20 @@
-//! A fusion request publishes no allocation until all output representations
-//! have been validated and adapted. The owner is captured before any await.
-
-use anyhow::{anyhow, Result};
+//! Request-local output validation. Actual Values own allocation lifetimes.
+use anyhow::anyhow;
 use runmat_accelerate_api::{
-    clear_handle_metadata, AccelProvider, GpuTensorHandle, GpuTensorStorage, NumericElementType,
-    ProviderPrecision,
+    allocation::GpuHandleReleaseError, AccelProvider, GpuTensorHandle, GpuTensorStorage,
+    NumericElementType, ProviderExecutionError, ProviderExecutionResult as Result,
+    ProviderPrecision, WeakGpuTensorHandle,
 };
 use runmat_runtime::builtins::common::gpu_helpers::{
-    exact_provider_for_handle, free_rejected_provider_output, gpu_class_metadata_matches,
-    same_gpu_handle,
+    exact_provider_for_handle, gpu_class_metadata_matches,
 };
 use runmat_value::Value;
 
-struct Allocation {
-    handle: GpuTensorHandle,
-    owner: &'static dyn AccelProvider,
-}
-
-pub(super) struct FusionAllocations {
+pub(super) struct FusionOutputAdmission {
     borrowed: Vec<GpuTensorHandle>,
-    allocations: Vec<Allocation>,
+    produced: Vec<WeakGpuTensorHandle>,
 }
-
-impl FusionAllocations {
-    pub fn protect_metadata(&self) -> Vec<runmat_accelerate_api::HandleMetadataRestoreGuard<'_>> {
-        self.borrowed
-            .iter()
-            .chain(self.allocations.iter().map(|allocation| &allocation.handle))
-            .map(runmat_accelerate_api::HandleMetadataRestoreGuard::new)
-            .collect()
-    }
+impl FusionOutputAdmission {
     pub fn new(inputs: &[Value]) -> Self {
         Self {
             borrowed: inputs
@@ -39,13 +24,10 @@ impl FusionAllocations {
                     _ => None,
                 })
                 .collect(),
-            allocations: Vec::new(),
+            produced: Vec::new(),
         }
     }
 
-    /// The central numeric-upload validator must see every borrowed or already
-    /// owned allocation before it can reject an alias. Validation after the
-    /// raw hook is too late if a convenience adapter has already freed it.
     pub fn upload(
         &mut self,
         provider: &'static dyn AccelProvider,
@@ -55,11 +37,17 @@ impl FusionAllocations {
         use runmat_accelerate_api::{
             upload_numeric_protecting, HostNumericDataView, HostNumericTensorView,
         };
-        let protected: Vec<_> = self
-            .borrowed
-            .iter()
-            .chain(self.allocations.iter().map(|allocation| &allocation.handle))
-            .collect();
+        // Temporary upgrades protect live intermediates during upload validation.
+        // Weak records neither prolong output lifetimes nor recreate allocations.
+        let mut live = Vec::new();
+        for handle in &self.produced {
+            match handle.acquire() {
+                Ok(handle) => live.push(handle),
+                Err(runmat_accelerate_api::allocation::AllocationAcquisitionError::NotLive) => {}
+                Err(error) => return Err(ProviderExecutionError::from_source(error)),
+            }
+        }
+        let protected: Vec<_> = self.borrowed.iter().chain(live.iter()).collect();
         let single;
         let data = match provider.precision() {
             ProviderPrecision::F64 => HostNumericDataView::F64(data),
@@ -76,8 +64,34 @@ impl FusionAllocations {
                 storage: GpuTensorStorage::Real,
             },
             &protected,
-        )?;
+        )
+        .map_err(ProviderExecutionError::from_source)?;
         self.admit(handle, provider, shape, provider.precision())
+    }
+
+    fn valid(
+        &self,
+        handle: &GpuTensorHandle,
+        provider: &'static dyn AccelProvider,
+        shape: &[usize],
+        precision: ProviderPrecision,
+    ) -> bool {
+        let element = match precision {
+            ProviderPrecision::F32 => NumericElementType::F32,
+            ProviderPrecision::F64 => NumericElementType::F64,
+        };
+        handle.shape() == shape
+            && handle.device_id() == provider.device_id()
+            && handle.physical().storage() == GpuTensorStorage::Real
+            && handle.physical().element_type() == element
+            && !runmat_accelerate_api::handle_is_logical(handle)
+            && !runmat_accelerate_api::handle_is_transposed(handle)
+            && exact_provider_for_handle(handle).is_some_and(|owner| std::ptr::eq(owner, provider))
+            && gpu_class_metadata_matches(handle, Some(precision), None, false)
+            && !self
+                .borrowed
+                .iter()
+                .any(|input| input.shares_allocation_with(handle))
     }
 
     pub fn admit(
@@ -87,53 +101,16 @@ impl FusionAllocations {
         shape: &[usize],
         precision: ProviderPrecision,
     ) -> Result<GpuTensorHandle> {
-        let element = match precision {
-            ProviderPrecision::F32 => NumericElementType::F32,
-            ProviderPrecision::F64 => NumericElementType::F64,
-        };
-        let owner = exact_provider_for_handle(&handle);
-        let valid = handle.shape == shape
-            && handle.device_id == provider.device_id()
-            && handle.descriptor.storage == Some(GpuTensorStorage::Real)
-            && handle.descriptor.element_type == Some(element)
-            && !runmat_accelerate_api::handle_is_logical(&handle)
-            && !runmat_accelerate_api::handle_is_transposed(&handle)
-            && owner.is_some_and(|owner| std::ptr::eq(owner, provider))
-            && gpu_class_metadata_matches(&handle, Some(precision), None, false)
-            && !self
-                .borrowed
-                .iter()
-                .any(|input| same_gpu_handle(input, &handle));
-        if !valid {
-            self.reject(&handle, provider);
-            return Err(anyhow!(
-                "fusion provider returned an invalid floating allocation"
+        if !self.valid(&handle, provider, shape, precision) {
+            return Err(reject_outputs(
+                vec![handle],
+                "fusion provider returned an invalid floating allocation",
             ));
         }
-        if !self
-            .allocations
-            .iter()
-            .any(|allocation| same_gpu_handle(&allocation.handle, &handle))
-        {
-            self.allocations.push(Allocation {
-                handle: handle.clone(),
-                owner: provider,
-            });
-        }
+        self.produced.push(handle.downgrade());
         Ok(handle)
     }
 
-    pub fn reject(&self, handle: &GpuTensorHandle, provider: &'static dyn AccelProvider) {
-        let protected: Vec<_> = self
-            .borrowed
-            .iter()
-            .chain(self.allocations.iter().map(|allocation| &allocation.handle))
-            .collect();
-        free_rejected_provider_output(handle, &protected, provider);
-    }
-
-    /// A malformed batch must release even the entries after the first invalid
-    /// one, while repeated aliases are released only once.
     pub fn admit_batch(
         &mut self,
         handles: Vec<GpuTensorHandle>,
@@ -143,57 +120,55 @@ impl FusionAllocations {
         precision: ProviderPrecision,
     ) -> Result<Vec<GpuTensorHandle>> {
         if handles.len() != count {
-            self.reject_batch(&handles, provider);
-            return Err(anyhow!("fusion provider returned the wrong output count"));
+            return Err(reject_outputs(
+                handles,
+                "fusion provider returned the wrong output count",
+            ));
         }
-        for handle in &handles {
-            // Validate without losing the remaining returned allocations.
-            if self
-                .admit(handle.clone(), provider, shape, precision)
-                .is_err()
-            {
-                // admit already rejected this handle; exclude its duplicates.
-                let remaining: Vec<_> = handles
-                    .iter()
-                    .filter(|other| !same_gpu_handle(handle, other))
-                    .cloned()
-                    .collect();
-                self.reject_batch(&remaining, provider);
-                return Err(anyhow!("fusion provider returned a malformed output batch"));
-            }
+        if handles
+            .iter()
+            .any(|handle| !self.valid(handle, provider, shape, precision))
+        {
+            return Err(reject_outputs(
+                handles,
+                "fusion provider returned a malformed output batch",
+            ));
         }
+        self.produced
+            .extend(handles.iter().map(GpuTensorHandle::downgrade));
         Ok(handles)
-    }
-
-    fn reject_batch(&self, handles: &[GpuTensorHandle], provider: &'static dyn AccelProvider) {
-        for (index, handle) in handles.iter().enumerate() {
-            if !handles[..index]
-                .iter()
-                .any(|previous| same_gpu_handle(previous, handle))
-            {
-                self.reject(handle, provider);
-            }
-        }
-    }
-
-    /// Consume the transaction only after all results are ready. Non-published
-    /// uploads/intermediates are released by Drop; aliases are adopted once.
-    pub fn publish(mut self, outputs: &[&GpuTensorHandle]) {
-        self.allocations.retain(|allocation| {
-            !outputs
-                .iter()
-                .any(|output| same_gpu_handle(&allocation.handle, output))
-        });
     }
 }
 
-impl Drop for FusionAllocations {
-    fn drop(&mut self) {
-        for allocation in &self.allocations {
-            if allocation.owner.free(&allocation.handle).is_ok() {
-                clear_handle_metadata(&allocation.handle);
-            }
-        }
+fn reject_outputs(handles: Vec<GpuTensorHandle>, message: &'static str) -> ProviderExecutionError {
+    let cleanup: Vec<_> = handles
+        .into_iter()
+        .filter_map(|handle| handle.release().err())
+        .collect();
+    if cleanup.is_empty() {
+        anyhow!(message).into()
+    } else {
+        ProviderExecutionError::from_source(RejectedOutputs { message, cleanup })
+    }
+}
+#[derive(Debug)]
+struct RejectedOutputs {
+    message: &'static str,
+    cleanup: Vec<GpuHandleReleaseError>,
+}
+impl std::fmt::Display for RejectedOutputs {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{}; {} allocation retirement failure(s)",
+            self.message,
+            self.cleanup.len()
+        )
+    }
+}
+impl std::error::Error for RejectedOutputs {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.cleanup.first().map(|error| error as _)
     }
 }
 

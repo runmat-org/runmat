@@ -491,7 +491,11 @@ pub async fn execute_fusion_elementwise(
         Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }
-        Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        Err(err) => {
+            let mut error = mex("FusionExecutionFailed", &err.to_string());
+            error.source = Some(Box::new(err));
+            Err(error)
+        }
     }
 }
 

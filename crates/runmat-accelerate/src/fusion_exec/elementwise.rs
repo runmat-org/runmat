@@ -1,10 +1,11 @@
 //! Typed elementwise request execution and transactional publication.
 use super::*;
+use runmat_accelerate_api::{ProviderElementType, ProviderExecutionResult as ExecutionResult};
 
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
-) -> Result<FusionExecutionOutcome<HashMap<ValueId, Value>>> {
+) -> ExecutionResult<FusionExecutionOutcome<HashMap<ValueId, Value>>> {
     let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -12,18 +13,19 @@ async fn execute_elementwise_outputs(
     };
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err(anyhow!("unsupported fusion kind").into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     if !request.plan.kernel.supported {
-        return Err(anyhow!("fusion kernel not supported for this plan"));
+        return Err(anyhow!("fusion kernel not supported for this plan").into());
     }
     if request.inputs.len() != request.plan.inputs.len() {
         return Err(anyhow!(
             "fusion input mismatch: expected {}, got {}",
             request.plan.inputs.len(),
             request.inputs.len()
-        ));
+        )
+        .into());
     }
     reject_native_integer_fusion_inputs(request)?;
     for value in &request.inputs {
@@ -38,16 +40,17 @@ async fn execute_elementwise_outputs(
                     ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                 });
                 if precision.is_none()
-                    || handle.descriptor.storage
+                    || handle.descriptor().storage
                         != Some(runmat_accelerate_api::GpuTensorStorage::Real)
-                    || handle.descriptor.element_type != element
+                    || handle.descriptor().element_type != element
                     || !gpu_class_metadata_matches(handle, precision, None, false)
                     || !exact_provider_for_handle(handle)
                         .is_some_and(|owner| std::ptr::eq(owner, provider))
                 {
                     return Err(anyhow!(
                         "fusion input has invalid floating metadata or provider ownership"
-                    ));
+                    )
+                    .into());
                 }
             }
             Value::Num(_) | Value::Tensor(_) => {}
@@ -86,7 +89,7 @@ async fn execute_elementwise_outputs(
         Ok(typed) => typed,
         Err(error) => {
             let error = match error.downcast::<crate::fusion::semantics::FusionAdmissionFailure>() {
-                Ok(failure) => return Err(failure.0),
+                Ok(failure) => return Err(failure.0.into()),
                 Err(unsupported) => unsupported,
             };
             log::debug!("fusion retained shared runtime: {error}");
@@ -172,11 +175,10 @@ async fn execute_elementwise_outputs(
             ))
         }
     };
-    let semantic_identity = runmat_execution::Digest::sha256(serde_json::to_vec(&(
-        program.cache_identity()?,
-        &shader,
-        scalar_work_units,
-    ))?);
+    let semantic_identity = runmat_execution::Digest::sha256(
+        serde_json::to_vec(&(program.cache_identity()?, &shader, scalar_work_units))
+            .map_err(anyhow::Error::from)?,
+    );
     let selection = select_fusion_provider_with_contract(
         request,
         &bindings,
@@ -203,7 +205,7 @@ async fn execute_elementwise_outputs(
         let mut timer = FusionStageTimer::new("elementwise", request.plan.index, len);
         let scalar_shape = normalize_scalar_shape(&vec![1; output_shape.len()]);
         let mut prepared = Vec::with_capacity(request.inputs.len());
-        let mut allocations = outputs::FusionAllocations::new(&request.inputs);
+        let mut allocations = outputs::FusionOutputAdmission::new(&request.inputs);
         let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
         let scalar_dtype = scalar_upload_dtype(provider);
         if program.uses_implicit_downcast() {
@@ -217,23 +219,23 @@ async fn execute_elementwise_outputs(
             match value {
                 Value::GpuTensor(handle) => {
                     use runmat_runtime::builtins::common::gpu_helpers::{
-                        exact_provider_for_handle, HandleMetadataRestoreGuard,
+                        exact_provider_for_handle, ResidencyRestoreGuard,
                     };
                     if !exact_provider_for_handle(handle)
                         .is_some_and(|owner| std::ptr::eq(owner, provider))
                     {
-                        return Err(anyhow!("fusion input has no matching exact provider owner"));
+                        return Err(anyhow!("fusion input has no matching exact provider owner").into());
                     }
                     let expected = match provider.precision() {
                         ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                         ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                     };
                     let contiguous = if runmat_accelerate_api::handle_is_transposed(handle)
-                        && handle.descriptor.element_type != Some(expected)
+                        && handle.descriptor().element_type != Some(expected)
                     {
-                        let metadata = allocations.protect_metadata();
+                        let metadata = runmat_runtime::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(handle);
                         let started = Instant::now();
-                        let materialized = provider.reshape(handle, &handle.shape);
+                        let materialized = provider.reshape(handle, handle.shape());
                         drop(metadata);
                         observer.queue(started);
                         let materialized = match materialized {
@@ -247,23 +249,23 @@ async fn execute_elementwise_outputs(
                                     FusionCpuObservation::new(None),
                                 ));
                             }
-                            Err(error) => return Err(error),
+                            Err(error) => return Err(error.into()),
                         };
                         observer.kernel_unmeasured();
                         allocations.admit(
                             materialized,
                             provider,
-                            &handle.shape,
+                            handle.shape(),
                             runmat_accelerate_api::handle_precision(handle)
                                 .ok_or_else(|| anyhow!("missing source precision"))?,
                         )?
                     } else {
                         handle.clone()
                     };
-                    let prepared_handle = if contiguous.descriptor.element_type == Some(expected) {
+                    let prepared_handle = if contiguous.descriptor().element_type == Some(expected) {
                         contiguous
                     } else {
-                        let metadata = HandleMetadataRestoreGuard::new(&contiguous);
+                        let metadata = ResidencyRestoreGuard::new(&contiguous);
                         let converted = match provider.precision() {
                             ProviderPrecision::F64 => provider.unary_double(&contiguous).await,
                             ProviderPrecision::F32 => provider.unary_single(&contiguous).await,
@@ -272,7 +274,7 @@ async fn execute_elementwise_outputs(
                         allocations.admit(
                             converted?,
                             provider,
-                            &handle.shape,
+                            handle.shape(),
                             provider.precision(),
                         )?
                     };
@@ -285,7 +287,7 @@ async fn execute_elementwise_outputs(
                     if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                         return Err(anyhow!(
                             "fusion: tensor input requires unsupported precision ({msg})"
-                        ));
+                        ).into());
                     }
                     let data = t.materialize_f64();
                     let started = Instant::now();
@@ -303,7 +305,7 @@ async fn execute_elementwise_outputs(
                     if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                         return Err(anyhow!(
                             "fusion: scalar input requires unsupported precision ({msg})"
-                        ));
+                        ).into());
                     }
                     let scalar = match provider.precision() {
                         ProviderPrecision::F32 => (*n as f32) as f64,
@@ -324,7 +326,7 @@ async fn execute_elementwise_outputs(
                 }
                 Value::Int(_) => unreachable!("integer inputs rejected before fusion upload"),
                 _ => {
-                    return Err(anyhow!("fusion: unsupported value type"));
+                    return Err(anyhow!("fusion: unsupported value type").into());
                 }
             }
         }
@@ -332,6 +334,11 @@ async fn execute_elementwise_outputs(
 
         let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
         let mut outputs = HashMap::new();
+        // Shader stores use backend precision; semantic Single adaptation follows dispatch.
+        let physical_output_class = match provider.precision() {
+            ProviderPrecision::F32 => ProviderElementType::F32,
+            ProviderPrecision::F64 => ProviderElementType::F64,
+        };
 
         if output_ids.len() == 1 {
             // Fast path: single output, use the existing single-dispatch API.
@@ -339,7 +346,7 @@ async fn execute_elementwise_outputs(
             timer.mark("generate_wgsl");
             let started = Instant::now();
             let metadata = protect_kernel_inputs(&handles);
-            let output = provider.fused_elementwise(&shader, &handles, &output_shape, len);
+            let output = provider.fused_elementwise(&shader, &handles, &output_shape, len, physical_output_class);
             drop(metadata);
             let output = output?;
             let output =
@@ -358,7 +365,7 @@ async fn execute_elementwise_outputs(
                 &handles,
                 &output_shape,
                 len,
-                output_ids.len(),
+                &vec![physical_output_class; output_ids.len()],
             );
             drop(metadata);
             observer.queue(started);
@@ -393,6 +400,7 @@ async fn execute_elementwise_outputs(
                             &handles,
                             &output_shape,
                             len,
+                            physical_output_class,
                         );
                         drop(metadata);
                         let output = output?;
@@ -407,7 +415,7 @@ async fn execute_elementwise_outputs(
                         outputs.insert(output_id, Value::GpuTensor(output));
                     }
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
         }
         timer.mark("dispatch");
@@ -417,13 +425,13 @@ async fn execute_elementwise_outputs(
                 .remove(id)
                 .ok_or_else(|| anyhow!("missing fused output"))?
             else {
-                return Err(anyhow!("fusion returned a nonresident output"));
+                return Err(anyhow!("fusion returned a nonresident output").into());
             };
             let output = if class == runmat_types::NumericClass::Single
                 && provider.precision() == ProviderPrecision::F64
             {
                 let metadata =
-                    runmat_runtime::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(
+                    runmat_runtime::builtins::common::gpu_helpers::ResidencyRestoreGuard::new(
                         &raw,
                     );
                 let converted = provider.unary_single(&raw).await;
@@ -436,17 +444,9 @@ async fn execute_elementwise_outputs(
         }
         for output in outputs.values_mut() {
             if let Value::GpuTensor(handle) = output {
-                mark_fusion_output(handle, &request.inputs);
+                mark_fusion_output(handle, &request.inputs)?;
             }
         }
-        let published: Vec<_> = outputs
-            .values()
-            .filter_map(|value| match value {
-                Value::GpuTensor(handle) => Some(handle),
-                _ => None,
-            })
-            .collect();
-        allocations.publish(&published);
         timer.mark("cleanup");
         timer.finish();
 
@@ -466,28 +466,28 @@ fn physical_upload_bytes(precision: ProviderPrecision, elements: usize) -> Optio
 
 fn protect_kernel_inputs(
     handles: &[GpuTensorHandle],
-) -> Vec<runmat_runtime::builtins::common::gpu_helpers::HandleMetadataRestoreGuard<'_>> {
+) -> Vec<runmat_runtime::builtins::common::gpu_helpers::ResidencyRestoreGuard<'_>> {
     handles
         .iter()
-        .map(runmat_runtime::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new)
+        .map(runmat_runtime::builtins::common::gpu_helpers::ResidencyRestoreGuard::new)
         .collect()
 }
 
 /// Execute a direct provider request. VM placement uses the typed entrypoint.
 pub async fn execute_elementwise(
     request: FusionExecutionRequest<'_>,
-) -> Result<ElementwiseExecutionResult> {
+) -> ExecutionResult<ElementwiseExecutionResult> {
     match execute_elementwise_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
 
 pub async fn execute_elementwise_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<ElementwiseExecutionResult>> {
+) -> ExecutionResult<FusionExecutionOutcome<ElementwiseExecutionResult>> {
     let final_output = request
         .plan
         .output

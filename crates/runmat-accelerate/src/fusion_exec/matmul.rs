@@ -130,7 +130,7 @@ pub async fn execute_matmul_epilogue_placed(
             provider.precision(),
         )?;
     }
-    mark_fusion_output(&mut output, &request.inputs);
+    mark_fusion_output(&mut output, &request.inputs)?;
     allocations.publish(&[&output]);
     selection.submitted();
     Ok(FusionExecutionOutcome::Executed(Value::GpuTensor(output)))
