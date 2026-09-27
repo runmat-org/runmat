@@ -18,12 +18,25 @@ impl RuntimeAccelerationService for Recorder {
         request: AdmittedBuiltinPreparation,
     ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
         assert_eq!(request.form().data_arguments, &[0]);
-        assert_eq!(
-            request.form().operation,
-            runmat_builtins::BuiltinPreparationOperation::Unary
-        );
-        assert_eq!(request.admission().input_count, 1);
-        assert_eq!(request.admission().signature, 0);
+        match request.form().operation {
+            runmat_builtins::BuiltinPreparationOperation::Unary => {
+                assert_eq!(request.admission().input_count, 1);
+                assert_eq!(request.admission().signature, 0);
+            }
+            runmat_builtins::BuiltinPreparationOperation::RoundDigits => {
+                assert_eq!(request.admission().binding.builtin.name, "round");
+                assert_eq!(
+                    request.admission().signature + 1,
+                    request.admission().input_count
+                );
+                assert!(matches!(
+                    request.numerical_domain(),
+                    runmat_accelerate_api::NumericalDomainEvidence::RoundDigits { digits: 1, .. }
+                ));
+                assert_eq!(request.operands().len(), 1);
+            }
+            other => panic!("unexpected rounding operation: {other:?}"),
+        }
         self.0
             .borrow_mut()
             .push(request.admission().binding.builtin.name);
@@ -87,14 +100,40 @@ fn admitted_rounding_plain_forms_follow_domain_validation() {
         .is_err());
         assert_eq!(records.borrow().len(), before);
     }
-    // Digit controls remain in their parsed domain route, not falsely claimed
-    // as the plain unary hook or included in the prepared operand list.
+    for (controls, expected) in [
+        (vec![Value::Num(1.0)], vec![1.3, -2.8]),
+        (
+            vec![Value::Num(1.0), Value::String("decimals".into())],
+            vec![1.3, -2.8],
+        ),
+        (
+            vec![Value::Num(1.0), Value::String("significant".into())],
+            vec![1.0, -3.0],
+        ),
+    ] {
+        let before = records.borrow().len();
+        let mut args = vec![input.clone()];
+        args.extend(controls);
+        let output =
+            block_on(context.scope(call_builtin_async_with_outputs("round", &args, 1))).unwrap();
+        assert_eq!(records.borrow().len(), before + 1);
+        let Value::Tensor(output) = output else {
+            panic!("round pages")
+        };
+        assert_eq!(output.as_f64_slice().unwrap(), expected);
+        assert_eq!(output.shape, vec![1, 1, 2]);
+    }
     let before = records.borrow().len();
-    block_on(context.scope(call_builtin_async_with_outputs(
-        "round",
-        &[input, Value::Num(1.0)],
-        1,
-    )))
-    .unwrap();
+    for controls in [
+        vec![Value::Num(0.0), Value::String("significant".into())],
+        vec![Value::Num(1.5)],
+        vec![Value::Num(1.0), Value::String("invalid".into())],
+    ] {
+        let mut args = vec![input.clone()];
+        args.extend(controls);
+        assert!(
+            block_on(context.scope(call_builtin_async_with_outputs("round", &args, 1))).is_err()
+        );
+    }
     assert_eq!(records.borrow().len(), before);
 }

@@ -135,7 +135,16 @@ async fn round_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         })
         .await;
     }
-    round_value(value, strategy).await
+    let (digits, significant) = strategy.provider_digits().expect("parsed digit strategy");
+    let mode = if significant {
+        runmat_accelerate_api::RoundDigitsMode::Significant
+    } else {
+        runmat_accelerate_api::RoundDigitsMode::Decimals
+    };
+    super::preparation::digits(value, digits, mode, rest.len(), |value| {
+        round_value(value, strategy)
+    })
+    .await
 }
 
 async fn round_value(value: Value, strategy: RoundStrategy) -> BuiltinResult<Value> {
