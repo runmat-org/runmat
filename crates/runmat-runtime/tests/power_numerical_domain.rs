@@ -135,15 +135,25 @@ fn actual_resident_dispatch_preserves_complex_promotion_in_both_compatibility_mo
                 panic!("resident complex output")
             };
             assert_eq!(
-                output.descriptor.storage,
+                output.descriptor().storage,
                 Some(GpuTensorStorage::ComplexInterleaved)
             );
+            assert_eq!(output.shape(), &[1, 2]);
             let values = block_on(provider.download(&output)).unwrap().data;
+            assert_eq!(values.len(), 4);
             assert!((values[1] / 1e-150 - 1.0).abs() < 1e-12);
             assert_eq!(values[3], 0.0);
-            provider.free(&output).unwrap();
+            output.release().unwrap();
+            assert_eq!(
+                block_on(provider.download(&base)).unwrap().data,
+                vec![-1e-300, 4.0]
+            );
+            assert_eq!(
+                block_on(provider.download(&exponent)).unwrap().data,
+                vec![0.5, 2.0]
+            );
         }
-        provider.free(&base).unwrap();
-        provider.free(&exponent).unwrap();
+        base.release().unwrap();
+        exponent.release().unwrap();
     }
 }
