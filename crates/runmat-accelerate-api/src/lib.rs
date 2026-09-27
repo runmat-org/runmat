@@ -2435,6 +2435,28 @@ pub trait AccelProvider: Send + Sync {
         unsupported_future("elem_pow not supported by provider")
     }
 
+    /// Classify the actual broadcasted pairs of real floating inputs. The
+    /// result is scoped to these unchanged inputs and is not an extrema proof.
+    fn classify_real_power<'a>(
+        &'a self,
+        _base: &'a GpuTensorHandle,
+        _exponent: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, PowerResultDomain> {
+        unsupported_future("classify_real_power not supported by provider")
+    }
+
+    /// Compute real-input power in its already-resolved result domain. Real
+    /// NaNs propagate even for (1, NaN)/(NaN, 0); complex output is interleaved
+    /// principal-branch storage. No residual threshold may change its domain.
+    fn real_power_in_domain<'a>(
+        &'a self,
+        _base: &'a GpuTensorHandle,
+        _exponent: &'a GpuTensorHandle,
+        _domain: PowerResultDomain,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("real_power_in_domain not supported by provider")
+    }
+
     /// Construct complex-interleaved GPU storage from a real-valued tensor,
     /// using zero for the imaginary lane.
     fn complex_from_real<'a>(

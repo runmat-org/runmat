@@ -1,4 +1,5 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
+mod power;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
@@ -5660,6 +5661,23 @@ impl AccelProvider for InProcessProvider {
             };
             Ok(self.allocate_tensor(out, shape))
         })
+    }
+
+    fn classify_real_power<'a>(
+        &'a self,
+        base: &'a GpuTensorHandle,
+        exponent: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, runmat_accelerate_api::PowerResultDomain> {
+        Box::pin(async move { self.classify_real_power_impl(base, exponent) })
+    }
+
+    fn real_power_in_domain<'a>(
+        &'a self,
+        base: &'a GpuTensorHandle,
+        exponent: &'a GpuTensorHandle,
+        domain: runmat_accelerate_api::PowerResultDomain,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.real_power_in_domain_impl(base, exponent, domain) })
     }
 
     fn complex_from_real<'a>(
