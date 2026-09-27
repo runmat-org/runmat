@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 pub struct ContourFillGpuInputs<'a> {
     pub x_axis: AxisData<'a>,
     pub y_axis: AxisData<'a>,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub color_table: &'a [[f32; 4]],
     pub level_values: &'a [f32],
     pub x_len: u32,

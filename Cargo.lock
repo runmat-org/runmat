@@ -7193,6 +7193,7 @@ dependencies = [
  "once_cell",
  "pollster 0.3.0",
  "rfd",
+ "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-thread-local",
  "runmat-time",

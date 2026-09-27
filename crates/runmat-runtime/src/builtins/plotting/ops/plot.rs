@@ -934,8 +934,8 @@ pub(super) async fn build_line_gpu_plot_async_for_builtin(
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = runmat_plot::gpu::line::LineGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
         len: len_u32,
         scalar,
     };

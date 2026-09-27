@@ -7,7 +7,7 @@ use crate::gpu::{tuning, ScalarType};
 
 #[derive(Clone)]
 pub struct HistogramGpuInputs {
-    pub samples: Arc<wgpu::Buffer>,
+    pub samples: crate::gpu::GpuInputBuffer,
     pub sample_count: u32,
     pub scalar: ScalarType,
     pub weights: HistogramGpuWeights,
@@ -18,8 +18,8 @@ pub enum HistogramGpuWeights {
     Uniform { total_weight: f32 },
     HostF32 { data: Vec<f32>, total_weight: f32 },
     HostF64 { data: Vec<f64>, total_weight: f32 },
-    GpuF32 { buffer: Arc<wgpu::Buffer> },
-    GpuF64 { buffer: Arc<wgpu::Buffer> },
+    GpuF32 { buffer: crate::gpu::GpuInputBuffer },
+    GpuF64 { buffer: crate::gpu::GpuInputBuffer },
 }
 
 pub enum HistogramNormalizationMode {
@@ -61,7 +61,7 @@ struct ConvertUniforms {
 
 struct MaterializedWeights {
     mode: WeightMode,
-    buffer: Option<Arc<wgpu::Buffer>>,
+    buffer: Option<crate::gpu::GpuInputBuffer>,
     total_hint: Option<f32>,
     accumulate_total: bool,
 }
@@ -219,7 +219,7 @@ fn materialize_weights(
             );
             Ok(MaterializedWeights {
                 mode: WeightMode::F32,
-                buffer: Some(buffer),
+                buffer: Some(buffer.into()),
                 total_hint: Some(total_weight),
                 accumulate_total: false,
             })
@@ -234,7 +234,7 @@ fn materialize_weights(
             );
             Ok(MaterializedWeights {
                 mode: WeightMode::F64,
-                buffer: Some(buffer),
+                buffer: Some(buffer.into()),
                 total_hint: Some(total_weight),
                 accumulate_total: false,
             })

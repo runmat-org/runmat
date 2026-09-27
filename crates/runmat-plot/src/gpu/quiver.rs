@@ -10,8 +10,8 @@ use wgpu::util::DeviceExt;
 pub struct QuiverGpuInputs<'a> {
     pub x_data: AxisData<'a>,
     pub y_data: AxisData<'a>,
-    pub u_buffer: Arc<wgpu::Buffer>,
-    pub v_buffer: Arc<wgpu::Buffer>,
+    pub u_buffer: crate::gpu::GpuInputBuffer,
+    pub v_buffer: crate::gpu::GpuInputBuffer,
     pub count: u32,
     pub rows: u32,
     pub cols: u32,
@@ -243,8 +243,8 @@ mod tests {
             &QuiverGpuInputs {
                 x_data: AxisData::F32(&x),
                 y_data: AxisData::F32(&y),
-                u_buffer: u,
-                v_buffer: v,
+                u_buffer: u.into(),
+                v_buffer: v.into(),
                 count: 2,
                 rows: 2,
                 cols: 1,
@@ -288,8 +288,8 @@ mod tests {
             &QuiverGpuInputs {
                 x_data: AxisData::F32(&x),
                 y_data: AxisData::F32(&y),
-                u_buffer: u,
-                v_buffer: v,
+                u_buffer: u.into(),
+                v_buffer: v.into(),
                 count: 6,
                 rows: 3,
                 cols: 2,

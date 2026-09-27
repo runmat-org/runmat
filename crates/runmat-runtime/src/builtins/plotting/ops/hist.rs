@@ -614,10 +614,10 @@ impl HistWeightsInput {
                     .ok_or_else(|| hist_internal("unable to export GPU weights"))?;
                 match exported.precision {
                     ProviderPrecision::F32 => Ok(HistogramGpuWeights::GpuF32 {
-                        buffer: exported.buffer.clone(),
+                        buffer: exported.clone().into(),
                     }),
                     ProviderPrecision::F64 => Ok(HistogramGpuWeights::GpuF64 {
-                        buffer: exported.buffer.clone(),
+                        buffer: exported.clone().into(),
                     }),
                 }
             }
@@ -1678,7 +1678,7 @@ async fn build_histogram_gpu_chart_async(
         .map_err(|_| hist_err("hist: bin count exceeds supported range for GPU execution"))?;
 
     let histogram_inputs = HistogramGpuInputs {
-        samples: exported.buffer.clone(),
+        samples: exported.clone().into(),
         sample_count: sample_count_u32,
         scalar: ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64),
         weights: gpu_weights,
@@ -1712,7 +1712,7 @@ async fn build_histogram_gpu_chart_async(
     } = histogram_output;
 
     let bar_inputs = BarGpuInputs {
-        values_buffer,
+        values_buffer: values_buffer.into(),
         row_count: bin_count_u32,
         scalar: ScalarType::F32,
     };

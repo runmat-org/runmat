@@ -865,12 +865,12 @@ async fn build_errorbar_gpu_plot(
         bounds.max.x += max_xp.max(min_xp.abs());
     }
     let inputs = ErrorBarGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        x_neg_buffer: xn_ref.as_ref().map(|r| r.buffer.clone()),
-        x_pos_buffer: xp_ref.as_ref().map(|r| r.buffer.clone()),
-        y_neg_buffer: yn_ref.buffer.clone(),
-        y_pos_buffer: yp_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
+        x_neg_buffer: xn_ref.as_ref().map(|r| r.clone().into()),
+        x_pos_buffer: xp_ref.as_ref().map(|r| r.clone().into()),
+        y_neg_buffer: yn_ref.clone().into(),
+        y_pos_buffer: yp_ref.clone().into(),
         len: x_ref.len as u32,
         scalar,
     };
@@ -893,8 +893,8 @@ async fn build_errorbar_gpu_plot(
             &context.device,
             &context.queue,
             &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
+                x_buffer: x_ref.clone().into(),
+                y_buffer: y_ref.clone().into(),
                 len: x_ref.len as u32,
                 scalar,
             },

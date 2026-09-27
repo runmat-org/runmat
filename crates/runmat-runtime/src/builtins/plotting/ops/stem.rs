@@ -625,8 +625,8 @@ async fn build_stem_gpu_plot(
         ),
     );
     let inputs = StemGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
         len: x_ref.len as u32,
         scalar,
     };
@@ -667,8 +667,8 @@ async fn build_stem_gpu_plot(
             &context.device,
             &context.queue,
             &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
+                x_buffer: x_ref.clone().into(),
+                y_buffer: y_ref.clone().into(),
                 len: x_ref.len as u32,
                 scalar,
             },
@@ -705,8 +705,8 @@ async fn build_stem_gpu_plot(
             &context.device,
             &context.queue,
             &MarkerGpuInputs {
-                x_buffer: x_ref.buffer.clone(),
-                y_buffer: y_ref.buffer.clone(),
+                x_buffer: x_ref.clone().into(),
+                y_buffer: y_ref.clone().into(),
                 len: x_ref.len as u32,
                 scalar,
             },

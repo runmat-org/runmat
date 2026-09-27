@@ -871,7 +871,7 @@ fn build_bar_gpu_series(
     }
     let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
     let inputs = BarGpuInputs {
-        values_buffer: exported.buffer.clone(),
+        values_buffer: exported.clone().into(),
         row_count: shape.rows as u32,
         scalar,
     };

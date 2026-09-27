@@ -7,7 +7,6 @@ use crate::core::{
 use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use glam::{Vec3, Vec4};
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct AreaPlot {
@@ -31,7 +30,7 @@ pub struct AreaPlot {
 #[derive(Clone, Debug)]
 pub struct AreaGpuSource {
     pub x_axis: OwnedAxisData,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub rows: usize,
     pub cols: usize,
     pub target_col: usize,

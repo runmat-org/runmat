@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 pub enum ScatterAttributeBuffer {
     None,
     Host(Vec<f32>),
-    Gpu(Arc<wgpu::Buffer>),
+    Gpu(crate::gpu::GpuInputBuffer),
 }
 
 impl ScatterAttributeBuffer {
@@ -27,7 +27,7 @@ pub enum ScatterColorBuffer {
     None,
     Host(Vec<[f32; 4]>),
     Gpu {
-        buffer: Arc<wgpu::Buffer>,
+        buffer: crate::gpu::GpuInputBuffer,
         components: u32,
     },
 }
@@ -45,7 +45,7 @@ impl ScatterColorBuffer {
         }
     }
 
-    pub fn buffer(&self) -> Option<Arc<wgpu::Buffer>> {
+    pub fn buffer(&self) -> Option<crate::gpu::GpuInputBuffer> {
         match self {
             ScatterColorBuffer::Gpu { buffer, .. } => Some(buffer.clone()),
             _ => None,
@@ -56,8 +56,8 @@ impl ScatterColorBuffer {
 /// Inputs required to pack scatter vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct Scatter2GpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }
@@ -341,7 +341,7 @@ fn prepare_size_buffer(
                 )
             }
         }
-        ScatterAttributeBuffer::Gpu(buffer) => (buffer.clone(), true),
+        ScatterAttributeBuffer::Gpu(buffer) => (Arc::clone(buffer), true),
     }
 }
 
@@ -404,7 +404,7 @@ fn prepare_color_buffer(
                 )
             }
         }
-        ScatterColorBuffer::Gpu { buffer, components } => (buffer.clone(), true, *components),
+        ScatterColorBuffer::Gpu { buffer, components } => (Arc::clone(buffer), true, *components),
     }
 }
 
@@ -491,8 +491,8 @@ mod stress_tests {
         let expected_vertices = point_count.div_ceil(stride) as usize * 6;
 
         let inputs = Scatter2GpuInputs {
-            x_buffer,
-            y_buffer,
+            x_buffer: x_buffer.into(),
+            y_buffer: y_buffer.into(),
             len: point_count,
             scalar: ScalarType::F32,
         };

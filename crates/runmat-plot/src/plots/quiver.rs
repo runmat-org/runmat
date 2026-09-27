@@ -8,7 +8,6 @@ use crate::gpu::axis::OwnedAxisData;
 use crate::gpu::{util::readback_scalar_buffer_f64, ScalarType};
 use crate::plots::NumericPlotData;
 use glam::{Vec3, Vec4};
-use std::sync::Arc;
 
 pub type QuiverSourceData<'a> = (
     &'a NumericPlotData,
@@ -57,8 +56,8 @@ pub struct QuiverPlot {
 pub struct QuiverGpuSource {
     pub x_data: OwnedAxisData,
     pub y_data: OwnedAxisData,
-    pub u_buffer: Arc<wgpu::Buffer>,
-    pub v_buffer: Arc<wgpu::Buffer>,
+    pub u_buffer: crate::gpu::GpuInputBuffer,
+    pub v_buffer: crate::gpu::GpuInputBuffer,
     pub count: usize,
     pub rows: usize,
     pub cols: usize,

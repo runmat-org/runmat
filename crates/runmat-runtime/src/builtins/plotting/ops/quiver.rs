@@ -690,8 +690,8 @@ async fn build_quiver_gpu_plot(
     let inputs = runmat_plot::gpu::quiver::QuiverGpuInputs {
         x_data: x_axis.axis_data(),
         y_data: y_axis.axis_data(),
-        u_buffer: u_ref.buffer.clone(),
-        v_buffer: v_ref.buffer.clone(),
+        u_buffer: u_ref.clone().into(),
+        v_buffer: v_ref.clone().into(),
         count: count_u32,
         rows: rows_u32,
         cols: cols_u32,
@@ -840,7 +840,7 @@ fn quiver_axis_source(
             }
             Ok(QuiverAxisSource::Gpu {
                 handle: handle.clone(),
-                data: OwnedAxisData::Buffer(exported.buffer.clone()),
+                data: OwnedAxisData::Buffer(exported.clone().into()),
                 len: exported.len,
             })
         }

@@ -212,3 +212,64 @@ fn stem_body_preparation_can_suspend_fail_and_drop_before_plot_mutation() {
     assert!(provider.produced.lock().unwrap().is_empty());
     input.release().unwrap();
 }
+
+#[cfg(feature = "wgpu")]
+#[test]
+#[ignore = "requires an actual WGPU device"]
+fn plot_input_clones_retain_exact_export_allocation_until_last_drop() {
+    use runmat_accelerate_api::{GpuTensorLayout, TransposeInfo};
+    use runmat_plot::gpu::{line::LineGpuInputs, GpuInputBuffer, ScalarType};
+    let _lock = crate::builtins::common::test_support::accel_test_lock();
+    let provider =
+        runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(Default::default())
+            .expect("actual WGPU qualification requires a device");
+    for transpose in [false, true] {
+        let input = provider
+            .upload(&HostTensorView {
+                data: &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+                shape: &[2, 3],
+            })
+            .unwrap();
+        let input = if transpose {
+            input
+                .with_view(input.view().clone().with_shape(vec![3, 2]).with_layout(
+                    GpuTensorLayout::Transpose(TransposeInfo {
+                        base_rows: 2,
+                        base_cols: 3,
+                    }),
+                ))
+                .unwrap()
+        } else {
+            input
+        };
+        let exported = runmat_accelerate_api::export_wgpu_buffer(&input).unwrap();
+        assert_eq!(
+            exported.owning_handle().shares_allocation_with(&input),
+            !transpose
+        );
+        let wire = exported.owning_handle().wire_descriptor();
+        let scalar = ScalarType::from_is_f64(exported.precision == ProviderPrecision::F64);
+        let buffer = GpuInputBuffer::from(exported);
+        let retained = LineGpuInputs {
+            x_buffer: buffer.clone(),
+            y_buffer: buffer.clone(),
+            len: 6,
+            scalar,
+        };
+        drop(buffer);
+        drop(input);
+        let live = provider.acquire_live(&wire).unwrap();
+        let expected = if transpose {
+            vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0]
+        } else {
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        };
+        assert_eq!(block_on(provider.download(&live)).unwrap().data, expected);
+        drop(live);
+        let cached = retained.clone();
+        drop(retained);
+        assert!(provider.acquire_live(&wire).is_ok());
+        drop(cached);
+        assert!(provider.acquire_live(&wire).is_err());
+    }
+}

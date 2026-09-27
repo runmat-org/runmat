@@ -6,6 +6,8 @@ pub mod contour_fill;
 pub mod errorbar;
 pub mod histogram;
 pub mod image;
+mod input_buffer;
+pub use input_buffer::GpuInputBuffer;
 pub mod line;
 pub mod line3;
 pub mod quiver;

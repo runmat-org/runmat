@@ -1862,7 +1862,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
                     format!("{name}: X axis precision must match Z precision"),
                 ));
             }
-            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.clone().into())
         }
         AxisSource::Host(v) => {
             if scalar == ScalarType::F32 {
@@ -1891,7 +1891,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
                     format!("{name}: Y axis precision must match Z precision"),
                 ));
             }
-            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.clone().into())
         }
         AxisSource::Host(v) => {
             if scalar == ScalarType::F32 {
@@ -1907,7 +1907,7 @@ fn build_contour_gpu_plot_with_axes_bounds_and_z_mode(
     let inputs = runmat_plot::gpu::contour::ContourGpuInputs {
         x_axis: x_axis_data,
         y_axis: y_axis_data,
-        z_buffer: z_ref.buffer.clone(),
+        z_buffer: z_ref.clone().into(),
         color_table: &color_table,
         level_values: &levels,
         x_len: x_axis.len() as u32,
@@ -2082,7 +2082,7 @@ pub(crate) fn build_contour_fill_gpu_plot(
     let inputs = contour_fill::ContourFillGpuInputs {
         x_axis: x_axis_data,
         y_axis: y_axis_data,
-        z_buffer: z_ref.buffer.clone(),
+        z_buffer: z_ref.clone().into(),
         color_table: &palette,
         level_values: &levels,
         x_len: x_axis.len() as u32,

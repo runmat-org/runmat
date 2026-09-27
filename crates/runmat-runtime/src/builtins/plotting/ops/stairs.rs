@@ -559,8 +559,8 @@ async fn build_stairs_gpu_plot(
     let scalar = ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64);
 
     let inputs = StairsGpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
         len: len_u32,
         scalar,
     };
@@ -578,8 +578,8 @@ async fn build_stairs_gpu_plot(
 
     let marker_gpu = if let Some(marker) = marker_meta.clone() {
         let marker_inputs = MarkerGpuInputs {
-            x_buffer: x_ref.buffer.clone(),
-            y_buffer: y_ref.buffer.clone(),
+            x_buffer: x_ref.clone().into(),
+            y_buffer: y_ref.clone().into(),
             len: len_u32,
             scalar,
         };

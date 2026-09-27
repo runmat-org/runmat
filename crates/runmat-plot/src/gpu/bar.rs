@@ -10,7 +10,7 @@ const VERTICES_PER_BAR: u32 = 6;
 /// Inputs required to pack bar vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct BarGpuInputs {
-    pub values_buffer: Arc<wgpu::Buffer>,
+    pub values_buffer: crate::gpu::GpuInputBuffer,
     pub row_count: u32,
     pub scalar: ScalarType,
 }

@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 
 pub struct AreaGpuInputs<'a> {
     pub x_axis: AxisData<'a>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub rows: u32,
     pub cols: u32,
     pub target_col: u32,
@@ -219,7 +219,7 @@ mod tests {
             &queue,
             &AreaGpuInputs {
                 x_axis: AxisData::F32(&x),
-                y_buffer: y,
+                y_buffer: y.into(),
                 rows: 3,
                 cols: 2,
                 target_col: 1,

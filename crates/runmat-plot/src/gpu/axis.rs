@@ -11,14 +11,14 @@ use wgpu::util::DeviceExt;
 pub enum AxisData<'a> {
     F32(&'a [f32]),
     F64(&'a [f64]),
-    Buffer(Arc<wgpu::Buffer>),
+    Buffer(crate::gpu::GpuInputBuffer),
 }
 
 #[derive(Clone, Debug)]
 pub enum OwnedAxisData {
     F32(Vec<f32>),
     F64(Vec<f64>),
-    Buffer(Arc<wgpu::Buffer>),
+    Buffer(crate::gpu::GpuInputBuffer),
 }
 
 impl OwnedAxisData {
@@ -55,7 +55,7 @@ pub fn axis_storage_buffer(
     scalar: ScalarType,
 ) -> Result<Arc<wgpu::Buffer>, String> {
     match axis {
-        AxisData::Buffer(buffer) => Ok(buffer.clone()),
+        AxisData::Buffer(buffer) => Ok(Arc::clone(buffer)),
         AxisData::F32(values) => {
             if scalar != ScalarType::F32 {
                 return Err(format!("{label}: expected f64 axis data for f64 shader"));

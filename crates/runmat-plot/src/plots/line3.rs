@@ -657,9 +657,9 @@ mod tests {
         );
         let mut plot = Line3Plot::from_gpu_xyz(
             Line3GpuInputs {
-                x_buffer,
-                y_buffer,
-                z_buffer,
+                x_buffer: x_buffer.into(),
+                y_buffer: y_buffer.into(),
+                z_buffer: z_buffer.into(),
                 len: 2,
                 scalar: crate::gpu::ScalarType::F32,
             },

@@ -9,12 +9,12 @@ use wgpu::util::DeviceExt;
 
 #[derive(Debug, Clone)]
 pub struct ErrorBarGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
-    pub x_neg_buffer: Option<Arc<wgpu::Buffer>>,
-    pub x_pos_buffer: Option<Arc<wgpu::Buffer>>,
-    pub y_neg_buffer: Arc<wgpu::Buffer>,
-    pub y_pos_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
+    pub x_neg_buffer: Option<crate::gpu::GpuInputBuffer>,
+    pub x_pos_buffer: Option<crate::gpu::GpuInputBuffer>,
+    pub y_neg_buffer: crate::gpu::GpuInputBuffer,
+    pub y_pos_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }

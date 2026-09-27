@@ -961,8 +961,8 @@ fn build_scatter_gpu_plot(
     let has_colors = color_buffer.has_data();
 
     let inputs = Scatter2GpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
         len: len_u32,
         scalar,
     };
@@ -1046,7 +1046,7 @@ fn build_size_buffer(
                 "scatter: GPU marker sizes must be single-precision (cast before plotting)",
             ));
         }
-        return Ok(ScatterAttributeBuffer::Gpu(exported.buffer));
+        return Ok(ScatterAttributeBuffer::Gpu(exported.into()));
     }
 
     if let Some(sizes) = style.per_point_sizes.as_ref() {
@@ -1080,7 +1080,7 @@ fn build_color_buffer(
             ));
         }
         return Ok(ScatterColorBuffer::Gpu {
-            buffer: exported.buffer,
+            buffer: exported.into(),
             components: gpu_color.components.stride(),
         });
     }

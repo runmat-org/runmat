@@ -711,8 +711,8 @@ async fn build_area_gpu_plots(
             }
             let bounds = super::gpu_helpers::axis_bounds_async(handle, BUILTIN_NAME).await?;
             (
-                runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
-                runmat_plot::gpu::axis::OwnedAxisData::Buffer(x_ref.buffer.clone()),
+                runmat_plot::gpu::axis::AxisData::Buffer(x_ref.clone().into()),
+                runmat_plot::gpu::axis::OwnedAxisData::Buffer(x_ref.clone().into()),
                 bounds,
             )
         }
@@ -735,7 +735,7 @@ async fn build_area_gpu_plots(
                         scalar,
                     )
                     .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
-                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer.into())
                 }
                 runmat_plot::gpu::ScalarType::F64 => {
                     let axis = runmat_plot::gpu::axis::AxisData::F64(&values);
@@ -746,7 +746,7 @@ async fn build_area_gpu_plots(
                         scalar,
                     )
                     .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, e))?;
-                    runmat_plot::gpu::axis::AxisData::Buffer(buffer)
+                    runmat_plot::gpu::axis::AxisData::Buffer(buffer.into())
                 }
             };
             (
@@ -774,7 +774,7 @@ async fn build_area_gpu_plots(
     for idx in 0..cols {
         let inputs = runmat_plot::gpu::area::AreaGpuInputs {
             x_axis: x_axis.clone(),
-            y_buffer: y_ref.buffer.clone(),
+            y_buffer: y_ref.clone().into(),
             rows: rows as u32,
             cols: cols as u32,
             target_col: idx as u32,

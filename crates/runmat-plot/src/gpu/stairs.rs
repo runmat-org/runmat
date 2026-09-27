@@ -9,8 +9,8 @@ use wgpu::util::DeviceExt;
 /// Inputs required to pack stairs vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct StairsGpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
 }

@@ -543,7 +543,7 @@ pub(crate) fn build_truecolor_image_surface_gpu(
         &runmat_plot::gpu::image::TrueColorImageGpuInputs {
             x_axis: x_data,
             y_axis: y_data,
-            image_buffer: image_ref.buffer.clone(),
+            image_buffer: image_ref.clone().into(),
             rows: rows as u32,
             cols: cols as u32,
             channels,
@@ -573,7 +573,7 @@ pub(crate) fn build_truecolor_image_surface_gpu(
         .with_image_mode(true)
         .with_shading(ShadingMode::None)
         .with_gpu_color_grid_source(runmat_plot::plots::SurfaceGpuColorGridSource {
-            image_buffer: image_ref.buffer.clone(),
+            image_buffer: image_ref.clone().into(),
             rows,
             cols,
             channels: channels as usize,

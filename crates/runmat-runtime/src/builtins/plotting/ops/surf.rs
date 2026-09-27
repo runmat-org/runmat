@@ -570,7 +570,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
                     format!("{name}: X axis precision must match Z precision"),
                 ));
             }
-            Some(exported.buffer.clone())
+            Some(exported.clone().into())
         }
         AxisSource::Host(v) => {
             if scalar == ScalarType::F32 {
@@ -600,7 +600,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
                     format!("{name}: Y axis precision must match Z precision"),
                 ));
             }
-            Some(exported.buffer.clone())
+            Some(exported.clone().into())
         }
         AxisSource::Host(v) => {
             if scalar == ScalarType::F32 {
@@ -631,7 +631,7 @@ pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
         } else {
             runmat_plot::gpu::surface::SurfaceAxis::F32(y_axis_f32.as_slice())
         },
-        z_buffer: z_ref.buffer.clone(),
+        z_buffer: z_ref.clone().into(),
         color_table: &color_table,
         x_len: x_len as u32,
         y_len: y_len as u32,

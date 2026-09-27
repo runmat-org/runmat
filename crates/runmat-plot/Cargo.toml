@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-value = { workspace = true }
+runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 # Interactive GPU-accelerated plotting
 bytemuck = { version = "1.0", features = ["derive"] }
 

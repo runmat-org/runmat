@@ -10,7 +10,7 @@ use crate::core::renderer::Vertex;
 pub struct TrueColorImageGpuInputs<'a> {
     pub x_axis: AxisData<'a>,
     pub y_axis: AxisData<'a>,
-    pub image_buffer: Arc<wgpu::Buffer>,
+    pub image_buffer: crate::gpu::GpuInputBuffer,
     pub rows: u32,
     pub cols: u32,
     pub channels: u32,
@@ -216,7 +216,7 @@ mod tests {
             &TrueColorImageGpuInputs {
                 x_axis: AxisData::F32(&x),
                 y_axis: AxisData::F32(&y),
-                image_buffer: image,
+                image_buffer: image.into(),
                 rows: 2,
                 cols: 2,
                 channels: 3,
@@ -252,7 +252,7 @@ mod tests {
             &TrueColorImageGpuInputs {
                 x_axis: AxisData::F32(&x),
                 y_axis: AxisData::F32(&y),
-                image_buffer: image,
+                image_buffer: image.into(),
                 rows: 2,
                 cols: 3,
                 channels: 3,

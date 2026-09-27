@@ -83,7 +83,7 @@ pub struct SurfacePlot {
 pub struct SurfaceGpuSource {
     pub x_axis: OwnedAxisData,
     pub y_axis: OwnedAxisData,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub x_len: usize,
     pub y_len: usize,
     pub scalar: ScalarType,
@@ -91,7 +91,7 @@ pub struct SurfaceGpuSource {
 
 #[derive(Clone, Debug)]
 pub struct SurfaceGpuColorGridSource {
-    pub image_buffer: Arc<wgpu::Buffer>,
+    pub image_buffer: crate::gpu::GpuInputBuffer,
     pub rows: usize,
     pub cols: usize,
     pub channels: usize,

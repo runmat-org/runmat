@@ -733,9 +733,9 @@ async fn build_line3_gpu_plot_async(
     let len = u32::try_from(x_ref.len)
         .map_err(|_| plotting_error(BUILTIN_NAME, "plot3: point count exceeds supported range"))?;
     let inputs = Line3GpuInputs {
-        x_buffer: x_ref.buffer.clone(),
-        y_buffer: y_ref.buffer.clone(),
-        z_buffer: z_ref.buffer.clone(),
+        x_buffer: x_ref.clone().into(),
+        y_buffer: y_ref.clone().into(),
+        z_buffer: z_ref.clone().into(),
         len,
         scalar: ScalarType::from_is_f64(x_ref.precision == ProviderPrecision::F64),
     };

@@ -10,9 +10,9 @@ use wgpu::util::DeviceExt;
 /// Inputs required to pack scatter3 vertices directly on the GPU.
 #[derive(Clone, Debug)]
 pub struct Scatter3GpuInputs {
-    pub x_buffer: Arc<wgpu::Buffer>,
-    pub y_buffer: Arc<wgpu::Buffer>,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub x_buffer: crate::gpu::GpuInputBuffer,
+    pub y_buffer: crate::gpu::GpuInputBuffer,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub len: u32,
     pub scalar: ScalarType,
     pub colors: ScatterColorBuffer,
@@ -311,7 +311,7 @@ fn prepare_size_buffer(
                 )
             }
         }
-        ScatterAttributeBuffer::Gpu(buffer) => (buffer.clone(), true),
+        ScatterAttributeBuffer::Gpu(buffer) => (Arc::clone(buffer), true),
     }
 }
 
@@ -374,7 +374,7 @@ fn prepare_color_buffer(
                 )
             }
         }
-        ScatterColorBuffer::Gpu { buffer, components } => (buffer.clone(), true, *components),
+        ScatterColorBuffer::Gpu { buffer, components } => (Arc::clone(buffer), true, *components),
     }
 }
 
@@ -451,9 +451,9 @@ mod stress_tests {
         };
 
         let inputs = Scatter3GpuInputs {
-            x_buffer: make_buffer("scatter3-test-x", &x),
-            y_buffer: make_buffer("scatter3-test-y", &y),
-            z_buffer: make_buffer("scatter3-test-z", &z),
+            x_buffer: make_buffer("scatter3-test-x", &x).into(),
+            y_buffer: make_buffer("scatter3-test-y", &y).into(),
+            z_buffer: make_buffer("scatter3-test-z", &z).into(),
             len: point_count,
             scalar: ScalarType::F32,
             colors: ScatterColorBuffer::None,

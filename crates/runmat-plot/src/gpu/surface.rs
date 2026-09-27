@@ -13,7 +13,7 @@ pub type SurfaceAxis<'a> = AxisData<'a>;
 pub struct SurfaceGpuInputs<'a> {
     pub x_axis: SurfaceAxis<'a>,
     pub y_axis: SurfaceAxis<'a>,
-    pub z_buffer: Arc<wgpu::Buffer>,
+    pub z_buffer: crate::gpu::GpuInputBuffer,
     pub color_table: &'a [[f32; 4]],
     pub x_len: u32,
     pub y_len: u32,
@@ -355,7 +355,7 @@ mod stress_tests {
         let inputs = SurfaceGpuInputs {
             x_axis: SurfaceAxis::F32(&x_axis),
             y_axis: SurfaceAxis::F32(&y_axis),
-            z_buffer,
+            z_buffer: z_buffer.into(),
             color_table: &color_table,
             x_len,
             y_len,
@@ -403,7 +403,7 @@ mod stress_tests {
             &SurfaceGpuInputs {
                 x_axis: SurfaceAxis::F32(&x_axis),
                 y_axis: SurfaceAxis::F32(&y_axis),
-                z_buffer,
+                z_buffer: z_buffer.into(),
                 color_table: &color_table,
                 x_len: 3,
                 y_len: 2,
