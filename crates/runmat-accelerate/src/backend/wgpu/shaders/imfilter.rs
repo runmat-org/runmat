@@ -43,15 +43,20 @@ mod recipe_tests {
             ImfilterShader::SingleDouble,
             ImfilterShader::Double,
         ] {
-            let source = recipe.source();
-            let module = naga::front::wgsl::parse_str(&source)
-                .unwrap_or_else(|error| panic!("{recipe:?}: {}", error.emit_to_string(&source)));
-            naga::valid::Validator::new(
-                naga::valid::ValidationFlags::all(),
-                naga::valid::Capabilities::all(),
-            )
-            .validate(&module)
-            .unwrap_or_else(|error| panic!("{recipe:?}: {error:?}"));
+            let template = recipe.source();
+            for workgroup in [1, 64, 128] {
+                let source = crate::backend::wgpu::pipelines::substitute_tokens(
+                    &template, workgroup, 8,
+                );
+                let module = naga::front::wgsl::parse_str(&source)
+                    .unwrap_or_else(|error| panic!("{recipe:?}: {}", error.emit_to_string(&source)));
+                naga::valid::Validator::new(
+                    naga::valid::ValidationFlags::all(),
+                    naga::valid::Capabilities::all(),
+                )
+                .validate(&module)
+                .unwrap_or_else(|error| panic!("{recipe:?}: {error:?}"));
+            }
         }
     }
 

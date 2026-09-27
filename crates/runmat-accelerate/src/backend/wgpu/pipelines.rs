@@ -1771,7 +1771,7 @@ impl WgpuPipelines {
     }
 }
 
-fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
+pub(super) fn substitute_tokens(src: &str, wg: u32, tile: u32) -> Cow<'_, str> {
     if src.contains("@WG@") || src.contains("@MT@") {
         let mut s = src.to_string();
         s = s.replace("@WG@", &wg.to_string());
