@@ -4,7 +4,10 @@ use runmat_builtins::*;
 #[test]
 fn migrated_filesystem_and_host_calls_have_one_canonical_binding() {
     let entries = [
+        &COPYFILE_CATALOG_ENTRY,
         &EXIST_CATALOG_ENTRY,
+        &FILEPARTS_CATALOG_ENTRY,
+        &FILESEP_CATALOG_ENTRY,
         &FULLFILE_CATALOG_ENTRY,
         &GENPATH_CATALOG_ENTRY,
         &GETENV_CATALOG_ENTRY,
@@ -49,4 +52,16 @@ fn migrated_filesystem_and_host_calls_have_one_canonical_binding() {
             "{name} still publishes a legacy registration"
         );
     }
+}
+
+#[test]
+fn filesep_canonical_dispatch_returns_the_platform_separator() {
+    let result =
+        futures::executor::block_on(runmat_runtime::call_builtin_async("filesep", &[])).unwrap();
+    assert_eq!(
+        result,
+        runmat_value::Value::CharArray(runmat_value::CharArray::new_row(
+            std::path::MAIN_SEPARATOR_STR,
+        ))
+    );
 }

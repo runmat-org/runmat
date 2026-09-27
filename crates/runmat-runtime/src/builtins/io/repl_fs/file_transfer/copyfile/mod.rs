@@ -3,7 +3,6 @@ mod filesystem;
 mod plan;
 mod result;
 mod single;
-pub(crate) mod specification;
 mod wildcard;
 
 #[cfg(test)]
@@ -14,6 +13,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "copyfile",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::file_transfer::copyfile"
 )]
 async fn copyfile_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
