@@ -4,6 +4,10 @@ use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 use super::super::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult};
 
+#[cfg(test)]
+#[path = "upload_protection_tests.rs"]
+mod protection_tests;
+
 pub(crate) fn upload_value_like(
     provider: &dyn AccelProvider,
     value: Value,
@@ -20,12 +24,14 @@ pub(crate) fn upload_value_like_protected(
     prototype: &GpuTensorHandle,
     protected: &[GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let output = upload_value_protected(provider, value, builtin, protected)?;
+    let mut protected = protected.to_vec();
+    protected.push(prototype.clone());
+    let output = upload_value_protected(provider, value, builtin, &protected)?;
     let Value::GpuTensor(mut handle) = output else {
         unreachable!("upload_value always returns a resident value")
     };
     if handle.device_id != prototype.device_id {
-        free_unless_protected(provider, &handle, protected);
+        free_unless_protected(provider, &handle, &protected);
         return Err(build_runtime_error(format!(
             "{builtin}: provider restored the result on the wrong device"
         ))
@@ -98,6 +104,7 @@ pub(crate) fn upload_value_protected(
             .build())
         }
     };
+    let protected_refs: Vec<_> = protected.iter().collect();
     let handle = match value {
         Value::Num(value) => {
             let tensor = Tensor::new(vec![value], vec![1, 1]).map_err(|error| {
@@ -105,13 +112,15 @@ pub(crate) fn upload_value_protected(
                     .with_builtin(builtin)
                     .build()
             })?;
-            gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
-                build_runtime_error(format!(
-                    "{builtin}: failed to restore result to input provider: {error}"
-                ))
-                .with_builtin(builtin)
-                .build()
-            })?
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &protected_refs).map_err(
+                |error| {
+                    build_runtime_error(format!(
+                        "{builtin}: failed to restore result to input provider: {error}"
+                    ))
+                    .with_builtin(builtin)
+                    .build()
+                },
+            )?
         }
         Value::Int(value) => {
             let tensor = Tensor::new_integer(IntegerStorage::from_scalar(value), vec![1, 1])
@@ -120,22 +129,26 @@ pub(crate) fn upload_value_protected(
                         .with_builtin(builtin)
                         .build()
                 })?;
-            gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
-                build_runtime_error(format!(
-                    "{builtin}: failed to restore result to input provider: {error}"
-                ))
-                .with_builtin(builtin)
-                .build()
-            })?
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &protected_refs).map_err(
+                |error| {
+                    build_runtime_error(format!(
+                        "{builtin}: failed to restore result to input provider: {error}"
+                    ))
+                    .with_builtin(builtin)
+                    .build()
+                },
+            )?
         }
         Value::Tensor(tensor) => {
-            gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
-                build_runtime_error(format!(
-                    "{builtin}: failed to restore result to input provider: {error}"
-                ))
-                .with_builtin(builtin)
-                .build()
-            })?
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &protected_refs).map_err(
+                |error| {
+                    build_runtime_error(format!(
+                        "{builtin}: failed to restore result to input provider: {error}"
+                    ))
+                    .with_builtin(builtin)
+                    .build()
+                },
+            )?
         }
         Value::Complex(real, imag) => {
             let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1]).map_err(|error| {
@@ -143,10 +156,10 @@ pub(crate) fn upload_value_protected(
                     .with_builtin(builtin)
                     .build()
             })?;
-            upload_complex_without_precision_override(provider, &tensor, builtin)?
+            upload_complex_without_precision_override(provider, &tensor, builtin, &protected_refs)?
         }
         Value::ComplexTensor(tensor) => {
-            upload_complex_without_precision_override(provider, &tensor, builtin)?
+            upload_complex_without_precision_override(provider, &tensor, builtin, &protected_refs)?
         }
         other => unreachable!("validated restore value {other:?}"),
     };
@@ -177,19 +190,15 @@ fn free_unless_protected(
     handle: &GpuTensorHandle,
     protected: &[GpuTensorHandle],
 ) {
-    if protected.iter().any(|candidate| {
-        candidate.device_id == handle.device_id && candidate.buffer_id == handle.buffer_id
-    }) {
-        return;
-    }
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(provider);
-    let _ = owner.free(handle);
+    let borrowed: Vec<_> = protected.iter().collect();
+    gpu_helpers::free_rejected_provider_output(handle, &borrowed, provider);
 }
 
 fn upload_complex_without_precision_override(
     provider: &dyn AccelProvider,
     tensor: &ComplexTensor,
     builtin: &str,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<GpuTensorHandle> {
     if tensor.integer_storage().is_some() {
         return Err(build_runtime_error(format!(
@@ -198,13 +207,14 @@ fn upload_complex_without_precision_override(
         .with_builtin(builtin)
         .build());
     }
-    let handle = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|error| {
-        build_runtime_error(format!(
-            "{builtin}: failed to restore result to input provider: {error}"
-        ))
-        .with_builtin(builtin)
-        .build()
-    })?;
+    let handle = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, protected)
+        .map_err(|error| {
+            build_runtime_error(format!(
+                "{builtin}: failed to restore result to input provider: {error}"
+            ))
+            .with_builtin(builtin)
+            .build()
+        })?;
     runmat_accelerate_api::set_handle_logical(&handle, false);
     Ok(handle)
 }
