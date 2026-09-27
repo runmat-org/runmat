@@ -17,7 +17,6 @@ use std::task::{Context, Poll};
 struct Provider {
     inner: InProcessProvider,
     mode: AtomicUsize,
-    freed: AtomicUsize,
 }
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
@@ -45,10 +44,6 @@ impl AccelProvider for Provider {
             self.inner.download(input).await
         })
     }
-    fn free(&self, input: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(input)
-    }
 }
 
 #[test]
@@ -57,7 +52,6 @@ fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
     let provider = PROVIDER.get_or_init(|| Provider {
         inner: InProcessProvider::new(),
         mode: AtomicUsize::new(0),
-        freed: AtomicUsize::new(0),
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
@@ -65,7 +59,6 @@ fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
         "stem", "stairs", "quiver3", "area", "quiver", "errorbar", "scatter3",
     ] {
         provider.mode.store(0, Ordering::SeqCst);
-        provider.freed.store(0, Ordering::SeqCst);
         assert_preparation_lifecycle(name, provider);
     }
 }
@@ -80,6 +73,8 @@ fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
             shape: &[1, 2],
         })
         .unwrap();
+    let physical = input.allocation_lease().downgrade();
+    let descriptor = input.wire_descriptor();
     let host = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
     let mut args = if name == "quiver3" {
         vec![
@@ -120,7 +115,8 @@ fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
     assert_eq!(count(), before);
     drop(future);
     assert_eq!(count(), before);
-    assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
+    assert!(physical.acquire().is_some());
+    assert_eq!(input.wire_descriptor(), descriptor);
     provider.mode.store(1, Ordering::SeqCst);
     assert!(block_on(runmat_runtime::call_builtin_async(name, &args)).is_err());
     assert_eq!(count(), before);
@@ -138,7 +134,14 @@ fn assert_preparation_lifecycle(name: &str, provider: &Provider) {
         .unwrap()
         .plots()
         .all(|plot| !plot.is_visible()));
-    assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
-    assert!(block_on(provider.inner.download(&input)).is_ok());
-    provider.free(&input).unwrap();
+    assert!(physical.acquire().is_some());
+    assert_eq!(input.wire_descriptor(), descriptor);
+    assert_eq!(
+        block_on(provider.inner.download(&input)).unwrap().data,
+        vec![1.0, 2.0]
+    );
+    drop(invalid);
+    drop(args);
+    drop(input);
+    assert!(physical.acquire().is_none());
 }

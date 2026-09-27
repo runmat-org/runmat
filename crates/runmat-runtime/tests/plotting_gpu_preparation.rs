@@ -16,7 +16,6 @@ struct FailingBounds {
     mode: AtomicUsize,
     downloads: AtomicUsize,
     bounds: AtomicUsize,
-    frees: AtomicUsize,
 }
 impl AccelProvider for FailingBounds {
     fn device_id(&self) -> u32 {
@@ -53,10 +52,6 @@ impl AccelProvider for FailingBounds {
             anyhow::bail!("injected plotting bounds failure")
         })
     }
-    fn free(&self, input: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(input)
-    }
 }
 
 #[test]
@@ -69,7 +64,6 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
         mode: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
         bounds: AtomicUsize::new(0),
-        frees: AtomicUsize::new(0),
     }));
     // This fixture owns the newly allocated device namespace for the process
     // lifetime. Register that owner independently of ambient provider selection.
@@ -82,14 +76,18 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
             shape: &[2, 1],
         })
         .unwrap();
+    let physical = input.allocation_lease().downgrade();
+    let descriptor = input.wire_descriptor();
     assert!(provider.export_wgpu_buffer(&input).is_some());
     assert_eq!(
-        input.device_id,
+        input.device_id(),
         provider.device_id(),
         "uploaded device identity"
     );
     assert!(
-        runmat_accelerate_api::provider_for_device(input.device_id).is_some(),
+        runmat_accelerate_api::registered_providers()
+            .iter()
+            .any(|owner| owner.device_id() == input.device_id()),
         "registered device owner"
     );
     assert!(
@@ -137,12 +135,16 @@ fn exported_gpu_geometry_does_not_retry_device_errors_or_publish_pending_plots()
             0,
             "{name} retried on host"
         );
-        assert_eq!(
-            provider.frees.load(Ordering::SeqCst),
-            0,
-            "{name} freed borrowed input"
+        assert!(
+            physical.acquire().is_some(),
+            "{name} lost borrowed allocation"
         );
-        assert!(block_on(provider.inner.download(&input)).is_ok());
+        assert_eq!(input.wire_descriptor(), descriptor);
+        assert_eq!(
+            block_on(provider.inner.download(&input)).unwrap().data,
+            vec![1.0, 2.0]
+        );
     }
-    provider.free(&input).unwrap();
+    drop(input);
+    assert!(physical.acquire().is_none());
 }
