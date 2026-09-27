@@ -619,7 +619,7 @@ fn valid_hilbert_gpu_output(
         && !runmat_accelerate_api::handle_is_logical(output)
         && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

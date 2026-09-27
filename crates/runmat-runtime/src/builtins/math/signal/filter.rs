@@ -1124,7 +1124,7 @@ async fn try_filter_gpu(args: &FilterArgs) -> BuiltinResult<Option<FilterEvaluat
         (None, None)
     } else if let Some(handle) = &args.initial.gpu_handle {
         if !runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         {
             return Ok(None);
         }

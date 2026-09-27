@@ -1643,8 +1643,11 @@ mod tests {
                 let Value::GpuTensor(handle) = output else {
                     panic!("expected resident output")
                 };
-                assert!(runmat_accelerate_api::provider_for_handle(handle)
-                    .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                assert!(
+                    runmat_accelerate_api::provider_for_handle(handle).is_some_and(|owner| {
+                        runmat_accelerate_api::same_provider_instance(owner, provider)
+                    })
+                );
                 assert_eq!(
                     runmat_accelerate_api::handle_integer_type(handle),
                     None,

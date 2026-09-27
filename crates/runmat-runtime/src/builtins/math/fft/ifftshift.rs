@@ -525,7 +525,7 @@ fn valid_ifftshift_gpu_output(
         && !same_gpu_handle(output, input)
         && gpu_metadata_snapshot(output) == expected
         && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn restore_ifftshift_gpu_value(

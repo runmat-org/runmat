@@ -462,7 +462,7 @@ fn try_conv2_gpu(
     let Some(rhs_provider) = runmat_accelerate_api::provider_for_handle(rhs) else {
         return Ok(None);
     };
-    if !std::ptr::eq(provider, rhs_provider) {
+    if !runmat_accelerate_api::same_provider_instance(provider, rhs_provider) {
         return Ok(None);
     }
 
@@ -522,7 +522,7 @@ fn native_result_matches_provider(
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
 }
 
 fn conv2_dimensions(shape: &[usize]) -> Option<(usize, usize)> {

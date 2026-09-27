@@ -403,7 +403,7 @@ pub fn valid_provider_fft_output(
     handle.shape() == expected_shape
         && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::provider_for_handle(handle)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == expected_storage
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
