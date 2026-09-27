@@ -603,7 +603,6 @@ fn rot90_gpu_via_provider(
             match provider.permute(handle, &order) {
                 Ok(perm_handle) => {
                     let result = provider.flip(&perm_handle, &[0]);
-                    let _ = provider.free(&perm_handle);
                     result.ok()
                 }
                 Err(_) => None,
@@ -616,7 +615,6 @@ fn rot90_gpu_via_provider(
             match provider.permute(handle, &order) {
                 Ok(perm_handle) => {
                     let result = provider.flip(&perm_handle, &[1]);
-                    let _ = provider.free(&perm_handle);
                     result.ok()
                 }
                 Err(_) => None,

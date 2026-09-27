@@ -451,7 +451,6 @@ fn randn_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
         false,
     )
     .map(Value::GpuTensor)
-    .map_err(builtin_error)
 }
 
 fn try_gpu_normal(shape: &[usize]) -> crate::BuiltinResult<Option<Value>> {

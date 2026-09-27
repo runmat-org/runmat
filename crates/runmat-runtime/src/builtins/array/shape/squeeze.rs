@@ -1,6 +1,5 @@
 //! MATLAB-compatible `squeeze` builtin with GPU-aware semantics for RunMat.
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,

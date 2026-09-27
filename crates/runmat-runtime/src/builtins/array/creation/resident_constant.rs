@@ -66,7 +66,7 @@ pub(super) fn logical(
             return Err(
                 build_runtime_error(format!("{name}: logical allocation failed: {cause}"))
                     .with_builtin(name)
-                    .with_source(cause)
+                    .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                     .build(),
             )
         }
@@ -137,7 +137,7 @@ pub(super) fn like(
                                 "{name}: provider fill failed: {cause}"
                             ))
                             .with_builtin(name)
-                            .with_source(cause)
+                            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                             .build())
                         }
                     }
@@ -150,7 +150,7 @@ pub(super) fn like(
                     "{name}: provider allocation failed: {cause}"
                 ))
                 .with_builtin(name)
-                .with_source(cause)
+                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                 .build())
             }
             None => None,

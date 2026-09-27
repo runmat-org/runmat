@@ -415,7 +415,7 @@ async fn zeros_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
                 "zeros: provider allocation failed: {cause}"
             ))
             .with_builtin("zeros")
-            .with_source(cause)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
             .build())
         }
     };
@@ -567,7 +567,7 @@ fn zeros_gpu_alloc(shape: &[usize], dtype: NumericDType) -> crate::BuiltinResult
             "zeros: provider allocation failed: {cause}"
         ))
         .with_builtin("zeros")
-        .with_source(cause)
+        .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
         .build()),
     }
 }

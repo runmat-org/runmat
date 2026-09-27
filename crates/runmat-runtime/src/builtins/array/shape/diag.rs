@@ -1010,7 +1010,7 @@ fn try_diag_gpu(handle: GpuTensorHandle, parsed: &ParsedDiagArgs) -> BuiltinResu
             "diag: provider diagonal operation failed: {cause}"
         ))
         .with_builtin("diag")
-        .with_source(cause)
+        .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
         .build()),
     }
 }

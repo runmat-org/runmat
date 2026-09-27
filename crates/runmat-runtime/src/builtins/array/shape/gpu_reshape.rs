@@ -49,7 +49,7 @@ pub(super) fn reshape(
     let mut output = provider.reshape(&source, shape).map_err(|cause| {
         crate::build_runtime_error(format!("{builtin}: layout materialization failed: {cause}"))
             .with_builtin(builtin)
-            .with_source(cause)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
             .build()
     })?;
     if output.shape() != shape

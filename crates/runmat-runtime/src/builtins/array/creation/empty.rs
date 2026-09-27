@@ -406,11 +406,17 @@ async fn build_empty_protecting(
                 runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
             };
             let host = Tensor::new_with_dtype(Vec::new(), shape, dtype).map_err(internal_error)?;
-            let mut handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting(
+            let handle = crate::builtins::common::gpu_helpers::upload_tensor_protecting(
                 provider, &host, protected,
-            )
-            .map_err(|err| internal_error(format!("empty: {err}")))?;
-            runmat_accelerate_api::mark_handle_explicit(&mut handle);
+            )?;
+            let handle = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .map_err(|cause| {
+                    crate::build_runtime_error(format!("empty: output provenance failed: {cause}"))
+                        .with_builtin("empty")
+                        .with_source(cause)
+                        .build()
+                })?;
             Ok(Value::GpuTensor(handle))
         }
     }

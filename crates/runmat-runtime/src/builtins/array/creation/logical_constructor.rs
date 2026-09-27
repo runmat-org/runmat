@@ -274,7 +274,7 @@ fn logical_gpu_output(
             return Err(
                 build_runtime_error(format!("{name}: logical fill failed: {cause}"))
                     .with_builtin(name)
-                    .with_source(cause)
+                    .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                     .build(),
             )
         }
@@ -440,7 +440,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::Tensor(t) => Ok(t.shape.clone()),
         Value::ComplexTensor(t) => Ok(t.shape.clone()),
         Value::LogicalArray(l) => Ok(l.shape.clone()),
-        Value::GpuTensor(h) => Ok(normalize_scalar_shape(&h.shape)),
+        Value::GpuTensor(h) => Ok(normalize_scalar_shape(h.shape())),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),

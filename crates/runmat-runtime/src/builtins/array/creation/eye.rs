@@ -353,7 +353,7 @@ fn ensure_eye_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
                 }
             }
             Value::GpuTensor(value) => {
-                let len = tensor::element_count(&value.shape);
+                let len = tensor::element_count(value.shape());
                 let row = value.shape().len() >= 2 && value.shape()[0] == 1;
                 let column = value.shape().len() >= 2 && value.shape()[1] == 1;
                 if len <= 1 || row || column || value.shape().len() == 1 {
@@ -784,7 +784,7 @@ async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Built
                         "eye: provider identity failed: {cause}"
                     ))
                     .with_builtin("eye")
-                    .with_source(cause)
+                    .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                     .build())
                 }
             }

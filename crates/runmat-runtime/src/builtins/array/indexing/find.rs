@@ -1361,7 +1361,7 @@ fn tensor_to_value(
 fn complex_tensor_to_value(
     tensor: ComplexTensor,
     output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-) -> BuiltinResult<Value> {
+) -> crate::BuiltinResult<Value> {
     if let Some(provider) = output_provider {
         if let Ok(handle) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
             return gpu_helpers::complex_gpu_value(handle);

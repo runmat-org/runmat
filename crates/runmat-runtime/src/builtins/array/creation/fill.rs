@@ -1023,7 +1023,7 @@ fn fill_like_gpu(
                     "createArray: provider fill failed: {cause}"
                 ))
                 .with_builtin("createArray")
-                .with_source(cause)
+                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                 .build())
             }
         }

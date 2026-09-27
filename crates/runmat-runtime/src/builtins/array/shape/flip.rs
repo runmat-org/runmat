@@ -794,7 +794,7 @@ pub(crate) async fn flip_gpu_with(
                     "{builtin}: provider flip failed: {cause}"
                 ))
                 .with_builtin(builtin)
-                .with_source(cause)
+                .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
                 .build())
             }
         }

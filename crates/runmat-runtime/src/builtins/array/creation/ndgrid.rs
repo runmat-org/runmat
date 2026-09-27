@@ -318,7 +318,7 @@ fn try_provider_outputs(
                 "ndgrid: provider expansion failed: {cause}"
             ))
             .with_builtin(BUILTIN_NAME)
-            .with_source(cause)
+            .with_source(runmat_accelerate_api::ProviderExecutionError::from(cause))
             .build())
         }
     };
