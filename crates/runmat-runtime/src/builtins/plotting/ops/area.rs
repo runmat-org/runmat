@@ -650,7 +650,7 @@ async fn prepare_area_plots(
 ) -> crate::BuiltinResult<Vec<AreaPlot>> {
     if matches!(&x, NumericInput::Host(tensor) if host_x_is_nondecreasing_vector(tensor)) {
         if let Some(y_gpu) = y.gpu_handle() {
-            if let Ok(plots) = build_area_gpu_plots(&x, y_gpu, parsed).await {
+            if let Some(plots) = build_area_gpu_plots(&x, y_gpu, parsed).await? {
                 return Ok(plots);
             }
         }
@@ -689,11 +689,11 @@ async fn build_area_gpu_plots(
     x: &NumericInput,
     y: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedAreaStyle,
-) -> crate::BuiltinResult<Vec<AreaPlot>> {
+) -> crate::BuiltinResult<Option<Vec<AreaPlot>>> {
+    let Some(y_ref) = runmat_accelerate_api::export_wgpu_buffer(y) else {
+        return Ok(None);
+    };
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y).ok_or_else(|| {
-        area_error_with_detail(&AREA_ERROR_INTERNAL, "unable to export GPU Y data")
-    })?;
     let (rows, cols) = area_shape_from_gpu_shape(&y_ref.shape, y_ref.len);
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         y_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
@@ -830,7 +830,7 @@ async fn build_area_gpu_plots(
         }
         plots.push(plot);
     }
-    Ok(plots)
+    Ok(Some(plots))
 }
 
 struct ParsedAreaStyle {
@@ -1013,7 +1013,10 @@ fn area_value_len(value: &Value) -> Option<usize> {
     match value {
         Value::Num(_) | Value::Int(_) => Some(1),
         Value::Tensor(tensor) => Some(tensor.len()),
-        Value::GpuTensor(handle) => Some(handle.shape.iter().product()),
+        Value::GpuTensor(handle) => handle
+            .shape
+            .iter()
+            .try_fold(1usize, |size, &dim| size.checked_mul(dim)),
         _ => None,
     }
 }
@@ -1022,7 +1025,13 @@ fn is_area_numeric_scalar(value: &Value) -> bool {
     match value {
         Value::Num(_) | Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.len() == 1,
-        Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() == 1,
+        Value::GpuTensor(handle) => {
+            handle
+                .shape
+                .iter()
+                .try_fold(1usize, |size, &dim| size.checked_mul(dim))
+                == Some(1)
+        }
         _ => false,
     }
 }
@@ -1030,7 +1039,11 @@ fn is_area_numeric_scalar(value: &Value) -> bool {
 fn validate_area_scalar(value: &Value) -> crate::BuiltinResult<()> {
     match value {
         Value::GpuTensor(handle)
-            if handle.shape.iter().product::<usize>() == 1
+            if handle
+                .shape
+                .iter()
+                .try_fold(1usize, |size, &dim| size.checked_mul(dim))
+                == Some(1)
                 && !runmat_accelerate_api::handle_is_logical(handle)
                 && runmat_accelerate_api::handle_storage(handle)
                     != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>

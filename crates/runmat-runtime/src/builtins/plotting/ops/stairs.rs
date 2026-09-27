@@ -1,6 +1,5 @@
 //! MATLAB-compatible `stairs` builtin.
 
-use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
@@ -418,7 +417,7 @@ pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     // any plot, so cancellation and failed downloads leave figure state intact.
     let mut prepared = None;
     if let (Some(x_gpu), Some(y_gpu)) = (x_input.gpu_handle(), y_input.gpu_handle()) {
-        match build_stairs_gpu_plot(
+        prepared = build_stairs_gpu_plot(
             BUILTIN_NAME,
             x_gpu,
             y_gpu,
@@ -426,11 +425,7 @@ pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             marker_meta.clone(),
             &label,
         )
-        .await
-        {
-            Ok(plot) => prepared = Some(plot),
-            Err(err) => warn!("stairs GPU path unavailable: {err}"),
-        }
+        .await?;
     }
     let plot = match prepared {
         Some(plot) => plot,
@@ -533,13 +528,14 @@ async fn build_stairs_gpu_plot(
     appearance: &LineAppearance,
     marker_meta: Option<LineMarkerAppearance>,
     label: &str,
-) -> BuiltinResult<StairsPlot> {
+) -> BuiltinResult<Option<StairsPlot>> {
+    let (Some(x_ref), Some(y_ref)) = (
+        runmat_accelerate_api::export_wgpu_buffer(x),
+        runmat_accelerate_api::export_wgpu_buffer(y),
+    ) else {
+        return Ok(None);
+    };
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
-
-    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
-    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
-        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
 
     if x_ref.len < 2 {
         return Err(plotting_error(
@@ -632,7 +628,7 @@ async fn build_stairs_gpu_plot(
     if let Some(visible) = appearance.visible {
         plot.set_visible(visible);
     }
-    Ok(plot)
+    Ok(Some(plot))
 }
 
 fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineMarkerAppearance>) {

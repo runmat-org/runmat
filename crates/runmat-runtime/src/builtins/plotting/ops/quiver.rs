@@ -502,7 +502,7 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             u_in.as_ref().and_then(NumericInput::gpu_handle),
             v_in.as_ref().and_then(NumericInput::gpu_handle),
         ) {
-            if let Ok(plot) = build_quiver_gpu_plot(
+            if let Some(plot) = build_quiver_gpu_plot(
                 x_in.as_ref().expect("x available"),
                 y_in.as_ref().expect("y available"),
                 u_gpu,
@@ -510,7 +510,7 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
                 &parsed,
                 parsed.label.as_deref().unwrap_or("Data"),
             )
-            .await
+            .await?
             {
                 return Ok(plot);
             }
@@ -597,12 +597,21 @@ async fn build_quiver_gpu_plot(
     v: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedQuiverStyle,
     label: &str,
-) -> crate::BuiltinResult<QuiverPlot> {
+) -> crate::BuiltinResult<Option<QuiverPlot>> {
+    let (Some(u_ref), Some(v_ref)) = (
+        runmat_accelerate_api::export_wgpu_buffer(u),
+        runmat_accelerate_api::export_wgpu_buffer(v),
+    ) else {
+        return Ok(None);
+    };
+    for coordinate in [x, y] {
+        if let QuiverCoordinateInput::Explicit(NumericInput::Gpu(handle)) = coordinate {
+            if runmat_accelerate_api::export_wgpu_buffer(handle).is_none() {
+                return Ok(None);
+            }
+        }
+    }
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let u_ref = runmat_accelerate_api::export_wgpu_buffer(u)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU U data"))?;
-    let v_ref = runmat_accelerate_api::export_wgpu_buffer(v)
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU V data"))?;
     if u_ref.len != v_ref.len || u_ref.precision != v_ref.precision {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -721,7 +730,7 @@ async fn build_quiver_gpu_plot(
     if let Some(visible) = parsed.visible {
         plot.set_visible(visible);
     }
-    Ok(plot)
+    Ok(Some(plot))
 }
 
 enum QuiverAxisSource {
