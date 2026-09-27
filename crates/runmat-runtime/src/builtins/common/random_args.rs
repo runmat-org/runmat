@@ -385,9 +385,7 @@ mod constructor_dimension_tests {
                     vec![1.0, 2.0]
                 );
             }
-            provider
-                .free(&prototype)
-                .expect("release owned test prototype");
+            drop(prototype);
         });
     }
 

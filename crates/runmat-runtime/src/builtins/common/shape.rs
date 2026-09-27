@@ -130,29 +130,37 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn numel_gpu_uses_shape_product() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![4, 5, 6],
-            device_id: 0,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        };
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![4, 5, 6],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         assert_eq!(
-            block_on(value_numel(&Value::GpuTensor(handle))).unwrap(),
+            block_on(value_numel(&Value::GpuTensor(allocation.handle))).unwrap(),
             120
         );
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
     fn empty_gpu_shape_is_scalar_metadata_without_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: Vec::new(),
-            device_id: u32::MAX,
-            buffer_id: u64::MAX,
-            descriptor: Default::default(),
-        };
-        let value = Value::GpuTensor(handle);
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let allocation = owner
+            .allocate_zeroed(
+                vec![],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let value = Value::GpuTensor(allocation.handle);
         assert_eq!(block_on(value_dimensions(&value)).unwrap(), vec![1, 1]);
         assert_eq!(block_on(value_numel(&value)).unwrap(), 1);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(value);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
