@@ -1,9 +1,7 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
 };
-use runmat_runtime::builtins::math::linalg::ops::dot::{
-    dot_host_real_for_provider, kernel_error::DotKernelError,
-};
+use runmat_runtime::builtins::math::linalg::ops::{dot_host_real_for_provider, DotKernelError};
 use runmat_value::{Tensor, Value};
 use std::error::Error;
 

@@ -1,7 +1,7 @@
 use runmat_accelerate_api::*;
-use runmat_runtime::builtins::math::reduction::gradient::{
+use runmat_runtime::builtins::math::reduction::{
     gradient_complex_tensor_host, gradient_real_tensor_host,
-    gradient_real_tensor_host_with_coordinates, kernel_error::GradientKernelError,
+    gradient_real_tensor_host_with_coordinates, GradientKernelError,
 };
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 use std::error::Error;

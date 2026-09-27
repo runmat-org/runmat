@@ -253,7 +253,8 @@ fn gradient_internal_error(detail: impl AsRef<str>) -> RuntimeError {
 
 #[path = "gradient/kernel_error.rs"]
 pub mod kernel_error;
-use kernel_error::{GradientKernelError, GradientKernelResult};
+pub use kernel_error::GradientKernelError;
+use kernel_error::GradientKernelResult;
 
 #[derive(Clone, Debug, PartialEq)]
 enum GradientSpacing {

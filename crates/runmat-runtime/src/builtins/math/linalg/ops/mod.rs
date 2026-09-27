@@ -12,6 +12,7 @@ pub(crate) mod transpose;
 pub use cross::cross_host_real_for_provider;
 pub use dot::dot_host_complex_for_provider;
 pub use dot::dot_host_real_for_provider;
+pub use dot::kernel_error::DotKernelError;
 pub use matrix_arithmetic::{mldivide_host_real_for_provider, mrdivide_host_real_for_provider};
 
 type TransposedSparseValues<T> = (usize, usize, Vec<usize>, Vec<usize>, Vec<T>);
