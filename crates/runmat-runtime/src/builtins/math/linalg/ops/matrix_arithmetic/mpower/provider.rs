@@ -34,11 +34,14 @@ pub(super) async fn try_power(base: &Value, exponent: &Value) -> BuiltinResult<O
         )));
     }
     match exponent {
-        0 => identity(provider, base).map(|result| result.map(gpu_helpers::resident_gpu_value)),
+        0 => identity(provider, base)?
+            .map(gpu_helpers::resident_gpu_value)
+            .transpose(),
         1 => Ok(Some(Value::GpuTensor(base.clone()))),
         exponent => binary_power(provider, base, exponent as u32)
-            .await
-            .map(|handle| handle.map(gpu_helpers::resident_gpu_value)),
+            .await?
+            .map(gpu_helpers::resident_gpu_value)
+            .transpose(),
     }
 }
 
@@ -46,37 +49,28 @@ fn identity(
     provider: &'static dyn AccelProvider,
     prototype: &GpuTensorHandle,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let output = match provider.eye_like(prototype) {
+    let mut output = match provider.eye_like(prototype) {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             let identity = crate::builtins::common::matrix::matrix_eye(prototype.shape()[0]);
-            return gpu_helpers::upload_tensor(provider, &identity)
-                .map(Some)
-                .map_err(|error| {
-                    super::errors::internal(format!(
-                        "mpower: failed to upload provider identity: {error}"
-                    ))
-                });
+            gpu_helpers::upload_tensor_protecting(provider, &identity, &[prototype])?
         }
-        Err(error) => {
-            return Err(super::errors::internal(format!(
-                "mpower: provider identity construction failed: {error}"
-            )))
-        }
+        Err(error) => return Err(provider_failure("identity construction", error)),
     };
     let contract = UnaryGpuOutputContract {
         storage: GpuTensorStorage::Real,
         precision: Some(provider.precision()),
         integer: None,
         logical: false,
-        alias: GpuOutputAliasPolicy::RequireDistinct,
+        alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::unary_gpu_output_matches(&output, prototype, provider, contract) {
+        gpu_helpers::propagate_output_provenance(&mut output, &[prototype])?;
         return Ok(Some(output));
     }
-    gpu_helpers::free_rejected_provider_output(&output, &[prototype], provider);
-    Err(super::errors::internal(
-        "mpower: provider returned invalid identity metadata",
+    Err(gpu_helpers::reject_gpu_output(
+        output,
+        super::errors::internal("mpower: provider returned invalid identity metadata"),
     ))
 }
 
@@ -85,33 +79,30 @@ async fn binary_power(
     base: &GpuTensorHandle,
     mut exponent: u32,
 ) -> BuiltinResult<Option<GpuTensorHandle>> {
-    let mut base_state = ManagedHandle::borrowed(provider, base);
-    let mut result: Option<ManagedHandle> = None;
+    let mut base_state = base.clone();
+    let mut result: Option<GpuTensorHandle> = None;
     while exponent > 0 {
         if exponent & 1 == 1 {
             result = Some(match result {
                 Some(current) => {
-                    let Some(product) =
-                        multiply(provider, current.handle(), base_state.handle()).await?
-                    else {
+                    let Some(product) = multiply(provider, &current, &base_state).await? else {
                         return Ok(None);
                     };
                     product
                 }
-                None => base_state.transfer_clone(),
+                None => base_state.clone(),
             });
         }
         exponent >>= 1;
         if exponent > 0 {
-            let Some(square) = multiply(provider, base_state.handle(), base_state.handle()).await?
-            else {
+            let Some(square) = multiply(provider, &base_state, &base_state).await? else {
                 return Ok(None);
             };
             base_state = square;
         }
     }
     result
-        .map(|handle| Some(handle.into_handle()))
+        .map(Some)
         .ok_or_else(|| super::errors::internal("mpower: empty provider power result"))
 }
 
@@ -119,17 +110,13 @@ async fn multiply(
     provider: &'static dyn AccelProvider,
     lhs: &GpuTensorHandle,
     rhs: &GpuTensorHandle,
-) -> BuiltinResult<Option<ManagedHandle>> {
-    let output = match provider.matmul(lhs, rhs).await {
+) -> BuiltinResult<Option<GpuTensorHandle>> {
+    let mut output = match provider.matmul(lhs, rhs).await {
         Ok(output) => output,
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return Ok(None);
         }
-        Err(error) => {
-            return Err(super::errors::internal(format!(
-                "mpower: provider matrix multiplication failed: {error}"
-            )))
-        }
+        Err(error) => return Err(provider_failure("matrix multiplication", error)),
     };
     let contract = BinaryGpuOutputContract {
         shape: lhs.shape().to_vec(),
@@ -137,14 +124,15 @@ async fn multiply(
         precision: Some(provider.precision()),
         integer: None,
         logical: false,
-        alias: GpuOutputAliasPolicy::RequireDistinct,
+        alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if gpu_helpers::binary_gpu_output_matches(&output, lhs, rhs, provider, &contract) {
-        return Ok(Some(ManagedHandle::owned(provider, output)));
+        gpu_helpers::propagate_output_provenance(&mut output, &[lhs, rhs])?;
+        return Ok(Some(output));
     }
-    gpu_helpers::free_rejected_provider_output(&output, &[lhs, rhs], provider);
-    Err(super::errors::internal(
-        "mpower: provider returned invalid matrix-product metadata",
+    Err(gpu_helpers::reject_gpu_output(
+        output,
+        super::errors::internal("mpower: provider returned invalid matrix-product metadata"),
     ))
 }
 
@@ -158,52 +146,14 @@ fn compatible_base(handle: &GpuTensorHandle) -> bool {
         && runmat_accelerate_api::handle_precision(handle) == Some(provider.precision())
 }
 
-struct ManagedHandle {
-    provider: &'static dyn AccelProvider,
-    handle: GpuTensorHandle,
-    owned: bool,
+fn provider_failure(operation: &str, source: anyhow::Error) -> crate::RuntimeError {
+    let mut error =
+        super::errors::internal(format!("mpower: provider {operation} failed: {source}"));
+    error.source = Some(source.into_boxed_dyn_error());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
 }
 
-impl ManagedHandle {
-    fn borrowed(provider: &'static dyn AccelProvider, handle: &GpuTensorHandle) -> Self {
-        Self {
-            provider,
-            handle: handle.clone(),
-            owned: false,
-        }
-    }
-
-    fn owned(provider: &'static dyn AccelProvider, handle: GpuTensorHandle) -> Self {
-        Self {
-            provider,
-            handle,
-            owned: true,
-        }
-    }
-
-    fn transfer_clone(&mut self) -> Self {
-        let owned = std::mem::replace(&mut self.owned, false);
-        Self {
-            provider: self.provider,
-            handle: self.handle.clone(),
-            owned,
-        }
-    }
-
-    fn handle(&self) -> &GpuTensorHandle {
-        &self.handle
-    }
-
-    fn into_handle(mut self) -> GpuTensorHandle {
-        self.owned = false;
-        self.handle.clone()
-    }
-}
-
-impl Drop for ManagedHandle {
-    fn drop(&mut self) {
-        if self.owned && self.provider.free(&self.handle).is_ok() {
-            runmat_accelerate_api::clear_handle_metadata(&self.handle);
-        }
-    }
-}
+#[cfg(test)]
+#[path = "provider_owning_tests.rs"]
+mod owning_tests;
