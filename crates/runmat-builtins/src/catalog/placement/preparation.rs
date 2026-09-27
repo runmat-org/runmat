@@ -37,6 +37,8 @@ pub enum BuiltinPreparationOperation {
     Unary,
     /// A real unary route whose numerical domain is admitted by its owner.
     RealUnary(runmat_types::RealUnaryPredicate),
+    /// Digit count and decimal/significant mode remain typed request controls.
+    RoundDigits,
     ElementwiseBinary,
     /// An admitted broadcast operation consuming every declared data operand.
     ElementwiseNary {
@@ -79,7 +81,11 @@ pub enum BuiltinPreparationProviderRequirement {
 impl BuiltinPreparationOperation {
     pub const fn data_arity(self) -> Option<usize> {
         match self {
-            Self::Unary | Self::RealUnary(_) | Self::Transpose | Self::Reduction(_) => Some(1),
+            Self::Unary
+            | Self::RealUnary(_)
+            | Self::RoundDigits
+            | Self::Transpose
+            | Self::Reduction(_) => Some(1),
             Self::ElementwiseBinary | Self::RealPower | Self::MatrixMultiply => Some(2),
             Self::ElementwiseNary { data_arity } => Some(data_arity),
             Self::Sink(_) => None,

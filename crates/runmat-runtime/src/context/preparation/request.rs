@@ -50,6 +50,10 @@ impl AdmittedBuiltinPreparation {
                 runmat_builtins::BuiltinPreparationOperation::RealUnary(expected),
                 NumericalDomainEvidence::RealUnary { predicate, .. },
             ) => expected == predicate,
+            (
+                runmat_builtins::BuiltinPreparationOperation::RoundDigits,
+                NumericalDomainEvidence::RoundDigits { digits, mode },
+            ) => mode == runmat_accelerate_api::RoundDigitsMode::Decimals || digits > 0,
             _ => false,
         };
         if !belongs {

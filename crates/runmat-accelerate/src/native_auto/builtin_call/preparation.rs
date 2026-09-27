@@ -9,6 +9,7 @@ pub(super) enum ArgumentOperation {
     },
     Unary(UnaryOp),
     RealUnary(runmat_accelerate_api::NumericalDomainEvidence),
+    RoundDigits(runmat_accelerate_api::NumericalDomainEvidence),
     RealPower(runmat_accelerate_api::NumericalDomainEvidence),
 }
 
@@ -79,7 +80,7 @@ impl ArgumentOperation {
                 auto.evaluate_unary(elements, *op, &args[0]),
                 ProviderOperationFamily::Elementwise,
             ),
-            Self::RealUnary(evidence) => {
+            Self::RealUnary(evidence) | Self::RoundDigits(evidence) => {
                 workload.numerical_domain = *evidence;
                 (
                     auto.evaluate_unary(elements, UnaryOp::Generic, &args[0]),

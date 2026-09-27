@@ -29,7 +29,7 @@ pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
 };
-pub use numerical_domain::NumericalDomainEvidence;
+pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::PowerResultDomain;
 
