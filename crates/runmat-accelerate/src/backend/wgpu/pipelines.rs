@@ -1504,7 +1504,8 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => DIAG_FROM_VECTOR_SHADER_F64,
                 NumericPrecision::F32 => DIAG_FROM_VECTOR_SHADER_F32,
-            },
+            }
+            .replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let diag_extract = create_pipeline(
@@ -1558,7 +1559,8 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => LINEAR_GATHER_SHADER_F64,
                 NumericPrecision::F32 => LINEAR_GATHER_SHADER_F32,
-            },
+            }
+            .replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let scatter_linear = create_pipeline(
@@ -1575,7 +1577,8 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => LINEAR_SCATTER_SHADER_F64,
                 NumericPrecision::F32 => LINEAR_SCATTER_SHADER_F32,
-            },
+            }
+            .replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let find = create_pipeline(

@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod layout_tests;
+
 fn linear_storage_lane_factor(
     integer_type: Option<runmat_accelerate_api::IntegerElementType>,
     storage: GpuTensorStorage,
@@ -38,6 +41,11 @@ impl WgpuProvider {
         col_index: usize,
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        let matrix_contiguous = self.reshape_exec(matrix, matrix.shape())?;
+        let matrix = &matrix_contiguous;
+        let values_contiguous = self.reshape_exec(values, values.shape())?;
+        let values = &values_contiguous;
+
         let raw_matrix = self.get_entry_raw(matrix)?;
         let raw_values = self.get_entry_raw(values)?;
         if matrix.view().is_logical() && !self.allocations.requires_logical_encoding(values)? {
@@ -109,7 +117,8 @@ impl WgpuProvider {
         if v_rows != rows {
             return Err(anyhow!("scatter_column: length mismatch"));
         }
-        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_COL_SHADER_F32;
+        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_COL_SHADER_F32
+            .replace("@WG@", &self.workgroup_config.scalar.to_string());
         let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-col-out");
         {
             let mut enc =
@@ -135,12 +144,12 @@ impl WgpuProvider {
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-scatter-col-module",
-            shader,
+            &shader,
         );
         let key = self.compute_pipeline_hash_bytes(
             shader.as_bytes(),
             "runmat-scatter-col-bgl",
-            Some(256),
+            Some(self.workgroup_config.scalar),
         );
         let pipeline = self.get_or_create_pipeline(
             key,
@@ -188,7 +197,10 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(rows as u32, 256);
+        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            rows as u32,
+            self.workgroup_config.scalar,
+        );
         crate::backend::wgpu::dispatch::scatter::run(
             self.device_ref(),
             self.queue_ref(),
@@ -604,6 +616,11 @@ impl WgpuProvider {
         row_index: usize,
         values: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        let matrix_contiguous = self.reshape_exec(matrix, matrix.shape())?;
+        let matrix = &matrix_contiguous;
+        let values_contiguous = self.reshape_exec(values, values.shape())?;
+        let values = &values_contiguous;
+
         let raw_matrix = self.get_entry_raw(matrix)?;
         let raw_values = self.get_entry_raw(values)?;
         if matrix.view().is_logical() && !self.allocations.requires_logical_encoding(values)? {
@@ -674,7 +691,8 @@ impl WgpuProvider {
         if v_cols != cols {
             return Err(anyhow!("scatter_row: length mismatch"));
         }
-        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_ROW_SHADER_F32;
+        let shader = crate::backend::wgpu::shaders::scatter::SCATTER_ROW_SHADER_F32
+            .replace("@WG@", &self.workgroup_config.scalar.to_string());
         let out_buffer = self.create_storage_buffer(rows * cols, "runmat-scatter-row-out");
         {
             let mut enc =
@@ -700,12 +718,12 @@ impl WgpuProvider {
         let module = crate::backend::wgpu::pipelines::create_shader_module(
             self.device_ref(),
             "runmat-scatter-row-module",
-            shader,
+            &shader,
         );
         let key = self.compute_pipeline_hash_bytes(
             shader.as_bytes(),
             "runmat-scatter-row-bgl",
-            Some(256),
+            Some(self.workgroup_config.scalar),
         );
         let pipeline = self.get_or_create_pipeline(
             key,
@@ -755,7 +773,7 @@ impl WgpuProvider {
             });
         let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
             cols as u32,
-            crate::backend::wgpu::config::REDUCE_WORKGROUP_SIZE,
+            self.workgroup_config.scalar,
         );
         crate::backend::wgpu::dispatch::scatter::run(
             self.device_ref(),
@@ -782,6 +800,9 @@ impl WgpuProvider {
         indices: &[u32],
         output_shape: &[usize],
     ) -> Result<GpuTensorHandle> {
+        let source_contiguous = self.reshape_exec(source, source.shape())?;
+        let source = &source_contiguous;
+
         let entry = self.get_entry_raw(source)?;
         let integer_type = entry.integer_type();
         if integer_type.is_none() && entry.precision != self.precision {
@@ -908,7 +929,7 @@ impl WgpuProvider {
             });
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             indices.len() as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            self.workgroup_config.scalar,
         );
         crate::backend::wgpu::dispatch::creation::run(
             self.device_ref(),
@@ -966,7 +987,41 @@ impl WgpuProvider {
             "scatter_linear: index count exceeds GPU limits"
         );
         let target_entry = self.get_entry_raw(target)?;
+        let values_contiguous = if values.shares_allocation_with(target) {
+            // A read/write binding to the same physical buffer is not a snapshot.
+            // Preserve assignment values before mutating any aliased target view.
+            let value_indices = (0..indices.len())
+                .map(|index| u32::try_from(index).map_err(Into::into))
+                .collect::<Result<Vec<u32>>>()?;
+            self.gather_linear_exec(values, &value_indices, values.shape())?
+        } else {
+            self.reshape_exec(values, values.shape())?
+        };
+        let values = &values_contiguous;
         let values_entry = self.get_entry_raw(values)?;
+        let physical_indices;
+        let indices = if runmat_accelerate_api::handle_is_transposed(target) {
+            let view = super::backend_shared::build_matrix_operand_view(target, &target_entry)?;
+            let rows = target.shape()[0];
+            let len = rows
+                .checked_mul(target.shape()[1])
+                .ok_or_else(|| anyhow!("scatter_linear: target shape overflow"))?;
+            physical_indices = indices
+                .iter()
+                .map(|&index| {
+                    let index = index as usize;
+                    ensure!(index < len, "scatter_linear: logical index out of bounds");
+                    let physical = (index % rows)
+                        .checked_mul(view.lda as usize)
+                        .and_then(|offset| offset.checked_add(index / rows))
+                        .ok_or_else(|| anyhow!("scatter_linear: physical index overflow"))?;
+                    u32::try_from(physical).map_err(Into::into)
+                })
+                .collect::<Result<Vec<u32>>>()?;
+            physical_indices.as_slice()
+        } else {
+            indices
+        };
         if self.allocations.requires_logical_encoding(target)?
             && !self.allocations.requires_logical_encoding(values)?
         {
@@ -1082,7 +1137,7 @@ impl WgpuProvider {
             });
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             indices.len() as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            self.workgroup_config.scalar,
         );
         crate::backend::wgpu::dispatch::creation::run(
             self.device_ref(),

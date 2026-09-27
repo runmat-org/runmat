@@ -1005,6 +1005,9 @@ impl WgpuProvider {
         vector: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
+        let contiguous = self.reshape_exec(vector, vector.shape())?;
+        let vector = &contiguous;
+
         let entry = self.get_entry(vector)?;
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
@@ -1030,6 +1033,9 @@ impl WgpuProvider {
         out_rows: usize,
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
+        let contiguous = self.reshape_exec(vector, vector.shape())?;
+        let vector = &contiguous;
+
         let entry = self.get_entry(vector)?;
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
@@ -1123,7 +1129,7 @@ impl WgpuProvider {
             });
         let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
             len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
+            self.workgroup_config.scalar,
         );
         crate::backend::wgpu::dispatch::diag::run(
             self.device_ref(),
@@ -1150,6 +1156,9 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
+        let contiguous = self.reshape_exec(matrix, matrix.shape())?;
+        let matrix = &contiguous;
+
         let entry = self.get_entry(matrix)?;
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
