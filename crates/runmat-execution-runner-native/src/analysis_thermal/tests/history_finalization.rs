@@ -490,21 +490,9 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         accuracy_result.artifact.source_observations,
         Some(complete.identity())
     );
-    let omitted_finalization = extend_resource_usage(
-        &completion.solve_usage,
-        &PlannedResourceUsageGraph::new(
-            attempts.iter().filter(|attempt| !matches!(
-                attempt.plan.input.phase,
-                runmat_analysis_fea::planning::resource::FeaResourcePhase::ObservationHistoryFinalization(_)
-            )).cloned().collect(),
-            ordinal as u64,
-        ).unwrap(),
-        &access,
-        output_policy,
-    ).unwrap();
     let baseline = extend_resource_usage(
         &completion.solve_usage,
-        &PlannedResourceUsageGraph::new(attempts, ordinal as u64).unwrap(),
+        &PlannedResourceUsageGraph::new(attempts.clone(), ordinal as u64).unwrap(),
         &access,
         output_policy,
     )
@@ -519,7 +507,67 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         chunk_bytes,
         inventory_limits: limits,
     };
-    assert!(prepare_result_publication(publication_preparation(&omitted_finalization)).is_err());
+    // This boundary proves exact accuracy accounting and the existing finalization gate.
+    // Complete CPU partition/reduction/checkpoint lineage remains an open workflow gate;
+    // neither this fixture's successful execution nor these checks establish that coverage.
+    for omitted_phase in [PublicationPhase::Accuracy, PublicationPhase::Finalization] {
+        let omitted = attempts
+            .iter()
+            .filter(|attempt| {
+                publication_phase_category(&attempt.plan.input.phase) == Some(omitted_phase)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !omitted.is_empty(),
+            "fixture must execute {omitted_phase:?}"
+        );
+        assert!(
+            omitted
+                .iter()
+                .all(|attempt| attempt.plan.request.accelerators.is_empty()),
+            "{omitted_phase:?} omission must exercise CPU accounting, not accelerator reconciliation"
+        );
+        // Rebuild internally valid identities, plans and totals after deleting the phase.
+        // Rejecting stale hashes would not establish expected-workflow completeness.
+        let incomplete = extend_resource_usage(
+            &completion.solve_usage,
+            &PlannedResourceUsageGraph::new(
+                attempts
+                    .iter()
+                    .filter(|attempt| {
+                        publication_phase_category(&attempt.plan.input.phase) != Some(omitted_phase)
+                    })
+                    .cloned()
+                    .collect(),
+                ordinal as u64,
+            )
+            .unwrap(),
+            &access,
+            output_policy,
+        )
+        .unwrap();
+        incomplete.evidence.validate_identity().unwrap();
+        assert_eq!(
+            incomplete.evidence.attempts.len() + omitted.len(),
+            baseline.evidence.attempts.len()
+        );
+        if omitted_phase == PublicationPhase::Accuracy {
+            // Exercise the core constructor independently of bridge-side preparation, using
+            // authentic accuracy/catalog artifacts and newly hashed incomplete usage.
+            assert!(
+                runmat_analysis_fea::execution::ResultPublicationRequest::new(
+                    &accuracy_result.artifact,
+                    Some(&complete),
+                    &incomplete.evidence,
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            prepare_result_publication(publication_preparation(&incomplete)).is_err(),
+            "publication must reject a valid baseline omitting CPU {omitted_phase:?} accounting"
+        );
+    }
     let publication = prepare_result_publication(publication_preparation(&baseline)).unwrap();
     let (response, accounting) = execute(
         &mut store,
@@ -564,6 +612,23 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         context,
     )
     .is_err());
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicationPhase {
+    Accuracy,
+    Finalization,
+}
+
+fn publication_phase_category(
+    phase: &runmat_analysis_fea::planning::resource::FeaResourcePhase,
+) -> Option<PublicationPhase> {
+    use runmat_analysis_fea::planning::resource::FeaResourcePhase;
+    match phase {
+        FeaResourcePhase::AccuracyEvaluation(_) => Some(PublicationPhase::Accuracy),
+        FeaResourcePhase::ObservationHistoryFinalization(_) => Some(PublicationPhase::Finalization),
+        _ => None,
+    }
 }
 
 fn assert_worker_rejects_omitted_authored_observations(

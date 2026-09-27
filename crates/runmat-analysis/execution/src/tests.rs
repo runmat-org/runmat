@@ -2472,6 +2472,44 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
         runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
     );
 
+    assert!(
+        runmat_analysis_fea::execution::ResultPublicationRequest::new(
+            &accuracy_artifact,
+            Some(&publication_catalog),
+            &resource_usage.evidence,
+        )
+        .is_err()
+    );
+    let accuracy_usage = PlannedResourceUsageGraph::new(
+        vec![PlannedResourceUsageAttempt {
+            plan: accuracy_prepared.resource_plan.clone(),
+            accounting: runmat_execution_runner::AttemptResourceAccounting {
+                attempt_id: runmat_execution::identity::AttemptId::derive(&[b"accuracy-attempt"]),
+                worker_id: runmat_execution::identity::WorkerId::derive(&[b"structural-worker"]),
+                resources: runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+                    accuracy_prepared.resource_plan.request.clone(),
+                    1,
+                    0,
+                    0,
+                    0,
+                )
+                .unwrap(),
+            },
+        }],
+        1,
+    )
+    .unwrap();
+    let output_policy = AnalysisOutputPolicy::new(4096, ObjectInventoryLimits::default()).unwrap();
+    let resource_usage =
+        extend_resource_usage(&resource_usage, &accuracy_usage, &access(), output_policy).unwrap();
+    let alternate_resource_usage = extend_resource_usage(
+        &alternate_resource_usage,
+        &accuracy_usage,
+        &access(),
+        output_policy,
+    )
+    .unwrap();
+
     assert!(prepare_result_publication(ResultPublicationPreparation {
         accuracy_host: accuracy_prepared.host.clone(),
         source_accuracy: accuracy_completed.outputs[0].clone(),

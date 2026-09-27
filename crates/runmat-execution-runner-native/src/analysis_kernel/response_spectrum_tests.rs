@@ -327,6 +327,18 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         .collect::<Vec<_>>();
     attempts.push(planned_attempt(&assembly.resource_plan, attempts.len()));
     attempts.push(planned_attempt(&envelope.resource_plan, attempts.len()));
+    let omitted_accuracy = prepare_planned_resource_graph_usage(
+        &assembly.resource_plan,
+        coordinator.resolved_workload().unwrap().identity().digest(),
+        coordinator.result().unwrap().identity.digest(),
+        &PlannedResourceUsageGraph::new(attempts.clone(), 1).unwrap(),
+        &access(),
+        256,
+        limits,
+    )
+    .unwrap();
+    assert!(coordinator.prepare_publication(omitted_accuracy).is_err());
+    attempts.push(planned_attempt(&accuracy.resource_plan, attempts.len()));
     let graph = PlannedResourceUsageGraph::new(attempts, 1).unwrap();
     let resource_usage = prepare_planned_resource_graph_usage(
         &assembly.resource_plan,
@@ -362,7 +374,7 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
         .unwrap();
     assert!(coordinator.is_complete());
     let usage = coordinator.resource_usage().unwrap();
-    assert_eq!(usage.evidence.attempts.len(), direction_plans.len() + 2);
+    assert_eq!(usage.evidence.attempts.len(), direction_plans.len() + 3);
     assert_eq!(usage.evidence.primary_plan, assembly.resource_plan.identity);
     assert!(usage.evidence.overruns.is_empty());
     let publication = &coordinator.publication().unwrap().result;

@@ -3,8 +3,9 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use serde::{Deserialize, Serialize};
 
 use crate::execution::{
-    AnalysisExecutionError, AnalysisExecutionResult, PublicationIdentity,
-    PublicationRequestIdentity, ResultPublicationRequest, SolverResultIdentity, StepIdentity,
+    AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
+    PublicationIdentity, PublicationRequestIdentity, ResultPublicationRequest,
+    SolverResultIdentity, StepIdentity,
 };
 use crate::planning::resource::{
     FeaResourcePlanIdentity, ResourceUsageEvidence, ResourceUsageEvidenceIdentity,
@@ -16,13 +17,15 @@ use super::accuracy::{
 };
 use super::observation::ObservationPublicationCatalogIdentity;
 
-const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v2\0";
+// Hard cutover: receipts must carry the independently bound accuracy task authority.
+const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v3\0";
 const PUBLICATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 mod profile;
 mod usage;
 pub use profile::published_result_encoding_profile;
+pub(crate) use usage::validate_accuracy_resource_usage;
 pub use usage::validate_result_publication_resource_usage;
 
 /// Immutable terminal receipt for a result set admitted by its typed accuracy policy.
@@ -35,6 +38,7 @@ pub struct PublishedAnalysisResult {
     pub producer: StepIdentity,
     pub source_result: SolverResultIdentity,
     pub source_observations: Option<ObservationPublicationCatalogIdentity>,
+    pub accuracy_request: AccuracyEvaluationRequestIdentity,
     pub source_accuracy: AccuracyArtifactIdentity,
     pub source_resource_plan: FeaResourcePlanIdentity,
     pub source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -52,6 +56,7 @@ struct PublishedAnalysisResultWire {
     producer: StepIdentity,
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationPublicationCatalogIdentity>,
+    accuracy_request: AccuracyEvaluationRequestIdentity,
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -71,6 +76,7 @@ impl TryFrom<PublishedAnalysisResultWire> for PublishedAnalysisResult {
             producer: wire.producer,
             source_result: wire.source_result,
             source_observations: wire.source_observations,
+            accuracy_request: wire.accuracy_request,
             source_accuracy: wire.source_accuracy,
             source_resource_plan: wire.source_resource_plan,
             source_resource_usage: wire.source_resource_usage,
@@ -101,12 +107,13 @@ impl PublishedAnalysisResult {
             request.source_resource_usage.digest(),
         )?;
         let result = Self {
-            schema_version: 2,
+            schema_version: 3,
             identity,
             request: request.identity(),
             producer: request.producer,
             source_result: request.source_result,
             source_observations: request.source_observations,
+            accuracy_request: request.accuracy_request,
             source_accuracy: request.source_accuracy,
             source_resource_plan: request.source_resource_plan,
             source_resource_usage: request.source_resource_usage,
@@ -123,6 +130,7 @@ impl PublishedAnalysisResult {
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
+        ResultPublicationRequest::from_publication(self)?;
         let expected = PublicationIdentity::new(
             self.request,
             self.source_result,
@@ -131,7 +139,7 @@ impl PublishedAnalysisResult {
             self.source_resource_plan.digest(),
             self.source_resource_usage.digest(),
         )?;
-        if self.schema_version != 2
+        if self.schema_version != 3
             || self.identity != expected
             || self.gate.decision != PublicationDecision::Allow
             || self.gate.status != self.accuracy_status
@@ -154,6 +162,11 @@ impl PublishedAnalysisResult {
         accuracy
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        validate_accuracy_resource_usage(
+            self.accuracy_request,
+            self.source_result,
+            resource_usage,
+        )?;
         let resource_plan = resource_usage
             .primary_plan()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -163,6 +176,7 @@ impl PublishedAnalysisResult {
             || &self.gate != accuracy.gate()
             || self.source_result != accuracy.source_result
             || self.source_observations != accuracy.source_observations
+            || self.accuracy_request != accuracy.evaluation_request
             || self.source_accuracy != accuracy.identity()
             || self.source_resource_plan != resource_plan.identity
             || self.source_resource_usage != resource_usage.identity()

@@ -75,6 +75,11 @@ impl ResultPublicationRequest {
         accuracy
             .validate()
             .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        crate::results::publication::validate_accuracy_resource_usage(
+            accuracy.evaluation_request,
+            accuracy.source_result,
+            resource_usage,
+        )?;
         let observation_identity = match observations {
             Some(observations) => {
                 observations.validate_source_result(
@@ -136,6 +141,26 @@ impl ResultPublicationRequest {
 
     pub const fn identity(&self) -> PublicationRequestIdentity {
         self.identity
+    }
+
+    /// Reconstruct the original request from a receipt, including its accuracy task authority.
+    /// This prevents a receipt from substituting the expected task while retaining its request ID.
+    pub(crate) fn from_publication(
+        publication: &crate::results::publication::PublishedAnalysisResult,
+    ) -> AnalysisExecutionResult<Self> {
+        let request = Self {
+            schema_version: 2,
+            identity: publication.request,
+            producer: publication.producer,
+            source_result: publication.source_result,
+            source_observations: publication.source_observations,
+            accuracy_request: publication.accuracy_request,
+            source_accuracy: publication.source_accuracy,
+            source_resource_plan: publication.source_resource_plan,
+            source_resource_usage: publication.source_resource_usage,
+        };
+        request.validate()?;
+        Ok(request)
     }
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {

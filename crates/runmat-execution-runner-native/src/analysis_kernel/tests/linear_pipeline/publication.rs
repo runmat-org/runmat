@@ -213,6 +213,24 @@ pub(super) fn execute(
         1,
     )
     .unwrap();
+    assert!(ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).is_err());
+    let mut attempts = resource_usage.attempts.clone();
+    attempts.push(ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[b"kernel-accuracy-attempt"]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+        plan: plan.identity,
+        resources: ResourceAccounting::for_reserved_interval(plan.request.clone(), 1, 0, 0, 0)
+            .unwrap(),
+    });
+    let resource_usage = runmat_analysis_fea::planning::resource::record_resource_graph_usage(
+        &solved.prepared.resource_plan,
+        vec![plan],
+        host.workload.identity.digest(),
+        solved.source_result.digest(),
+        attempts,
+        2,
+    )
+    .unwrap();
     let publication_request =
         ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).unwrap();
     let publication_request_objects = runmat_analysis_execution::prepare_analysis_objects(

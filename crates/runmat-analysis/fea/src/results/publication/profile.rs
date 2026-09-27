@@ -10,6 +10,7 @@ struct Receipt<'a> {
     producer: StepIdentity,
     source_result: SolverResultIdentity,
     source_observations: Option<ObservationPublicationCatalogIdentity>,
+    accuracy_request: AccuracyEvaluationRequestIdentity,
     source_accuracy: AccuracyArtifactIdentity,
     source_resource_plan: FeaResourcePlanIdentity,
     source_resource_usage: ResourceUsageEvidenceIdentity,
@@ -27,6 +28,7 @@ impl Serialize for PublishedAnalysisResult {
             producer: self.producer,
             source_result: self.source_result,
             source_observations: self.source_observations,
+            accuracy_request: self.accuracy_request,
             source_accuracy: self.source_accuracy,
             source_resource_plan: self.source_resource_plan,
             source_resource_usage: self.source_resource_usage,
@@ -47,6 +49,7 @@ pub(super) fn validate_sources(
     accuracy
         .validate()
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+    validate_accuracy_resource_usage(request.accuracy_request, request.source_result, usage)?;
     let primary = usage
         .primary_plan()
         .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
@@ -87,12 +90,13 @@ pub fn published_result_encoding_profile(
     )?;
     Ok(profile_serialized(
         &Receipt {
-            schema_version: 2,
+            schema_version: 3,
             identity,
             request: request.identity(),
             producer: request.producer,
             source_result: request.source_result,
             source_observations: request.source_observations,
+            accuracy_request: request.accuracy_request,
             source_accuracy: request.source_accuracy,
             source_resource_plan: request.source_resource_plan,
             source_resource_usage: request.source_resource_usage,

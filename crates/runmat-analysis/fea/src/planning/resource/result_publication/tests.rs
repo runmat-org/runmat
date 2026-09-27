@@ -19,6 +19,8 @@ use runmat_execution::{
     Digest,
 };
 
+mod accuracy_usage;
+
 fn facts(output: u64) -> PreparedPhaseResourceFacts {
     PreparedPhaseResourceFacts {
         inputs: PreparedInputResourceFacts {

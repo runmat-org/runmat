@@ -1,6 +1,9 @@
 //! Source-preserving terminal accounting, shared by workers, bridge and durable runtime.
 use super::PublishedAnalysisResult;
-use crate::execution::{AnalysisExecutionError, AnalysisExecutionResult};
+use crate::execution::{
+    AccuracyEvaluationRequestIdentity, AnalysisExecutionError, AnalysisExecutionResult,
+    SolverResultIdentity,
+};
 use crate::planning::resource::{
     record_resource_graph_usage, FeaResourceDemand, FeaResourcePhase, ResourcePlanningError,
     ResourceUsageEvidence,
@@ -8,6 +11,48 @@ use crate::planning::resource::{
 
 fn resource_error(error: ResourcePlanningError) -> AnalysisExecutionError {
     AnalysisExecutionError::Invalid(error.to_string())
+}
+
+/// The accuracy artifact/request, not the supplied usage inventory, identifies required work.
+/// Multiple attempts are allowed: retry accounting must not be collapsed to one attempt.
+/// This proves an admitted scheduler attempt, not success attestation or completeness of all
+/// earlier solve/observation/state work; those require their own independently bound lineage.
+pub(crate) fn validate_accuracy_resource_usage(
+    request: AccuracyEvaluationRequestIdentity,
+    source_result: SolverResultIdentity,
+    usage: &ResourceUsageEvidence,
+) -> AnalysisExecutionResult<()> {
+    usage.validate_identity().map_err(resource_error)?;
+    if usage.result_digest != source_result.digest() {
+        return Err(AnalysisExecutionError::Identity(
+            "accuracy accounting names a different solver result",
+        ));
+    }
+    let mut accounted = false;
+    for plan in &usage.plans {
+        if plan.input.phase != FeaResourcePhase::AccuracyEvaluation(request) {
+            continue;
+        }
+        let FeaResourceDemand::AccuracyEvaluation(demand) = &plan.input.demand else {
+            return Err(AnalysisExecutionError::Identity(
+                "accuracy accounting demand differs",
+            ));
+        };
+        if demand.request != request || demand.source_result != source_result {
+            return Err(AnalysisExecutionError::Identity(
+                "accuracy accounting sources differ",
+            ));
+        }
+        // validate_identity requires the plan catalog to exactly cover measured attempts.
+        // Thus this plan already has an attempt; do not rescan the entire attempt graph.
+        accounted = true;
+    }
+    if accounted {
+        return Ok(());
+    }
+    Err(AnalysisExecutionError::Identity(
+        "publication omits its source-bound accuracy scheduler attempt",
+    ))
 }
 
 /// Requires exactly the measured publication attempt in addition to every baseline attempt.
@@ -19,6 +64,11 @@ pub fn validate_result_publication_resource_usage(
     terminal: &ResourceUsageEvidence,
 ) -> AnalysisExecutionResult<()> {
     publication.validate()?;
+    validate_accuracy_resource_usage(
+        publication.accuracy_request,
+        publication.source_result,
+        baseline,
+    )?;
     let primary = baseline.primary_plan().map_err(resource_error)?;
     terminal.validate_identity().map_err(resource_error)?;
     if publication.source_resource_usage != baseline.identity()
