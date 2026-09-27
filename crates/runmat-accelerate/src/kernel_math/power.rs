@@ -33,23 +33,6 @@ fn nan(v: f64) -> bool {
     return (b.y & 0x7ff00000u) == 0x7ff00000u && ((b.y & 0x000fffffu) != 0u || b.x != 0u);
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn two_precisions_have_distinct_helpers_and_identical_exception_order() {
-        for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
-            let source = functions(precision);
-            let name = entrypoint(precision);
-            assert!(source.contains(&format!("fn {name}(")));
-            assert!(!source.contains("fn real_power("));
-            assert!(!source.contains(&format!("{name}_{name}")));
-            assert!(source.find(&format!("if {name}_nan(a)")).unwrap() < source.find("if b ==").unwrap());
-            assert!(source.contains(&format!("if {name}_negative(a) && odd")));
-        }
-    }
-}
 fn negative(v: f64) -> bool { return (bitcast<vec2<u32>>(v).y & 0x80000000u) != 0u; }
 "#
         }
@@ -88,4 +71,27 @@ fn real_power(a: T, b: T) -> T {{
         .replace("negative(", &format!("{name}_negative("))
         .replace("needs_complex(", &format!("{name}_needs_complex("))
         .replace("real_power(", &format!("{name}("))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_precisions_have_distinct_helpers_and_identical_exception_order() {
+        for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+            let source = functions(precision);
+            let name = entrypoint(precision);
+            assert!(source.contains(&format!("fn {name}(")));
+            assert!(!source.contains("#[cfg(test)]"));
+            assert!(!source.contains("mod tests"));
+            assert!(!source.contains("fn real_power("));
+            assert!(!source.contains(&format!("{name}_{name}")));
+            assert!(
+                source.find(&format!("if {name}_nan(a)")).unwrap()
+                    < source.find("if b ==").unwrap()
+            );
+            assert!(source.contains(&format!("if {name}_negative(a) && odd")));
+        }
+    }
 }
