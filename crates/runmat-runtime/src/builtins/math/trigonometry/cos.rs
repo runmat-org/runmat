@@ -335,8 +335,7 @@ pub(crate) mod tests {
         HostTensorView, ProviderPrecision,
     };
     use runmat_value::{IntValue, StringArray, Tensor};
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::Mutex;
 
     use crate::builtins::common::{gpu_helpers, test_support};
@@ -347,56 +346,62 @@ pub(crate) mod tests {
     }
 
     struct MalformedCosProvider {
-        device_id: u32,
-        next_buffer: AtomicU64,
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        foreign: runmat_accelerate_api::test_support::TestAllocationOwner,
         malformed: AtomicU8,
-        allocations: AtomicUsize,
-        frees: AtomicUsize,
-        buffers: Mutex<HashMap<u64, HostTensorOwned>>,
+        probes: Mutex<Vec<runmat_accelerate_api::test_support::RetirementProbe>>,
     }
 
     impl MalformedCosProvider {
         fn new() -> Self {
             Self {
-                device_id: runmat_accelerate_api::next_device_id(),
-                next_buffer: AtomicU64::new(8_700_000_000_000_000_000),
+                owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+                foreign: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
                 malformed: AtomicU8::new(0),
-                allocations: AtomicUsize::new(0),
-                frees: AtomicUsize::new(0),
-                buffers: Mutex::new(HashMap::new()),
+                probes: Mutex::new(Vec::new()),
             }
         }
 
         fn allocate(
             &self,
-            data: Vec<f64>,
+            mut data: Vec<f64>,
             shape: Vec<usize>,
-            device_id: u32,
+            foreign: bool,
             precision: ProviderPrecision,
             storage: GpuTensorStorage,
         ) -> GpuTensorHandle {
-            let buffer_id = self.next_buffer.fetch_add(1, Ordering::Relaxed);
-            self.buffers.lock().unwrap().insert(
-                buffer_id,
-                HostTensorOwned {
-                    data,
-                    shape: shape.clone(),
-                    storage,
-                },
-            );
-            self.allocations.fetch_add(1, Ordering::Relaxed);
-            GpuTensorHandle {
-                shape,
-                device_id,
-                buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor::numeric(
-                    match precision {
-                        ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
-                        ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
-                    },
-                    storage,
-                ),
+            use runmat_accelerate_api::{HostNumericDataOwned, HostNumericTensorOwned};
+            if storage == GpuTensorStorage::ComplexInterleaved {
+                data = data.into_iter().flat_map(|real| [real, 0.0]).collect();
             }
+            let data = match precision {
+                ProviderPrecision::F32 => {
+                    HostNumericDataOwned::F32(data.into_iter().map(|v| v as f32).collect())
+                }
+                ProviderPrecision::F64 => HostNumericDataOwned::F64(data),
+            };
+            let owner = if foreign { &self.foreign } else { &self.owner };
+            let allocation = owner
+                .allocate_numeric(HostNumericTensorOwned {
+                    data,
+                    shape,
+                    storage,
+                })
+                .unwrap();
+            self.probes.lock().unwrap().push(allocation.probe);
+            allocation.handle
+        }
+
+        fn allocations(&self) -> usize {
+            self.probes.lock().unwrap().len()
+        }
+        fn retirements(&self) -> usize {
+            self.probes
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|probe| probe.retirements())
+                .sum()
         }
     }
 
@@ -405,7 +410,7 @@ pub(crate) mod tests {
             Ok(self.allocate(
                 host.data.to_vec(),
                 host.shape.to_vec(),
-                self.device_id,
+                false,
                 ProviderPrecision::F64,
                 GpuTensorStorage::Real,
             ))
@@ -413,34 +418,38 @@ pub(crate) mod tests {
 
         fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
-                self.buffers
+                self.probes
                     .lock()
                     .unwrap()
-                    .get(&handle.buffer_id)
-                    .cloned()
-                    .ok_or_else(|| anyhow::anyhow!("unknown test buffer"))
+                    .iter()
+                    .find_map(|probe| {
+                        probe
+                            .with_data(handle, |data| {
+                                use runmat_accelerate_api::HostNumericDataView;
+                                let data = match data {
+                                    HostNumericDataView::F64(values) => values.to_vec(),
+                                    HostNumericDataView::F32(values) => {
+                                        values.iter().map(|&v| f64::from(v)).collect()
+                                    }
+                                    _ => panic!("floating fixture payload"),
+                                };
+                                HostTensorOwned {
+                                    data,
+                                    shape: handle.shape().to_vec(),
+                                    storage: handle.physical().storage(),
+                                }
+                            })
+                            .ok()
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("unknown test allocation"))
             })
         }
 
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            if self
-                .buffers
-                .lock()
-                .unwrap()
-                .remove(&handle.buffer_id)
-                .is_some()
-            {
-                self.frees.fetch_add(1, Ordering::Relaxed);
-            }
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
-            "malformed-cos-test-provider".to_string()
+            "malformed-cos-test-provider".into()
         }
-
         fn device_id(&self) -> u32 {
-            self.device_id
+            self.owner.device_id()
         }
 
         fn unary_cos<'a>(
@@ -449,27 +458,20 @@ pub(crate) mod tests {
         ) -> AccelProviderFuture<'a, GpuTensorHandle> {
             Box::pin(async move {
                 let malformed = self.malformed.load(Ordering::Relaxed);
-                let device_id = if malformed == 2 {
-                    self.device_id.wrapping_add(10_000)
-                } else {
-                    self.device_id
-                };
-                let precision = if malformed == 0 {
-                    ProviderPrecision::F32
-                } else {
-                    ProviderPrecision::F64
-                };
-                let storage = if malformed == 1 {
-                    GpuTensorStorage::ComplexInterleaved
-                } else {
-                    GpuTensorStorage::Real
-                };
                 Ok(self.allocate(
-                    vec![99.0; input.shape.iter().product()],
-                    input.shape.clone(),
-                    device_id,
-                    precision,
-                    storage,
+                    vec![99.0; input.shape().iter().product()],
+                    input.shape().to_vec(),
+                    malformed == 2,
+                    if malformed == 0 {
+                        ProviderPrecision::F32
+                    } else {
+                        ProviderPrecision::F64
+                    },
+                    if malformed == 1 {
+                        GpuTensorStorage::ComplexInterleaved
+                    } else {
+                        GpuTensorStorage::Real
+                    },
                 ))
             })
         }
@@ -689,15 +691,12 @@ pub(crate) mod tests {
                 .expect_err("malformed native output must be rejected");
             assert_eq!(error.identifier(), COS_ERROR_INTERNAL.identifier);
             let completed = usize::from(malformed) + 1;
-            assert_eq!(provider.allocations.load(Ordering::Relaxed), completed * 2);
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2 - 1);
-            provider.free(&input).expect("free input");
-            assert_eq!(provider.frees.load(Ordering::Relaxed), completed * 2);
+            assert_eq!(provider.allocations(), completed * 2);
+            assert_eq!(provider.retirements(), completed * 2 - 1);
+            input.release().expect("release input");
+            assert_eq!(provider.retirements(), completed * 2);
         }
-        assert_eq!(
-            provider.allocations.load(Ordering::Relaxed),
-            provider.frees.load(Ordering::Relaxed)
-        );
+        assert_eq!(provider.allocations(), provider.retirements());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -899,7 +898,7 @@ pub(crate) mod tests {
         let Value::GpuTensor(output) = result else {
             panic!("expected GPU output")
         };
-        assert_eq!(output.device_id, prototype_provider.device_id());
+        assert_eq!(output.device_id(), prototype_provider.device_id());
         let output_owner =
             runmat_accelerate_api::provider_for_handle(&output).expect("registered output owner");
         assert!(std::ptr::eq(
