@@ -19,6 +19,7 @@ mod handle_metadata;
 mod numeric_upload;
 mod placement;
 mod power;
+mod numerical_domain;
 
 pub use handle_metadata::{
     restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
@@ -28,8 +29,9 @@ pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
 };
+pub use numerical_domain::NumericalDomainEvidence;
 pub use placement::*;
-pub use power::{NumericalDomainEvidence, PowerResultDomain};
+pub use power::PowerResultDomain;
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);

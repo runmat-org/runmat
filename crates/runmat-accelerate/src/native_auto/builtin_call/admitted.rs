@@ -103,6 +103,7 @@ pub(super) fn prepare_with(
     }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
+        Operation::RealUnary(_) => ArgumentOperation::RealUnary(request.numerical_domain()),
         Operation::Transpose => ArgumentOperation::Unary(UnaryOp::Transpose),
         Operation::ElementwiseBinary => ArgumentOperation::Binary(BinaryOp::Elementwise),
         Operation::RealPower => ArgumentOperation::RealPower(request.numerical_domain()),

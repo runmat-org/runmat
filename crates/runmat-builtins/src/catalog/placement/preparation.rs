@@ -35,6 +35,8 @@ pub struct BuiltinPreparationForm {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BuiltinPreparationOperation {
     Unary,
+    /// A real unary route whose numerical domain is admitted by its owner.
+    RealUnary(runmat_types::RealUnaryPredicate),
     ElementwiseBinary,
     /// Real floating operands whose result domain depends on paired values.
     RealPower,
@@ -73,7 +75,7 @@ pub enum BuiltinPreparationProviderRequirement {
 impl BuiltinPreparationOperation {
     pub const fn data_arity(self) -> Option<usize> {
         match self {
-            Self::Unary | Self::Transpose | Self::Reduction(_) => Some(1),
+            Self::Unary | Self::RealUnary(_) | Self::Transpose | Self::Reduction(_) => Some(1),
             Self::ElementwiseBinary | Self::RealPower | Self::MatrixMultiply => Some(2),
             Self::Sink(_) => None,
         }

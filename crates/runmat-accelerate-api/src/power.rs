@@ -1,16 +1,6 @@
 //! Numerical-domain contract for power of real floating operands.
 use serde::{Deserialize, Serialize};
 
-/// Per-invocation semantic evidence. Missing evidence is not a real-domain
-/// promise, including when an older serialized query omits this field.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "operation", content = "domain")]
-pub enum NumericalDomainEvidence {
-    #[default]
-    Unknown,
-    RealPower(PowerResultDomain),
-}
-
 /// Result storage selected from the actual paired operands, not a residual
 /// tolerance or the fact that both inputs have real storage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -44,18 +34,16 @@ impl PowerResultDomain {
 #[cfg(test)]
 mod tests {
     use super::PowerResultDomain::{self, Complex, Real};
+    use crate::NumericalDomainEvidence;
 
     #[test]
     fn older_workloads_decode_unknown_and_domains_round_trip() {
         let old: crate::ProviderWorkload =
             serde_json::from_str(r#"{"elements":4,"flops":null,"batch":null}"#).unwrap();
-        assert_eq!(
-            old.numerical_domain,
-            super::NumericalDomainEvidence::Unknown
-        );
+        assert_eq!(old.numerical_domain, NumericalDomainEvidence::Unknown);
         for domain in [Real, Complex] {
             let workload = crate::ProviderWorkload {
-                numerical_domain: super::NumericalDomainEvidence::RealPower(domain),
+                numerical_domain: NumericalDomainEvidence::RealPower(domain),
                 ..old.clone()
             };
             let encoded = serde_json::to_string(&workload).unwrap();

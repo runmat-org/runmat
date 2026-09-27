@@ -5,6 +5,7 @@ pub mod fact;
 pub mod identity;
 pub mod integer_literal;
 pub mod rules;
+pub mod real_unary;
 pub mod serde_f64;
 pub mod source;
 pub mod symbolic;
@@ -22,6 +23,7 @@ pub use declaration::{
 pub use fact::*;
 pub use identity::*;
 pub use integer_literal::{IntegerClass, IntegerLiteral, IntegerLiteralClass};
+pub use real_unary::{RealUnaryClassification, RealUnaryPredicate};
 pub use rules::*;
 pub use source::{merge_span, Span};
 pub use symbolic::{

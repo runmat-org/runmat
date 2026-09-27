@@ -40,14 +40,19 @@ impl AdmittedBuiltinPreparation {
     ) -> Result<Self, RuntimeError> {
         use runmat_accelerate_api::NumericalDomainEvidence;
         let evidence = classify(&self.operands)?;
-        if !matches!(
-            (self.form.operation, evidence),
+        let belongs = match (self.form.operation, evidence) {
             (_, NumericalDomainEvidence::Unknown)
-                | (
-                    runmat_builtins::BuiltinPreparationOperation::RealPower,
-                    NumericalDomainEvidence::RealPower(_)
-                )
-        ) {
+            | (
+                runmat_builtins::BuiltinPreparationOperation::RealPower,
+                NumericalDomainEvidence::RealPower(_),
+            ) => true,
+            (
+                runmat_builtins::BuiltinPreparationOperation::RealUnary(expected),
+                NumericalDomainEvidence::RealUnary { predicate, .. },
+            ) => expected == predicate,
+            _ => false,
+        };
+        if !belongs {
             return Err(invalid(
                 "numerical evidence does not belong to preparation operation",
             ));

@@ -55,6 +55,58 @@ fn numerical_evidence_defaults_unknown_and_cannot_cross_operation_roles() {
         .is_err());
 }
 
+#[test]
+fn real_unary_evidence_is_bound_to_declared_predicate_and_owned_operand() {
+    use runmat_accelerate_api::NumericalDomainEvidence;
+    use runmat_types::{RealUnaryClassification, RealUnaryPredicate};
+    let make = || {
+        let mut entry = SIN_CATALOG_ENTRY;
+        entry.placement.preparation =
+            BuiltinOperandPreparation::Forms(Box::leak(Box::new([BuiltinPreparationForm {
+                operation: BuiltinPreparationOperation::RealUnary(
+                    RealUnaryPredicate::ClosedUnitInterval,
+                ),
+                ..FORM
+            }])));
+        AdmittedBuiltinPreparation::from_entry(
+            Box::leak(Box::new(entry)),
+            admission(),
+            vec![Value::Num(0.25)],
+        )
+        .unwrap()
+    };
+    for classification in [
+        RealUnaryClassification::Inside,
+        RealUnaryClassification::Outside,
+        RealUnaryClassification::Indeterminate,
+    ] {
+        let evidence = NumericalDomainEvidence::RealUnary {
+            predicate: RealUnaryPredicate::ClosedUnitInterval,
+            classification,
+        };
+        let request = make()
+            .with_numerical_domain(|operands| {
+                assert_eq!(operands, &[Value::Num(0.25)]);
+                Ok(evidence)
+            })
+            .unwrap();
+        assert_eq!(request.numerical_domain(), evidence);
+        assert_eq!(request.form().operation.data_arity(), Some(1));
+    }
+    assert!(make()
+        .with_numerical_domain(|_| Ok(NumericalDomainEvidence::RealUnary {
+            predicate: RealUnaryPredicate::Nonnegative,
+            classification: RealUnaryClassification::Inside,
+        }))
+        .is_err());
+    assert!(request()
+        .with_numerical_domain(|_| Ok(NumericalDomainEvidence::RealUnary {
+            predicate: RealUnaryPredicate::ClosedUnitInterval,
+            classification: RealUnaryClassification::Inside,
+        }))
+        .is_err());
+}
+
 fn context() -> RuntimeContext {
     RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
 }
