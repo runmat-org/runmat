@@ -5,6 +5,9 @@ use runmat_runtime::{call_builtin_async, GpuGatherRetry};
 use runmat_value::Value;
 use std::sync::Mutex;
 
+#[path = "sinc_provider_contract/complex_single.rs"]
+mod complex_single;
+
 #[derive(Clone, Copy)]
 enum Mode {
     Supported,
@@ -16,10 +19,14 @@ enum Mode {
 }
 struct Provider {
     inner: runmat_accelerate::simple_provider::InProcessProvider,
+    precision: ProviderPrecision,
     mode: Mode,
     trace: Mutex<Vec<&'static str>>,
 }
 impl AccelProvider for Provider {
+    fn precision(&self) -> ProviderPrecision {
+        self.precision
+    }
     fn device_id(&self) -> u32 {
         self.inner.device_id()
     }
@@ -70,11 +77,30 @@ impl AccelProvider for Provider {
             }
         })
     }
+    fn download_numeric<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async move {
+            if input.physical().element_type() == NumericElementType::F32 {
+                self.trace.lock().unwrap().push("download");
+                self.inner.download_numeric(input).await
+            } else {
+                let host = self.download(input).await?;
+                Ok(HostNumericTensorOwned {
+                    data: HostNumericDataOwned::F64(host.data),
+                    shape: host.shape,
+                    storage: host.storage,
+                })
+            }
+        })
+    }
 }
 
 fn provider(mode: Mode) -> &'static Provider {
     Box::leak(Box::new(Provider {
         inner: Default::default(),
+        precision: ProviderPrecision::F64,
         mode,
         trace: Mutex::new(Vec::new()),
     }))

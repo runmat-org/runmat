@@ -12,7 +12,7 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
+use runmat_value::{ComplexStorage, ComplexTensor, NumericDType, NumericStorage, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
@@ -312,7 +312,11 @@ async fn sinc_gpu_host_fallback(
             return Err(sinc_error(&SINC_ERROR_MALFORMED_COMPLEX_BUFFER));
         }
         let complex = chunks.map(|chunk| (chunk[0], chunk[1])).collect::<Vec<_>>();
-        let tensor = ComplexTensor::new(complex, shape)
+        let dtype = match precision {
+            runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
+            runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
+        };
+        let tensor = ComplexTensor::from_f64_values_with_dtype(complex, shape, dtype)
             .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
         let host = sinc_complex_tensor(tensor)?;
         return gpu_helpers::restore_class_preserving_value(handle, host, BUILTIN_NAME);
@@ -359,12 +363,26 @@ fn sinc_tensor(tensor: Tensor) -> BuiltinResult<Tensor> {
 }
 
 fn sinc_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Value> {
-    let data = tensor
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| sinc_complex_value(re, im))
-        .collect::<Vec<_>>();
-    let tensor = ComplexTensor::new(data, tensor.shape.clone())
+    let shape = tensor.shape.clone();
+    let storage = match tensor.into_complex_storage() {
+        ComplexStorage::F64(values) => ComplexStorage::F64(
+            values
+                .into_iter()
+                .map(|(re, im)| sinc_complex_value(re, im))
+                .collect(),
+        ),
+        ComplexStorage::F32(values) => ComplexStorage::F32(
+            values
+                .into_iter()
+                .map(|(re, im)| {
+                    let (re, im) = sinc_complex_value(f64::from(re), f64::from(im));
+                    (re as f32, im as f32)
+                })
+                .collect(),
+        ),
+        ComplexStorage::Integer(_) => return Err(sinc_error(&SINC_ERROR_INVALID_INPUT)),
+    };
+    let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|e| sinc_error_with_detail(&SINC_ERROR_INTERNAL, &e))?;
     Ok(complex_tensor_into_value(tensor))
 }
