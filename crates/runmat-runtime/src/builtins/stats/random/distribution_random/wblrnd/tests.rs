@@ -337,7 +337,7 @@ fn wgpu_fallback_preserves_explicit_residency_and_precision() {
             panic!("expected resident output");
         };
         assert!(runmat_accelerate_api::handle_is_explicit(&output));
-        assert_eq!(output.shape, vec![1, 2]);
+        assert_eq!(output.shape(), &[1, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_precision(&output),
             Some(precision)

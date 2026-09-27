@@ -3706,7 +3706,7 @@ mod tests {
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("expected resident output")
             };
-            assert_eq!(output_handle.device_id, source.device_id);
+            assert_eq!(output_handle.device_id(), source.device_id());
             assert!(gpu_helpers::exact_provider_for_handle(output_handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             assert!(runmat_accelerate::fusion_residency::is_resident(&source));
@@ -4372,7 +4372,7 @@ mod tests {
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("expected resident output");
             };
-            assert_eq!(output_handle.device_id, source.device_id);
+            assert_eq!(output_handle.device_id(), source.device_id());
             assert!(gpu_helpers::exact_provider_for_handle(output_handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             assert!(runmat_accelerate::fusion_residency::is_resident(&source));

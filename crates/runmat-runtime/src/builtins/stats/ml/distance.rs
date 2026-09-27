@@ -2426,10 +2426,10 @@ mod tests {
         };
         assert!(runmat_accelerate_api::handle_is_explicit(&output));
         assert_eq!(
-            output.device_id,
+            output.device_id(),
             runmat_accelerate_api::AccelProvider::device_id(provider)
         );
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(
             runmat_accelerate_api::handle_precision(&output),
             Some(runmat_accelerate_api::ProviderPrecision::F64)

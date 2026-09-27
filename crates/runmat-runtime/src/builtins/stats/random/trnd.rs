@@ -569,7 +569,7 @@ mod tests {
                 runmat_accelerate_api::handle_precision(&handle),
                 Some(ProviderPrecision::F32)
             );
-            assert_eq!(handle.shape, vec![2, 1]);
+            assert_eq!(handle.shape(), &[2, 1]);
         });
     }
 

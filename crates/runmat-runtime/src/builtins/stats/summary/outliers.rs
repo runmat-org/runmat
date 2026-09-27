@@ -1722,10 +1722,10 @@ mod tests {
         };
         assert!(runmat_accelerate_api::handle_is_explicit(&output));
         assert_eq!(
-            output.device_id,
+            output.device_id(),
             runmat_accelerate_api::AccelProvider::device_id(provider)
         );
-        assert_eq!(output.shape, vec![5, 1]);
+        assert_eq!(output.shape(), &[5, 1]);
         assert!(runmat_accelerate_api::handle_is_logical(&output));
     }
 
