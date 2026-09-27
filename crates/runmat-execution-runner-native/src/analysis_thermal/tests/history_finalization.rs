@@ -507,10 +507,14 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
         chunk_bytes,
         inventory_limits: limits,
     };
-    // This boundary proves exact accuracy accounting and the existing finalization gate.
-    // Complete CPU partition/reduction/checkpoint lineage remains an open workflow gate;
-    // neither this fixture's successful execution nor these checks establish that coverage.
-    for omitted_phase in [PublicationPhase::Accuracy, PublicationPhase::Finalization] {
+    let mut accepted_omissions = Vec::new();
+    // Partition/reduction omissions were reproduced separately and remain open until their
+    // per-task source provenance is retained; checkpoint lineage is independently derivable.
+    for omitted_phase in [
+        PublicationPhase::Accuracy,
+        PublicationPhase::Finalization,
+        PublicationPhase::Checkpoint,
+    ] {
         let omitted = attempts
             .iter()
             .filter(|attempt| {
@@ -551,7 +555,12 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
             incomplete.evidence.attempts.len() + omitted.len(),
             baseline.evidence.attempts.len()
         );
-        if omitted_phase == PublicationPhase::Accuracy {
+        if matches!(
+            omitted_phase,
+            PublicationPhase::Accuracy
+                | PublicationPhase::Checkpoint
+                | PublicationPhase::Finalization
+        ) {
             // Exercise the core constructor independently of bridge-side preparation, using
             // authentic accuracy/catalog artifacts and newly hashed incomplete usage.
             assert!(
@@ -563,11 +572,78 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
                 .is_err()
             );
         }
+        if prepare_result_publication(publication_preparation(&incomplete)).is_ok() {
+            accepted_omissions.push(omitted_phase);
+        }
+    }
+    assert!(
+        accepted_omissions.is_empty(),
+        "publication accepted missing CPU accounting: {accepted_omissions:?}"
+    );
+    // Requiring merely one checkpoint per history is insufficient: every prefix has work.
+    let checkpoint_attempts: Vec<_> = attempts
+        .iter()
+        .filter(|attempt| {
+            publication_phase_category(&attempt.plan.input.phase)
+                == Some(PublicationPhase::Checkpoint)
+        })
+        .collect();
+    for index in [
+        0,
+        checkpoint_attempts.len() / 2,
+        checkpoint_attempts.len() - 1,
+    ] {
+        let omitted_id = checkpoint_attempts[index].accounting.attempt_id;
+        let incomplete = extend_resource_usage(
+            &completion.solve_usage,
+            &PlannedResourceUsageGraph::new(
+                attempts
+                    .iter()
+                    .filter(|attempt| attempt.accounting.attempt_id != omitted_id)
+                    .cloned()
+                    .collect(),
+                ordinal as u64,
+            )
+            .unwrap(),
+            &access,
+            output_policy,
+        )
+        .unwrap();
         assert!(
-            prepare_result_publication(publication_preparation(&incomplete)).is_err(),
-            "publication must reject a valid baseline omitting CPU {omitted_phase:?} accounting"
+            runmat_analysis_fea::execution::ResultPublicationRequest::new(
+                &accuracy_result.artifact,
+                Some(&complete),
+                &incomplete.evidence,
+            )
+            .is_err(),
+            "missing individual checkpoint {index}"
         );
     }
+    // A wrong-source demand must not hide next to the correctly accounted task.
+    let mut conflict = (*checkpoint_attempts[0]).clone();
+    let mut input = conflict.plan.input.clone();
+    let runmat_analysis_fea::planning::resource::FeaResourceDemand::StructuralObservationHistoryCheckpoint(demand) = &mut input.demand else { unreachable!() };
+    demand.topology_digest = Digest::sha256("foreign checkpoint topology");
+    conflict.plan = runmat_analysis_fea::planning::resource::build_resource_plan(input).unwrap();
+    conflict.accounting.attempt_id =
+        runmat_execution::identity::AttemptId::derive(&[b"conflicting checkpoint"]);
+    let mut conflicting_attempts = attempts.clone();
+    conflicting_attempts.push(conflict);
+    let conflicting_usage = extend_resource_usage(
+        &completion.solve_usage,
+        &PlannedResourceUsageGraph::new(conflicting_attempts, ordinal as u64).unwrap(),
+        &access,
+        output_policy,
+    )
+    .unwrap();
+    assert!(
+        runmat_analysis_fea::execution::ResultPublicationRequest::new(
+            &accuracy_result.artifact,
+            Some(&complete),
+            &conflicting_usage.evidence,
+        )
+        .is_err()
+    );
     let publication = prepare_result_publication(publication_preparation(&baseline)).unwrap();
     let (response, accounting) = execute(
         &mut store,
@@ -618,6 +694,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
 enum PublicationPhase {
     Accuracy,
     Finalization,
+    Checkpoint,
 }
 
 fn publication_phase_category(
@@ -627,6 +704,9 @@ fn publication_phase_category(
     match phase {
         FeaResourcePhase::AccuracyEvaluation(_) => Some(PublicationPhase::Accuracy),
         FeaResourcePhase::ObservationHistoryFinalization(_) => Some(PublicationPhase::Finalization),
+        FeaResourcePhase::StructuralObservationHistoryCheckpoint(_) => {
+            Some(PublicationPhase::Checkpoint)
+        }
         _ => None,
     }
 }

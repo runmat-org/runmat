@@ -82,6 +82,10 @@ impl ResultPublicationRequest {
         )?;
         let observation_identity = match observations {
             Some(observations) => {
+                crate::results::publication::validate_observation_publication_usage(
+                    observations,
+                    resource_usage,
+                )?;
                 observations.validate_source_result(
                     accuracy.producer,
                     accuracy.source_kind,

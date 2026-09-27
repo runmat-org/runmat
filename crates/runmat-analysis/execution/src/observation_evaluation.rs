@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use runmat_analysis_core::{ObservationId, ProcedureStep};
 use runmat_analysis_fea::execution::{
     AnalysisNumericalObjectKind, AnalysisWorkKind, FieldRecoveryRequest, FieldRecoverySource,
@@ -9,6 +7,7 @@ use runmat_analysis_fea::results::field::StructuralRecoveredFieldTopology;
 use runmat_analysis_fea::results::observation::{
     resolve_structural_observation_plan, ObservationArtifactManifest, ObservationFieldCatalog,
     ObservationFieldSelection, ObservationLimits, ObservationResult,
+    ObservationSelectionCoordinate,
 };
 use runmat_execution::resource::AcceleratorRequest;
 use runmat_execution::ProgramRevision;
@@ -225,20 +224,11 @@ fn admit_structural(
         preparation.limits,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let required_definitions = plan
-        .observations
-        .iter()
-        .map(|observation| observation.source_field_definition_identity)
-        .collect::<BTreeSet<_>>();
-    let selected_fields = fields
-        .fields
-        .iter()
-        .filter(|entry| required_definitions.contains(&entry.definition.identity()))
-        .map(|entry| entry.field)
-        .collect::<Vec<_>>();
+    let catalog = ObservationFieldCatalog::structural(source_request.clone(), fields.clone())?;
+    let selected_fields = catalog
+        .canonical_selected_fields(&plan, ObservationSelectionCoordinate::StructuralRecovery)?;
     let selection = ObservationFieldSelection::structural(source_request, fields, selected_fields)?;
     let request = ObservationEvaluationRequest::new(selection.clone(), plan)?;
-    let catalog = ObservationFieldCatalog::structural(source_request.clone(), fields.clone())?;
     catalog.validate_structural_selection(&selection)?;
     let field_catalog = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationFieldCatalog,

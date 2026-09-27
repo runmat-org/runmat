@@ -73,6 +73,18 @@ pub fn build_prepared_result_publication_resource_plan(
             ));
         }
     }
+    // Reconstruct from the source catalog at both worker admission and import. A receipt's
+    // hashes alone cannot prove that an otherwise-valid usage graph retains required tasks.
+    let observations = request.source_observations.map(|_| {
+        runmat_analysis_fea::results::observation::ObservationPublicationCatalog::from_canonical_bytes(
+            &unique(AnalysisNumericalObjectKind::ObservationCatalog)?.payload(),
+        ).map_err(AnalysisBridgeError::from)
+    }).transpose()?;
+    if ResultPublicationRequest::new(accuracy, observations.as_ref(), usage)? != *request {
+        return Err(AnalysisBridgeError::Identity(
+            "publication request differs from source-bound task accounting",
+        ));
+    }
     let profile = published_result_encoding_profile(request, accuracy, usage)?;
     Ok(build_result_publication_resource_plan(
         request,

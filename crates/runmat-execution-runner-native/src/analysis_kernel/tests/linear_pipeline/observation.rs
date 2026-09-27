@@ -1,9 +1,6 @@
 use super::*;
 
-pub(super) fn execute(
-    solved: &SolvedPipeline,
-    recovered: &RecoveredPipeline,
-) -> runmat_analysis_fea::results::observation::ObservationPublicationCatalog {
+pub(super) fn execute(solved: &SolvedPipeline, recovered: &RecoveredPipeline) -> ObservedPipeline {
     let definitions = recovered
         .artifact
         .fields()
@@ -23,25 +20,24 @@ pub(super) fn execute(
         .unwrap();
     let recovery_request =
         FieldRecoveryRequest::from_canonical_bytes(&recovered.inputs[0].payload()).unwrap();
+    let catalog = runmat_analysis_fea::results::observation::ObservationFieldCatalog::structural(
+        recovery_request.clone(),
+        recovered.artifact.manifest().unwrap(),
+    )
+    .unwrap();
+    let selected_fields = catalog.canonical_selected_fields(
+        &observation_plan,
+        runmat_analysis_fea::results::observation::ObservationSelectionCoordinate::StructuralRecovery,
+    ).unwrap();
     let field_selection =
         runmat_analysis_fea::results::observation::ObservationFieldSelection::structural(
             &recovery_request,
             &recovered.artifact.manifest().unwrap(),
-            recovered
-                .artifact
-                .fields()
-                .iter()
-                .map(RecoveredField::identity)
-                .collect(),
+            selected_fields,
         )
         .unwrap();
     let source_request =
         ObservationEvaluationRequest::new(field_selection, observation_plan).unwrap();
-    let catalog = runmat_analysis_fea::results::observation::ObservationFieldCatalog::structural(
-        recovery_request,
-        recovered.artifact.manifest().unwrap(),
-    )
-    .unwrap();
     let catalog_objects = runmat_analysis_execution::prepare_analysis_objects(
         AnalysisNumericalObjectKind::ObservationFieldCatalog,
         catalog.identity(),
@@ -357,6 +353,23 @@ pub(super) fn execute(
             inputs: &assembly_inputs,
         })
         .unwrap();
+    // This direct-kernel fixture models reserved accounting, as its solve/accuracy stages do.
+    // Retain the exact plan actually executed; do not reconstruct a fictitious assembly task.
+    let assembly_attempt = ResourceUsageAttempt {
+        attempt_id: runmat_execution::identity::AttemptId::derive(&[
+            b"kernel-observation-assembly-attempt",
+        ]),
+        worker_id: runmat_execution::identity::WorkerId::derive(&[b"kernel-worker"]),
+        plan: assembly_resource_plan.identity,
+        resources: ResourceAccounting::for_reserved_interval(
+            assembly_resource_plan.request.clone(),
+            1,
+            0,
+            0,
+            0,
+        )
+        .unwrap(),
+    };
     let artifact_objects = prepare_kernel_output(&assembly_outputs[0]);
     let manifest = runmat_analysis_fea::results::observation::ObservationArtifactManifest::from_canonical_bytes(
         &artifact_objects
@@ -369,7 +382,7 @@ pub(super) fn execute(
         manifest.results[0].result,
         reference_result.logical_identity
     );
-    runmat_analysis_fea::results::observation::ObservationPublicationCatalog::new(
+    let catalog = runmat_analysis_fea::results::observation::ObservationPublicationCatalog::new(
         source_request.producer,
         source_request.plan.clone(),
         catalog,
@@ -389,7 +402,12 @@ pub(super) fn execute(
             mesh: Some(&solver_mesh),
         },
     )
-    .unwrap()
+    .unwrap();
+    ObservedPipeline {
+        catalog,
+        assembly_plan: assembly_resource_plan,
+        assembly_attempt,
+    }
 }
 
 fn resource_plan_objects(

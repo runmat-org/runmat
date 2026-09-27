@@ -54,6 +54,34 @@ impl TryFrom<ObservationAssemblyRequestWire> for ObservationAssemblyRequest {
 }
 
 impl ObservationAssemblyRequest {
+    /// Reconstruct the exact assembly request without loading numerical result payloads.
+    /// The publication catalog independently validates scheduled result coverage.
+    pub(crate) fn published_identity(
+        source: &ObservationEvaluationRequest,
+        manifest: &crate::results::observation::ObservationArtifactManifest,
+    ) -> AnalysisExecutionResult<ObservationAssemblyRequestIdentity> {
+        source.validate()?;
+        manifest
+            .validate()
+            .map_err(|error| AnalysisExecutionError::Invalid(error.to_string()))?;
+        if manifest.evaluation_request != source.identity()
+            || manifest.producer != source.producer
+            || manifest.plan_identity != source.plan.identity
+            || manifest.source_selection != source.selection.identity()
+            || manifest.source != source.selection.source()
+        {
+            return Err(AnalysisExecutionError::Identity(
+                "published assembly differs from its source request",
+            ));
+        }
+        assembly_identity(
+            source.producer,
+            source.identity(),
+            &ManifestIdentities::Results(&manifest.results),
+            &ManifestIdentities::Evidence(&manifest.results),
+        )
+    }
+
     pub fn new(
         source: &ObservationEvaluationRequest,
         results: &[ObservationResult],
@@ -67,16 +95,21 @@ impl ObservationAssemblyRequest {
             .iter()
             .map(|result| result.partition_evidence.identity)
             .collect::<Vec<_>>();
+        Self::from_identities(source, result_identities, evidence_identities)
+    }
+
+    fn from_identities(
+        source: &ObservationEvaluationRequest,
+        result_identities: Vec<ObservationResultIdentity>,
+        evidence_identities: Vec<ObservationPartitionEvidenceIdentity>,
+    ) -> AnalysisExecutionResult<Self> {
         let request = Self {
             schema_version: 1,
-            identity: ObservationAssemblyRequestIdentity::derive(
-                "observation-assembly-request",
-                &(
-                    source.producer,
-                    source.identity(),
-                    &result_identities,
-                    &evidence_identities,
-                ),
+            identity: assembly_identity(
+                source.producer,
+                source.identity(),
+                &result_identities,
+                &evidence_identities,
             )?,
             producer: source.producer,
             source_request: source.identity(),
@@ -138,14 +171,11 @@ impl ObservationAssemblyRequest {
     }
 
     fn validate_identity(&self) -> AnalysisExecutionResult<()> {
-        let expected = ObservationAssemblyRequestIdentity::derive(
-            "observation-assembly-request",
-            &(
-                self.producer,
-                self.source_request,
-                &self.results,
-                &self.partition_evidence,
-            ),
+        let expected = assembly_identity(
+            self.producer,
+            self.source_request,
+            &self.results,
+            &self.partition_evidence,
         )?;
         if self.schema_version != 1
             || self.results.is_empty()
@@ -157,6 +187,39 @@ impl ObservationAssemblyRequest {
             ));
         }
         Ok(())
+    }
+}
+
+fn assembly_identity(
+    producer: StepIdentity,
+    source: ObservationEvaluationRequestIdentity,
+    results: &impl Serialize,
+    evidence: &impl Serialize,
+) -> AnalysisExecutionResult<ObservationAssemblyRequestIdentity> {
+    ObservationAssemblyRequestIdentity::derive(
+        "observation-assembly-request",
+        &(producer, source, results, evidence),
+    )
+}
+
+enum ManifestIdentities<'a> {
+    Results(&'a [crate::results::observation::ObservationArtifactEntry]),
+    Evidence(&'a [crate::results::observation::ObservationArtifactEntry]),
+}
+impl Serialize for ManifestIdentities<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let entries = match self {
+            Self::Results(entries) | Self::Evidence(entries) => entries,
+        };
+        let mut sequence = serializer.serialize_seq(Some(entries.len()))?;
+        for entry in *entries {
+            match self {
+                Self::Results(_) => sequence.serialize_element(&entry.result)?,
+                Self::Evidence(_) => sequence.serialize_element(&entry.partition_evidence)?,
+            }
+        }
+        sequence.end()
     }
 }
 

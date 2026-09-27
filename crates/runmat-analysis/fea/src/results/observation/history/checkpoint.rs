@@ -19,6 +19,16 @@ use super::schedule::{
     sample_matches_history_policy, validate_history_policy,
 };
 
+const CHECKPOINT_PREFIX: &[u8] = b"runmat-observation-history-checkpoint/v2\0";
+const CHECKPOINT_SCHEMA_VERSION: u16 = 2;
+
+mod identity;
+mod lineage;
+use identity::derive_checkpoint_identity;
+
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ObservationHistoryStreamIdentity(Digest);
@@ -32,12 +42,6 @@ impl ObservationHistoryStreamIdentity {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ObservationHistoryCheckpointIdentity(Digest);
-
-impl ObservationHistoryCheckpointIdentity {
-    pub const fn digest(self) -> Digest {
-        self.0
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, try_from = "ObservationHistoryStreamWire")]
@@ -246,7 +250,7 @@ impl ObservationHistoryCheckpointManifest {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
         self.validate()?;
         Ok(encode_contract(
-            OBSERVATION_PREFIX,
+            CHECKPOINT_PREFIX,
             "observation-history-checkpoint-manifest",
             self,
             OBSERVATION_LIMITS,
@@ -255,7 +259,7 @@ impl ObservationHistoryCheckpointManifest {
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ObservationError> {
         let manifest: Self = decode_contract(
-            OBSERVATION_PREFIX,
+            CHECKPOINT_PREFIX,
             "observation-history-checkpoint-manifest",
             bytes,
             OBSERVATION_LIMITS,
@@ -298,7 +302,7 @@ impl ObservationHistoryCheckpoint {
     ) -> Result<Self, ObservationError> {
         let entries = samples.iter().map(history_entry).collect();
         let mut manifest = ObservationHistoryCheckpointManifest {
-            schema_version: 1,
+            schema_version: CHECKPOINT_SCHEMA_VERSION,
             identity: ObservationHistoryCheckpointIdentity(Digest::sha256([])),
             stream,
             predecessor,
@@ -326,7 +330,7 @@ impl ObservationHistoryCheckpoint {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ObservationError> {
         self.validate()?;
         Ok(encode_contract(
-            OBSERVATION_PREFIX,
+            CHECKPOINT_PREFIX,
             "observation-history-checkpoint",
             &ObservationHistoryCheckpointWire {
                 manifest: self.manifest.clone(),
@@ -338,7 +342,7 @@ impl ObservationHistoryCheckpoint {
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ObservationError> {
         let wire: ObservationHistoryCheckpointWire = decode_contract(
-            OBSERVATION_PREFIX,
+            CHECKPOINT_PREFIX,
             "observation-history-checkpoint",
             bytes,
             OBSERVATION_LIMITS,
@@ -425,7 +429,7 @@ fn validate_checkpoint_manifest(
         }
         _ => manifest.observed_sample_count,
     };
-    if manifest.schema_version != 1
+    if manifest.schema_version != CHECKPOINT_SCHEMA_VERSION
         || manifest.observed_sample_count == 0
         || manifest.observed_sample_count > maximum_produced
         || retained_count != expected_retained
@@ -557,24 +561,4 @@ fn derive_stream_identity(
         OBSERVATION_LIMITS,
     )?;
     Ok(ObservationHistoryStreamIdentity(Digest::sha256(bytes)))
-}
-
-fn derive_checkpoint_identity(
-    manifest: &ObservationHistoryCheckpointManifest,
-) -> Result<ObservationHistoryCheckpointIdentity, ObservationError> {
-    let bytes = encode_contract(
-        OBSERVATION_PREFIX,
-        "observation-history-checkpoint-identity",
-        &(
-            manifest.schema_version,
-            manifest.stream.identity,
-            manifest.predecessor,
-            manifest.observed_sample_count,
-            manifest.retained_prefix_digest,
-            manifest.observed_prefix_digest,
-            &manifest.samples,
-        ),
-        OBSERVATION_LIMITS,
-    )?;
-    Ok(ObservationHistoryCheckpointIdentity(Digest::sha256(bytes)))
 }

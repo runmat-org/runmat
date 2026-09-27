@@ -304,51 +304,16 @@ pub fn validate_structural_resource_usage(
     Ok(())
 }
 
-/// Requires accounted history finalization and reconciles governed acceleration against exact
-/// accelerated observation-partition plans. Earlier CPU lineage and accuracy-attempt completeness
-/// remain the caller's task-graph responsibility; unrelated reservations cannot satisfy this proof.
+/// Requires source-derived checkpoint/finalization/assembly accounting and reconciles governed
+/// acceleration. Earlier CPU partition/reduction lineage remains a separate publication gate.
 pub fn validate_observation_resource_usage(
     observations: &ObservationPublicationCatalog,
     usage: &ResourceUsageEvidence,
 ) -> AnalysisBridgeResult<()> {
-    observations
-        .validate()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    usage
-        .validate_identity()
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    // Finalized history is an admitted phase, including for CPU execution. The
-    // terminal catalog names its request, so omitting that phase is detectable
-    // without inventing accounting for earlier checkpoint/partition lineage.
-    for entry in observations.entries() {
-        let ObservationPublicationEntry::History(history) = entry else {
-            continue;
-        };
-        let plans = usage
-            .plans
-            .iter()
-            .filter(|plan| {
-                plan.input.phase
-                    == FeaResourcePhase::ObservationHistoryFinalization(history.request.identity())
-            })
-            .collect::<Vec<_>>();
-        if plans.is_empty() {
-            return Err(AnalysisBridgeError::Identity(
-                "published history omits its admitted finalization phase",
-            ));
-        }
-        for plan in plans {
-            if !usage
-                .attempts
-                .iter()
-                .any(|attempt| attempt.plan == plan.identity)
-            {
-                return Err(AnalysisBridgeError::Identity(
-                    "published history finalization phase has no scheduler attempt",
-                ));
-            }
-        }
-    }
+    runmat_analysis_fea::results::publication::validate_observation_publication_usage(
+        observations,
+        usage,
+    )?;
     let accelerated_plans = usage
         .plans
         .iter()

@@ -27,6 +27,12 @@ struct RecoveredPipeline {
     artifact: runmat_analysis_fea::results::field::RecoveredFieldArtifact,
 }
 
+struct ObservedPipeline {
+    catalog: runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
+    assembly_plan: runmat_analysis_fea::planning::resource::FeaResourcePlan,
+    assembly_attempt: ResourceUsageAttempt,
+}
+
 #[test]
 fn native_kernel_executes_path_free_structural_linear_workload() {
     let solved = solve::execute();

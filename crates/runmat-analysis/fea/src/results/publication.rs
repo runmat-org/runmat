@@ -22,8 +22,11 @@ const PUBLICATION_PREFIX: &[u8] = b"runmat-analysis-published-result/v3\0";
 const PUBLICATION_LIMITS: CanonicalLimits =
     CanonicalLimits::new(8 * 1024 * 1024, 1_000_000, 65_536, 64);
 
+mod observation_usage;
 mod profile;
 mod usage;
+pub(crate) use observation_usage::observation_usage_index_bytes;
+pub use observation_usage::validate_observation_publication_usage;
 pub use profile::published_result_encoding_profile;
 pub(crate) use usage::validate_accuracy_resource_usage;
 pub use usage::validate_result_publication_resource_usage;

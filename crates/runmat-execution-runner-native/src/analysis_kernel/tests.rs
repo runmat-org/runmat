@@ -10,7 +10,7 @@ use runmat_analysis_fea::execution::SolverResultIdentity;
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::planning::resource::{record_resource_usage, ResourceUsageAttempt};
 use runmat_analysis_fea::results::accuracy::{AccuracyStatus, PublicationDecision};
-use runmat_analysis_fea::results::field::{RecoveredField, RecoveredFieldCatalog};
+use runmat_analysis_fea::results::field::RecoveredFieldCatalog;
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::ComputeBackend;

@@ -1,10 +1,8 @@
 use super::*;
 use runmat_analysis_fea::execution::{AccuracySourceKind, SequenceIdentity};
 
-pub(super) fn execute(
-    solved: &SolvedPipeline,
-    observations: &runmat_analysis_fea::results::observation::ObservationPublicationCatalog,
-) {
+pub(super) fn execute(solved: &SolvedPipeline, observed: &ObservedPipeline) {
+    let observations = &observed.catalog;
     let host = &solved.prepared.host;
     let prepared = runmat_analysis_execution::prepare_accuracy(
         runmat_analysis_execution::AccuracyPreparation {
@@ -224,11 +222,26 @@ pub(super) fn execute(
     });
     let resource_usage = runmat_analysis_fea::planning::resource::record_resource_graph_usage(
         &solved.prepared.resource_plan,
-        vec![plan],
+        vec![plan.clone()],
         host.workload.identity.digest(),
         solved.source_result.digest(),
         attempts,
         2,
+    )
+    .unwrap();
+    assert!(
+        ResultPublicationRequest::new(&accuracy, Some(observations), &resource_usage).is_err(),
+        "solve and accuracy accounting cannot omit the executed observation assembly",
+    );
+    let mut attempts = resource_usage.attempts.clone();
+    attempts.push(observed.assembly_attempt.clone());
+    let resource_usage = runmat_analysis_fea::planning::resource::record_resource_graph_usage(
+        &solved.prepared.resource_plan,
+        vec![plan, observed.assembly_plan.clone()],
+        host.workload.identity.digest(),
+        solved.source_result.digest(),
+        attempts,
+        3,
     )
     .unwrap();
     let publication_request =

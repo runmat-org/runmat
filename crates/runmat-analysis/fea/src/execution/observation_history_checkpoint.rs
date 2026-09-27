@@ -69,6 +69,28 @@ impl TryFrom<ObservationHistoryCheckpointRequestWire> for ObservationHistoryChec
 }
 
 impl ObservationHistoryCheckpointRequest {
+    /// Reconstruct one scheduler request from an independently validated complete history.
+    /// Borrow the plan identity rather than cloning the resolved plan for every prefix.
+    pub(crate) fn published_sample_identity(
+        plan: ResolvedObservationPlanIdentity,
+        producer: super::StepIdentity,
+        observation_id: &ObservationId,
+        predecessor: Option<ObservationHistoryCheckpointIdentity>,
+        sample_ordinal: u64,
+        sample_coordinate: RecoveredFieldSample,
+        sample: ObservationResultIdentity,
+    ) -> AnalysisExecutionResult<ObservationHistoryCheckpointRequestIdentity> {
+        derive_request_identity(
+            plan,
+            producer,
+            observation_id,
+            predecessor,
+            sample_ordinal,
+            sample_coordinate,
+            sample,
+        )
+    }
+
     pub fn new(
         plan: ResolvedObservationPlan,
         producer: super::StepIdentity,

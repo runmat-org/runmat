@@ -108,19 +108,15 @@ pub(super) fn admit_thermal(
         preparation.limits,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let required = plan
-        .observations
-        .iter()
-        .map(|observation| observation.source_field_definition_identity)
-        .collect::<BTreeSet<_>>();
-    let fields = sample_fields
-        .iter()
-        .filter(|entry| required.contains(&entry.definition.identity()))
-        .map(|entry| entry.field)
-        .collect();
+    let catalog = ObservationFieldCatalog::thermal(manifest.clone())?;
+    let fields = catalog.canonical_selected_fields(
+        &plan,
+        ObservationSelectionCoordinate::ThermalSample {
+            ordinal: *sample_ordinal,
+        },
+    )?;
     let selection =
         ObservationFieldSelection::thermal(thermal, manifest, &mesh, *sample_ordinal, fields)?;
-    let catalog = ObservationFieldCatalog::thermal(manifest.clone())?;
     catalog.validate_thermal_selection(&selection, thermal, &mesh)?;
     let request = ObservationEvaluationRequest::new(selection.clone(), plan)?;
     let field_catalog = prepare_analysis_objects(

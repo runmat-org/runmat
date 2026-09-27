@@ -244,6 +244,10 @@ fn receipt_and_validation_underreservation_are_rejected() {
     let FeaResourceDemand::ResultPublication(demand) = &mut input.demand else {
         panic!("publication demand")
     };
+    assert_eq!(
+        demand.observation_task_index_workspace_bytes.0,
+        (usage.plans.len() * std::mem::size_of::<&FeaResourcePlan>()) as u64
+    );
     demand.source_validation_workspace_bytes.0 -= 1;
     assert!(build_resource_plan(input).is_err());
 }

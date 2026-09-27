@@ -180,6 +180,7 @@ pub(super) fn execute_observation_partition(
             "observation partition request names no canonical assignment",
         ))?;
     request.validate_for(&source_request, &partition_plan, partition, &fields)?;
+    catalog.validate_canonical_selection(&source_request.plan, &source_request.selection)?;
     if source_request.identity().digest() != source_request_identity
         || request.identity().digest() != request_identity
         || partition_plan.identity.digest() != partition_plan_identity

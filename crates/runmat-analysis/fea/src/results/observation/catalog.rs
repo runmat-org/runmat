@@ -14,6 +14,9 @@ use crate::execution::{
 };
 use crate::results::field::RecoveredFieldArtifactManifest;
 
+mod selection;
+pub use selection::ObservationSelectionCoordinate;
+
 const PREFIX: &[u8] = b"runmat-observation-field-catalog/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
 

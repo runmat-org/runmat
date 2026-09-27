@@ -241,6 +241,10 @@ impl ObservationPublicationCatalog {
             match entry {
                 ObservationPublicationEntry::Sample(value) => {
                     value.validate()?;
+                    self.source.validate_canonical_selection(
+                        &value.request.plan,
+                        &value.request.selection,
+                    )?;
                     match (self.source.source(), value.request.selection.source()) {
                         (
                             ObservationFieldCatalogSource::Structural { .. },

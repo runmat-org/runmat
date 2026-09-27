@@ -32,12 +32,16 @@ pub fn build_result_publication_resource_plan(
     })?;
     // The source materialization envelope covers the first cloned inventory, identity trees,
     // reconciliation records and scalar/map aggregators while the original decode stays live.
+    let observation_index_workspace =
+        crate::results::publication::observation_usage_index_bytes(usage.plans.len())
+            .ok_or(ResourcePlanningError::Overflow("observation task index"))?;
     let validation = facts
         .inputs
         .decoded_resident_bytes_admission_budget
         .0
         .checked_add(interval_workspace)
         .and_then(|v| v.checked_add(nested_plan_workspace))
+        .and_then(|v| v.checked_add(observation_index_workspace))
         .ok_or(ResourcePlanningError::Overflow(
             "result publication validation workspace",
         ))?;
@@ -55,6 +59,7 @@ pub fn build_result_publication_resource_plan(
             ),
             accounting_interval_workspace_bytes: ByteCount(interval_workspace),
             nested_plan_workspace_bytes: ByteCount(nested_plan_workspace),
+            observation_task_index_workspace_bytes: ByteCount(observation_index_workspace),
             source_validation_workspace_bytes: ByteCount(validation),
             inputs: facts.inputs,
             output: facts.output,
