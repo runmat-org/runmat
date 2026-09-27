@@ -57,7 +57,7 @@ async fn try_provider(
                 "provider {} failed: {source}",
                 kind.provider_hook()
             ));
-            error.source = Some(Box::new(source));
+            error.source = Some(source.into_boxed_dyn_error());
             Err(error)
         }
     }
