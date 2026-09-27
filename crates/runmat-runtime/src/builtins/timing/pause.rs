@@ -662,21 +662,27 @@ pub(crate) mod tests {
     fn pause_resident_argument_is_gated_before_provider_access() {
         let _guard = TEST_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(
-            runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX,
-                descriptor: Default::default(),
-            }
-            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit),
-        );
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("unregistered owner");
+        let explicit = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit view");
+        let resident = Value::GpuTensor(explicit);
         let error = block_on(pause_builtin(vec![resident])).expect_err("resident pause input");
 
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:PauseGpuInputExtension")
         );
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop((error, allocation.handle));
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -687,14 +693,17 @@ pub(crate) mod tests {
             let tensor = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("resident duration")
-                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic view");
+            let lease = handle.allocation_lease().downgrade();
             let result = {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
                 block_on(pause_builtin(vec![Value::GpuTensor(handle.clone())]))
                     .expect("automatic duration gathers transparently")
             };
             assert!(matches!(result, Value::Tensor(tensor) if tensor.is_empty()));
-            runmat_accelerate_api::clear_handle_metadata(&handle);
+            drop(handle);
+            assert!(lease.acquire().is_none());
         });
         reset_state(true);
     }

@@ -330,7 +330,6 @@ fn is_underlying_type_error(error: &'static BuiltinErrorDescriptor) -> RuntimeEr
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_value::{
         CellArray, CharArray, ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage,
         LogicalArray, NumericDType, ObjectInstance, StringArray, StructValue, Tensor,
@@ -516,7 +515,8 @@ pub(crate) mod tests {
                 Tensor::new_with_dtype(vec![1.0, 2.0], vec![1, 2], NumericDType::F32).unwrap();
             let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor)
                 .expect("upload");
-            runmat_accelerate_api::set_handle_class_identity(&handle, "single");
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -527,6 +527,8 @@ pub(crate) mod tests {
                     .expect("predicate"),
                 Value::Bool(true)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 
@@ -563,35 +565,49 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn underlying_type_rejects_contradictory_resident_integer_class_metadata() {
-        test_support::with_test_provider(|_| {
+    fn underlying_type_uses_owner_storage_after_contradictory_wire_rejection() {
+        test_support::with_test_provider(|provider| {
             let tensor =
                 Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap();
-            let handle = crate::builtins::common::gpu_helpers::upload_tensor(
-                runmat_accelerate_api::provider().expect("test provider"),
-                &tensor,
+            let handle =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &tensor).unwrap();
+            let original = handle.wire_descriptor();
+            let mut contradictory = original.clone();
+            contradictory.physical = runmat_accelerate_api::GpuPhysicalDescriptor::new(
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+                1,
+                8,
+                8,
             )
             .unwrap();
-            runmat_accelerate_api::set_handle_class_identity(&handle, "double");
-            let error = underlying_type_builtin(Value::GpuTensor(handle))
-                .expect_err("contradictory class metadata must reject");
+            provider.reset_telemetry();
             assert_eq!(
-                error.identifier(),
-                Some("RunMat:isUnderlyingType:ProviderPayloadMismatch")
+                provider.acquire_live(&contradictory).unwrap_err(),
+                runmat_accelerate_api::allocation::AllocationAcquisitionError::PhysicalMismatch
             );
+            assert_eq!(handle.wire_descriptor(), original);
+            let lease = handle.allocation_lease().downgrade();
+            assert_eq!(
+                underlying_type_builtin(Value::GpuTensor(handle)).unwrap(),
+                "uint64"
+            );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 
     #[test]
     fn underlying_type_reports_logical_for_gpu_masks() {
         test_support::with_test_provider(|provider| {
-            let tensor = Tensor::new(vec![1.0, 0.0], vec![1, 2]).unwrap();
-            let view = HostTensorView {
-                data: &tensor.materialize_f64(),
-                shape: &tensor.shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            runmat_accelerate_api::set_handle_logical(&handle, true);
+            let handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1, 0],
+                    shape: &[1, 2],
+                })
+                .expect("native logical upload");
+            let lease = handle.allocation_lease().downgrade();
+            provider.reset_telemetry();
 
             assert_eq!(
                 underlying_type_builtin(Value::GpuTensor(handle.clone())).expect("underlying"),
@@ -602,6 +618,8 @@ pub(crate) mod tests {
                     .expect("predicate"),
                 Value::Bool(true)
             );
+            assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+            assert!(lease.acquire().is_none());
         });
     }
 }

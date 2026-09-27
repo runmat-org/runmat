@@ -1,0 +1,465 @@
+//! Production joins and admission ordering, not a GPU numerical execution test.
+#[path = "support/typed_fusion_plan.rs"]
+mod fixture;
+#[path = "support/reduction_program.rs"]
+mod support;
+use futures::executor::block_on;
+use runmat_accelerate::fusion::FusionOp;
+use runmat_accelerate::fusion_exec::resolve_reduction_program;
+use runmat_accelerate::graph::PrimitiveOp;
+use runmat_accelerate_api::{ProviderPrecision, ThreadProviderGuard};
+use runmat_runtime::context::{RuntimeBuiltinService, RuntimeContext, RuntimeServicePorts};
+use runmat_types::NumericClass;
+use runmat_value::{Tensor, Value};
+use std::{
+    cell::Cell,
+    error::Error,
+    future::Future,
+    rc::Rc,
+    sync::atomic::Ordering,
+    task::{Context, Poll},
+};
+use support::*;
+
+fn tensor(single: bool, shape: Vec<usize>) -> Value {
+    let count = shape.iter().product();
+    Value::Tensor(if single {
+        Tensor::from_f32(vec![2.0; count], shape).unwrap()
+    } else {
+        Tensor::new(vec![2.0; count], shape).unwrap()
+    })
+}
+fn add(left: u32, right: u32, output: u32) -> FusionOp {
+    FusionOp::Primitive {
+        op: PrimitiveOp::Add,
+        inputs: vec![left, right],
+        output: Some(output),
+    }
+}
+
+#[test]
+fn actual_host_controls_fail_before_any_producer_probe_for_all_four_owners() {
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    for name in ["sum", "mean", "min", "max"] {
+        OWNER.reset();
+        let left = OWNER.input();
+        let right = OWNER.input();
+        let mut controls = Vec::new();
+        if matches!(name, "min" | "max") {
+            controls.push(tensor(false, vec![0, 0]));
+        }
+        controls.push(Value::Num(0.5));
+        let mut ids = vec![0, 1];
+        ids.extend((0..controls.len()).map(|index| 2 + index as u32));
+        let mut terminal = vec![10];
+        terminal.extend_from_slice(&ids[2..]);
+        let plan = reduction(
+            fixture::plan(
+                vec![
+                    builtin("power", vec![0, 1], 10),
+                    builtin(name, terminal, 11),
+                ],
+                11,
+            ),
+            ids,
+            10,
+        );
+        let mut values = vec![
+            Value::GpuTensor(left.handle.clone()),
+            Value::GpuTensor(right.handle.clone()),
+        ];
+        values.extend(controls.iter().cloned());
+        let request = request(&plan, values);
+        let failure = match block_on(resolve_reduction_program(&request, ProviderPrecision::F64)) {
+            Err(error) => error,
+            _ => panic!("{name}: invalid axis must retain the owner's parser error"),
+        };
+        let actual = failure
+            .source()
+            .unwrap()
+            .downcast_ref::<runmat_runtime::RuntimeError>()
+            .expect("actual parser error source");
+        let mut host_args = vec![tensor(false, vec![2, 2])];
+        host_args.extend(controls);
+        let expected = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name, &host_args, 1,
+        ))
+        .unwrap_err();
+        assert_eq!(actual.identifier(), expected.identifier());
+        assert_eq!(actual.to_string(), expected.to_string());
+        assert_eq!(OWNER.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(left.probe.retirements(), 0);
+        assert_eq!(right.probe.retirements(), 0);
+        drop(request);
+        drop(left.handle);
+        drop(right.handle);
+        assert_eq!(left.probe.retirements(), 1);
+        assert_eq!(right.probe.retirements(), 1);
+    }
+}
+
+struct DenyBindings {
+    calls: Cell<usize>,
+}
+impl RuntimeBuiltinService for DenyBindings {
+    fn bindings_by_name(&self, _: &str) -> Vec<runmat_runtime::builtin::RuntimeBuiltinBinding> {
+        self.calls.set(self.calls.get() + 1);
+        Vec::new()
+    }
+}
+#[test]
+fn admitted_bindings_and_refined_domain_survive_suspension_but_do_not_authorize_next_request() {
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    OWNER.reset();
+    OWNER.ready.store(false, Ordering::SeqCst);
+    let left = OWNER.input();
+    let right = OWNER.input();
+    let plan = reduction(
+        fixture::plan(
+            vec![
+                builtin("power", vec![0, 1], 10),
+                fixture::cast("sin", 10, 12),
+                builtin("sum", vec![12, 2], 11),
+            ],
+            11,
+        ),
+        vec![0, 1, 2],
+        12,
+    );
+    let request = request(
+        &plan,
+        vec![
+            Value::GpuTensor(left.handle.clone()),
+            Value::GpuTensor(right.handle.clone()),
+            Value::Num(2.0),
+        ],
+    );
+    let mut future = Box::pin(resolve_reduction_program(&request, ProviderPrecision::F64));
+    let mut task = Context::from_waker(futures::task::noop_waker_ref());
+    assert!(future.as_mut().poll(&mut task).is_pending());
+    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    let denied = Rc::new(DenyBindings {
+        calls: Cell::new(0),
+    });
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(RuntimeServicePorts::default().with_builtin(denied.clone()));
+    let _context = context.enter();
+    OWNER.ready.store(true, Ordering::SeqCst);
+    let receipt = match future.as_mut().poll(&mut task) {
+        Poll::Ready(Ok(Some(receipt))) => receipt,
+        _ => panic!("captured owner declarations must finish after the real-domain probe"),
+    };
+    assert_eq!(receipt.contract().output_class, NumericClass::Double);
+    assert_eq!(receipt.contract().axes, vec![1]);
+    assert!(receipt.producer_body().contains("sin("));
+    assert!(receipt.producer_preamble().contains("rm_power"));
+    assert_eq!(receipt.data_inputs().len(), 2);
+    assert_eq!(
+        denied.calls.get(),
+        0,
+        "resuming does not select a new implementation"
+    );
+    assert!(
+        block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        denied.calls.get(),
+        1,
+        "fresh request checks its current selected service"
+    );
+    drop(receipt);
+    drop(future);
+    drop(request);
+    drop(left.handle);
+    drop(right.handle);
+    assert_eq!(left.probe.retirements(), 1);
+    assert_eq!(right.probe.retirements(), 1);
+}
+
+#[test]
+fn probe_operational_errors_keep_the_original_source() {
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    OWNER.reset();
+    OWNER.fail.store(true, Ordering::SeqCst);
+    let left = OWNER.input();
+    let right = OWNER.input();
+    let plan = reduction(
+        fixture::plan(
+            vec![
+                builtin("power", vec![0, 1], 10),
+                builtin("sum", vec![10], 11),
+            ],
+            11,
+        ),
+        vec![0, 1],
+        10,
+    );
+    let request = request(
+        &plan,
+        vec![
+            Value::GpuTensor(left.handle),
+            Value::GpuTensor(right.handle),
+        ],
+    );
+    let error = match block_on(resolve_reduction_program(&request, ProviderPrecision::F64)) {
+        Err(error) => error,
+        _ => panic!("probe failed"),
+    };
+    assert!(error.source().unwrap().is::<ProbeFailure>());
+    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn cancelled_admission_does_not_retire_borrowed_inputs_or_publish_a_receipt() {
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    OWNER.reset();
+    OWNER.ready.store(false, Ordering::SeqCst);
+    let left = OWNER.input();
+    let right = OWNER.input();
+    let plan = reduction(
+        fixture::plan(
+            vec![
+                builtin("power", vec![0, 1], 10),
+                builtin("sum", vec![10], 11),
+            ],
+            11,
+        ),
+        vec![0, 1],
+        10,
+    );
+    let request = request(
+        &plan,
+        vec![
+            Value::GpuTensor(left.handle),
+            Value::GpuTensor(right.handle),
+        ],
+    );
+    let mut future = Box::pin(resolve_reduction_program(&request, ProviderPrecision::F64));
+    assert!(future
+        .as_mut()
+        .poll(&mut Context::from_waker(futures::task::noop_waker_ref()))
+        .is_pending());
+    assert_eq!(OWNER.calls.load(Ordering::SeqCst), 1);
+    drop(future);
+    assert_eq!(left.probe.retirements(), 0);
+    assert_eq!(right.probe.retirements(), 0);
+    drop(request);
+    assert_eq!(left.probe.retirements(), 1);
+    assert_eq!(right.probe.retirements(), 1);
+}
+
+#[test]
+fn original_slots_constants_and_host_controls_have_disjoint_recipe_roles() {
+    let plan = reduction(
+        fixture::plan(vec![add(0, 4, 10), builtin("sum", vec![10, 9], 11)], 11),
+        vec![9, 7, 4, 0],
+        10,
+    );
+    let request = request(
+        &plan,
+        vec![
+            Value::Num(1.0),
+            tensor(false, vec![1, 1]),
+            tensor(false, vec![2, 3]),
+            tensor(false, vec![2, 3]),
+        ],
+    );
+    let receipt = block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+        .unwrap()
+        .unwrap();
+    let mapping: Vec<_> = receipt
+        .data_inputs()
+        .iter()
+        .map(|input| (input.value_id, input.request_slot))
+        .collect();
+    assert_eq!(mapping, vec![(4, Some(2)), (0, Some(3))]);
+    assert!(std::ptr::eq(
+        receipt.data_inputs()[0].value,
+        &request.inputs[2]
+    ));
+    assert_eq!(receipt.contract().input_shape, vec![2, 3]);
+    assert_eq!(receipt.contract().output_shape, vec![1, 3]);
+    assert!(receipt.producer_body().contains("input1.data[i1]"));
+    assert!(receipt.producer_body().contains("input0.data[i0]"));
+    assert!(!receipt.producer_body().contains("input2"));
+    let identity = receipt.identity();
+    drop(receipt);
+    let mut axis_two = request;
+    axis_two.inputs[0] = Value::Num(2.0);
+    let changed = block_on(resolve_reduction_program(&axis_two, ProviderPrecision::F64))
+        .unwrap()
+        .unwrap();
+    assert_ne!(identity, changed.identity());
+    assert_eq!(changed.contract().output_shape, vec![2, 1]);
+    assert_eq!(plan.inputs, vec![9, 7, 4, 0]);
+    assert_eq!(plan.operations.len(), 2);
+    let mut constant_plan = plan.clone();
+    constant_plan.inputs = vec![9, 0];
+    constant_plan
+        .const_values
+        .insert(4, tensor(false, vec![2, 3]));
+    let constant_request = support::request(
+        &constant_plan,
+        vec![Value::Num(1.0), tensor(false, vec![2, 3])],
+    );
+    let constant = block_on(resolve_reduction_program(
+        &constant_request,
+        ProviderPrecision::F64,
+    ))
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        constant
+            .data_inputs()
+            .iter()
+            .map(|input| (input.value_id, input.request_slot))
+            .collect::<Vec<_>>(),
+        vec![(0, Some(1)), (4, None)]
+    );
+    assert!(std::ptr::eq(
+        constant.data_inputs()[1].value,
+        &constant_plan.const_values[&4]
+    ));
+}
+
+#[test]
+fn strict_accumulator_and_mixed_class_proofs_are_not_weakened() {
+    for single in [true, false] {
+        let plan = reduction(
+            fixture::plan(vec![add(0, 1, 10), builtin("sum", vec![10], 11)], 11),
+            vec![0, 1],
+            10,
+        );
+        let request = request(
+            &plan,
+            vec![tensor(single, vec![2, 2]), tensor(single, vec![2, 2])],
+        );
+        let receipt = block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+            .unwrap()
+            .unwrap();
+        assert_eq!(receipt.contract().accumulator_class, NumericClass::Double);
+        assert!(receipt.producer_body().contains(if single {
+            "typed0: f32"
+        } else {
+            "typed0: f64"
+        }));
+        assert!(
+            block_on(resolve_reduction_program(&request, ProviderPrecision::F32))
+                .unwrap()
+                .is_none()
+        );
+    }
+    let plan = reduction(
+        fixture::plan(vec![add(0, 1, 10), builtin("sum", vec![10], 11)], 11),
+        vec![0, 1],
+        10,
+    );
+    let request = request(
+        &plan,
+        vec![tensor(true, vec![2, 2]), tensor(false, vec![1, 1])],
+    );
+    assert!(
+        block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+            .unwrap()
+            .is_none()
+    );
+    let min = reduction(
+        fixture::plan(vec![add(0, 1, 10), builtin("min", vec![10], 11)], 11),
+        vec![0, 1],
+        10,
+    );
+    let request = support::request(
+        &min,
+        vec![tensor(true, vec![2, 2]), tensor(true, vec![2, 2])],
+    );
+    let receipt = block_on(resolve_reduction_program(&request, ProviderPrecision::F32))
+        .unwrap()
+        .unwrap();
+    assert_eq!(receipt.contract().accumulator_class, NumericClass::Single);
+}
+
+#[test]
+fn conflicting_missing_computed_and_extra_dependencies_fail_closed() {
+    let base = reduction(
+        fixture::plan(vec![add(0, 1, 10), builtin("sum", vec![10, 2], 11)], 11),
+        vec![0, 1, 2],
+        10,
+    );
+    for case in 0..6 {
+        let mut plan = base.clone();
+        match case {
+            0 => {
+                plan.const_values.insert(0, tensor(false, vec![2, 2]));
+            }
+            1 => {
+                plan.inputs[1] = 0;
+            }
+            2 => {
+                plan.operations[0] = add(0, 99, 10);
+            }
+            3 => {
+                plan.operations.insert(1, add(0, 1, 20));
+            }
+            4 => {
+                plan.operations.insert(1, add(0, 1, 20));
+                *plan.operations.last_mut().unwrap() = builtin("sum", vec![10, 20], 11);
+            }
+            5 => {
+                plan.reduction_data = Some(0);
+            }
+            _ => unreachable!(),
+        }
+        let request = request(
+            &plan,
+            vec![
+                tensor(false, vec![2, 2]),
+                tensor(false, vec![2, 2]),
+                Value::Num(1.0),
+            ],
+        );
+        assert!(
+            block_on(resolve_reduction_program(&request, ProviderPrecision::F64))
+                .unwrap()
+                .is_none(),
+            "case {case}"
+        );
+    }
+}
+
+#[test]
+fn input_only_root_is_borrowed_and_buffer_contents_do_not_change_recipe_identity() {
+    let plan = reduction(
+        fixture::plan(vec![builtin("sum", vec![0], 11)], 11),
+        vec![0],
+        0,
+    );
+    let first = request(&plan, vec![tensor(false, vec![2, 2])]);
+    let first_receipt = block_on(resolve_reduction_program(&first, ProviderPrecision::F64))
+        .unwrap()
+        .unwrap();
+    assert!(first_receipt.producer_body().is_empty());
+    assert_eq!(first_receipt.producer_expression(), "input0.data[i0]");
+    assert!(std::ptr::eq(
+        first_receipt.data_inputs()[0].value,
+        &first.inputs[0]
+    ));
+    let second = request(
+        &plan,
+        vec![Value::Tensor(
+            Tensor::new(vec![9.0; 4], vec![2, 2]).unwrap(),
+        )],
+    );
+    let second_receipt = block_on(resolve_reduction_program(&second, ProviderPrecision::F64))
+        .unwrap()
+        .unwrap();
+    assert_eq!(first_receipt.identity(), second_receipt.identity());
+}

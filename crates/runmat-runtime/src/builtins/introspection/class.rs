@@ -365,12 +365,17 @@ pub(crate) mod tests {
                 class_builtin(Value::GpuTensor(handle.clone())).expect("automatic class"),
                 "double"
             );
-            let handle =
-                handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = handle
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit view");
+            let lease = handle.allocation_lease().downgrade();
             assert_eq!(
-                class_builtin(Value::GpuTensor(handle)).expect("explicit class"),
+                class_builtin(Value::GpuTensor(explicit)).expect("explicit class"),
                 "gpuArray"
             );
+            assert!(lease.acquire().is_some());
+            drop(handle);
+            assert!(lease.acquire().is_none());
         });
     }
 
