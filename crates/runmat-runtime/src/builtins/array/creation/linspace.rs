@@ -1141,7 +1141,7 @@ pub(crate) mod tests {
             )
             .expect_err("resident integer endpoint must be rejected");
             assert!(error.message().contains("single or double"));
-            provider.free(&endpoint).ok();
+            drop(endpoint);
         });
     }
 
@@ -1170,7 +1170,7 @@ pub(crate) mod tests {
             )
             .expect_err("resident logical count must be rejected");
             assert!(error.message().contains("scalar"));
-            provider.free(&count).ok();
+            drop(count);
         });
     }
 
@@ -1339,7 +1339,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).unwrap();
             assert_eq!(gathered.shape, vec![1, 1]);
             assert!(gathered.materialize_f64()[0].is_nan());
-            provider.free(&start).ok();
+            drop(start);
         });
     }
 

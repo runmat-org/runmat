@@ -309,7 +309,7 @@ pub(crate) mod tests {
             assert_eq!(output, Value::GpuTensor(input.clone()));
             assert!(runmat_accelerate_api::provider_for_handle(&input)
                 .is_some_and(|provider| std::ptr::eq(provider, owner_dyn)));
-            owner.free(&input).expect("owner cleanup");
+            drop(input);
         }
     }
 
@@ -435,7 +435,7 @@ pub(crate) mod tests {
                 .expect("upload");
             let result = run_full(Value::GpuTensor(handle.clone())).expect("full gpu");
             assert_eq!(result, Value::GpuTensor(handle.clone()));
-            provider.free(&handle).ok();
+            drop(handle);
         });
     }
 

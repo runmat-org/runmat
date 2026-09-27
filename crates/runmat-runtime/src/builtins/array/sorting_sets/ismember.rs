@@ -1755,8 +1755,8 @@ pub(crate) mod tests {
             .expect("ismember");
             assert_eq!(eval.mask.data, vec![1, 1]);
             assert_eq!(eval.loc.materialize_f64(), vec![1.0, 3.0]);
-            let _ = provider.free(&handle_a);
-            let _ = provider.free(&handle_b);
+            drop(handle_a);
+            drop(handle_b);
         });
     }
 
@@ -1794,8 +1794,8 @@ pub(crate) mod tests {
         assert_eq!(eval.mask.data, cpu_eval.mask.data);
         assert_eq!(eval.loc.materialize_f64(), cpu_eval.loc.materialize_f64());
 
-        let _ = provider.free(&handle_a);
-        let _ = provider.free(&handle_b);
+        drop(handle_a);
+        drop(handle_b);
 
         let matrix = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let bank = Tensor::new(vec![1.0, 7.0, 3.0, 2.0, 9.0, 4.0], vec![3, 2]).unwrap();
@@ -1822,8 +1822,8 @@ pub(crate) mod tests {
             eval_rows.loc.materialize_f64(),
             cpu_rows.loc.materialize_f64()
         );
-        let _ = provider.free(&handle_matrix);
-        let _ = provider.free(&handle_bank);
+        drop(handle_matrix);
+        drop(handle_bank);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

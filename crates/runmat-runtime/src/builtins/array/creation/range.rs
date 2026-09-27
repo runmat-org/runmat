@@ -1116,7 +1116,7 @@ pub(crate) mod tests {
                 error.identifier(),
                 Some("RunMat:compatibility:RangeGpuMultiAxisExtension")
             );
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -1420,7 +1420,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![6.0]);
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -1439,7 +1439,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.materialize_f64(), vec![9.0]);
-            let _ = provider.free(&handle);
+            drop(handle);
         });
     }
 
@@ -1503,6 +1503,6 @@ pub(crate) mod tests {
         {
             assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);
         }
-        let _ = provider.free(&handle);
+        drop(handle);
     }
 }

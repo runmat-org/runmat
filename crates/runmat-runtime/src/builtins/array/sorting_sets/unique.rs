@@ -2532,7 +2532,7 @@ pub(crate) mod tests {
         let handle = provider.upload(&view).expect("upload");
         let gpu_eval = evaluate_sync(Value::GpuTensor(handle.clone()), &[]).expect("gpu unique");
         let (gpu_values, gpu_ia, gpu_ic) = gpu_eval.into_triple();
-        let _ = provider.free(&handle);
+        drop(handle);
 
         let host_values = test_support::gather(host_values).expect("gather host values");
         let host_ia = test_support::gather(host_ia).expect("gather host ia");

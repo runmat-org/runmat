@@ -980,7 +980,7 @@ pub(crate) mod tests {
                 random::generate_uniform(4, "rand provider sync").expect("uniform");
             let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
             assert_eq!(gpu.materialize_f64(), host_after_gpu);
-            provider.free(&handle).expect("free uniform handle");
+            drop(handle);
         });
     }
 

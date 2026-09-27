@@ -2232,6 +2232,6 @@ pub(crate) mod tests {
         assert_eq!(gpu_indices.shape, cpu_indices.shape);
         assert_eq!(gpu_indices.as_f64_slice(), cpu_indices.as_f64_slice());
 
-        let _ = provider.free(&handle);
+        drop(handle);
     }
 }

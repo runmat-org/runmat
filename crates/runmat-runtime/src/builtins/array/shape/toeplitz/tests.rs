@@ -70,8 +70,8 @@ fn resident_exact_integer_construction_preserves_values_and_owner() {
                 9_007_199_254_740_993
             ]))
         );
-        provider.free(&output).unwrap();
-        provider.free(&handle).unwrap();
+        drop(output);
+        drop(handle);
     });
 }
 

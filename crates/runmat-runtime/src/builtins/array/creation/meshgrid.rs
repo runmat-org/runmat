@@ -2329,8 +2329,8 @@ pub(crate) mod tests {
                 storage.imag,
                 IntegerStorage::U64(vec![u64::MAX, u64::MAX, wide, wide])
             );
-            provider.free(&axis_handle).expect("free axis");
-            provider.free(&output).expect("free output");
+            drop(axis_handle);
+            drop(output);
         });
     }
 

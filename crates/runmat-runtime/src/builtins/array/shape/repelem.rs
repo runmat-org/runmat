@@ -1097,8 +1097,8 @@ pub(crate) mod tests {
                 gathered.integer_storage(),
                 Some(&IntegerStorage::U64(vec![wide, wide, 7, 7]))
             );
-            provider.free(&output).ok();
-            provider.free(&source).ok();
+            drop(output);
+            drop(source);
         });
     }
 

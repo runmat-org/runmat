@@ -192,7 +192,7 @@ fn resident_integer_data_is_rejected_before_provider_gather() {
         ))
         .expect_err("resident integer data must reject");
         assert!(error.message.contains("GPU input data must be"));
-        provider.free(&handle).expect("free test allocation");
+        drop(handle);
     });
 }
 

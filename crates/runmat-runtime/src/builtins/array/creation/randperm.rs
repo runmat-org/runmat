@@ -942,6 +942,6 @@ pub(crate) mod tests {
                 "value {value} outside expected range 1..12"
             );
         }
-        provider.free(&gpu_handle).expect("free permutation");
+        drop(gpu_handle);
     }
 }
