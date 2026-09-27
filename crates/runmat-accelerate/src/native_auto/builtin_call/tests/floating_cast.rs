@@ -96,6 +96,7 @@ fn actual_single_host_staging_body_and_publication_produce_one_completed_receipt
 #[test]
 #[ignore = "requires actual WGPU device; execute explicitly for template adaptation qualification"]
 fn actual_single_like_adaptation_has_no_plain_cast_candidate_or_completion_receipt() {
+    let _extensions = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     use runmat_accelerate_api::{
         GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorView,
     };
