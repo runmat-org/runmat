@@ -192,7 +192,15 @@ mod tests {
     fn resident_declaration_rejects_without_provider_or_workspace_effects() {
         let _workspace = test_workspace_guard();
         runmat_accelerate::ensure_residency_hooks();
-        let handle = runmat_accelerate_api::GpuTensorHandle::new(vec![1, 1], u32::MAX - 23, 98231);
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let handle = allocation.handle;
+        assert!(crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle).is_none());
         runmat_accelerate_api::mark_residency(&handle);
         let error = block_on(syms_builtin(vec![
             Value::from("x"),
@@ -202,7 +210,9 @@ mod tests {
         assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
         assert!(workspace::lookup("x").is_none());
         assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-        runmat_accelerate_api::clear_residency(&handle);
+        assert_eq!(allocation.probe.retirements(), 0);
+        handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]

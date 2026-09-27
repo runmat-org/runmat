@@ -902,7 +902,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
-            provider.free(&handle).ok();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -933,7 +938,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, 1e-10));
             }
-            provider.free(&handle).ok();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -961,7 +971,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, 1e-10), "{a:?} vs {b:?}");
             }
-            provider.free(&handle).ok();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -996,7 +1011,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
-            provider.free(&handle).ok();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         }
     }
 }

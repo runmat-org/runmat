@@ -682,6 +682,31 @@ pub(crate) mod tests {
         error.identifier()
     }
 
+    pub(crate) fn upload_complex_spectrum(
+        provider: &dyn runmat_accelerate_api::AccelProvider,
+        words: &[f64],
+        shape: &[usize],
+    ) -> GpuTensorHandle {
+        use runmat_accelerate_api::{
+            HostNumericDataView, HostNumericTensorView, ProviderPrecision,
+        };
+        let single;
+        let data = match provider.precision() {
+            ProviderPrecision::F64 => HostNumericDataView::F64(words),
+            ProviderPrecision::F32 => {
+                single = words.iter().map(|word| *word as f32).collect::<Vec<_>>();
+                HostNumericDataView::F32(&single)
+            }
+        };
+        provider
+            .upload_numeric(&HostNumericTensorView {
+                data,
+                shape,
+                storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            })
+            .expect("upload typed complex spectrum")
+    }
+
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
         match value {
             Value::ComplexTensor(t) => t,
@@ -1078,21 +1103,7 @@ pub(crate) mod tests {
     fn ifft_gpu_roundtrip_matches_cpu() {
         test_support::with_test_provider(|provider| {
             let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
-            let shape = vec![4, 2];
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &spectrum,
-                shape: &shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![4],
-                device_id: handle.device_id,
-                buffer_id: handle.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..handle.descriptor
-                },
-            };
+            let spectrum_handle = upload_complex_spectrum(provider, &spectrum, &[4]);
             let gpu =
                 ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new()).expect("ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -1111,7 +1122,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, 1e-12));
             }
-            provider.free(&handle).ok();
+            let physical = spectrum_handle.allocation_lease().downgrade();
+            spectrum_handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -1120,21 +1136,7 @@ pub(crate) mod tests {
     fn ifft_gpu_symmetric_returns_resident_real_tensor() {
         test_support::with_test_provider(|provider| {
             let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
-            let shape = vec![4, 2];
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &spectrum,
-                shape: &shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![4],
-                device_id: handle.device_id,
-                buffer_id: handle.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..handle.descriptor
-                },
-            };
+            let spectrum_handle = upload_complex_spectrum(provider, &spectrum, &[4]);
             let gpu = ifft_builtin(
                 Value::GpuTensor(spectrum_handle.clone()),
                 vec![Value::from("symmetric")],
@@ -1151,7 +1153,12 @@ pub(crate) mod tests {
                 }
                 other => panic!("expected real output tensor, got {other:?}"),
             }
-            provider.free(&handle).ok();
+            let physical = spectrum_handle.allocation_lease().downgrade();
+            spectrum_handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -1163,21 +1170,7 @@ pub(crate) mod tests {
             .expect("wgpu provider")
         {
             let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
-            let shape = vec![4, 2];
-            let view = runmat_accelerate_api::HostTensorView {
-                data: &spectrum,
-                shape: &shape,
-            };
-            let handle = provider.upload(&view).expect("upload");
-            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![4],
-                device_id: handle.device_id,
-                buffer_id: handle.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..handle.descriptor
-                },
-            };
+            let spectrum_handle = upload_complex_spectrum(provider, &spectrum, &[4]);
             let gpu = ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new())
                 .expect("gpu ifft");
             let cpu_spectrum = HostComplexTensor::new(
@@ -1201,7 +1194,12 @@ pub(crate) mod tests {
             {
                 assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
-            provider.free(&handle).ok();
+            let physical = spectrum_handle.allocation_lease().downgrade();
+            spectrum_handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         }
     }
 
@@ -1234,12 +1232,12 @@ pub(crate) mod tests {
             );
 
             let logical = LogicalArray::new(vec![1, 0], vec![1, 2]).expect("logical array");
-            let logical_tensor = crate::builtins::common::tensor::logical_to_tensor(&logical)
-                .expect("logical tensor");
-            let logical_handle =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &logical_tensor)
-                    .expect("upload logical");
-            runmat_accelerate_api::set_handle_logical(&logical_handle, true);
+            let logical_handle = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &logical.data,
+                    shape: &logical.shape,
+                })
+                .expect("upload logical");
             let logical_output = ifft_builtin(
                 Value::GpuTensor(logical_handle.clone()),
                 vec![Value::from("symmetric")],
@@ -1254,8 +1252,18 @@ pub(crate) mod tests {
             );
             assert!(runmat_accelerate_api::handle_is_logical(&logical_handle));
 
-            provider.free(&integer_handle).ok();
-            provider.free(&logical_handle).ok();
+            let physical = integer_handle.allocation_lease().downgrade();
+            integer_handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
+            let physical = logical_handle.allocation_lease().downgrade();
+            logical_handle.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         }
     }
 
@@ -1266,21 +1274,7 @@ pub(crate) mod tests {
             .expect("wgpu provider")
         {
             let spectrum = [10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
-            let uploaded = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &spectrum,
-                    shape: &[4, 2],
-                })
-                .expect("upload spectrum");
-            let input = GpuTensorHandle {
-                shape: vec![4],
-                device_id: uploaded.device_id,
-                buffer_id: uploaded.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..uploaded.descriptor
-                },
-            };
+            let input = upload_complex_spectrum(provider, &spectrum, &[4]);
             let output = ifft_builtin(
                 Value::GpuTensor(input.clone()),
                 vec![Value::from("symmetric")],
@@ -1289,10 +1283,9 @@ pub(crate) mod tests {
             let Value::GpuTensor(output_handle) = &output else {
                 panic!("matching F32 owner should receive a resident real result")
             };
-            assert_ne!(
-                (output_handle.device_id, output_handle.buffer_id),
-                (input.device_id, input.buffer_id)
-            );
+            assert!(!output_handle
+                .allocation_lease()
+                .shares_allocation_with(input.allocation_lease()));
             assert_eq!(
                 runmat_accelerate_api::handle_storage(output_handle),
                 runmat_accelerate_api::GpuTensorStorage::Real
@@ -1301,7 +1294,12 @@ pub(crate) mod tests {
             for (actual, expected) in gathered.materialize_f64().iter().zip([1.0, 2.0, 3.0, 4.0]) {
                 assert!((*actual - expected).abs() <= 1e-5, "{actual} vs {expected}");
             }
-            provider.free(&uploaded).ok();
+            let physical = input.allocation_lease().downgrade();
+            input.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         }
     }
 

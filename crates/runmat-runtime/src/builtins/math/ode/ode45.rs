@@ -377,8 +377,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("automatic upload");
-            let automatic =
-                automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+            let automatic = automatic
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("admit provenance view");
             let result = block_on(ode45_builtin(
                 Value::BoundFunctionHandle {
                     name: "constant_rhs".into(),
@@ -397,8 +398,9 @@ mod tests {
                     shape: &shape,
                 })
                 .expect("explicit upload");
-            let explicit =
-                explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let explicit = explicit
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = block_on(ode45_builtin(
                 Value::FunctionHandle("unused".into()),

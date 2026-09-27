@@ -853,7 +853,6 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor as HostTensor};
 
@@ -1179,24 +1178,16 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = HostTensor::new((0..8).map(|v| v as f64).collect(), vec![2, 4]).unwrap();
             let spectrum = fft2_of_tensor(&tensor);
-            let view = HostTensorView {
-                data: &spectrum
-                    .materialize_f64()
-                    .iter()
-                    .flat_map(|(re, im)| [*re, *im])
-                    .collect::<Vec<_>>(),
-                shape: &[2, 4, 2],
-            };
-            let raw = provider.upload(&view).expect("upload spectrum");
-            let second = runmat_accelerate_api::GpuTensorHandle {
-                shape: spectrum.shape.clone(),
-                device_id: raw.device_id,
-                buffer_id: raw.buffer_id,
-                descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                    storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                    ..raw.descriptor
-                },
-            };
+            let words = spectrum
+                .materialize_f64()
+                .iter()
+                .flat_map(|(re, im)| [*re, *im])
+                .collect::<Vec<_>>();
+            let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+                provider,
+                &words,
+                &spectrum.shape,
+            );
 
             let gpu =
                 ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1209,8 +1200,12 @@ pub(crate) mod tests {
             for (lhs, rhs) in g.materialize_f64().iter().zip(c.materialize_f64().iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
-            provider.free(&raw).ok();
-            provider.free(&second).ok();
+            let physical = second.allocation_lease().downgrade();
+            second.release().expect("release fixture input");
+            assert!(
+                physical.acquire().is_none(),
+                "last fixture owner releases physical allocation"
+            );
         });
     }
 
@@ -1282,25 +1277,16 @@ pub(crate) mod tests {
 
         let tensor = HostTensor::new((0..16).map(|v| v as f64).collect(), vec![4, 4]).unwrap();
         let spectrum = fft2_of_tensor(&tensor);
-        let host_real_imag = spectrum
+        let words = spectrum
             .materialize_f64()
             .iter()
             .flat_map(|(re, im)| [*re, *im])
             .collect::<Vec<_>>();
-        let view = HostTensorView {
-            data: &host_real_imag,
-            shape: &[4, 4, 2],
-        };
-        let raw = provider.upload(&view).expect("upload spectrum");
-        let second = runmat_accelerate_api::GpuTensorHandle {
-            shape: spectrum.shape.clone(),
-            device_id: raw.device_id,
-            buffer_id: raw.buffer_id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                ..raw.descriptor
-            },
-        };
+        let second = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+            provider,
+            &words,
+            &spectrum.shape,
+        );
 
         let gpu_val =
             ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
@@ -1321,8 +1307,12 @@ pub(crate) mod tests {
         {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
-        provider.free(&second).ok();
-        runmat_accelerate_api::clear_residency(&second);
+        let physical = second.allocation_lease().downgrade();
+        second.release().expect("release fixture input");
+        assert!(
+            physical.acquire().is_none(),
+            "last fixture owner releases physical allocation"
+        );
     }
 
     fn ifft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

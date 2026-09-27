@@ -1159,7 +1159,7 @@ mod tests {
             assert_eq!(handle.shape(), vec![1, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0]);
-            let _ = provider.free(&y);
+            y.release().expect("release borrowed y");
         });
     }
 
@@ -1190,8 +1190,8 @@ mod tests {
             assert_eq!(handle.shape(), vec![1, 2, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
-            let _ = provider.free(&y);
-            let _ = provider.free(&xq);
+            y.release().expect("release borrowed y");
+            xq.release().expect("release borrowed query");
         });
     }
 
@@ -1210,7 +1210,9 @@ mod tests {
                     shape: &[1, 1],
                 })
                 .expect("upload xq");
-            let xq = xq.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            let xq = xq
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("admit provenance view");
             let result = run(vec![
                 Value::GpuTensor(y.clone()),
                 Value::GpuTensor(xq.clone()),
@@ -1223,9 +1225,9 @@ mod tests {
                 runmat_accelerate_api::handle_provenance(&output),
                 Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             );
-            provider.free(&y).ok();
-            provider.free(&xq).ok();
-            provider.free(&output).ok();
+            y.release().expect("release fixture input");
+            xq.release().expect("release fixture input");
+            output.release().expect("release fixture input");
         });
     }
 
@@ -1238,7 +1240,7 @@ mod tests {
                     shape: &[1, 3],
                 })
                 .expect("upload y/query");
-            let metadata = gpu_helpers::snapshot_handle_metadata(&y);
+            let metadata = y.wire_descriptor();
             let result = run(vec![
                 Value::GpuTensor(y.clone()),
                 Value::GpuTensor(y.clone()),
@@ -1247,11 +1249,11 @@ mod tests {
             let Value::GpuTensor(output) = result else {
                 panic!("expected resident output");
             };
-            assert_eq!(output.shape, vec![1, 3]);
-            assert_eq!(gpu_helpers::snapshot_handle_metadata(&y), metadata);
+            assert_eq!(output.shape(), vec![1, 3]);
+            assert_eq!(y.wire_descriptor(), metadata);
             let gathered = test_support::gather(Value::GpuTensor(output)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![1.0, 2.0, 3.0]);
-            provider.free(&y).ok();
+            y.release().expect("release fixture input");
         });
     }
 
@@ -1273,12 +1275,11 @@ mod tests {
                 &[&y],
             ));
             let other = provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 2.0],
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U64(&[1, 2]),
                     shape: &[1, 2],
                 })
                 .expect("upload other");
-            runmat_accelerate_api::set_handle_class_identity(&other, "uint64");
             assert!(!valid_interp1_gpu_input(
                 &other,
                 &[1, 2],
@@ -1286,8 +1287,8 @@ mod tests {
                 provider,
                 &[&y],
             ));
-            provider.free(&y).ok();
-            provider.free(&other).ok();
+            y.release().expect("release fixture input");
+            other.release().expect("release fixture input");
         });
     }
 
@@ -1312,7 +1313,7 @@ mod tests {
             };
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![99.0]);
-            let _ = provider.free(&y);
+            y.release().expect("release borrowed y");
         });
     }
 
