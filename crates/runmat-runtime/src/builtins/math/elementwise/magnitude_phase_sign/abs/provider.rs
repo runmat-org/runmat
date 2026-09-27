@@ -36,7 +36,8 @@ pub(super) async fn evaluate(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     &ABS_ERROR_INTERNAL,
                     format!("provider unary_abs failed: {error}"),
                 );
-                failure.source = Some(error.into_boxed_dyn_error());
+                failure =
+                    crate::runtime_error::with_provider_execution_source(failure, error.into());
                 failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(failure);
             }

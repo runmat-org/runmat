@@ -72,12 +72,16 @@ fn later_gradient_failure_retires_prior_outputs_without_releasing_input() {
         if alias {
             assert!(error.message().contains("malformed or aliased"));
         } else {
-            assert!(error
-                .source
-                .as_ref()
-                .unwrap()
+            let source = error.source.as_ref().expect("provider source retained");
+            let provider = source
+                .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                .expect("typed provider execution carrier retained");
+            let cause = std::error::Error::source(provider)
+                .expect("original provider cause retained")
                 .downcast_ref::<std::io::Error>()
-                .is_some());
+                .expect("original I/O error remains downcastable");
+            assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
+            assert_eq!(cause.to_string(), "second gradient failed");
         }
         let outputs = provider.outputs.lock().unwrap();
         assert_eq!(outputs.len(), 1);

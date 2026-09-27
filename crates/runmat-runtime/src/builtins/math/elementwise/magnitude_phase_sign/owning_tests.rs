@@ -77,12 +77,16 @@ fn unary_dispatch_preserves_provider_failure_and_rejects_physical_alias() {
             if alias {
                 assert!(error.message().contains("malformed"));
             } else {
-                assert!(error
-                    .source
-                    .as_ref()
-                    .unwrap()
+                let source = error.source.as_ref().expect("provider source retained");
+                let provider = source
+                    .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                    .expect("typed provider execution carrier retained");
+                let cause = std::error::Error::source(provider)
+                    .expect("original provider cause retained")
                     .downcast_ref::<std::io::Error>()
-                    .is_some());
+                    .expect("original I/O error remains downcastable");
+                assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
+                assert_eq!(cause.to_string(), "unary failed");
             }
             assert_eq!(input.probe.retirements(), 0);
             input.handle.allocation_lease().validate_live().unwrap();

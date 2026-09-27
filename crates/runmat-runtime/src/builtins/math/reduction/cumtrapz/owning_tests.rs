@@ -82,12 +82,18 @@ fn cumulative_integration_retires_spacing_on_execution_failure_and_alias_rejecti
         .unwrap_err();
         assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
         match fault {
-            Fault::Failure => assert!(error
-                .source
-                .as_ref()
-                .unwrap()
-                .downcast_ref::<std::io::Error>()
-                .is_some()),
+            Fault::Failure => {
+                let source = error.source.as_ref().expect("provider source retained");
+                let provider = source
+                    .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                    .expect("typed provider execution carrier retained");
+                let cause = std::error::Error::source(provider)
+                    .expect("original provider cause retained")
+                    .downcast_ref::<std::io::Error>()
+                    .expect("original I/O error remains downcastable");
+                assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
+                assert_eq!(cause.to_string(), "cumtrapz execution failed");
+            }
             _ => assert!(error.message().contains("malformed or aliased")),
         }
         let uploads = provider.uploads.lock().unwrap();

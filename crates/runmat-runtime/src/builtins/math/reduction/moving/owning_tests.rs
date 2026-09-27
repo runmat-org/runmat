@@ -82,12 +82,16 @@ fn moving_rejects_malformed_results_and_preserves_execution_failure_without_gath
         if malformed {
             assert!(error.message().contains("malformed"));
         } else {
-            assert!(error
-                .source
-                .as_ref()
-                .unwrap()
+            let source = error.source.as_ref().expect("provider source retained");
+            let provider = source
+                .downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+                .expect("typed provider execution carrier retained");
+            let cause = std::error::Error::source(provider)
+                .expect("original provider cause retained")
                 .downcast_ref::<std::io::Error>()
-                .is_some());
+                .expect("original I/O error remains downcastable");
+            assert_eq!(cause.kind(), std::io::ErrorKind::BrokenPipe);
+            assert_eq!(cause.to_string(), "moving execution failed");
         }
         for output in provider.outputs.lock().unwrap().iter() {
             assert_eq!(output.retirements(), 1);
