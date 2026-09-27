@@ -32,6 +32,7 @@ struct Provider {
     calls: AtomicUsize,
     original: Mutex<Option<GpuTensorHandle>>,
     outputs: Mutex<Vec<RetirementProbe>>,
+    input_intents: Mutex<Vec<Option<GpuHandleProvenance>>>,
 }
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
@@ -56,6 +57,10 @@ impl AccelProvider for Provider {
         axis: usize,
     ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            self.input_intents
+                .lock()
+                .unwrap()
+                .push(handle_provenance(input));
             let pass = self.calls.fetch_add(1, Ordering::SeqCst);
             let fault = if pass == self.fault_pass {
                 self.fault
@@ -124,7 +129,61 @@ fn provider(fault: Fault, fault_pass: usize) -> &'static Provider {
         calls: AtomicUsize::new(0),
         original: Mutex::new(None),
         outputs: Mutex::new(Vec::new()),
+        input_intents: Mutex::new(Vec::new()),
     }))
+}
+
+#[test]
+fn forward_passes_preserve_explicit_and_automatic_intent_without_mutating_inputs() {
+    for intent in [
+        GpuHandleProvenance::Explicit,
+        GpuHandleProvenance::Automatic,
+    ] {
+        for (name, fault, pass, shape, count) in [
+            ("fft", Fault::None, 0, vec![2, 3], 1),
+            ("fft2", Fault::None, 0, vec![2, 3], 2),
+            ("fftn", Fault::None, 0, vec![2, 3], 2),
+            ("fft", Fault::CurrentAlias, 0, vec![1, 1], 1),
+            ("fft2", Fault::CurrentAlias, 1, vec![2, 1], 2),
+            ("fftn", Fault::CurrentAlias, 1, vec![2, 1], 2),
+        ] {
+            let provider = provider(fault, pass);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let input = provider
+                .owner
+                .allocate_zeroed(
+                    shape,
+                    NumericElementType::F64,
+                    GpuTensorStorage::ComplexInterleaved,
+                )
+                .unwrap();
+            let source = input.handle.with_provenance(intent).unwrap();
+            let original_intent = handle_provenance(&input.handle);
+            let args = [Value::GpuTensor(source.clone())];
+            let Value::GpuTensor(output) =
+                block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap()
+            else {
+                panic!("resident result")
+            };
+            assert_eq!(handle_provenance(&output), Some(intent), "{name} {fault:?}");
+            assert_eq!(
+                *provider.input_intents.lock().unwrap(),
+                vec![Some(intent); count]
+            );
+            assert_eq!(handle_provenance(&source), Some(intent));
+            assert_eq!(handle_provenance(&input.handle), original_intent);
+            assert_eq!(provider.calls.load(Ordering::SeqCst), count);
+            drop(output);
+            drop(args);
+            drop(source);
+            assert_eq!(input.probe.retirements(), 0);
+            drop(input.handle);
+            assert_eq!(input.probe.retirements(), 1);
+            for output in provider.outputs.lock().unwrap().iter() {
+                assert_eq!(output.retirements(), 1);
+            }
+        }
+    }
 }
 
 #[test]

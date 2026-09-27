@@ -20,7 +20,7 @@ pub(in crate::builtins::math::fft) fn validate_forward_input(
 
 pub(in crate::builtins::math::fft) fn admit_forward_output(
     provider: &'static dyn AccelProvider,
-    output: GpuTensorHandle,
+    mut output: GpuTensorHandle,
     current: &GpuTensorHandle,
     original: &GpuTensorHandle,
     length: Option<usize>,
@@ -81,6 +81,12 @@ pub(in crate::builtins::math::fft) fn admit_forward_output(
         || !gpu_helpers::binary_gpu_output_matches(&output, current, original, provider, &contract)
     {
         let mut error = error();
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        return Err(gpu_helpers::reject_gpu_output(output, error));
+    }
+    if let Err(mut error) =
+        gpu_helpers::propagate_output_provenance(&mut output, [current, original])
+    {
         error.gpu_gather_retry = crate::GpuGatherRetry::Never;
         return Err(gpu_helpers::reject_gpu_output(output, error));
     }
