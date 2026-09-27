@@ -32,7 +32,7 @@ impl AccelProvider for Provider {
         shape.swap(0, 1);
         let allocation =
             self.owner
-                .allocate_zeroed(shape, NumericElementType::F64, GpuTensorStorage::Real)?;
+                .allocate_zeroed(shape, NumericElementType::F64, input.storage())?;
         *self.intermediate.lock().unwrap() = Some(allocation.probe);
         Ok(allocation.handle)
     }
@@ -60,7 +60,11 @@ fn ctranspose_owns_intermediate_across_pending_and_operational_failure() {
         let _selected = ThreadProviderGuard::set(Some(provider));
         let input = provider
             .owner
-            .allocate_zeroed(vec![2, 3], NumericElementType::F64, GpuTensorStorage::Real)
+            .allocate_zeroed(
+                vec![2, 3],
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
             .unwrap();
         let mut invocation = Box::pin(ctranspose_gpu(input.handle.clone()));
         let waker = futures::task::noop_waker();
