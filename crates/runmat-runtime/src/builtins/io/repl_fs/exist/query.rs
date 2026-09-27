@@ -10,7 +10,7 @@ use crate::builtins::common::path_search::{
 };
 use crate::BuiltinResult;
 use runmat_builtins::{
-    builtin_functions, EXIST_ERROR_INVALID_TYPE, EXIST_ERROR_TYPE_ARG, EXIST_SEARCH_TYPE_EXTENSION,
+    builtin_name_is_known, EXIST_ERROR_INVALID_TYPE, EXIST_ERROR_TYPE_ARG, EXIST_SEARCH_TYPE_EXTENSION,
 };
 use runmat_value::Value;
 
@@ -246,10 +246,7 @@ fn variable_exists(name: &str) -> bool {
 }
 
 fn builtin_exists(name: &str) -> bool {
-    let lowered = name.to_ascii_lowercase();
-    builtin_functions()
-        .into_iter()
-        .any(|b| b.name.eq_ignore_ascii_case(&lowered))
+    builtin_name_is_known(name)
 }
 
 async fn class_exists(name: &str) -> BuiltinResult<bool> {
