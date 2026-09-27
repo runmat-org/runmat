@@ -33,6 +33,11 @@ pub(super) fn error(
     builtin_path = "crate::builtins::math::elementwise::complex_construction::complex"
 )]
 async fn complex_builtin(real: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::COMPLEX_DESCRIPTOR,
+        &runmat_builtins::COMPLEX_ERROR_TOO_MANY_OUTPUTS,
+        "complex",
+    )?;
     match rest.as_slice() {
         [] => provider::unary(real).await,
         [imaginary] => provider::binary(real, imaginary.clone()).await,

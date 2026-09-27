@@ -18,6 +18,11 @@ use super::projection::{self, ProjectionKind};
     builtin_path = "crate::builtins::math::elementwise::complex_components::imag"
 )]
 async fn imag_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::IMAG_DESCRIPTOR,
+        &runmat_builtins::IMAG_ERROR_TOO_MANY_OUTPUTS,
+        "imag",
+    )?;
     projection::execute(ProjectionKind::Imaginary, value).await
 }
 

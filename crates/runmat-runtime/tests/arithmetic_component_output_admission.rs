@@ -1,0 +1,68 @@
+use futures::executor::block_on;
+use runmat_accelerate_api::GpuTensorHandle;
+use runmat_value::Value;
+
+const FORMS: &[(&str, usize)] = &[
+    ("ldivide", 2),
+    ("minus", 2),
+    ("plus", 2),
+    ("power", 2),
+    ("rdivide", 2),
+    ("times", 2),
+    ("conj", 1),
+    ("imag", 1),
+    ("real", 1),
+    ("complex", 1),
+    ("complex", 2),
+];
+
+#[test]
+fn excess_outputs_reject_before_resident_operand_access() {
+    let unavailable = Value::GpuTensor(GpuTensorHandle {
+        shape: vec![2, 3],
+        device_id: u32::MAX,
+        buffer_id: u64::MAX,
+        descriptor: Default::default(),
+    });
+    for &(name, inputs) in FORMS {
+        let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
+        let identifier = format!("RunMat:{name}:TooManyOutputs");
+        assert!(entry
+            .descriptor
+            .errors
+            .iter()
+            .any(|error| error.identifier == Some(identifier.as_str())));
+        let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name,
+            &vec![unavailable.clone(); inputs],
+            2,
+        ))
+        .expect_err("output admission must precede provider lookup/download");
+        assert_eq!(error.identifier(), Some(identifier.as_str()), "{name}");
+    }
+}
+
+#[test]
+fn zero_outputs_still_execute_input_admission() {
+    for &(name, inputs) in FORMS {
+        assert!(
+            block_on(runmat_runtime::call_builtin_async_with_outputs(
+                name,
+                &vec![Value::Num(2.0); inputs],
+                0,
+            ))
+            .is_ok(),
+            "{name}: zero output invocation remains legal"
+        );
+        let error = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name,
+            &vec![Value::String("not numeric".into()); inputs],
+            0,
+        ))
+        .expect_err("discarding results must not discard input validation");
+        assert_ne!(
+            error.identifier(),
+            Some(format!("RunMat:{name}:TooManyOutputs").as_str())
+        );
+    }
+}

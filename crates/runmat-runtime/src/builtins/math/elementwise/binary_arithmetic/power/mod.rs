@@ -91,6 +91,11 @@ fn power_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::power"
 )]
 async fn power_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::POWER_DESCRIPTOR,
+        &runmat_builtins::POWER_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
         || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
         || rest

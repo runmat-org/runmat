@@ -91,7 +91,14 @@ pub const COMPLEX_ERROR_INTEGER_CLASS: BuiltinErrorDescriptor = BuiltinErrorDesc
     when: "An integer component is paired with an unsupported unlike class.",
     message: "complex: integer inputs require matching integer classes or a scalar double",
 };
-const ERRORS: [BuiltinErrorDescriptor; 5] = [
+pub const COMPLEX_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.COMPLEX.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:complex:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "complex: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 6] = [
+    COMPLEX_ERROR_TOO_MANY_OUTPUTS,
     COMPLEX_ERROR_INVALID_ARGUMENT,
     COMPLEX_ERROR_INVALID_INPUT,
     COMPLEX_ERROR_SIZE_MISMATCH,

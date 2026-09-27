@@ -43,11 +43,19 @@ pub const POWER_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor 
     message: "power: internal error",
 };
 
+pub const POWER_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.POWER.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:power:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "power: too many output arguments",
+};
+
 pub const POWER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        POWER_ERROR_TOO_MANY_OUTPUTS,
         POWER_ERROR_INVALID_ARGUMENT,
         POWER_ERROR_INVALID_INPUT,
         POWER_ERROR_SIZE_MISMATCH,

@@ -50,7 +50,14 @@ pub const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "Internal tensor conversion, allocation, or provider interaction fails.",
     message: "conj: internal error",
 };
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
+pub const ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.CONJ.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:conj:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "conj: too many output arguments",
+};
+const ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_INVALID_INPUT, ERROR_INTERNAL, ERROR_TOO_MANY_OUTPUTS];
 pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
@@ -151,5 +158,6 @@ pub use CHARACTER_INPUT_EXTENSION as CONJ_CHARACTER_INPUT_EXTENSION;
 pub use DESCRIPTOR as CONJ_DESCRIPTOR;
 pub use ERROR_INTERNAL as CONJ_ERROR_INTERNAL;
 pub use ERROR_INVALID_INPUT as CONJ_ERROR_INVALID_INPUT;
+pub use ERROR_TOO_MANY_OUTPUTS as CONJ_ERROR_TOO_MANY_OUTPUTS;
 pub use EXTENSIONS as CONJ_EXTENSIONS;
 pub use INTEGER_CAPABILITIES as CONJ_INTEGER_CAPABILITIES;

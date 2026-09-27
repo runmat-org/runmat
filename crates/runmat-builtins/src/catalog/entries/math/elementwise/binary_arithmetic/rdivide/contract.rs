@@ -42,11 +42,19 @@ pub const RDIVIDE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
     message: "rdivide: internal error",
 };
 
+pub const RDIVIDE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.RDIVIDE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:rdivide:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "rdivide: too many output arguments",
+};
+
 pub const RDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        RDIVIDE_ERROR_TOO_MANY_OUTPUTS,
         RDIVIDE_ERROR_INVALID_ARGUMENT,
         RDIVIDE_ERROR_INVALID_INPUT,
         RDIVIDE_ERROR_SIZE_MISMATCH,

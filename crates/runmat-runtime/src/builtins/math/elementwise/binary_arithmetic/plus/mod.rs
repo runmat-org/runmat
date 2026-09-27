@@ -106,6 +106,11 @@ fn plus_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::plus"
 )]
 async fn plus_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::PLUS_DESCRIPTOR,
+        &runmat_builtins::PLUS_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
         || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
         || rest

@@ -18,6 +18,11 @@ use super::projection::{self, ProjectionKind};
     builtin_path = "crate::builtins::math::elementwise::complex_components::real"
 )]
 async fn real_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::REAL_DESCRIPTOR,
+        &runmat_builtins::REAL_ERROR_TOO_MANY_OUTPUTS,
+        "real",
+    )?;
     projection::execute(ProjectionKind::Real, value).await
 }
 

@@ -77,6 +77,11 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
     builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::ldivide"
 )]
 async fn ldivide_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::LDIVIDE_DESCRIPTOR,
+        &runmat_builtins::LDIVIDE_ERROR_TOO_MANY_OUTPUTS,
+        BUILTIN_NAME,
+    )?;
     if crate::builtins::common::validation::is_typed_complex_integer(&lhs)
         || crate::builtins::common::validation::is_typed_complex_integer(&rhs)
         || rest

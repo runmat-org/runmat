@@ -66,11 +66,19 @@ pub const MINUS_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "minus: sparse arithmetic internal error",
 };
 
+pub const MINUS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.MINUS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:minus:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "minus: too many output arguments",
+};
+
 pub const MINUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        MINUS_ERROR_TOO_MANY_OUTPUTS,
         MINUS_ERROR_INVALID_ARGUMENT,
         MINUS_ERROR_INVALID_INPUT,
         MINUS_ERROR_SIZE_MISMATCH,

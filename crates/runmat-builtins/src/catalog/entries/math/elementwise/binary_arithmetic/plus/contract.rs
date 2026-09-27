@@ -66,11 +66,19 @@ pub const PLUS_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescr
     message: "plus: sparse arithmetic internal error",
 };
 
+pub const PLUS_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.PLUS.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:plus:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "plus: too many output arguments",
+};
+
 pub const PLUS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        PLUS_ERROR_TOO_MANY_OUTPUTS,
         PLUS_ERROR_INVALID_ARGUMENT,
         PLUS_ERROR_INVALID_INPUT,
         PLUS_ERROR_SIZE_MISMATCH,

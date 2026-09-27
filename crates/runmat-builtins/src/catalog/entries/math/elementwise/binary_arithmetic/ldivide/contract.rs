@@ -42,11 +42,19 @@ pub const LDIVIDE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescripto
     message: "ldivide: internal error",
 };
 
+pub const LDIVIDE_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.LDIVIDE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:ldivide:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "ldivide: too many output arguments",
+};
+
 pub const LDIVIDE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        LDIVIDE_ERROR_TOO_MANY_OUTPUTS,
         LDIVIDE_ERROR_INVALID_ARGUMENT,
         LDIVIDE_ERROR_INVALID_INPUT,
         LDIVIDE_ERROR_SIZE_MISMATCH,

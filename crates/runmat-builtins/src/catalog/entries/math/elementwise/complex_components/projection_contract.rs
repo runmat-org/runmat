@@ -40,7 +40,14 @@ macro_rules! define_component_projection {
             when: "Internal tensor conversion, allocation, or provider interaction fails.",
             message: concat!($name, ": internal error"),
         };
-        const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID_INPUT, ERROR_INTERNAL];
+        pub const ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+            code: concat!("RM.", $upper, ".TOO_MANY_OUTPUTS"),
+            identifier: Some(concat!("RunMat:", $name, ":TooManyOutputs")),
+            when: "More than one output is requested.",
+            message: concat!($name, ": too many output arguments"),
+        };
+        const ERRORS: [BuiltinErrorDescriptor; 3] =
+            [ERROR_INVALID_INPUT, ERROR_INTERNAL, ERROR_TOO_MANY_OUTPUTS];
         pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
             signatures: &SIGNATURES,
             output_mode: BuiltinOutputMode::Fixed,

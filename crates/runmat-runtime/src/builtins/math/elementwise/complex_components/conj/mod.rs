@@ -35,6 +35,11 @@ fn builtin_error_with_detail(
     builtin_path = "crate::builtins::math::elementwise::complex_components::conj"
 )]
 async fn conj_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::CONJ_DESCRIPTOR,
+        &runmat_builtins::CONJ_ERROR_TOO_MANY_OUTPUTS,
+        "conj",
+    )?;
     if matches!(value, Value::CharArray(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &CONJ_CHARACTER_INPUT_EXTENSION,

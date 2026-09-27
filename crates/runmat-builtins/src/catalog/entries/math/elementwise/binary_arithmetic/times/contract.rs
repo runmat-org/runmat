@@ -66,11 +66,19 @@ pub const TIMES_ERROR_SPARSE_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDesc
     message: "times: sparse arithmetic internal error",
 };
 
+pub const TIMES_ERROR_TOO_MANY_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TIMES.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:times:TooManyOutputs"),
+    when: "More than one output is requested.",
+    message: "times: too many output arguments",
+};
+
 pub const TIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: SIGNATURES,
     output_mode: BuiltinOutputMode::Fixed,
     completion_policy: BuiltinCompletionPolicy::Public,
     errors: &[
+        TIMES_ERROR_TOO_MANY_OUTPUTS,
         TIMES_ERROR_INVALID_ARGUMENT,
         TIMES_ERROR_INVALID_INPUT,
         TIMES_ERROR_SIZE_MISMATCH,
