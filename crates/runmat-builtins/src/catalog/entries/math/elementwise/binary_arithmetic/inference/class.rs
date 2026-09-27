@@ -65,6 +65,16 @@ fn output_class(
         (Some(_), Some(_)) => Err(DynamicReason::UnsupportedRepresentation),
         (Some(_), None) if right == NumericClass::Double && right_fact.is_scalar() => Ok(left),
         (None, Some(_)) if left == NumericClass::Double && left_fact.is_scalar() => Ok(right),
+        (Some(_), None)
+            if right == NumericClass::Double && right_fact.shape.element_count().is_none() =>
+        {
+            Err(DynamicReason::RuntimeValue)
+        }
+        (None, Some(_))
+            if left == NumericClass::Double && left_fact.shape.element_count().is_none() =>
+        {
+            Err(DynamicReason::RuntimeValue)
+        }
         (Some(_), None) | (None, Some(_)) => Err(DynamicReason::UnsupportedRepresentation),
         (None, None) if left == NumericClass::Single || right == NumericClass::Single => {
             Ok(NumericClass::Single)

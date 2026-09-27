@@ -38,6 +38,12 @@ fn integer_inference_rejects_non_numeric_and_complex_pairs() {
         let result = infer_catalog_call(entry, &request(vec![integer.clone(), integer.clone()]));
         assert!(result.diagnostics.is_empty(), "{name}");
         assert_eq!(result.outputs[0].kind, integer.kind, "{name}");
+        let unknown_shape = numeric(NumericClass::Double, NumericDomain::Real, &[None, None]);
+        let result = infer_catalog_call(entry, &request(vec![integer.clone(), unknown_shape]));
+        assert!(
+            result.diagnostics.is_empty(),
+            "{name}: unknown shape may be scalar"
+        );
     }
 }
 
