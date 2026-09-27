@@ -429,6 +429,11 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         }
     }
     let output_precision = super::common::output_precision::SignalPrecision::of(&x);
+    let source = if let Value::GpuTensor(handle) = &x {
+        Some(handle.clone())
+    } else {
+        None
+    };
     let borrowed = std::iter::once(&x)
         .chain(rest.iter())
         .filter_map(|value| {
@@ -500,7 +505,16 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         None => parse_options(rest, signal.data.len(), signal.is_complex).await?,
     };
     let eval = compute_spectrogram(&signal.data, &options)?;
-    output_eval(eval, options.reassigned, output_precision)
+    let output = output_eval(eval, options.reassigned, output_precision)?;
+    match source {
+        Some(source) => super::resident_output::restore(
+            &source,
+            output,
+            BUILTIN_NAME,
+            &borrowed.iter().collect::<Vec<_>>(),
+        ),
+        None => Ok(output),
+    }
 }
 
 fn output_eval(
@@ -629,57 +643,25 @@ async fn output_gpu(
         .collect::<Vec<_>>();
     let f_shape = [estimate.rows, 1usize];
     let t_shape = [1usize, estimate.cols];
-    let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
-        data: &f_values,
-        shape: &f_shape,
-    }) {
-        Ok(value) => value,
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
-            return Ok(None)
-        }
-        Err(error) => {
-            return Err(crate::runtime_error::with_provider_execution_source(
-                spectrogram_error_with_detail(
-                    &SPECTROGRAM_ERROR_INTERNAL,
-                    format!("provider output preparation failed: {error}"),
-                ),
-                error.into(),
-            ))
-        }
-    };
     let f = context.coordinate(
-        f,
+        f_values,
         f_shape.to_vec(),
         &[&estimate.s, &estimate.ps],
+        BUILTIN_NAME,
         output_error,
     )?;
-    let t = match provider.upload(&runmat_accelerate_api::HostTensorView {
-        data: &t_values,
-        shape: &t_shape,
-    }) {
-        Ok(value) => value,
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
-            return Ok(None)
-        }
-        Err(error) => {
-            return Err(crate::runtime_error::with_provider_execution_source(
-                spectrogram_error_with_detail(
-                    &SPECTROGRAM_ERROR_INTERNAL,
-                    format!("provider output preparation failed: {error}"),
-                ),
-                error.into(),
-            ))
-        }
-    };
+    let mut siblings = vec![&estimate.s, &estimate.ps];
+    if let Value::GpuTensor(handle) = &f {
+        siblings.push(handle);
+    }
     let t = context.coordinate(
-        t,
+        t_values,
         t_shape.to_vec(),
-        &[&estimate.s, &estimate.ps, &f],
+        &siblings,
+        BUILTIN_NAME,
         output_error,
     )?;
     let s = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.s)?;
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
-    let t = crate::builtins::common::gpu_helpers::resident_gpu_value(t)?;
     let ps = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
@@ -1250,6 +1232,61 @@ mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::builtin_function_by_name;
     use runmat_value::{IntegerStorage, Tensor};
+
+    #[test]
+    fn output_publication_rounds_once_including_reserved_reassignment_coordinates() {
+        // Public reassignment remains unsupported. Exercise the existing output
+        // carrier directly so its reserved FC/TC slots cannot drift in class.
+        let boundary = 1.0 + 3.0 * 2.0f64.powi(-25);
+        assert_ne!(boundary, (boundary as f32) as f64);
+        for precision in [
+            super::super::common::output_precision::SignalPrecision::Single,
+            super::super::common::output_precision::SignalPrecision::Double,
+        ] {
+            let _outputs = crate::output_count::push_output_count(Some(6));
+            let output = output_eval(
+                SpectrogramEvaluation {
+                    s: vec![Complex::new(boundary, -boundary)],
+                    f: vec![boundary],
+                    t: vec![boundary],
+                    ps: vec![boundary],
+                    fc: vec![boundary],
+                    tc: vec![boundary],
+                },
+                true,
+                precision,
+            )
+            .unwrap();
+            let Value::OutputList(values) = output else {
+                panic!("six output slots")
+            };
+            assert_eq!(values.len(), 6);
+            let single =
+                precision == super::super::common::output_precision::SignalPrecision::Single;
+            let dtype = if single {
+                runmat_value::NumericDType::F32
+            } else {
+                runmat_value::NumericDType::F64
+            };
+            let expected = if single {
+                (boundary as f32) as f64
+            } else {
+                boundary
+            };
+            let Value::ComplexTensor(stft) = &values[0] else {
+                panic!("complex STFT")
+            };
+            assert_eq!(stft.numeric_dtype(), dtype);
+            assert_eq!(stft.materialize_f64(), vec![(expected, -expected)]);
+            for value in &values[1..] {
+                let Value::Tensor(value) = value else {
+                    panic!("real coordinate/power")
+                };
+                assert_eq!(value.numeric_dtype(), dtype);
+                assert_eq!(value.materialize_f64(), vec![expected]);
+            }
+        }
+    }
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())

@@ -397,6 +397,11 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         }
     }
     let output_precision = super::common::output_precision::SignalPrecision::of(&x);
+    let source = if let Value::GpuTensor(handle) = &x {
+        Some(handle.clone())
+    } else {
+        None
+    };
     let borrowed = std::iter::once(&x)
         .chain(rest.iter())
         .filter_map(|value| {
@@ -469,7 +474,16 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         None => parse_options(rest, input.rows, input.is_complex).await?,
     };
     let eval = compute_periodogram(&input.columns, &options)?;
-    output_eval(eval, output_precision)
+    let output = output_eval(eval, output_precision)?;
+    match source {
+        Some(source) => super::resident_output::restore(
+            &source,
+            output,
+            BUILTIN_NAME,
+            &borrowed.iter().collect::<Vec<_>>(),
+        ),
+        None => Ok(output),
+    }
 }
 
 async fn ensure_periodogram_integer_boundary(
@@ -592,32 +606,14 @@ async fn output_gpu(
     };
     let f_values = frequency_vector(nfft, options.frequency_units, options.range);
     let f_shape = [estimate.rows, 1usize];
-    let f = match provider.upload(&runmat_accelerate_api::HostTensorView {
-        data: &f_values,
-        shape: &f_shape,
-    }) {
-        Ok(value) => value,
-        Err(error) if runmat_accelerate_api::is_unsupported_provider_operation(&error) => {
-            return Ok(None)
-        }
-        Err(error) => {
-            return Err(crate::runtime_error::with_provider_execution_source(
-                periodogram_error_with_detail(
-                    &PERIODOGRAM_ERROR_INTERNAL,
-                    format!("provider output preparation failed: {error}"),
-                ),
-                error.into(),
-            ))
-        }
-    };
     let f = context.coordinate(
-        f,
+        f_values,
         f_shape.to_vec(),
         &[&estimate.s, &estimate.ps],
+        BUILTIN_NAME,
         output_error,
     )?;
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(estimate.ps)?;
-    let f = crate::builtins::common::gpu_helpers::resident_gpu_value(f)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             return Ok(Some(Value::OutputList(Vec::new())));

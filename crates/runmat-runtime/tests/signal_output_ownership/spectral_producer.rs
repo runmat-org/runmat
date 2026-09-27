@@ -67,13 +67,13 @@ fn coordinates_require_real_live_owned_encoding_and_requested_shape() {
             Upload::Dead,
         ] {
             let provider = Provider::new(Mode::Good, upload);
-            provider.legacy_coordinates.store(true, Ordering::SeqCst);
             let _scope = ThreadProviderGuard::set(Some(provider));
             let source = input(provider, NumericElementType::F64, false);
             let error = call(name, &args(name, &source.handle)).unwrap_err();
             assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
             assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
-            assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 1);
+            assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
             provider.assert_retired();
             assert_eq!(source.probe.retirements(), 0);
@@ -81,7 +81,6 @@ fn coordinates_require_real_live_owned_encoding_and_requested_shape() {
         for stage in 1..=if name == "periodogram" { 1 } else { 2 } {
             for failure in [false, true] {
                 let provider = Provider::new(Mode::Good, Upload::Good);
-                provider.legacy_coordinates.store(true, Ordering::SeqCst);
                 if failure {
                     provider.fail_stage.store(stage, Ordering::SeqCst);
                 } else {
@@ -102,7 +101,8 @@ fn coordinates_require_real_live_owned_encoding_and_requested_shape() {
                     );
                 }
                 assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
-                assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), stage);
+                assert_eq!(provider.uploads.load(Ordering::SeqCst), stage);
+                assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
                 provider.assert_retired();
                 assert_eq!(source.probe.retirements(), 0);
@@ -114,7 +114,6 @@ fn coordinates_require_real_live_owned_encoding_and_requested_shape() {
 #[test]
 fn time_coordinate_cannot_alias_a_distinct_frequency_view() {
     let provider = Provider::new(Mode::Good, Upload::Previous);
-    provider.legacy_coordinates.store(true, Ordering::SeqCst);
     let _scope = ThreadProviderGuard::set(Some(provider));
     let source = provider
         .owner
@@ -122,7 +121,8 @@ fn time_coordinate_cannot_alias_a_distinct_frequency_view() {
         .unwrap();
     let error = call("spectrogram", &args("spectrogram", &source.handle)).unwrap_err();
     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
-    assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.uploads.load(Ordering::SeqCst), 2);
+    assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
     provider.assert_retired();
     assert_eq!(source.probe.retirements(), 0);
 }
@@ -143,7 +143,6 @@ fn resident_window_is_protected_from_spectral_and_coordinate_aliases() {
                     Upload::Good
                 },
             );
-            provider.legacy_coordinates.store(true, Ordering::SeqCst);
             let _scope = ThreadProviderGuard::set(Some(provider));
             let source = input(provider, NumericElementType::F64, false);
             let window = provider
@@ -163,9 +162,10 @@ fn resident_window_is_protected_from_spectral_and_coordinate_aliases() {
             assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
             assert_eq!(provider.hooks.load(Ordering::SeqCst), 1);
             assert_eq!(
-                provider.raw_uploads.load(Ordering::SeqCst),
+                provider.uploads.load(Ordering::SeqCst),
                 usize::from(coordinate)
             );
+            assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 1);
             provider.borrowed.lock().unwrap().take();
             provider.assert_retired();
@@ -214,33 +214,22 @@ fn pending_spectral_estimate_retires_owned_pair_not_borrowed_controls() {
 }
 
 #[test]
-fn valid_native_spectral_outputs_preserve_caller_intent_and_existing_coordinate_encoding() {
+fn valid_native_spectral_outputs_preserve_caller_intent_and_signal_precision() {
     for name in ["periodogram", "spectrogram"] {
         for element in [NumericElementType::F32, NumericElementType::F64] {
             for explicit in [false, true] {
                 let provider = Provider::new(Mode::Good, Upload::Good);
-                provider.legacy_coordinates.store(true, Ordering::SeqCst);
                 let _scope = ThreadProviderGuard::set(Some(provider));
                 let source = input(provider, element, explicit);
                 let output = call(name, &args(name, &source.handle)).unwrap();
                 let Value::OutputList(values) = output else {
                     panic!("spectral output list")
                 };
-                for (index, value) in values.iter().enumerate() {
+                for value in &values {
                     let Value::GpuTensor(handle) = value else {
                         panic!("resident output")
                     };
-                    let coordinate = index == 1 || (name == "spectrogram" && index == 2);
-                    // This fixture's legacy upload chooses F64; this is not a
-                    // new language-level coordinate precision rule.
-                    assert_eq!(
-                        handle.physical().element_type(),
-                        if coordinate {
-                            NumericElementType::F64
-                        } else {
-                            element
-                        }
-                    );
+                    assert_eq!(handle.physical().element_type(), element);
                     assert_eq!(
                         handle_provenance(handle),
                         Some(if explicit {
@@ -253,6 +242,7 @@ fn valid_native_spectral_outputs_preserve_caller_intent_and_existing_coordinate_
                     assert!(!handle.shares_allocation_with(&source.handle));
                 }
                 assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
+                assert_eq!(provider.raw_uploads.load(Ordering::SeqCst), 0);
                 drop(values);
                 provider.assert_retired();
                 assert_eq!(source.probe.retirements(), 0);

@@ -53,7 +53,6 @@ pub struct Provider {
     pub malformed_stage: AtomicUsize,
     pub fail_download: AtomicBool,
     pub pending_download: AtomicBool,
-    pub legacy_coordinates: AtomicBool,
     pub raw_uploads: AtomicUsize,
     last_upload: Mutex<Option<(WeakAllocationLease, GpuTensorWireDescriptor)>>,
 }
@@ -76,7 +75,6 @@ impl Provider {
             malformed_stage: AtomicUsize::new(usize::MAX),
             fail_download: AtomicBool::new(false),
             pending_download: AtomicBool::new(false),
-            legacy_coordinates: AtomicBool::new(false),
             raw_uploads: AtomicUsize::new(0),
             last_upload: Mutex::new(None),
         }))
@@ -176,17 +174,9 @@ impl AccelProvider for Provider {
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
     }
-    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        assert!(
-            self.legacy_coordinates.load(Ordering::SeqCst),
-            "native upload required outside the unchanged coordinate ABI"
-        );
+    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.raw_uploads.fetch_add(1, Ordering::SeqCst);
-        self.upload_numeric_raw(&HostNumericTensorView {
-            data: HostNumericDataView::F64(host.data),
-            shape: host.shape,
-            storage: GpuTensorStorage::Real,
-        })
+        panic!("spectral outputs require native typed uploads")
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("native download required")

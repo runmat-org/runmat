@@ -20,14 +20,21 @@ impl SignalPrecision {
         let single = match signal {
             Value::Tensor(value) => value.numeric_dtype() == NumericDType::F32,
             Value::ComplexTensor(value) => value.numeric_dtype() == NumericDType::F32,
-            Value::GpuTensor(value) => {
-                !handle_is_logical(value)
-                    && handle_integer_type(value).is_none()
-                    && handle_precision(value) == Some(ProviderPrecision::F32)
-            }
+            Value::GpuTensor(value) => return Self::of_handle(value),
             _ => false,
         };
         if single {
+            Self::Single
+        } else {
+            Self::Double
+        }
+    }
+
+    pub(crate) fn of_handle(value: &runmat_accelerate_api::GpuTensorHandle) -> Self {
+        if !handle_is_logical(value)
+            && handle_integer_type(value).is_none()
+            && handle_precision(value) == Some(ProviderPrecision::F32)
+        {
             Self::Single
         } else {
             Self::Double
