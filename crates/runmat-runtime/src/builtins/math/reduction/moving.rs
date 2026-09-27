@@ -768,6 +768,10 @@ struct ParsedMoving {
     normalization: VarianceNormalization,
 }
 
+#[cfg(test)]
+#[path = "moving/owning_tests.rs"]
+mod owning_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum VarianceNormalization {
     Sample,
@@ -978,16 +982,15 @@ async fn moving_gpu(
     parsed: &ParsedMoving,
 ) -> BuiltinResult<Value> {
     if let Some(output) = moving_gpu_provider(name, op, &handle, parsed).await? {
-        return Ok(Value::GpuTensor(output));
+        return gpu_helpers::resident_gpu_value(output);
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
     let result = moving_real(name, op, tensor, parsed)?;
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(tensor::tensor_into_value(result));
-    };
-    let uploaded = gpu_helpers::upload_tensor(provider, &result)
-        .map_err(|err| internal(name, format!("{name}: failed to upload GPU result: {err}")))?;
-    Ok(Value::GpuTensor(uploaded))
+    crate::builtins::common::provider_restore::restore_class_preserving_value(
+        &handle,
+        tensor::tensor_into_value(result),
+        name,
+    )
 }
 
 async fn moving_gpu_provider(
@@ -1014,14 +1017,14 @@ async fn moving_gpu_provider(
 
     let dim = parsed
         .dim
-        .unwrap_or_else(|| default_dimension(&handle.shape));
+        .unwrap_or_else(|| default_dimension(handle.shape()));
     if dim == 0 {
         return Err(invalid_argument(
             name,
             format!("{name}: dimension must be >= 1"),
         ));
     }
-    let input_shape = shape_with_trailing_singletons(&handle.shape, dim);
+    let input_shape = shape_with_trailing_singletons(handle.shape(), dim);
     let output_shape = output_shape(name, &input_shape, dim, parsed)?;
     validate_sample_points_len(name, input_shape[dim - 1], parsed)?;
     let request = ProviderMovingWindowRequest {
@@ -1036,11 +1039,47 @@ async fn moving_gpu_provider(
         normalization: provider_normalization(parsed.normalization),
     };
     match provider.moving_window(&request).await {
-        Ok(output) => {
-            runmat_accelerate_api::set_handle_logical(&output, false);
+        Ok(mut output) => {
+            let source_integer = runmat_accelerate_api::handle_integer_type(handle);
+            let expected_integer = if matches!(op, MovingOp::Min | MovingOp::Max | MovingOp::Median)
+            {
+                source_integer
+            } else {
+                None
+            };
+            let expected_precision = if (source_integer.is_some() && expected_integer.is_none())
+                || runmat_accelerate_api::handle_is_logical(handle)
+            {
+                Some(runmat_accelerate_api::ProviderPrecision::F64)
+            } else {
+                runmat_accelerate_api::handle_precision(handle)
+            };
+            let valid = output.shape() == output_shape
+                && output.device_id() == handle.device_id()
+                && runmat_accelerate_api::provider_for_handle(&output)
+                    .is_some_and(|owner| std::ptr::eq(owner, provider))
+                && runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::Real
+                && runmat_accelerate_api::handle_integer_type(&output) == expected_integer
+                && runmat_accelerate_api::handle_precision(&output) == expected_precision
+                && !runmat_accelerate_api::handle_is_logical(&output);
+            if !valid {
+                let mut error = internal(
+                    name,
+                    format!("{name}: provider returned a malformed moving-window result"),
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(output, error));
+            }
+            gpu_helpers::propagate_output_provenance(&mut output, &[handle])?;
             Ok(Some(output))
         }
-        Err(_) => Ok(None),
+        Err(source) if gpu_helpers::provider_hook_is_unsupported(&source) => Ok(None),
+        Err(source) => {
+            let mut error = internal(name, format!("{name}: provider execution failed: {source}"));
+            error.source = Some(source.into_boxed_dyn_error());
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(error)
+        }
     }
 }
 
