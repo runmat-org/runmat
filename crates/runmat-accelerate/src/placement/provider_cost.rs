@@ -13,6 +13,26 @@ pub(crate) fn wgpu_cost_estimate(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
 ) -> ProviderCostEstimate {
+    let power_work = {
+        #[cfg(feature = "wgpu")]
+        {
+            super::provider_contract::power::wgpu_work(provider.precision(), &query.operation)
+        }
+        #[cfg(not(feature = "wgpu"))]
+        {
+            None::<super::provider_contract::power::PowerWork>
+        }
+    };
+    let (probe_elements, probe_bytes, readback_bytes, dispatches) =
+        power_work.as_ref().map_or((0, 0, 0, 1), |work| {
+            (
+                work.elements,
+                work.temporary_bytes,
+                work.readback_bytes,
+                work.dispatches,
+            )
+        });
+    let download_bytes = query.required_download_bytes.saturating_add(readback_bytes);
     let telemetry = provider.telemetry_snapshot();
     let stats = match query.operation.family {
         ProviderOperationFamily::MatrixMultiply => telemetry.matmul,
@@ -25,8 +45,17 @@ pub(crate) fn wgpu_cost_estimate(
         | ProviderOperationFamily::Upload
         | ProviderOperationFamily::Download => ProviderDispatchStats::default(),
     };
-    let observed_execution_ns = average_ns(stats);
-    let execution_ns = observed_execution_ns.unwrap_or_else(|| operation_prior_ns(query));
+    // A single elementwise enqueue sample does not measure the composite
+    // classification/reduction/readback/kernel route. Keep its prior explicit
+    // until the existing invocation feedback supplies a matching observation.
+    let observed_execution_ns = if power_work.is_some() {
+        None
+    } else {
+        average_ns(stats)
+    };
+    let execution_ns = observed_execution_ns
+        .unwrap_or_else(|| operation_prior_ns(query))
+        .saturating_add(probe_elements.saturating_mul(3));
     let compile_or_prepare_ns = match query.preparation {
         CandidatePreparationState::Ready | CandidatePreparationState::Warm => 0,
         CandidatePreparationState::Cold => 100_000,
@@ -37,22 +66,18 @@ pub(crate) fn wgpu_cost_estimate(
             components: ExecutionCostComponents {
                 compile_or_prepare_ns,
                 upload_ns: transfer_prior_ns(query.required_upload_bytes),
-                allocation_ns: 5_000,
-                queue_ns: 10_000,
+                allocation_ns: 5_000u64.saturating_mul(u64::from(dispatches)),
+                queue_ns: 10_000u64.saturating_mul(u64::from(dispatches)),
                 execution_ns,
-                synchronization_ns: if query.required_download_bytes == 0 {
-                    0
-                } else {
-                    5_000
-                },
-                download_ns: transfer_prior_ns(query.required_download_bytes),
+                synchronization_ns: if download_bytes == 0 { 0 } else { 5_000 },
+                download_ns: transfer_prior_ns(download_bytes),
                 downstream_ns: if query.downstream_materialization {
                     5_000
                 } else {
                     0
                 },
             },
-            scratch_bytes: 0,
+            scratch_bytes: probe_bytes,
             confidence: if observed_execution_ns.is_some() {
                 EstimateConfidence::Medium
             } else {
@@ -92,6 +117,50 @@ mod tests {
     };
 
     use super::*;
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn power_domain_probe_requires_readback_even_when_result_stays_resident() {
+        use runmat_accelerate_api::{
+            NumericalDomainEvidence, PowerResultDomain, ProviderElementType, ProviderLayout,
+            ProviderRepresentation, ProviderResidency, ProviderStorage,
+        };
+        let provider = crate::simple_provider::InProcessProvider::new();
+        let input = ProviderRepresentation {
+            element_type: ProviderElementType::F64,
+            storage: ProviderStorage::DenseReal,
+            layout: ProviderLayout::ColumnMajorContiguous,
+            shape: vec![1, 3],
+            residency: ProviderResidency::Host,
+        };
+        let query = ProviderCostQuery {
+            operation: ProviderFeasibilityQuery {
+                operation: ProviderOperationIdentity::new(
+                    runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
+                ),
+                family: ProviderOperationFamily::Elementwise,
+                inputs: vec![input.clone(), input],
+                outputs: vec![],
+                workload: ProviderWorkload {
+                    elements: Some(3),
+                    numerical_domain: NumericalDomainEvidence::RealPower(
+                        PowerResultDomain::Complex,
+                    ),
+                    ..Default::default()
+                },
+            },
+            preparation: CandidatePreparationState::Warm,
+            required_upload_bytes: 0,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+        };
+        let estimate = wgpu_cost_estimate(&provider, &query).cost;
+        assert!(estimate.components.synchronization_ns > 0);
+        assert_eq!(estimate.components.download_ns, transfer_prior_ns(8));
+        assert_eq!(estimate.scratch_bytes, 40);
+        assert_eq!(estimate.components.queue_ns, 40_000);
+        assert_eq!(estimate.source, EstimateSource::StaticPrior);
+    }
 
     #[test]
     fn cold_and_transfer_components_are_explicit() {
