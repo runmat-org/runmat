@@ -858,17 +858,6 @@ impl ImhistEvaluation {
         let Some(source) = self.resident_source.as_ref() else {
             return Ok(host_values);
         };
-        let Some(_provider) =
-            crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
-        else {
-            if runmat_accelerate_api::handle_is_explicit(source) {
-                return Err(internal(
-                    "explicit gpuArray input has no owning provider for result publication",
-                ));
-            }
-            return Ok(host_values);
-        };
-
         let mut restored = Vec::with_capacity(host_values.len());
         for host_value in host_values.iter().cloned() {
             let protected = std::iter::once(source.clone())
@@ -877,17 +866,16 @@ impl ImhistEvaluation {
                     _ => None,
                 }))
                 .collect::<Vec<_>>();
-            let output = match common::restore_resident_numeric_result_for_sources(
-                &protected, host_value, NAME,
-            ) {
-                Ok(output) => output,
-                Err(err) => {
-                    if runmat_accelerate_api::handle_is_explicit(source) {
-                        return Err(err);
-                    }
-                    return Ok(host_values);
-                }
-            };
+            // The shared boundary authenticates the owner and permits an
+            // automatic host result only for typed Unsupported. Operational
+            // errors remain terminal, including failure of a later output.
+            let output =
+                crate::builtins::common::gpu_helpers::restore_class_preserving_value_protecting(
+                    source,
+                    host_value,
+                    NAME,
+                    &protected.iter().collect::<Vec<_>>(),
+                )?;
             let Value::GpuTensor(handle) = &output else {
                 if !runmat_accelerate_api::handle_is_explicit(source) {
                     return Ok(host_values);
@@ -1627,7 +1615,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_resident_input_does_not_silently_return_host_on_precision_mismatch() {
+    fn explicit_resident_input_preserves_unsupported_typed_upload_error() {
         test_support::with_f32_test_provider(|provider| {
             runmat_accelerate::ensure_residency_hooks();
             let input = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::F32);
@@ -1638,8 +1626,10 @@ mod tests {
             let err = block_on(imhist_builtin(Value::GpuTensor(source), vec![]))
                 .expect_err("double output cannot silently become host output");
             assert!(
-                err.message().contains("requires Some(F64)")
-                    || err.message().contains("result precision"),
+                err.message().contains("failed to restore GPU result")
+                    && err
+                        .message()
+                        .contains("cannot store native double payloads"),
                 "unexpected error: {}",
                 err.message()
             );
