@@ -1,10 +1,13 @@
-use super::support::facts::{materialize, preserve_shape_as_dynamic};
+use super::support::facts::{materialize_floating_result, preserve_shape_as_dynamic};
 use super::{argument_error, finish_fixed, numeric_kind};
 use crate::{BuiltinCatalogEntry, RoundingFunction};
 use runmat_types::{
     AliasFact, CallInference, CallRequest, DynamicReason, LiteralValue, MutationFact, NumericClass,
-    NumericDomain, StorageFact, ValueFact, ValueKindFact,
+    NumericDomain, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
 };
+
+#[cfg(test)]
+mod tests;
 
 pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let mut diagnostics = Vec::new();
@@ -44,7 +47,7 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
     }
 
     if let Some(digits) = request.arguments.get(1) {
-        let scalar_control = digits.is_scalar()
+        let scalar_control = digits.shape.element_count().is_none_or(|count| count == 1)
             && matches!(
                 digits.kind,
                 ValueKindFact::Numeric(_) | ValueKindFact::Logical | ValueKindFact::Unknown
@@ -58,7 +61,7 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         }
         if let Some(LiteralValue::Number(value)) = request.literals.literal_args.get(1) {
             if !value.is_finite()
-                || value.fract() != 0.0
+                || (value.round() - value).abs() > f64::EPSILON
                 || *value < f64::from(i32::MIN)
                 || *value > f64::from(i32::MAX)
             {
@@ -93,6 +96,7 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
                 _ => None,
             });
         if let Some(mode) = mode_literal {
+            let mode = mode.trim();
             if !matches!(
                 mode.to_ascii_lowercase().as_str(),
                 "decimal" | "decimals" | "significant"
@@ -145,13 +149,12 @@ pub(super) fn infer_round(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
         ValueKindFact::Numeric(numeric)
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
-            materialize(&mut output);
+            materialize_rounding_result(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {}
         ValueKindFact::Logical | ValueKindFact::Character => {
-            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize(&mut output);
+            materialize_rounding_result(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Unknown => preserve_shape_as_dynamic(&mut output),
@@ -229,7 +232,7 @@ pub(super) fn infer_rounding(
         ValueKindFact::Numeric(numeric)
             if matches!(numeric.class, NumericClass::Double | NumericClass::Single) =>
         {
-            materialize(&mut output);
+            materialize_rounding_result(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Numeric(_) => {
@@ -237,8 +240,7 @@ pub(super) fn infer_rounding(
             // returns the exact storage (and resident handle) unchanged.
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
-            output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize(&mut output);
+            materialize_rounding_result(&mut output);
             output.residency = input.residency.clone();
         }
         ValueKindFact::Object(object)
@@ -265,4 +267,33 @@ pub(super) fn infer_rounding(
         }
     }
     finish_fixed(entry, request, output, diagnostics)
+}
+
+fn materialize_rounding_result(output: &mut ValueFact) {
+    let character = output.kind == ValueKindFact::Character;
+    let complex_storage = output
+        .numeric()
+        .filter(|numeric| numeric.domain == NumericDomain::Complex)
+        .map(|_| output.storage);
+    if matches!(
+        output.kind,
+        ValueKindFact::Logical | ValueKindFact::Character
+    ) {
+        output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
+    }
+    materialize_floating_result(output, false);
+    if output.residency == ResidencyFact::Host {
+        if character {
+            // Character conversion always constructs a Tensor, even for 1x1.
+            output.storage = StorageFact::Dense;
+        } else if let Some(storage) = complex_storage {
+            // Unlike real double tensors, complex rounding does not collapse
+            // a singleton tensor into the scalar Complex carrier.
+            output.storage = match storage {
+                StorageFact::Scalar => StorageFact::Scalar,
+                StorageFact::Dense => StorageFact::Dense,
+                _ => StorageFact::Unknown,
+            };
+        }
+    }
 }
