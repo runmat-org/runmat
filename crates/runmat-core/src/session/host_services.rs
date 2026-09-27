@@ -31,6 +31,13 @@ mod tests {
     };
 
     struct Host;
+    fn same_service<T: ?Sized>(before: Option<&Rc<T>>, after: Option<&Rc<T>>) {
+        match (before, after) {
+            (Some(before), Some(after)) => assert!(Rc::ptr_eq(before, after)),
+            (None, None) => {}
+            _ => panic!("host installation changed another service port"),
+        }
+    }
     impl RuntimeHostService for Host {
         fn console(&self, _: runmat_runtime::console::ConsoleStream, _: String) {
             panic!("installation must not emit console output")
@@ -55,20 +62,11 @@ mod tests {
             session.install_host_service(host.clone());
             let after = session.runtime_context.service_ports();
             assert!(Rc::ptr_eq(after.host().unwrap(), &host));
-            assert!(Rc::ptr_eq(before.call().unwrap(), after.call().unwrap()));
-            assert!(Rc::ptr_eq(
-                before.acceleration().unwrap(),
-                after.acceleration().unwrap()
-            ));
-            assert!(Rc::ptr_eq(
-                before.placement().unwrap(),
-                after.placement().unwrap()
-            ));
-            assert!(Rc::ptr_eq(before.spmd().unwrap(), after.spmd().unwrap()));
-            assert!(Rc::ptr_eq(
-                before.distributed().unwrap(),
-                after.distributed().unwrap()
-            ));
+            same_service(before.call(), after.call());
+            same_service(before.acceleration(), after.acceleration());
+            same_service(before.placement(), after.placement());
+            same_service(before.spmd(), after.spmd());
+            same_service(before.distributed(), after.distributed());
         });
     }
 }
