@@ -117,7 +117,10 @@ fn pending_coordinate_operation_releases_owned_result_not_borrowed_input() {
         assert!(!temporary.handle.shares_allocation_with(&borrowed));
         let owner = gpu_helpers::exact_provider_for_handle(&temporary.handle)
             .expect("actual fixture owner");
-        assert!(std::ptr::addr_eq(owner, provider as &dyn AccelProvider));
+        assert!(runmat_accelerate_api::same_provider_instance(
+            owner,
+            provider as &dyn AccelProvider
+        ));
         drop(
             outputs
                 .adopt(

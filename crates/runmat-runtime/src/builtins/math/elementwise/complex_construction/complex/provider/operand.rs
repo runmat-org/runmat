@@ -51,7 +51,9 @@ impl RealGpuOperand {
                         "GPU input provider is unavailable",
                     )
                 })?;
-                if !std::ptr::eq(owner, provider) || handle.device_id() != provider.device_id() {
+                if !runmat_accelerate_api::same_provider_instance(owner, provider)
+                    || handle.device_id() != provider.device_id()
+                {
                     return Err(error(
                         &COMPLEX_ERROR_INVALID_INPUT,
                         "GPU inputs must belong to the same provider",
@@ -118,7 +120,11 @@ mod lease_tests {
         };
         drop(borrowed);
         assert_eq!(allocation.probe.retirements(), 0);
-        allocation.handle.allocation_lease().validate_live().unwrap();
+        allocation
+            .handle
+            .allocation_lease()
+            .validate_live()
+            .unwrap();
         let owned = RealGpuOperand {
             handle: allocation.handle,
         };

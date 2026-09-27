@@ -569,8 +569,11 @@ pub(crate) mod tests {
                 panic!("expected resident result")
             };
             assert_eq!(result_handle.device_id(), provider.device_id());
-            assert!(runmat_accelerate_api::provider_for_handle(&result_handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider)));
+            assert!(
+                runmat_accelerate_api::provider_for_handle(&result_handle).is_some_and(|owner| {
+                    runmat_accelerate_api::same_provider_instance(owner, provider)
+                })
+            );
             let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
             assert_eq!(gathered.shape, vec![3, 1]);
             let expected: Vec<f64> = tensor.materialize_f64().iter().map(|&v| v.atan()).collect();
@@ -597,8 +600,11 @@ pub(crate) mod tests {
             match result {
                 Value::GpuTensor(handle) => {
                     assert_eq!(handle.device_id(), provider.device_id());
-                    assert!(runmat_accelerate_api::provider_for_handle(&handle)
-                        .is_some_and(|owner| std::ptr::eq(owner, provider)));
+                    assert!(
+                        runmat_accelerate_api::provider_for_handle(&handle).is_some_and(|owner| {
+                            runmat_accelerate_api::same_provider_instance(owner, provider)
+                        })
+                    );
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     let expected: Vec<f64> =
                         tensor.materialize_f64().iter().map(|&v| v.atan()).collect();

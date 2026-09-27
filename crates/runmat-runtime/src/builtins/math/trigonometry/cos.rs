@@ -902,7 +902,7 @@ pub(crate) mod tests {
         assert_eq!(output.device_id(), prototype_provider.device_id());
         let output_owner =
             runmat_accelerate_api::provider_for_handle(&output).expect("registered output owner");
-        assert!(std::ptr::eq(
+        assert!(runmat_accelerate_api::same_provider_instance(
             output_owner,
             prototype_provider as &dyn runmat_accelerate_api::AccelProvider
         ));

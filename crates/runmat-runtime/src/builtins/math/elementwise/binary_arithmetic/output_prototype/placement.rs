@@ -69,8 +69,9 @@ fn same_placement(
     output: &GpuTensorHandle,
 ) -> bool {
     prototype.device_id() == output.device_id()
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|output_provider| std::ptr::eq(output_provider, prototype_provider))
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|output_provider| {
+            runmat_accelerate_api::same_provider_instance(output_provider, prototype_provider)
+        })
 }
 
 fn host_value_to_tensor(context: OutputPrototypeContext, value: Value) -> BuiltinResult<Tensor> {

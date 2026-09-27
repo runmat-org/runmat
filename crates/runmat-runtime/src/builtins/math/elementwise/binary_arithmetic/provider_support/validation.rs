@@ -11,8 +11,9 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn valid_real_bina
 ) -> bool {
     output.shape() == expected_shape
         && output.device_id() == class_source.device_id()
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
+        && gpu_helpers::exact_provider_for_handle(output).is_some_and(|output_owner| {
+            runmat_accelerate_api::same_provider_instance(output_owner, owner)
+        })
         && !output.shares_allocation_with(class_source)
         && other_source.is_none_or(|source| !output.shares_allocation_with(source))
         && output.descriptor().storage == Some(GpuTensorStorage::Real)

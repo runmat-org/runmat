@@ -127,7 +127,7 @@ async fn ensure_provider_output(
     if let Value::GpuTensor(handle) = &value {
         if runmat_accelerate_api::handle_storage(handle) == expected_storage
             && gpu_helpers::exact_provider_for_handle(handle)
-                .is_some_and(|owner| std::ptr::eq(owner, provider))
+                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         {
             return Ok(value);
         }

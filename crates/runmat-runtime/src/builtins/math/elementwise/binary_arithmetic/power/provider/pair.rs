@@ -108,7 +108,9 @@ fn common_owner(
 ) -> Option<&'static dyn AccelProvider> {
     let left = gpu_helpers::exact_provider_for_handle(lhs)?;
     let right = gpu_helpers::exact_provider_for_handle(rhs)?;
-    (std::ptr::eq(left, right) && lhs.device_id() == rhs.device_id()).then_some(left)
+    (runmat_accelerate_api::same_provider_instance(left, right)
+        && lhs.device_id() == rhs.device_id())
+    .then_some(left)
 }
 
 fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {

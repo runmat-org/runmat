@@ -88,7 +88,7 @@ fn validate(
         && output.device_id() == prototype.device_id()
         && !prototype.shares_allocation_with(&output)
         && gpu_helpers::exact_provider_for_handle(&output)
-            .is_some_and(|owner| std::ptr::eq(owner, provider))
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
         && output.descriptor().storage == Some(expected.storage)
         && runmat_accelerate_api::handle_integer_type(&output) == Some(expected.element_type)
         && runmat_accelerate_api::handle_precision(&output).is_none()

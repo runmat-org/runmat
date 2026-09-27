@@ -122,7 +122,7 @@ fn typed_unsupported_hook_uses_exact_owner_fallback() {
     assert_eq!(output.device_id(), input.device_id());
     assert!(!output.shares_allocation_with(&input));
     let output_lease = output.allocation_lease().downgrade();
-    assert!(std::ptr::eq(
+    assert!(runmat_accelerate_api::same_provider_instance(
         runmat_accelerate_api::provider_for_handle(output).unwrap(),
         provider
     ));

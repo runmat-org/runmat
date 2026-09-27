@@ -51,6 +51,7 @@ fn shared_owner(
 ) -> Option<&'static dyn AccelProvider> {
     let left_owner = gpu_helpers::exact_provider_for_handle(left)?;
     let right_owner = gpu_helpers::exact_provider_for_handle(right)?;
-    (std::ptr::eq(left_owner, right_owner) && left.device_id() == right.device_id())
-        .then_some(left_owner)
+    (runmat_accelerate_api::same_provider_instance(left_owner, right_owner)
+        && left.device_id() == right.device_id())
+    .then_some(left_owner)
 }

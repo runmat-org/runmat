@@ -214,7 +214,9 @@ fn validate_binary_resident_inputs(
                 "GPU provider unavailable for input",
             )
         })?;
-        if !std::ptr::eq(actual_owner, owner) || handle.device_id() != owner.device_id() {
+        if !runmat_accelerate_api::same_provider_instance(actual_owner, owner)
+            || handle.device_id() != owner.device_id()
+        {
             return Err(error(
                 &COMPLEX_ERROR_INVALID_INPUT,
                 "GPU inputs must belong to the same provider",
