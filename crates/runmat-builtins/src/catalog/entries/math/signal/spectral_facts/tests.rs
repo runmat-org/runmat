@@ -158,7 +158,7 @@ fn rejected_literal_grids_never_infer_a_success_cardinality() {
             vec![
                 LiteralValue::Empty,
                 LiteralValue::Empty,
-                LiteralValue::Vector(vec![LiteralValue::Number(1.0)]),
+                LiteralValue::Vector(vec![]),
             ],
         ),
     ] {
@@ -168,10 +168,8 @@ fn rejected_literal_grids_never_infer_a_success_cardinality() {
             .diagnostics
             .iter()
             .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
-        assert_eq!(
-            result.outputs[0].shape,
-            ShapeFact::from(vec![None, Some(1)])
-        );
+        assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+        assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
     }
     let too_large = request(
         [8, 1],
@@ -189,8 +187,48 @@ fn rejected_literal_grids_never_infer_a_success_cardinality() {
         .diagnostics
         .iter()
         .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
-    assert_eq!(
-        result.outputs[0].shape,
-        ShapeFact::from(vec![None, Some(1)])
-    );
+    assert_eq!(result.outputs[0].kind, ValueKindFact::Unknown);
+    assert_eq!(result.outputs[0].shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn singleton_numeric_vector_grid_is_scalar_uniform_nfft_for_both_identities() {
+    for (entry, spectrum, controls) in [
+        (
+            &super::super::periodogram::PERIODOGRAM_CATALOG_ENTRY,
+            Spectrum::Periodogram,
+            vec![
+                LiteralValue::Empty,
+                LiteralValue::Vector(vec![LiteralValue::Number(2.0)]),
+            ],
+        ),
+        (
+            &super::super::spectrogram::SPECTROGRAM_CATALOG_ENTRY,
+            Spectrum::Spectrogram,
+            vec![
+                LiteralValue::Empty,
+                LiteralValue::Empty,
+                LiteralValue::Vector(vec![LiteralValue::Number(2.0)]),
+            ],
+        ),
+    ] {
+        let result = infer(&request([8, 1], controls), entry, spectrum);
+        assert!(!result
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "RM-CATALOG-SPECTRAL-GRID"));
+        assert_eq!(
+            result.outputs[0].numeric().unwrap().class,
+            NumericClass::Single
+        );
+        let columns = if matches!(spectrum, Spectrum::Periodogram) {
+            1
+        } else {
+            8
+        };
+        assert_eq!(
+            result.outputs[0].shape,
+            ShapeFact::from(vec![Some(2), Some(columns)])
+        );
+    }
 }

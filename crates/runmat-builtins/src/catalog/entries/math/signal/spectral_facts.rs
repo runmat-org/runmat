@@ -23,8 +23,9 @@ pub(super) fn infer(
         Spectrum::Spectrogram => (4, 10),
     };
     let mut diagnostics = Vec::new();
-    if let Some(diagnostic) = geometry::invalid_grid(request, spectrum) {
-        diagnostics.push(diagnostic);
+    let invalid_grid = geometry::invalid_grid(request, spectrum);
+    if let Some(diagnostic) = invalid_grid.as_ref() {
+        diagnostics.push(diagnostic.clone());
     }
     if request.arguments.is_empty() || request.arguments.len() > max_args {
         diagnostics.push(argument_error(
@@ -63,6 +64,9 @@ pub(super) fn infer(
                     class: NumericClass::Double,
                     domain: NumericDomain::Real,
                 }));
+            }
+            if invalid_grid.is_some() {
+                return ValueFact::unknown(DynamicReason::RuntimeValue);
             }
             let Some(class) = class else {
                 return ValueFact::unknown(DynamicReason::RuntimeValue);

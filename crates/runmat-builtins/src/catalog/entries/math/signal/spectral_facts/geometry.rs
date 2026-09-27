@@ -24,6 +24,9 @@ pub(super) fn invalid_grid(
     let grid = positional(args, &mut index)??;
     let invalid = match grid {
         LiteralValue::Empty => false,
+        LiteralValue::Vector(v) if v.len() == 1 => {
+            integer(&v[0]).is_some_and(|n| n == 0 || n > MAX_NFFT)
+        }
         LiteralValue::Vector(v) => {
             v.len()
                 < if matches!(spectrum, Spectrum::Periodogram) {
@@ -138,6 +141,7 @@ fn known_geometry(
     let grid = positional(args, &mut index)?;
     let (nfft, explicit) = match grid {
         None | Some(LiteralValue::Empty) => (window.checked_next_power_of_two()?.max(256), false),
+        Some(LiteralValue::Vector(v)) if v.len() == 1 => (integer(&v[0])?, false),
         Some(LiteralValue::Vector(v)) => (v.len(), true),
         Some(v) => (integer(v)?, false),
     };
