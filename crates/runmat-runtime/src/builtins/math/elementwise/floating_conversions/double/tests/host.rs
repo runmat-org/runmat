@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn character_conversion_preserves_column_major_order_and_full_nd_shape() {
+    for (source, shape, expected) in [
+        (
+            "abcdef",
+            vec![2, 3],
+            vec![97.0, 100.0, 98.0, 101.0, 99.0, 102.0],
+        ),
+        (
+            "abcdefgh",
+            vec![2, 2, 2],
+            vec![97.0, 99.0, 98.0, 100.0, 101.0, 103.0, 102.0, 104.0],
+        ),
+        ("", vec![1, 0, 3], vec![]),
+    ] {
+        let chars =
+            runmat_value::CharArray::new_with_shape(source.chars().collect(), shape.clone())
+                .unwrap();
+        let Value::Tensor(output) = double_builtin(Value::CharArray(chars), vec![]).unwrap() else {
+            panic!("dense character conversion");
+        };
+        assert_eq!(output.shape, shape);
+        assert_eq!(output.materialize_f64(), expected);
+    }
+}
+
+#[test]
 fn double_descriptor_signatures_cover_core_forms() {
     let labels: Vec<&str> = DOUBLE_DESCRIPTOR
         .signatures

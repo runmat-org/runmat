@@ -117,8 +117,12 @@ pub(super) fn double_from_sparse_tensor(sparse: SparseTensor) -> BuiltinResult<V
 }
 
 pub(super) fn double_from_char_array(chars: CharArray) -> BuiltinResult<Value> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
+    let data: Vec<f64> = chars
+        .to_column_major()
+        .into_iter()
+        .map(|ch| ch as u32 as f64)
+        .collect();
+    let tensor = Tensor::new(data, chars.shape)
         .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
     Ok(tensor::tensor_into_value(tensor))
 }

@@ -61,7 +61,11 @@ pub(super) fn numeric_scalar_to_f32(value: NumericScalar) -> f32 {
 }
 
 pub(super) fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let ascii: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(ascii, vec![chars.rows, chars.cols])
+    let ascii: Vec<f64> = chars
+        .to_column_major()
+        .into_iter()
+        .map(|ch| ch as u32 as f64)
+        .collect();
+    Tensor::new(ascii, chars.shape.clone())
         .map_err(|e| single_error_with_detail(&SINGLE_ERROR_INTERNAL, e))
 }
