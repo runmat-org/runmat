@@ -1,6 +1,8 @@
 mod specs;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod mapped_tests;
 use super::operation::LogarithmOperation;
 use crate::BuiltinResult;
 use runmat_macros::runtime_builtin;
@@ -11,6 +13,14 @@ pub(crate) use specs::{
 };
 
 pub(super) const OPERATION: LogarithmOperation = LogarithmOperation::Natural;
+
+/// Whether mapped scalar calls may use the canonical whole-array operation.
+/// This is a selection probe, not execution or completion evidence. The
+/// canonical operation still performs its own admission when selected.
+pub(crate) async fn mapped_batch_equivalent(input: &Value) -> BuiltinResult<bool> {
+    super::provider::mapped_batch_equivalent(OPERATION, input).await
+}
+
 #[runtime_builtin(
     name = "log",
     binding_variant = "default",

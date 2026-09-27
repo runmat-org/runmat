@@ -4,7 +4,7 @@ use runmat_accelerate_api::{
     HostTensorView, NumericElementType, ThreadProviderGuard,
 };
 
-struct Provider(TestAllocationOwner);
+struct Provider(TestAllocationOwner, bool);
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
         self.0.device_id()
@@ -22,7 +22,12 @@ impl AccelProvider for Provider {
         &'a self,
         _: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async {
+        Box::pin(async move {
+            if self.1 {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "fixture reduction unavailable",
+                ));
+            }
             Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "probe failed").into())
         })
     }
@@ -30,7 +35,7 @@ impl AccelProvider for Provider {
 
 #[test]
 fn logarithm_probe_keeps_original_source_and_rejected_view_keeps_input_alive() {
-    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new())));
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new(), false)));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let input = provider
         .0
@@ -51,5 +56,46 @@ fn logarithm_probe_keeps_original_source_and_rejected_view_keeps_input_alive() {
         .unwrap_err();
     assert!(error.message().contains("malformed"));
     assert_eq!(input.probe.retirements(), 0);
+    input.handle.allocation_lease().validate_live().unwrap();
+
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let explicit = input
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let error = futures::executor::block_on(mapped_batch_equivalent(
+        LogarithmOperation::Natural,
+        &Value::GpuTensor(explicit),
+    ))
+    .unwrap_err();
+    assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    assert!(error
+        .source
+        .as_ref()
+        .unwrap()
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .is_some());
+}
+
+#[test]
+fn mapped_log_unknown_probe_does_not_claim_batch_equivalence() {
+    let provider = Box::leak(Box::new(Provider(TestAllocationOwner::new(), true)));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
+    let input = provider
+        .0
+        .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let explicit = input
+        .handle
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    assert!(!futures::executor::block_on(mapped_batch_equivalent(
+        LogarithmOperation::Natural,
+        &Value::GpuTensor(explicit),
+    ))
+    .unwrap());
     input.handle.allocation_lease().validate_live().unwrap();
 }

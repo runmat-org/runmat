@@ -10,6 +10,41 @@ use crate::BuiltinResult;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 
+pub(super) async fn mapped_batch_equivalent(
+    operation: LogarithmOperation,
+    input: &Value,
+) -> BuiltinResult<bool> {
+    let Value::GpuTensor(handle) = input else {
+        return Ok(true);
+    };
+    // These extension/class rules belong to canonical scalar admission, not
+    // the real floating range probe. Do not interpret integer/logical storage
+    // as real floating evidence merely because its physical encoding is float.
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Ok(false);
+    }
+    if !runmat_accelerate_api::handle_is_explicit(handle)
+        || runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved
+        || (operation.explicit_complex_extension().is_some()
+            && crate::compatibility::runmat_extensions_enabled())
+    {
+        return Ok(true);
+    }
+    let provider = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| super::errors::missing_provider(operation))?;
+    let result = probe_gpu_lower_bound(provider, handle, operation.real_boundary())
+        .await
+        .map_err(|source| {
+            let mut error = super::errors::internal(operation, source.to_string());
+            error.source = Some(Box::new(source));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error
+        })?;
+    Ok(matches!(result, GpuLowerBoundResult::AtOrAbove))
+}
+
 pub(super) async fn evaluate(
     operation: LogarithmOperation,
     handle: GpuTensorHandle,
