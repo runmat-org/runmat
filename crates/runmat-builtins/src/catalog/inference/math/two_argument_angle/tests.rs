@@ -45,7 +45,7 @@ fn admitted_atan2_preserves_numeric_facts_without_inventing_placement() {
     assert_eq!(forms[0].data_arguments, &[0, 1]);
     assert_eq!(
         forms[0].operation,
-        crate::BuiltinPreparationOperation::Binary
+        crate::BuiltinPreparationOperation::ElementwiseBinary
     );
 }
 
