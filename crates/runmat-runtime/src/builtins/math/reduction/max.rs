@@ -1125,7 +1125,7 @@ async fn reduction_max_gpu(
         }
     };
     let target_dim = match args.selection {
-        DimSelection::Auto => default_dimension_from_shape(&handle.shape),
+        DimSelection::Auto => default_dimension_from_shape(handle.shape()),
         DimSelection::Dim(dim) => dim,
         DimSelection::Vec(ref dims) if dims.len() == 1 => dims[0],
         DimSelection::All => {
@@ -2114,7 +2114,6 @@ async fn elementwise_max_gpu_pair(
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_ge(a, b).await {
             let indices = gpu_mask_indices(provider, &mask)?;
-            let _ = provider.free(&mask);
             return Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
                 indices: Value::GpuTensor(indices),
@@ -2137,7 +2136,7 @@ async fn elementwise_max_gpu_pair(
         }
     }
     // Broadcast-compatible path via repmat, then device compare
-    let (out_shape, reps_a, reps_b) = broadcast_reps(&a.shape, &b.shape)?;
+    let (out_shape, reps_a, reps_b) = broadcast_reps(a.shape(), b.shape())?;
     let a_exp = if reps_a.iter().any(|&r| r != 1) {
         provider.repmat(a, &reps_a).ok()?
     } else {
@@ -2150,20 +2149,12 @@ async fn elementwise_max_gpu_pair(
     };
     let values = provider.elem_max(&a_exp, &b_exp).await.ok();
     let mask = provider.elem_ge(&a_exp, &b_exp).await.ok();
-    if !std::ptr::eq(&a_exp, a) {
-        let _ = provider.free(&a_exp);
-    }
-    if !std::ptr::eq(&b_exp, b) {
-        let _ = provider.free(&b_exp);
-    }
     let values = values?;
     if values.shape() != out_shape {
-        let _ = provider.free(&values);
         return None;
     }
     let index_tensor = if let Some(mask) = mask {
         let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-        let _ = provider.free(&mask);
         let mask_values = tensor::tensor_values_f64_cow(&mask_host);
         let mut indices = Vec::with_capacity(mask_values.len());
         for &m in mask_values.iter() {
@@ -2227,7 +2218,6 @@ async fn elementwise_max_gpu_scalar_left(
     // Prefer tensorize + elem_max for broader provider compatibility
     let values = if let Ok(fill) = provider.fill_like(a, scalar) {
         let vals = provider.elem_max(a, &fill).await.ok();
-        let _ = provider.free(&fill);
         vals?
     } else {
         provider.scalar_max(a, scalar).ok()?
@@ -2235,15 +2225,12 @@ async fn elementwise_max_gpu_scalar_left(
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
         if let Ok(mask) = provider.elem_ge(a, &fill).await {
-            let _ = provider.free(&fill);
             let indices = gpu_mask_indices(provider, &mask)?;
-            let _ = provider.free(&mask);
             return Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
                 indices: Value::GpuTensor(indices),
             });
         } else {
-            let _ = provider.free(&fill);
             let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
             let values = tensor::tensor_values_f64_cow(&ta);
             let mut indices = Vec::with_capacity(values.len());
@@ -2279,7 +2266,6 @@ async fn elementwise_max_gpu_scalar_right(
     let scalar = extract_scalar(other)?;
     let values = if let Ok(fill) = provider.fill_like(b, scalar) {
         let vals = provider.elem_max(&fill, b).await.ok();
-        let _ = provider.free(&fill);
         vals?
     } else {
         provider.scalar_max(b, scalar).ok()?
@@ -2287,15 +2273,12 @@ async fn elementwise_max_gpu_scalar_right(
     // Try device mask; if unavailable, compute on host (origin 1 if scalar >= b)
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
         if let Ok(mask) = provider.elem_ge(&fill, b).await {
-            let _ = provider.free(&fill);
             let indices = gpu_mask_indices(provider, &mask)?;
-            let _ = provider.free(&mask);
             return Some(MaxEvaluation {
                 values: Value::GpuTensor(values),
                 indices: Value::GpuTensor(indices),
             });
         } else {
-            let _ = provider.free(&fill);
             let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
             let values = tensor::tensor_values_f64_cow(&tb);
             let mut indices = Vec::with_capacity(values.len());
@@ -2345,7 +2328,6 @@ fn gpu_mask_indices(
 ) -> Option<GpuTensorHandle> {
     let scaled = provider.scalar_mul(mask, -1.0).ok()?;
     let shifted = provider.scalar_add(&scaled, 2.0).ok()?;
-    let _ = provider.free(&scaled);
     Some(shifted)
 }
 

@@ -894,7 +894,7 @@ async fn reduction_min_gpu(
         }
     };
     let target_dim = match args.selection {
-        DimSelection::Auto => default_dimension_from_shape(&handle.shape),
+        DimSelection::Auto => default_dimension_from_shape(handle.shape()),
         DimSelection::Dim(dim) => dim,
         DimSelection::Vec(ref dims) if dims.len() == 1 => dims[0],
         DimSelection::All => {
@@ -1816,7 +1816,6 @@ async fn elementwise_min_gpu_pair(
         // Try device mask first; if unavailable, compute indices on host while keeping values on device
         if let Ok(mask) = provider.elem_le(a, b).await {
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
@@ -1845,7 +1844,7 @@ async fn elementwise_min_gpu_pair(
         }
     }
     // Broadcast-compatible path via repmat, then device compare
-    let (out_shape, reps_a, reps_b) = broadcast_reps(&a.shape, &b.shape)?;
+    let (out_shape, reps_a, reps_b) = broadcast_reps(a.shape(), b.shape())?;
     let a_exp = if reps_a.iter().any(|&r| r != 1) {
         provider.repmat(a, &reps_a).ok()?
     } else {
@@ -1858,20 +1857,12 @@ async fn elementwise_min_gpu_pair(
     };
     let values = provider.elem_min(&a_exp, &b_exp).await.ok();
     let mask = provider.elem_le(&a_exp, &b_exp).await.ok();
-    if !std::ptr::eq(&a_exp, a) {
-        let _ = provider.free(&a_exp);
-    }
-    if !std::ptr::eq(&b_exp, b) {
-        let _ = provider.free(&b_exp);
-    }
     let values = values?;
     if values.shape() != out_shape {
-        let _ = provider.free(&values);
         return None;
     }
     let index_tensor = if let Some(mask) = mask {
         let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-        let _ = provider.free(&mask);
         let mask_values = tensor::tensor_values_f64_cow(&mask_host);
         let mut indices = Vec::with_capacity(mask_values.len());
         for &m in mask_values.iter() {
@@ -1936,9 +1927,7 @@ async fn elementwise_min_gpu_scalar_left(
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(a, scalar) {
         if let Ok(mask) = provider.elem_le(a, &fill).await {
-            let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
@@ -1946,7 +1935,6 @@ async fn elementwise_min_gpu_scalar_left(
             }
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
-            let _ = provider.free(&fill);
             let ta = gpu_helpers::gather_tensor_async(a).await.ok()?;
             let values = tensor::tensor_values_f64_cow(&ta);
             let mut indices = Vec::with_capacity(values.len());
@@ -1984,9 +1972,7 @@ async fn elementwise_min_gpu_scalar_right(
     // Try device mask; if unavailable, compute on host
     let index_tensor = if let Ok(fill) = provider.fill_like(b, scalar) {
         if let Ok(mask) = provider.elem_le(&fill, b).await {
-            let _ = provider.free(&fill);
             let mask_host = gpu_helpers::gather_tensor_async(&mask).await.ok()?;
-            let _ = provider.free(&mask);
             let mask_values = tensor::tensor_values_f64_cow(&mask_host);
             let mut indices = Vec::with_capacity(mask_values.len());
             for &m in mask_values.iter() {
@@ -1994,7 +1980,6 @@ async fn elementwise_min_gpu_scalar_right(
             }
             Tensor::new(indices, mask_host.shape.clone()).ok()?
         } else {
-            let _ = provider.free(&fill);
             let tb = gpu_helpers::gather_tensor_async(b).await.ok()?;
             let values = tensor::tensor_values_f64_cow(&tb);
             let mut indices = Vec::with_capacity(values.len());

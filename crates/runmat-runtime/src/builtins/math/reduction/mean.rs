@@ -752,7 +752,7 @@ async fn mean_native_integer_gpu(
         })?;
         return Ok(Value::GpuTensor(uploaded));
     }
-    let dims = resolve_native_dims(&handle.shape, &parsed.axes)?;
+    let dims = resolve_native_dims(handle.shape(), &parsed.axes)?;
     if dims.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
@@ -1054,7 +1054,7 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<MeanAxes>> {
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(logical) => logical.data.len() == 1,
         Value::GpuTensor(handle) => {
-            is_scalar_shape(&handle.shape) || tensor::element_count(&handle.shape) == 1
+            is_scalar_shape(handle.shape()) || tensor::element_count(handle.shape()) == 1
         }
         _ => false,
     };
@@ -1883,10 +1883,10 @@ async fn mean_gpu_try(
 ) -> Option<GpuTensorHandle> {
     match axes {
         MeanAxes::Default => {
-            if is_scalar_shape(&handle.shape) {
+            if is_scalar_shape(handle.shape()) {
                 return Some(handle.clone());
             }
-            let dim = default_dimension_from_shape(&handle.shape);
+            let dim = default_dimension_from_shape(handle.shape());
             reduce_mean_dim_gpu(provider, handle.clone(), dim).await
         }
         MeanAxes::Dim(dim) => reduce_mean_dim_gpu(provider, handle.clone(), *dim).await,
@@ -1913,7 +1913,7 @@ async fn mean_gpu_try(
             dims_sorted.sort_unstable();
             dims_sorted.dedup();
             for dim in dims_sorted {
-                if is_scalar_shape(&result.shape) {
+                if is_scalar_shape(result.shape()) {
                     break;
                 }
                 result = reduce_mean_dim_gpu(provider, result, dim).await?;
@@ -1921,7 +1921,7 @@ async fn mean_gpu_try(
             Some(result)
         }
         MeanAxes::All => {
-            if is_scalar_shape(&handle.shape) {
+            if is_scalar_shape(handle.shape()) {
                 return Some(handle.clone());
             }
             match provider.reduce_mean(handle).await {
@@ -1929,7 +1929,7 @@ async fn mean_gpu_try(
                 Err(err) => {
                     log::trace!("mean: provider reduce_mean fallback triggered: {err}");
                     let rank = handle.shape().len();
-                    if is_scalar_shape(&handle.shape) || rank == 0 {
+                    if is_scalar_shape(handle.shape()) || rank == 0 {
                         Some(handle.clone())
                     } else {
                         let dims: Vec<usize> = (1..=rank).collect();
@@ -2018,7 +2018,6 @@ async fn reduce_mean_vecdim_nd_gpu(
     }
     let total_elems: usize = handle.shape().iter().copied().product();
     if reduce_len == 0 || total_elems == 0 {
-        let _ = provider.free(&permuted);
         return provider.fill(&[1, 1], f64::NAN).ok();
     }
     let num_slices = total_elems / reduce_len;
@@ -2028,8 +2027,6 @@ async fn reduce_mean_vecdim_nd_gpu(
         .ok()?;
     // Reduce along rows (dim 0) -> [1, num_slices]
     let reduced_rows = provider.reduce_mean_dim(&reshaped2d, 0).await.ok()?;
-    let _ = provider.free(&reshaped2d);
-    let _ = provider.free(&permuted);
     // Reshape to kept sizes (permuted order)
     let kept_sizes: Vec<usize> = kept_dims.iter().map(|&d| handle.shape()[d]).collect();
     let kept_shape = if kept_sizes.is_empty() {
@@ -2038,7 +2035,6 @@ async fn reduce_mean_vecdim_nd_gpu(
         kept_sizes.clone()
     };
     let reshaped_kept = provider.reshape(&reduced_rows, &kept_shape).ok()?;
-    let _ = provider.free(&reduced_rows);
     // Expand permuted shape by inserting ones for reduced axes
     let mut expanded_perm_shape: Vec<usize> = Vec::with_capacity(rank);
     expanded_perm_shape.extend(std::iter::repeat_n(1usize, reduce_dims.len()));
@@ -2046,14 +2042,12 @@ async fn reduce_mean_vecdim_nd_gpu(
     let expanded = provider
         .reshape(&reshaped_kept, &expanded_perm_shape)
         .ok()?;
-    let _ = provider.free(&reshaped_kept);
     // Inverse permute back to original axis order
     let mut inv_order = vec![0usize; rank];
     for (dst, &src) in order.iter().enumerate() {
         inv_order[src] = dst;
     }
     let out = provider.permute(&expanded, &inv_order).ok()?;
-    let _ = provider.free(&expanded);
     Some(out)
 }
 
@@ -2065,10 +2059,10 @@ async fn mean_gpu_omitnan(
     // Early return for empty dim selection
     let dims_in_bounds: Vec<usize> = match axes {
         MeanAxes::Default => {
-            if is_scalar_shape(&handle.shape) {
+            if is_scalar_shape(handle.shape()) {
                 return Some(handle.clone());
             }
-            vec![default_dimension_from_shape(&handle.shape) - 1]
+            vec![default_dimension_from_shape(handle.shape()) - 1]
         }
         MeanAxes::Dim(d) => {
             if *d == 0 || *d > handle.shape().len() {
@@ -2092,7 +2086,7 @@ async fn mean_gpu_omitnan(
             dims
         }
         MeanAxes::All => {
-            if is_scalar_shape(&handle.shape) {
+            if is_scalar_shape(handle.shape()) {
                 return Some(handle.clone());
             }
             (0..handle.shape().len()).collect()
@@ -2118,14 +2112,12 @@ async fn mean_gpu_omitnan(
     // mean = sum ./ count (0/0 -> NaN when all NaN)
     let out = provider.elem_div(&sum_h, &cnt_h).await.ok()?;
 
-    // Free intermediates
-    let _ = provider.free(&cleaned);
-    let _ = provider.free(&mask);
-    let _ = provider.free(&sum_h);
-    let _ = provider.free(&cnt_h);
-
     Some(out)
 }
+
+#[cfg(test)]
+#[path = "mean/owning_tests.rs"]
+mod owning_tests;
 
 fn mean_tensor(tensor: Tensor, axes: MeanAxes, nan_mode: ReductionNaN) -> BuiltinResult<Tensor> {
     match axes {
