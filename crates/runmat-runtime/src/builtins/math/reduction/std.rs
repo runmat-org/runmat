@@ -1330,7 +1330,7 @@ pub(crate) mod tests {
                 }
                 _ => panic!("unexpected shapes"),
             }
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -1350,7 +1350,7 @@ pub(crate) mod tests {
             .expect_err("integer GPU data");
             assert_eq!(err.identifier(), STD_ERROR_INVALID_INPUT.identifier);
             assert!(err.message().contains("integer data inputs"));
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -1371,7 +1371,7 @@ pub(crate) mod tests {
             let value = values(&gathered)[0];
             let diff = (value - 3.45205252953).abs();
             assert!(diff < 1e-6, "value={value}, diff={diff}");
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -1389,7 +1389,7 @@ pub(crate) mod tests {
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape, vec![1, 1]);
             assert!((values(&gathered)[0] - SQRT_2).abs() < 1e-8);
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -1413,7 +1413,7 @@ pub(crate) mod tests {
         let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
         let gpu_value = block_on(std_gpu(handle.clone(), &args)).expect("gpu std");
         let gpu_tensor = test_support::gather(gpu_value).expect("gather gpu");
-        provider.free(&handle).ok();
+        handle.release().unwrap();
 
         assert_eq!(gpu_tensor.shape, cpu_tensor.shape);
         let tol = match provider.precision() {

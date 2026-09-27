@@ -2094,14 +2094,14 @@ pub(crate) mod tests {
     #[test]
     fn weighted_median_accepts_resident_weights_and_preserves_logical_metadata() {
         test_support::with_test_provider(|provider| {
-            let input = Tensor::new(vec![0.0, 1.0, 0.0], vec![3, 1]).expect("input");
             let input_handle = provider
-                .upload(&runmat_accelerate_api::HostTensorView {
-                    data: &input.materialize_f64(),
-                    shape: &input.shape,
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1, 0],
+                    shape: &[3, 1],
                 })
                 .expect("input upload");
-            let input = gpu_helpers::logical_gpu_value(input_handle);
+            let input =
+                gpu_helpers::logical_gpu_value(input_handle).expect("admit logical producer");
             let Value::GpuTensor(input_handle) = input else {
                 unreachable!()
             };

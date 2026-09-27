@@ -3168,9 +3168,13 @@ pub(crate) mod tests {
     #[test]
     fn mean_weights_logical_gpu_result_is_numeric_and_resident() {
         test_support::with_test_provider(|provider| {
-            let input = Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap();
-            let input = gpu_helpers::upload_tensor(provider, &input).expect("upload logical input");
-            let input = gpu_helpers::logical_gpu_value(input);
+            let input = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[0, 1],
+                    shape: &[2, 1],
+                })
+                .expect("upload logical input");
+            let input = gpu_helpers::logical_gpu_value(input).expect("admit logical producer");
             let weights = Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap();
             let result = mean_builtin(input, vec![Value::from("Weights"), Value::Tensor(weights)])
                 .expect("weighted logical GPU mean");
@@ -3374,7 +3378,7 @@ pub(crate) mod tests {
             let Value::GpuTensor(out) = result else {
                 panic!("expected resident GPU tensor");
             };
-            assert_eq!(out.shape, vec![1, 3]);
+            assert_eq!(out.shape(), vec![1, 3]);
             assert_eq!(
                 runmat_accelerate_api::handle_integer_type(&out),
                 Some(runmat_accelerate_api::IntegerElementType::U16)
@@ -3411,7 +3415,7 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&out),
                 Some(runmat_accelerate_api::IntegerElementType::I16)
             );
-            assert_eq!(out.shape, vec![1, 1]);
+            assert_eq!(out.shape(), vec![1, 1]);
             assert_eq!(
                 block_on(provider.download_integer(&out))
                     .expect("download native integer vecdim mean")

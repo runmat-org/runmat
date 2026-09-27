@@ -1306,7 +1306,7 @@ pub(crate) mod tests {
             .expect_err("integer GPU data");
             assert_eq!(err.identifier(), VAR_ERROR_INVALID_INPUT.identifier);
             assert!(err.message().contains("integer data inputs"));
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 

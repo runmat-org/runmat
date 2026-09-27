@@ -2866,7 +2866,7 @@ mod tests {
                     );
                 }
             }
-            provider.free(&handle).ok();
+            handle.release().unwrap();
         });
     }
 
@@ -2994,12 +2994,12 @@ mod tests {
             assert_eq!(median.shape, vec![1, 4]);
             assert_eq!(median.materialize_f64(), vec![1.0, 2.0, 6.0, 6.0]);
 
-            provider.free(&input).ok();
-            provider.free(&sum_handle).ok();
-            provider.free(&var_input).ok();
-            provider.free(&var_handle).ok();
-            provider.free(&median_input).ok();
-            provider.free(&median_handle).ok();
+            input.release().unwrap();
+            sum_handle.release().unwrap();
+            var_input.release().unwrap();
+            var_handle.release().unwrap();
+            median_input.release().unwrap();
+            median_handle.release().unwrap();
         });
     }
 
@@ -3489,9 +3489,9 @@ mod tests {
                     let Value::GpuTensor(output) = output else {
                         panic!("{name} must return a resident result");
                     };
-                    provider.free(&output).ok();
+                    output.release().unwrap();
                 }
-                provider.free(&input).ok();
+                input.release().unwrap();
             }
         });
     }
@@ -3530,9 +3530,9 @@ mod tests {
                 let Value::GpuTensor(output) = output else {
                     panic!("movmedian must return resident result");
                 };
-                provider.free(&output).ok();
+                output.release().unwrap();
             }
-            provider.free(&input).ok();
+            input.release().unwrap();
         });
     }
 

@@ -803,8 +803,8 @@ pub(crate) mod tests {
             );
             assert_eq!(gathered.shape, vec![1, 1]);
             assert_eq!(gathered.data, vec![4.0, 4.0]);
-            let _ = provider.free(&handle);
-            let _ = provider.free(&out);
+            handle.release().unwrap();
+            out.release().unwrap();
         });
     }
 

@@ -22,7 +22,7 @@ fn resident_integer_controls_do_not_round_through_binary64() {
             .unwrap();
             assert_eq!(args.dim, Some(usize::MAX));
         }
-        provider.free(&handle).unwrap();
+        handle.release().unwrap();
     });
 }
 
@@ -71,12 +71,11 @@ fn topk_gpu_extension_gates_before_gather_and_preserves_residency() {
         }
 
         let logical = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &[0.0, 1.0, 0.0],
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[0, 1, 0],
                 shape: &[3, 1],
             })
             .expect("logical upload");
-        runmat_accelerate_api::set_handle_logical(&logical, true);
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         let err = futures::executor::block_on(mink_builtin(
             Value::GpuTensor(logical),

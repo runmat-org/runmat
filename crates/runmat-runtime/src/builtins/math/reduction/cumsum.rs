@@ -1275,7 +1275,7 @@ pub(crate) mod tests {
                 shape: &tensor.shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let original_id = handle.buffer_id;
+            let original_id = handle.buffer_id();
             let result = cumsum_builtin(
                 Value::GpuTensor(handle.clone()),
                 vec![Value::Int(IntValue::I32(3))],
@@ -1283,8 +1283,8 @@ pub(crate) mod tests {
             .expect("cumsum");
             match result {
                 Value::GpuTensor(out) => {
-                    assert_eq!(out.shape, tensor.shape);
-                    assert_eq!(out.buffer_id, original_id);
+                    assert_eq!(out.shape(), tensor.shape);
+                    assert_eq!(out.buffer_id(), original_id);
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
