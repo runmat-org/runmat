@@ -1095,10 +1095,16 @@ impl ParsedShader {
                 if let Some(eq_idx) = rest.find('=') {
                     let (lhs, rhs) = rest.split_at(eq_idx);
                     let name = lhs.split(':').next().map(str::trim).unwrap_or("");
-                    if name.starts_with("tmp") {
+                    if name.starts_with("tmp") || name.starts_with("typed") {
                         let expr = rhs.trim_start_matches('=').trim();
                         let expr = expr.trim_end_matches(';').trim().to_string();
-                        tmp_exprs.push(expr);
+                        tmp_exprs.push(
+                            if lhs.split(':').nth(1).is_some_and(|ty| ty.trim() == "f32") {
+                                format!("f32({expr})")
+                            } else {
+                                expr
+                            },
+                        );
                     }
                 }
             } else if let Some(rest) = trimmed
@@ -1188,11 +1194,15 @@ fn evaluate_expression(
     output_shape: &[usize],
     tmp_values: &[Option<f64>],
 ) -> anyhow::Result<f64> {
-    let tokens = tokenize(expr)?;
-    let mut parser = ExprParser::new(tokens, idx, inputs, input_shapes, output_shape, tmp_values);
-    let value = parser.parse_expression()?;
-    parser.expect_end()?;
-    Ok(value)
+    (|| {
+        let tokens = tokenize(expr)?;
+        let mut parser =
+            ExprParser::new(tokens, idx, inputs, input_shapes, output_shape, tmp_values);
+        let value = parser.parse_expression()?;
+        parser.expect_end()?;
+        Ok(value)
+    })()
+    .map_err(suspension::record_provider_error)
 }
 
 #[derive(Clone, Debug)]
@@ -1402,7 +1412,10 @@ impl<'a> ExprParser<'a> {
 
     fn parse_identifier(&mut self, name: String) -> anyhow::Result<f64> {
         self.advance();
-        if let Some(rest) = name.strip_prefix("tmp") {
+        if let Some(rest) = name
+            .strip_prefix("tmp")
+            .or_else(|| name.strip_prefix("typed"))
+        {
             let idx: usize = rest
                 .parse()
                 .map_err(|e| anyhow!("invalid tmp identifier '{name}': {e}"))?;
@@ -1519,7 +1532,8 @@ impl<'a> ExprParser<'a> {
             "isFinite" => Ok(if arg(0)?.is_finite() { 1.0 } else { 0.0 }),
             "isInf" => Ok(if arg(0)?.is_infinite() { 1.0 } else { 0.0 }),
             "select" => Ok(if arg(2)? != 0.0 { arg(1)? } else { arg(0)? }),
-            "f32" | "f64" => Ok(arg(0)?),
+            "f32" => Ok(f64::from(arg(0)? as f32)),
+            "f64" => Ok(arg(0)?),
             _ => Err(anyhow!("unsupported function '{name}' in fused shader")),
         }
     }

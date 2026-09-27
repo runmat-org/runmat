@@ -14,6 +14,32 @@ struct Probe {
 thread_local! {
     static PENDING: RefCell<Option<Rc<Probe>>> = const { RefCell::new(None) };
     static DOWNLOAD: RefCell<Option<(u64, Rc<Probe>)>> = const { RefCell::new(None) };
+    static PROVIDER_ERROR: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+pub(super) fn record_provider_error(error: anyhow::Error) -> anyhow::Error {
+    PROVIDER_ERROR.with(|slot| slot.replace(Some(error.to_string().chars().take(500).collect())));
+    error
+}
+
+fn provider_error() -> Option<String> {
+    PROVIDER_ERROR.with(|slot| slot.borrow().clone())
+}
+
+#[test]
+fn deterministic_shader_interpreter_executes_typed_temporary_precision() {
+    let parsed = ParsedShader::parse("let typed0: f32 = f64(16777217.0);\nlet typed1: f64 = f64(typed0) + 1.0;\noutput0.data[g] = f64(typed1);").unwrap();
+    assert_eq!(parsed.tmp_exprs.len(), 2);
+    let mut values = vec![None; 2];
+    for (index, expression) in parsed.tmp_exprs.iter().enumerate() {
+        values[index] =
+            Some(evaluate_expression(expression, 0, &[], &[], &[1, 1], &values).unwrap());
+    }
+    assert_eq!(values, vec![Some(16_777_216.0), Some(16_777_217.0)]);
+    assert_eq!(
+        evaluate_expression(&parsed.output_exprs[0], 0, &[], &[], &[1, 1], &values).unwrap(),
+        16_777_217.0
+    );
 }
 
 struct Scope;
@@ -61,6 +87,7 @@ impl Drop for Scope {
     fn drop(&mut self) {
         PENDING.with(|slot| slot.replace(None));
         DOWNLOAD.with(|slot| slot.replace(None));
+        PROVIDER_ERROR.with(|slot| slot.replace(None));
     }
 }
 
@@ -256,6 +283,8 @@ fn pending_typed_fusion_cancellation_releases_uploaded_input() {
 #[test]
 fn typed_fusion_single_restoration_completes_with_exact_single_output() {
     gc_test_context(|| {
+        PROVIDER_ERROR.with(|slot| slot.replace(None));
+        let _scope = Scope;
         let _lock = accel_test_lock();
         ensure_provider_registered();
         let provider = PROVIDER.get().unwrap();
@@ -286,7 +315,10 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             .unwrap()
             .0;
         let Value::GpuTensor(handle) = &completed.values[y] else {
-            panic!("actual fused output must remain resident")
+            panic!(
+                "actual fused output must remain resident; provider error={:?}",
+                provider_error()
+            )
         };
         assert_eq!(
             handle.descriptor.element_type,
@@ -317,6 +349,7 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
 
 fn witness(resident: bool, cancel: bool) {
     gc_test_context(|| {
+        PROVIDER_ERROR.with(|slot| slot.replace(None));
         let _lock = accel_test_lock();
         ensure_provider_registered();
         let provider = PROVIDER.get().unwrap();
@@ -368,12 +401,12 @@ fn witness(resident: bool, cancel: bool) {
         match execution.as_mut().poll(&mut cx) {
             Poll::Pending => {}
             Poll::Ready(Err(error)) => panic!(
-                "fusion returned before suspension: {error:?}; profile={:?}",
-                placement.profile_snapshot()
+                "fusion returned before suspension: {error:?}; provider error={:?}",
+                provider_error()
             ),
             Poll::Ready(Ok(_)) => panic!(
-                "fusion completed without pending restoration; profile={:?}",
-                placement.profile_snapshot()
+                "fusion completed without pending restoration; provider error={:?}",
+                provider_error()
             ),
         }
         assert_eq!(
