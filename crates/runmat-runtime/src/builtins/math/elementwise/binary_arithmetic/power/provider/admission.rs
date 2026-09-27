@@ -16,7 +16,7 @@ pub(in super::super) fn representation(
             ProviderLayout::ColumnMajorContiguous
         },
         shape: handle
-            .shape
+            .shape()
             .iter()
             .map(|extent| u64::try_from(*extent))
             .collect::<Result<_, _>>()?,

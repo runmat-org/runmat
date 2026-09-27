@@ -28,13 +28,14 @@ pub(super) async fn try_real_pair(
     if !compatible_real_inputs(lhs, rhs) {
         return Ok(None);
     }
-    let shape =
-        crate::builtins::common::broadcast::broadcast_shapes(BUILTIN_NAME, &lhs.shape, &rhs.shape)
-            .map_err(builtin_error)?;
-    let source =
-        gpu_helpers::select_resident_output_source([lhs.clone(), rhs.clone()], BUILTIN_NAME)?;
+    let shape = crate::builtins::common::broadcast::broadcast_shapes(
+        BUILTIN_NAME,
+        lhs.shape(),
+        rhs.shape(),
+    )
+    .map_err(builtin_error)?;
     if !super::admission::may_execute(provider, lhs, rhs)
-        .map_err(|error| builtin_error(format!("power: {error}")))?
+        .map_err(|error| provider_error("execution admission", error))?
     {
         return Ok(None);
     }
@@ -44,11 +45,7 @@ pub(super) async fn try_real_pair(
         match provider.classify_real_power(lhs, rhs).await {
             Ok(domain) => domain,
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => return Ok(None),
-            Err(error) => {
-                return Err(builtin_error(format!(
-                    "power: domain classification failed: {error}"
-                )))
-            }
+            Err(error) => return Err(provider_error("domain classification", error)),
         }
     };
     let result = {
@@ -58,25 +55,20 @@ pub(super) async fn try_real_pair(
     };
     match result {
         Ok(mut output) if valid_output(&output, lhs, rhs, provider, &shape, domain) => {
-            if let Some(source) = source {
-                let provenance = runmat_accelerate_api::handle_provenance(&source)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-                runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-            }
-            Ok(Some(if domain == PowerResultDomain::Complex {
+            gpu_helpers::propagate_output_provenance(&mut output, [lhs, rhs])?;
+            let value = if domain == PowerResultDomain::Complex {
                 gpu_helpers::complex_gpu_value(output)
             } else {
                 gpu_helpers::resident_gpu_value(output)
-            }))
+            }?;
+            Ok(Some(value))
         }
-        Ok(output) => {
-            gpu_helpers::free_rejected_provider_output(&output, &[lhs, rhs], provider);
-            Err(builtin_error(
-                "power: provider returned malformed domain-preserving output",
-            ))
-        }
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error("power: provider returned malformed domain-preserving output"),
+        )),
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => Ok(None),
-        Err(error) => Err(builtin_error(format!("power: {error}"))),
+        Err(error) => Err(provider_error("provider execution", error)),
     }
 }
 
@@ -93,7 +85,7 @@ fn valid_output(
         PowerResultDomain::Real => GpuTensorStorage::Real,
         PowerResultDomain::Complex => GpuTensorStorage::ComplexInterleaved,
     };
-    output.descriptor.storage == Some(storage)
+    output.descriptor().storage == Some(storage)
         && gpu_helpers::binary_gpu_output_matches(
             output,
             lhs,
@@ -105,7 +97,7 @@ fn valid_output(
                 precision: runmat_accelerate_api::handle_precision(lhs),
                 integer: None,
                 logical: false,
-                alias: GpuOutputAliasPolicy::RequireDistinct,
+                alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
             },
         )
 }
@@ -116,18 +108,24 @@ fn common_owner(
 ) -> Option<&'static dyn AccelProvider> {
     let left = gpu_helpers::exact_provider_for_handle(lhs)?;
     let right = gpu_helpers::exact_provider_for_handle(rhs)?;
-    (std::ptr::eq(left, right) && lhs.device_id == rhs.device_id).then_some(left)
+    (std::ptr::eq(left, right) && lhs.device_id() == rhs.device_id()).then_some(left)
 }
 
 fn compatible_real_inputs(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
     [lhs, rhs].into_iter().all(|handle| {
-        handle.descriptor.storage == Some(GpuTensorStorage::Real)
+        handle.descriptor().storage == Some(GpuTensorStorage::Real)
             && !runmat_accelerate_api::handle_is_logical(handle)
             && runmat_accelerate_api::handle_integer_type(handle).is_none()
             && gpu_helpers::expected_handle_numeric_element_type(handle).is_ok()
     }) && runmat_accelerate_api::handle_precision(lhs).is_some()
         && runmat_accelerate_api::handle_precision(lhs)
             == runmat_accelerate_api::handle_precision(rhs)
+}
+
+fn provider_error(stage: &str, source: anyhow::Error) -> crate::RuntimeError {
+    let mut error = builtin_error(format!("power: {stage} failed: {source}"));
+    error.source = Some(source.into_boxed_dyn_error());
+    error
 }
 
 async fn gather_pair_and_evaluate(
@@ -141,4 +139,48 @@ async fn gather_pair_and_evaluate(
         .await
         .map_err(|flow| map_control_flow_with_builtin(flow, BUILTIN_NAME))?;
     power_host(Value::Tensor(left), Value::Tensor(right))
+}
+
+#[cfg(test)]
+mod owning_tests {
+    use super::*;
+    use runmat_accelerate_api::{test_support::TestAllocationOwner, NumericElementType};
+
+    #[test]
+    fn real_pair_admission_reads_immutable_class_and_storage() {
+        let owner = TestAllocationOwner::new();
+        let real = owner
+            .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+            .unwrap();
+        let complex = owner
+            .allocate_zeroed(
+                vec![2, 1],
+                NumericElementType::F64,
+                GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let logical = owner.allocate_logical(vec![0, 1], vec![2, 1]).unwrap();
+        assert!(compatible_real_inputs(&real.handle, &real.handle));
+        assert!(!compatible_real_inputs(&real.handle, &complex.handle));
+        assert!(!compatible_real_inputs(&logical.handle, &real.handle));
+        assert_eq!(real.probe.retirements(), 0);
+        assert_eq!(complex.probe.retirements(), 0);
+        assert_eq!(logical.probe.retirements(), 0);
+    }
+
+    #[test]
+    fn provider_failure_keeps_its_typed_source() {
+        let error = provider_error(
+            "domain classification",
+            anyhow::Error::new(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "classifier transport closed",
+            )),
+        );
+        let source = error.source.as_ref().unwrap();
+        assert_eq!(
+            source.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::BrokenPipe,
+        );
+    }
 }
