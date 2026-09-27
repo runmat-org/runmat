@@ -65,18 +65,13 @@ fn combined_length(
         .ok_or_else(|| polyder_error("polyder: output size overflow"))
 }
 
-fn valid(
-    output: &GpuTensorHandle,
-    inputs: &[&GpuTensorHandle],
-    orientation: &GpuTensorHandle,
-    max_len: usize,
-) -> bool {
+fn valid(output: &GpuTensorHandle, inputs: &[&GpuTensorHandle], max_len: usize) -> bool {
     let Ok(len) = length(output) else {
         return false;
     };
     len > 0
         && len <= max_len
-        && output.shape() == orientation_from_shape(orientation.shape()).shape_for_len(len)
+        && ensure_vector_shape("polyder", "provider output", output.shape()).is_ok()
         && output.physical().storage() == GpuTensorStorage::Real
         && output.physical().element_type() == inputs[0].physical().element_type()
         && !runmat_accelerate_api::handle_is_logical(output)
@@ -89,7 +84,21 @@ fn valid(
             .all(|input| !output.shares_allocation_with(input))
 }
 
-fn adopt(mut output: GpuTensorHandle, inputs: &[&GpuTensorHandle]) -> BuiltinResult<Value> {
+fn adopt(
+    mut output: GpuTensorHandle,
+    inputs: &[&GpuTensorHandle],
+    orientation: &GpuTensorHandle,
+) -> BuiltinResult<Value> {
+    let shape = orientation_from_shape(orientation.shape()).shape_for_len(length(&output)?);
+    if output.shape() != shape {
+        output = output
+            .with_view(output.view().clone().with_shape(shape))
+            .map_err(|error| {
+                crate::build_runtime_error(format!("polyder: invalid result view: {error}"))
+                    .with_source(error)
+                    .build()
+            })?;
+    }
     gpu_helpers::propagate_output_provenance(&mut output, inputs.iter().copied())?;
     gpu_helpers::resident_gpu_value(output)
 }
@@ -110,10 +119,10 @@ pub(super) async fn try_gpu_derivative_single(value: &Value) -> BuiltinResult<Op
     let Some(output) = optional(provider.polyder_single(input).await)? else {
         return Ok(None);
     };
-    if !valid(&output, &[input], input, max_len) {
+    if !valid(&output, &[input], max_len) {
         return Err(invalid(output));
     }
-    adopt(output, &[input]).map(Some)
+    adopt(output, &[input], input).map(Some)
 }
 
 pub(super) async fn try_gpu_derivative_product(
@@ -131,10 +140,10 @@ pub(super) async fn try_gpu_derivative_product(
     let Some(output) = optional(provider.polyder_product(left, right).await)? else {
         return Ok(None);
     };
-    if !valid(&output, &[left, right], left, max_len) {
+    if !valid(&output, &[left, right], max_len) {
         return Err(invalid(output));
     }
-    adopt(output, &[left, right]).map(Some)
+    adopt(output, &[left, right], left).map(Some)
 }
 
 pub(super) async fn try_gpu_quotient(
@@ -153,8 +162,8 @@ pub(super) async fn try_gpu_quotient(
     let Some(result) = optional(provider.polyder_quotient(left, right).await)? else {
         return Ok(None);
     };
-    if !valid(&result.numerator, &[left, right], left, numerator_len)
-        || !valid(&result.denominator, &[left, right], right, denominator_len)
+    if !valid(&result.numerator, &[left, right], numerator_len)
+        || !valid(&result.denominator, &[left, right], denominator_len)
         || result.numerator.shares_allocation_with(&result.denominator)
     {
         return Err(gpu_helpers::reject_gpu_output(
@@ -163,7 +172,7 @@ pub(super) async fn try_gpu_quotient(
         ));
     }
     Ok(Some(PolyderEval {
-        numerator: adopt(result.numerator, &[left, right])?,
-        denominator: adopt(result.denominator, &[left, right])?,
+        numerator: adopt(result.numerator, &[left, right], left)?,
+        denominator: adopt(result.denominator, &[left, right], right)?,
     }))
 }

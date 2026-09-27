@@ -552,6 +552,28 @@ struct Polynomial {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    #[test]
+    fn resident_nd_vector_preserves_host_derivative_orientation() {
+        test_support::with_test_provider(|provider| {
+            let source = Tensor::new(vec![3.0, 2.0, 1.0], vec![1, 1, 3]).unwrap();
+            let expected = derivative_single(Value::Tensor(source.clone())).unwrap();
+            let input =
+                crate::builtins::common::gpu_helpers::upload_tensor(provider, &source).unwrap();
+            let output = derivative_single(Value::GpuTensor(input.clone())).unwrap();
+            let Value::GpuTensor(output) = output else {
+                panic!("resident derivative required")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            let actual = test_support::gather(Value::GpuTensor(output)).unwrap();
+            let Value::Tensor(expected) = expected else {
+                panic!("host derivative tensor required")
+            };
+            assert_eq!(actual.shape, expected.shape);
+            assert_eq!(actual.shape, vec![2, 1]);
+            assert_eq!(actual.materialize_f64(), vec![6.0, 2.0]);
+        });
+    }
+
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
