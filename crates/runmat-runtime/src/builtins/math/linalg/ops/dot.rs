@@ -403,12 +403,7 @@ async fn try_provider_dot(
             Ok(Some(Value::GpuTensor(handle)))
         }
         Ok(handle) => Err(reject_dot_output(handle)),
-        Err(err)
-            if gpu_helpers::provider_hook_is_unsupported(&err)
-                || err.to_string() == "dot not supported by provider" =>
-        {
-            Ok(None)
-        }
+        Err(err) if gpu_helpers::provider_hook_is_unsupported(&err) => Ok(None),
         Err(err) => {
             let mut error = dot_internal_error(format!("dot: provider execution failed: {err}"));
             error.gpu_gather_retry = crate::GpuGatherRetry::Never;
