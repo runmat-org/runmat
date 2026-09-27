@@ -730,6 +730,7 @@ impl RemotePoolDriver {
                 .expect("remote progress registry poisoned")
                 .get(&request.task_id)
                 .cloned();
+            let mut pending_results = None;
             let (report, failed_route) = match (route, program) {
                 (Some(route), Some(mut program)) => {
                     let route_identity = route.identity;
@@ -785,7 +786,10 @@ impl RemotePoolDriver {
                                         )
                                         .await
                                     {
-                                        Ok(()) => (AttemptReport::Succeeded { result }, None),
+                                        Ok(lease) => {
+                                            pending_results = Some(lease);
+                                            (AttemptReport::Succeeded { result }, None)
+                                        }
                                         Err(error) => (
                                             AttemptReport::Lost {
                                                 message: error.to_string(),
@@ -833,6 +837,7 @@ impl RemotePoolDriver {
             } else {
                 this.apply_report(BackendReport::for_request(&request, report));
             }
+            drop(pending_results);
         });
     }
 

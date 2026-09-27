@@ -44,12 +44,12 @@ struct FakeWorker {
     described: Option<WorkerSpec>,
 }
 
-struct ResultObjectWorker {
-    spec: WorkerSpec,
-    bundle: Arc<Vec<u8>>,
-    reference: runmat_execution::value::ValueRef,
-    bytes: Arc<Vec<u8>>,
-    corrupt_download: bool,
+pub(in crate::remote) struct ResultObjectWorker {
+    pub(in crate::remote) spec: WorkerSpec,
+    pub(in crate::remote) bundle: Arc<Vec<u8>>,
+    pub(in crate::remote) reference: runmat_execution::value::ValueRef,
+    pub(in crate::remote) bytes: Arc<Vec<u8>>,
+    pub(in crate::remote) corrupt_download: bool,
 }
 
 struct FailingRouteWorker {
@@ -1461,7 +1461,7 @@ async fn pinned_quic_worker_executes_only_the_installed_exact_bundle() {
     server.unwrap();
 }
 
-fn inventory(cpu_millicores: u32) -> ResourceInventory {
+pub(in crate::remote) fn inventory(cpu_millicores: u32) -> ResourceInventory {
     ResourceInventory {
         cpu_millicores,
         memory_bytes: 3 * 1024 * 1024,
@@ -1485,7 +1485,10 @@ fn request() -> ResourceRequest {
     }
 }
 
-fn object_reference(authorization_scope: &str, bytes: &[u8]) -> runmat_execution::value::ValueRef {
+pub(in crate::remote) fn object_reference(
+    authorization_scope: &str,
+    bytes: &[u8],
+) -> runmat_execution::value::ValueRef {
     runmat_execution::value::ValueRef {
         schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
         id: runmat_execution::identity::ValueId::derive(&[b"remote-execution-object", bytes]),
@@ -1500,7 +1503,7 @@ fn object_reference(authorization_scope: &str, bytes: &[u8]) -> runmat_execution
     }
 }
 
-fn submission(
+pub(in crate::remote) fn submission(
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
     task_id: TaskId,
@@ -1535,7 +1538,8 @@ async fn program() -> (ProgramExecutionRequest, ArtifactId) {
     (program, artifact_id)
 }
 
-async fn executable_bundle() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>) {
+pub(in crate::remote) async fn executable_bundle() -> (ProgramExecutionRequest, ArtifactId, Vec<u8>)
+{
     build_executable_bundle(false).await
 }
 

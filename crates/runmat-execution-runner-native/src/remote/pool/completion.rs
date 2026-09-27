@@ -1,57 +1,59 @@
 use std::sync::Arc;
 
-use runmat_execution::state::TaskState;
+use runmat_execution::state::{AttemptState, TaskState};
+use runmat_execution::TaskId;
 use runmat_execution_runner::port::BackendReport;
-use runmat_execution_runner::{AttemptReport, DriverCommand};
+use runmat_execution_runner::{AttemptSuccess, DriverAction, DriverCommand, DriverSnapshot};
 
 use super::RemotePoolDriver;
 
 impl RemotePoolDriver {
     pub(super) fn apply_report(self: &Arc<Self>, report: BackendReport) {
         let task_id = report.task_id;
-        let (actions, terminal, committed_results) = {
+        let (actions, outcome) = {
             let mut driver = self.driver.lock().expect("remote driver poisoned");
-            let actions = match driver.handle(DriverCommand::BackendReport(report.clone())) {
+            let actions = match driver.handle(DriverCommand::BackendReport(report)) {
                 Ok(actions) => actions,
                 Err(_) => return,
             };
             let snapshot = driver.snapshot();
-            let committed_results = snapshot.tasks.get(&task_id).and_then(|task| {
-                task.committed
-                    .as_ref()
-                    .filter(|commit| commit.attempt_id == report.attempt_id)
-                    .map(|commit| commit.result_objects.clone())
-            });
-            let terminal = snapshot.tasks.get(&task_id).and_then(|task| {
-                matches!(
-                    task.state,
-                    TaskState::Succeeded
-                        | TaskState::Failed
-                        | TaskState::Cancelled
-                        | TaskState::Indeterminate
-                )
-                .then_some(task.state)
-            });
-            (actions, terminal, committed_results)
-        };
-        if let Some(results) = committed_results {
-            if let Err(error) = self.execution_objects.commit_results(&results) {
-                self.resolve_task(task_id, Err(error.to_string()));
-                return;
-            }
-        }
-        self.dispatch(actions);
-        if let Some(state) = terminal {
-            let outcome = match report.report {
-                AttemptReport::Succeeded { result } => Ok(result),
-                AttemptReport::Failed { message, .. } | AttemptReport::Lost { message } => {
-                    Err(message)
+            let outcome = snapshot.tasks.get(&task_id).and_then(|task| {
+                if task.state == TaskState::Succeeded {
+                    Some(match &task.committed {
+                        Some(commit) => self
+                            .execution_objects
+                            .commit_results(&commit.result_objects)
+                            .map(|()| AttemptSuccess {
+                                outputs: commit.outputs.clone(),
+                                result_objects: commit.result_objects.clone(),
+                                resources: commit.resources.clone(),
+                            })
+                            .map_err(|error| error.to_string()),
+                        None => Err("succeeded remote task has no committed result".into()),
+                    })
+                } else {
+                    terminal_failure(&snapshot, task_id, task.state).map(Err)
                 }
-                AttemptReport::Cancelled => Err("remote task was cancelled".into()),
-                AttemptReport::Started => Err(format!(
-                    "remote task reached terminal state {state:?} without a terminal report"
-                )),
-            };
+            });
+            // Serialize committed-object protection and stale-result disposal with
+            // scheduler admission. Otherwise a discarded overlapping result can
+            // remove an accepted object's catalog entry before it is protected.
+            // Lock order is driver -> object catalog; neither operation calls back
+            // into the driver. Dispatch/worker calls remain outside both locks.
+            let actions = actions
+                .into_iter()
+                .filter_map(|action| match action {
+                    DriverAction::GarbageCollectResults { objects, .. } => {
+                        self.execution_objects.discard_results(&objects);
+                        None
+                    }
+                    action => Some(action),
+                })
+                .collect();
+            (actions, outcome)
+        };
+        self.dispatch(actions);
+        if let Some(outcome) = outcome {
             self.resolve_task(task_id, outcome);
         }
     }
@@ -66,22 +68,7 @@ impl RemotePoolDriver {
             .tasks
             .iter()
             .filter_map(|(task_id, task)| {
-                let live_attempt = snapshot.attempts.values().any(|attempt| {
-                    attempt.request.task_id == *task_id
-                        && matches!(
-                            attempt.state,
-                            runmat_execution::state::AttemptState::Assigned
-                                | runmat_execution::state::AttemptState::Starting
-                                | runmat_execution::state::AttemptState::Running
-                        )
-                });
-                let message = match task.state {
-                    TaskState::Failed => "remote task failed",
-                    TaskState::Cancelled if !live_attempt => "remote task was cancelled",
-                    TaskState::Indeterminate => "remote worker was lost",
-                    _ => return None,
-                };
-                Some((*task_id, message.to_string()))
+                terminal_failure(&snapshot, *task_id, task.state).map(|message| (*task_id, message))
             })
             .collect::<Vec<_>>();
         for (task_id, message) in terminal {
@@ -108,3 +95,31 @@ impl RemotePoolDriver {
             .remove(&task_id);
     }
 }
+
+fn terminal_failure(
+    snapshot: &DriverSnapshot,
+    task_id: TaskId,
+    state: TaskState,
+) -> Option<String> {
+    let message = match state {
+        TaskState::Failed => "remote task failed",
+        TaskState::Indeterminate => "remote worker was lost",
+        TaskState::Cancelled
+            if !snapshot.attempts.values().any(|attempt| {
+                attempt.request.task_id == task_id
+                    && matches!(
+                        attempt.state,
+                        AttemptState::Assigned | AttemptState::Starting | AttemptState::Running
+                    )
+            }) =>
+        {
+            "remote task was cancelled"
+        }
+        _ => return None,
+    };
+    Some(message.into())
+}
+
+#[cfg(test)]
+#[path = "../pool_tests/completion_authority.rs"]
+mod tests;
