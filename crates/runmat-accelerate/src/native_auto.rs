@@ -1786,8 +1786,18 @@ mod tests {
             71
         }
 
-        fn query_feasibility(&self, _query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
-            ProviderFeasibility::supported(ProviderResourceEstimate::default())
+        fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
+            ProviderFeasibility::supported(ProviderResourceEstimate {
+                output_bytes: Some(
+                    query
+                        .workload
+                        .elements
+                        .expect("fixture element count")
+                        .checked_mul(8)
+                        .expect("F64 fixture output bytes"),
+                ),
+                ..Default::default()
+            })
         }
 
         fn estimate_cost(&self, query: &ProviderCostQuery) -> Option<ProviderCostEstimate> {

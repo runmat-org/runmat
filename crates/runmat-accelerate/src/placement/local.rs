@@ -14,6 +14,8 @@ use runmat_value::Value;
 
 use super::{select_candidate, summarize_values, tensor_representation, PlacementPolicy};
 mod signature;
+#[cfg(test)]
+mod resource_tests;
 
 pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) operation: &'a str,
@@ -101,9 +103,21 @@ pub(crate) fn plan_local(
         outputs: request.outputs,
         workload: request.workload,
     };
-    if let ProviderFeasibility::Rejected { rejection } = provider.query_feasibility(&query) {
+    let estimate = match provider.query_feasibility(&query) {
+        ProviderFeasibility::Supported { estimate } => estimate,
+        ProviderFeasibility::Rejected { rejection } => {
+            return Ok(LocalPlacementOutcome::ProviderRejected {
+                code: rejection.code,
+                cpu_cost: cpu.cost,
+            });
+        }
+    };
+    // The provider owns physical allocation widths and inferred outputs. Empty
+    // query.outputs means unspecified output facts, not zero retained bytes.
+    // Explicit provider execution remains supported when this estimate is absent.
+    if request.compare_profitability && estimate.output_bytes.is_none() {
         return Ok(LocalPlacementOutcome::ProviderRejected {
-            code: rejection.code,
+            code: ProviderRejectionCode::UnknownResourceEstimate,
             cpu_cost: cpu.cost,
         });
     }
@@ -173,12 +187,15 @@ pub(crate) fn plan_local(
                     region: cpu.region,
                     operation: request.operation.into(),
                     runtime_facts: signature::with_semantic_identity(
-                        signature::runtime_facts(
-                            &cost_query,
-                            cpu.preparation,
-                            &residency,
-                            &resources,
-                            host_resources.epoch,
+                        signature::with_output_resources(
+                            signature::runtime_facts(
+                                &cost_query,
+                                cpu.preparation,
+                                &residency,
+                                &resources,
+                                host_resources.epoch,
+                            ),
+                            estimate.output_bytes,
                         ),
                         request.semantic_identity,
                     ),
@@ -213,9 +230,8 @@ pub(crate) fn plan_local(
                                 PlacementGraphCandidate {
                                     resources: CandidateResourceDemand {
                                         cpu_millicores: 0,
-                                        retained_bytes: estimated_output_bytes(
-                                            &query.outputs,
-                                            provider.precision(),
+                                        retained_bytes: estimate.output_bytes.expect(
+                                            "automatic placement admitted known physical output bytes",
                                         ),
                                         scratch_bytes: provider_cost.scratch_bytes,
                                         queue_slots: 1,
@@ -264,23 +280,6 @@ pub(crate) fn plan_local(
         cpu_cost,
         provider_cost,
         feedback,
-    })
-}
-
-fn estimated_output_bytes(
-    outputs: &[ProviderRepresentation],
-    precision: runmat_accelerate_api::ProviderPrecision,
-) -> u64 {
-    let element_bytes = match precision {
-        runmat_accelerate_api::ProviderPrecision::F32 => 4_u64,
-        runmat_accelerate_api::ProviderPrecision::F64 => 8_u64,
-    };
-    outputs.iter().fold(0_u64, |total, output| {
-        let elements = output
-            .shape
-            .iter()
-            .fold(1_u64, |count, dimension| count.saturating_mul(*dimension));
-        total.saturating_add(elements.saturating_mul(element_bytes))
     })
 }
 

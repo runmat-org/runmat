@@ -149,6 +149,7 @@ pub(crate) fn provider_rejection_token(code: ProviderRejectionCode) -> &'static 
         ProviderRejectionCode::InvalidShape => "provider_shape_invalid",
         ProviderRejectionCode::ResourceLimit => "provider_resource_limit",
         ProviderRejectionCode::ProviderUnavailable => "provider_unavailable",
+        ProviderRejectionCode::UnknownResourceEstimate => "provider_resource_estimate_unknown",
     }
 }
 

@@ -36,12 +36,33 @@ impl AccelProvider for UploadRejectingProvider {
     }
     fn query_feasibility(
         &self,
-        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        runmat_accelerate_api::ProviderFeasibility::supported(Default::default())
+        known_fixture_resources(query)
     }
 }
 static PROVIDER: UploadRejectingProvider = UploadRejectingProvider;
+
+// These lifecycle fixtures model dense F64 output buffers with the admitted
+// element count and output arity. They do not model provider kernel execution.
+fn known_fixture_resources(
+    query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+) -> runmat_accelerate_api::ProviderFeasibility {
+    let outputs = u64::from(query.workload.requested_outputs.unwrap_or(1));
+    let bytes = query
+        .workload
+        .elements
+        .expect("fixture element count")
+        .checked_mul(8)
+        .and_then(|bytes| bytes.checked_mul(outputs))
+        .expect("fixture physical output size");
+    runmat_accelerate_api::ProviderFeasibility::supported(
+        runmat_accelerate_api::ProviderResourceEstimate {
+            output_bytes: Some(bytes),
+            ..Default::default()
+        },
+    )
+}
 
 #[derive(Default)]
 struct Probe {

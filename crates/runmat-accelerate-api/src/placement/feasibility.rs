@@ -68,6 +68,9 @@ pub enum ProviderRejectionCode {
     InvalidShape,
     ResourceLimit,
     ProviderUnavailable,
+    /// Execution is supported, but automatic placement lacks a required
+    /// physical resource estimate. This does not assert an exceeded limit.
+    UnknownResourceEstimate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

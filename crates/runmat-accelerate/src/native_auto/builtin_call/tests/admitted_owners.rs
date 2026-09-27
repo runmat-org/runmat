@@ -85,10 +85,10 @@ impl AccelProvider for Owner {
     }
     fn query_feasibility(
         &self,
-        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
         // This fixture tests ownership before planning, not hook availability.
-        runmat_accelerate_api::ProviderFeasibility::supported(Default::default())
+        known_fixture_resources(query)
     }
 }
 fn owner() -> &'static Owner {

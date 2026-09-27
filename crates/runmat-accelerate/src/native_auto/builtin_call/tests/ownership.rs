@@ -59,9 +59,9 @@ impl AccelProvider for CounterProvider {
     }
     fn query_feasibility(
         &self,
-        _: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
-        runmat_accelerate_api::ProviderFeasibility::supported(Default::default())
+        known_fixture_resources(query)
     }
 }
 fn provider(fail_on: Option<u64>) -> &'static CounterProvider {

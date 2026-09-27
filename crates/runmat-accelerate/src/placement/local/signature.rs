@@ -3,6 +3,13 @@ use super::super::residency::ResidencySummary;
 use runmat_accelerate_api::ProviderCostQuery;
 use runmat_execution::{CandidatePreparationState, Digest, PlacementResourceSnapshot};
 
+pub(super) fn with_output_resources(facts: Digest, output_bytes: Option<u64>) -> Digest {
+    Digest::sha256(
+        serde_json::to_vec(&("physical-output-resources-v1", facts, output_bytes))
+            .expect("provider output resources must serialize"),
+    )
+}
+
 pub(super) fn with_semantic_identity(facts: Digest, semantic: Option<Digest>) -> Digest {
     let Some(semantic) = semantic else {
         return facts;
