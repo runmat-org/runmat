@@ -17,7 +17,7 @@ pub(in crate::builtins::math::elementwise::exponentials) fn valid_real(
             precision: expected_precision,
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
         },
     )
 }

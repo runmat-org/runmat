@@ -1,9 +1,9 @@
 mod contract;
 mod restore;
+#[cfg(test)]
+mod owning_tests;
 
-use runmat_accelerate_api::{
-    GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, ProviderPrecision,
-};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_value::Value;
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
@@ -25,13 +25,10 @@ pub(super) async fn evaluate(
             "GPU input class metadata contradicts its physical storage",
         )
     })?;
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-    let provenance =
-        runmat_accelerate_api::handle_provenance(&handle).unwrap_or(GpuHandleProvenance::Automatic);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
 
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         let gathered = gpu_helpers::gather_tensor_async(&handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
         let tensor =
             gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
         let output = super::host::evaluate_tensor(operation, tensor)?;
@@ -49,41 +46,40 @@ pub(super) async fn evaluate(
 
     if runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone())).await;
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
         let value =
             gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
         let output = super::host::evaluate(operation, value)?;
-        return restore::value(operation, provider, &handle, output, provenance);
+        return restore::value(operation, provider, &handle, output);
     }
 
     let provider_result = match operation {
         ExponentialOperation::Exp => provider.unary_exp(&handle).await,
         ExponentialOperation::Expm1 => provider.unary_expm1(&handle).await,
     };
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
     match provider_result {
         Ok(mut output) if valid_real(&output, &handle, provider, contract::precision(&handle)) => {
-            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+            gpu_helpers::propagate_output_provenance(&mut output, &[&handle])?;
             return gpu_helpers::resident_gpu_value(output);
         }
         Ok(output) => {
-            gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
-            return Err(super::errors::internal(
-                operation,
-                "provider returned malformed unary output",
-            ));
+            let mut error =
+                super::errors::internal(operation, "provider returned malformed unary output");
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(gpu_helpers::reject_gpu_output(output, error));
         }
         Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
         Err(error) => {
-            return Err(super::errors::internal(
+            let mut failure = super::errors::internal(
                 operation,
                 format!("provider unary operation failed: {error}"),
-            ));
+            );
+            failure.source = Some(error.into_boxed_dyn_error());
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(failure);
         }
     }
 
     let gathered = gpu_helpers::gather_tensor_async(&handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
     let tensor = gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
     let output = super::host::evaluate_tensor(operation, tensor)?;
     restore::real(

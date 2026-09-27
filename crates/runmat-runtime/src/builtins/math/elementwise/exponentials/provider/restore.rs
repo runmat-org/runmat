@@ -1,6 +1,4 @@
-use runmat_accelerate_api::{
-    AccelProvider, GpuHandleProvenance, GpuTensorHandle, GpuTensorStorage, ProviderPrecision,
-};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
@@ -14,14 +12,13 @@ pub(super) fn value(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     value: Value,
-    provenance: GpuHandleProvenance,
 ) -> BuiltinResult<Value> {
     match value {
-        Value::ComplexTensor(tensor) => complex(operation, provider, input, tensor, provenance),
+        Value::ComplexTensor(tensor) => complex(operation, provider, input, tensor),
         Value::Complex(real, imag) => {
             let tensor = ComplexTensor::new(vec![(real, imag)], input.shape().to_vec())
                 .map_err(|error| super::super::errors::internal(operation, error))?;
-            complex(operation, provider, input, tensor, provenance)
+            complex(operation, provider, input, tensor)
         }
         Value::Tensor(tensor) => real(
             operation,
@@ -55,20 +52,17 @@ pub(super) fn real(
     tensor: Tensor,
     expected_precision: Option<ProviderPrecision>,
 ) -> BuiltinResult<Value> {
-    let mut output = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
-        super::super::errors::internal(
-            operation,
-            format!("failed to restore fallback result to input provider: {error}"),
-        )
-    })?;
+    let mut output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[input])?;
     if !contract::valid_real(&output, input, provider, expected_precision) {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
-        return Err(super::super::errors::internal(
-            operation,
-            "provider upload returned malformed fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            super::super::errors::internal(
+                operation,
+                "provider upload returned malformed fallback output",
+            ),
         ));
     }
-    preserve_provenance(&mut output, input);
+    gpu_helpers::propagate_output_provenance(&mut output, &[input])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -77,34 +71,24 @@ fn complex(
     provider: &'static dyn AccelProvider,
     input: &GpuTensorHandle,
     tensor: ComplexTensor,
-    provenance: GpuHandleProvenance,
 ) -> BuiltinResult<Value> {
-    let mut output = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|error| {
-        super::super::errors::internal(
-            operation,
-            format!("failed to restore complex result to input provider: {error}"),
-        )
-    })?;
+    let mut output = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[input])?;
     let contract = gpu_helpers::UnaryGpuOutputContract {
         storage: GpuTensorStorage::ComplexInterleaved,
         precision: contract::precision(input),
         integer: None,
         logical: false,
-        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
     };
     if !gpu_helpers::unary_gpu_output_matches(&output, input, provider, contract) {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[input]);
-        return Err(super::super::errors::internal(
-            operation,
-            "provider upload returned malformed complex fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            super::super::errors::internal(
+                operation,
+                "provider upload returned malformed complex fallback output",
+            ),
         ));
     }
-    runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
+    gpu_helpers::propagate_output_provenance(&mut output, &[input])?;
     gpu_helpers::complex_gpu_value(output)
-}
-
-fn preserve_provenance(output: &mut GpuTensorHandle, input: &GpuTensorHandle) {
-    let provenance =
-        runmat_accelerate_api::handle_provenance(input).unwrap_or(GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
 }
