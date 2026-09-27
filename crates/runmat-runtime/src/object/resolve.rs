@@ -93,6 +93,8 @@ pub async fn read_member_sequence_with_context(
     match base {
         Value::StructArray(array) => crate::aggregate::structure::gather_member(array, &field),
         Value::ObjectArray(array) => {
+            let roots = crate::call::arguments::roots::ExpansionRoots::new()?;
+            roots.retain_values(array.data());
             let mut values = Vec::with_capacity(array.len());
             for value in array.into_data() {
                 let mut selected = Box::pin(read_member_sequence_with_context(
@@ -107,6 +109,7 @@ pub async fn read_member_sequence_with_context(
                     runmat_types::SequenceUse::RequireSingle,
                     crate::sequence::SequenceResolutionContext::default(),
                 )?;
+                roots.retain_values(&selected);
                 values.push(selected.pop().expect("single sequence resolution"));
             }
             crate::sequence::ValueSequence::comma_separated(values)

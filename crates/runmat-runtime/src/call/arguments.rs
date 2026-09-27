@@ -6,6 +6,8 @@ use crate::sequence::ResolveValueSequence;
 use crate::{runtime_error::semantic_error, RuntimeError};
 use runmat_value::{CellArray, IntValue, Value, ValueSequence};
 
+pub(crate) mod roots;
+
 /// Describes one source-level call argument after lowering.
 ///
 /// The descriptor is shared by bytecode and native execution. It captures only
@@ -77,6 +79,8 @@ pub async fn expand_arguments(
     runtime: &RuntimeContext,
     arguments: Vec<MaterializedArgument>,
 ) -> Result<Vec<Value>, RuntimeError> {
+    let roots = roots::ExpansionRoots::new()?;
+    roots.retain_arguments(&arguments);
     let mut expanded_arguments = Vec::new();
     for argument in arguments {
         match argument {
@@ -86,13 +90,16 @@ pub async fn expand_arguments(
                     runmat_types::SequenceUse::ExpandAll,
                     crate::sequence::SequenceResolutionContext::default(),
                 )?;
+                roots.retain_values(&values);
                 expanded_arguments.extend(values);
             }
             MaterializedArgument::Sequence(sequence) => {
-                expanded_arguments.extend(sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::ExpandAll,
                     crate::sequence::SequenceResolutionContext::default(),
-                )?);
+                )?;
+                roots.retain_values(&values);
+                expanded_arguments.extend(values);
             }
         }
     }
@@ -230,6 +237,7 @@ async fn expand_composite_values(
         .service_ports()
         .require_distributed("Composite comma-separated-list expansion")
         .map_err(|error| semantic_error("RuntimeCapabilityUnavailable", error.to_string()))?;
+    let roots = roots::ExpansionRoots::new()?;
     let mut values = Vec::with_capacity(selected_ranks.len());
     for selected_rank in selected_ranks {
         let Value::Int(IntValue::U32(rank)) = selected_rank else {
@@ -247,6 +255,7 @@ async fn expand_composite_values(
                     "the selected lab did not assign this Composite value",
                 )
             })?;
+        roots.retain_values(std::slice::from_ref(&value));
         values.push(value);
     }
     Ok(values)
