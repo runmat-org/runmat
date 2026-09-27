@@ -79,4 +79,44 @@ mod tests {
         test_support::with_test_provider(|provider| check_logical_producer(provider));
         test_support::with_f32_test_provider(|provider| check_logical_producer(provider));
     }
+
+    #[test]
+    fn integer_conversion_retains_borrowed_source_and_native_result() {
+        test_support::with_test_provider(|provider| {
+            let tensor =
+                Tensor::new_integer(IntegerStorage::U16(vec![1, 257]), vec![2, 1]).unwrap();
+            let source = upload_real_tensor(provider, &tensor, false, &[]).unwrap();
+            let weak = source.downgrade();
+            let converted = futures::executor::block_on(convert_device_value(
+                source.clone(),
+                DataClass::UInt32,
+            ))
+            .unwrap();
+            assert!(source.allocation_lease().validate_live().is_ok());
+            let gathered =
+                futures::executor::block_on(gpu_helpers::gather_tensor_async(&converted.handle))
+                    .unwrap();
+            assert_eq!(
+                gathered.integer_storage(),
+                Some(&IntegerStorage::U32(vec![1, 257]))
+            );
+            assert_eq!(gathered.shape, vec![2, 1]);
+            drop(converted);
+            assert!(weak.acquire().is_ok());
+            drop(source);
+            assert!(weak.acquire().is_err());
+        });
+    }
+
+    #[test]
+    fn provider_error_adapter_retains_nested_runtime_identity() {
+        let error = crate::build_runtime_error("download failed")
+            .with_identifier("RunMat:TestDownload")
+            .build();
+        let converted = provider_failure(
+            runmat_accelerate_api::ProviderExecutionError::from_source(error),
+        );
+        assert_eq!(converted.identifier(), Some("RunMat:TestDownload"));
+        assert_eq!(converted.message(), "download failed");
+    }
 }

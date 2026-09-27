@@ -612,9 +612,9 @@ fn upload_host_value(value: Value, dtype: DataClass) -> BuiltinResult<PreparedHa
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).map_err(|err| {
                 gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_INTERNAL)
             })?;
-            upload_complex_host_value(provider, tensor, dtype)
+            upload_complex_host_value(provider, tensor, dtype, &[])
         }
-        Value::ComplexTensor(tensor) => upload_complex_host_value(provider, tensor, dtype),
+        Value::ComplexTensor(tensor) => upload_complex_host_value(provider, tensor, dtype, &[]),
         value => upload_real_host_value(provider, value, dtype),
     }
 }
@@ -712,6 +712,7 @@ fn upload_complex_host_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     tensor: ComplexTensor,
     dtype: DataClass,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<PreparedHandle> {
     let shape = tensor.shape.clone();
     let storage = tensor.into_complex_storage();
@@ -762,9 +763,12 @@ fn upload_complex_host_value(
     let tensor = ComplexTensor::from_complex_storage(storage, shape)
         .map_err(|error| gpu_array_error_with_message(error, &GPUARRAY_ERROR_INPUT_TYPE))?;
 
-    let handle = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|err| {
-        gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
-    })?;
+    let handle = gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, protected)
+        .map_err(|err| {
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                err,
+            ))
+        })?;
     Ok(PreparedHandle {
         handle,
         provider,
@@ -837,7 +841,9 @@ async fn convert_device_value(
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
             .map_err(|err| {
-                gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+                provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                    err,
+                ))
             })?;
         let Value::ComplexTensor(tensor) = gathered else {
             return Err(gpu_array_error_with_message(
@@ -845,14 +851,15 @@ async fn convert_device_value(
                 &GPUARRAY_ERROR_PROVIDER_IO,
             ));
         };
-        let prepared = upload_complex_host_value(provider, tensor, dtype)?;
+        let prepared = upload_complex_host_value(provider, tensor, dtype, &[&handle])?;
         return Ok(prepared);
     }
 
     if let Some(integer_type) = integer_type.filter(|_| dtype.is_integer()) {
-        let downloaded = provider.download_integer(&handle).await.map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
+        let downloaded = provider
+            .download_integer(&handle)
+            .await
+            .map_err(|error| provider_failure(error.into()))?;
         if downloaded.shape != handle.shape() || downloaded.data.element_type() != integer_type {
             return Err(gpu_array_error_with_message(
                 "gpuArray: provider returned contradictory integer payload metadata",
@@ -865,9 +872,7 @@ async fn convert_device_value(
         let tensor = Tensor::new_integer(cast, shape).map_err(|err| {
             gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_CONVERSION)
         })?;
-        let new_handle = gpu_helpers::upload_tensor(provider, &tensor).map_err(|err| {
-            gpu_array_error_with_message(format!("gpuArray: {err}"), &GPUARRAY_ERROR_PROVIDER_IO)
-        })?;
+        let new_handle = upload_real_tensor(provider, &tensor, false, &[&handle])?;
         return Ok(PreparedHandle {
             handle: new_handle,
             provider,
@@ -879,7 +884,9 @@ async fn convert_device_value(
     let tensor = gpu_helpers::gather_tensor_async(&handle)
         .await
         .map_err(|err| {
-            gpu_array_error_with_message(err.to_string(), &GPUARRAY_ERROR_PROVIDER_IO)
+            provider_failure(runmat_accelerate_api::ProviderExecutionError::from_source(
+                err,
+            ))
         })?;
     let (tensor, logical) = cast_tensor(tensor, dtype)?;
     let new_handle = upload_real_tensor(provider, &tensor, logical, &[&handle])?;
