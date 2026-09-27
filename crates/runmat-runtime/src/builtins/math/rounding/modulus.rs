@@ -273,7 +273,7 @@ fn mod_real_scalar_f32(a: f32, b: f32) -> f32 {
         }
         return if a.signum() == b.signum() { a } else { b };
     }
-    let mut remainder = a - b * (a / b).floor();
+    let mut remainder = a % b;
     if !remainder.is_finite() && !a.is_finite() {
         return f32::NAN;
     }
@@ -297,8 +297,10 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
     if !a.is_finite() && b.is_finite() {
         return f64::NAN;
     }
-    let quotient = (a / b).floor();
-    let mut remainder = a - b * quotient;
+    // The floating remainder operation avoids overflowing the quotient for
+    // finite operands such as MAX and 0.5. Apply floor-modulus sign correction
+    // only after obtaining the bounded truncating remainder.
+    let mut remainder = a % b;
     if remainder == 0.0 {
         remainder = 0.0;
     }

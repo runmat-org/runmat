@@ -288,3 +288,53 @@ fn remainder_character_pages_are_not_scalarized_or_reordered() {
         }
     }
 }
+
+#[test]
+fn finite_remainders_survive_overflowing_quotients() {
+    for name in ["mod", "rem"] {
+        for left in [f64::MAX, -f64::MAX] {
+            for right in [0.5, -0.5, f64::MIN_POSITIVE] {
+                let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+                    name,
+                    &[Value::Num(left), Value::Num(right)],
+                    1,
+                ))
+                .unwrap() else {
+                    panic!("scalar remainder")
+                };
+                // MAX has no fractional bits and is a multiple of every
+                // represented power of two below one; the exact remainder is 0.
+                assert_eq!(result.to_bits(), 0.0_f64.to_bits(), "{name}");
+            }
+        }
+        let left =
+            runmat_value::Tensor::from_f32(vec![f32::MAX, -f32::MAX], vec![1, 1, 2]).unwrap();
+        let right = runmat_value::Tensor::from_f32(vec![0.5], vec![1, 1]).unwrap();
+        let Value::Tensor(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name,
+            &[Value::Tensor(left), Value::Tensor(right)],
+            1,
+        ))
+        .unwrap() else {
+            panic!("single pages")
+        };
+        assert_eq!(result.shape, vec![1, 1, 2]);
+        assert_eq!(result.as_f32_slice().unwrap(), &[0.0, 0.0]);
+    }
+    for (name, left, right, expected) in [
+        ("mod", -5.5, 2.0, 0.5_f64),
+        ("mod", 5.5, -2.0, -0.5),
+        ("rem", -5.5, 2.0, -1.5),
+        ("rem", 5.5, -2.0, 1.5),
+    ] {
+        let Value::Num(result) = block_on(runmat_runtime::call_builtin_async_with_outputs(
+            name,
+            &[Value::Num(left), Value::Num(right)],
+            1,
+        ))
+        .unwrap() else {
+            panic!("scalar remainder")
+        };
+        assert_eq!(result, expected);
+    }
+}
