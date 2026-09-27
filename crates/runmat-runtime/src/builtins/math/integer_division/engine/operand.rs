@@ -6,8 +6,70 @@ pub(super) struct IdivideBuffer {
     pub(super) class: Option<IntegerClass>,
 }
 
+pub(super) enum AdmittedOperand {
+    Host(IdivideBuffer),
+    Resident {
+        handle: runmat_accelerate_api::GpuTensorHandle,
+        class: IntegerClass,
+    },
+}
+
+impl AdmittedOperand {
+    pub(super) fn new(value: Value) -> BuiltinResult<Self> {
+        if let Value::GpuTensor(handle) = value {
+            let element = gpu_helpers::expected_handle_numeric_element_type(&handle)
+                .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?;
+            let class = runmat_accelerate_api::handle_integer_class(&handle).ok_or_else(|| {
+                error(
+                    &ERROR_INVALID_INPUT,
+                    "resident inputs must use an integer class",
+                )
+            })?;
+            if !gpu_helpers::numeric_descriptor_matches(
+                &handle,
+                element,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            ) {
+                return Err(error(
+                    &ERROR_INVALID_INPUT,
+                    "resident inputs require explicit real storage",
+                ));
+            }
+            Ok(Self::Resident { handle, class })
+        } else {
+            IdivideBuffer::from_host(value).map(Self::Host)
+        }
+    }
+
+    pub(super) fn class(&self) -> Option<IntegerClass> {
+        match self {
+            Self::Host(buffer) => buffer.class,
+            Self::Resident { class, .. } => Some(*class),
+        }
+    }
+
+    pub(super) fn shape(&self) -> &[usize] {
+        match self {
+            Self::Host(buffer) => &buffer.shape,
+            Self::Resident { handle, .. } => &handle.shape,
+        }
+    }
+
+    pub(super) async fn materialize(self) -> BuiltinResult<IdivideBuffer> {
+        match self {
+            Self::Host(buffer) => Ok(buffer),
+            Self::Resident { handle, .. } => {
+                let tensor = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?;
+                IdivideBuffer::from_tensor(tensor)
+            }
+        }
+    }
+}
+
 impl IdivideBuffer {
-    pub(super) async fn from_value(value: Value) -> BuiltinResult<Self> {
+    fn from_host(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::Num(value) => Ok(Self {
                 data: vec![scalar_double_integer(value)?],
@@ -20,12 +82,6 @@ impl IdivideBuffer {
                 class: Some(value.integer_class()),
             }),
             Value::Tensor(tensor) => Self::from_tensor(tensor),
-            Value::GpuTensor(handle) => {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?;
-                Self::from_tensor(tensor)
-            }
             other => Err(error(
                 &ERROR_INVALID_INPUT,
                 format!("unsupported integer input {other:?}"),
@@ -60,10 +116,10 @@ impl IdivideBuffer {
 }
 
 pub(super) fn output_class(
-    left: &IdivideBuffer,
-    right: &IdivideBuffer,
+    left: &AdmittedOperand,
+    right: &AdmittedOperand,
 ) -> BuiltinResult<IntegerClass> {
-    match (left.class, right.class) {
+    match (left.class(), right.class()) {
         (Some(lhs), Some(rhs)) if lhs == rhs => Ok(lhs),
         (Some(class), None) | (None, Some(class)) => {
             if matches!(class, IntegerClass::Int64 | IntegerClass::UInt64) {

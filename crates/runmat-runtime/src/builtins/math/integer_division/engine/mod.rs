@@ -9,7 +9,7 @@ use crate::builtins::common::integer_value::{value_from_exact_integers, IntegerC
 use crate::builtins::common::{gpu_helpers, resident_output};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
-use operand::{output_class, IdivideBuffer};
+use operand::{output_class, AdmittedOperand};
 use rounding::RoundingMode;
 
 const NAME: &str = "idivide";
@@ -22,36 +22,52 @@ mod operand;
 mod rounding;
 
 pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        runmat_builtins::IDIVIDE_CATALOG_ENTRY.descriptor,
+        &ERROR_INVALID_INPUT,
+        NAME,
+    )?;
     if !(2..=3).contains(&args.len()) {
         return Err(error(
             &ERROR_INVALID_INPUT,
             "expected two integer inputs and an optional rounding mode",
         ));
     }
-    let output_source = gpu_helpers::select_resident_output_source(
-        args.iter().take(2).filter_map(|value| match value {
-            Value::GpuTensor(handle) => Some(handle.clone()),
-            _ => None,
-        }),
-        NAME,
-    )?;
-    let mut arguments = args.into_iter();
-    let left = IdivideBuffer::from_value(arguments.next().expect("A")).await?;
-    let right = IdivideBuffer::from_value(arguments.next().expect("B")).await?;
-    let class = output_class(&left, &right)?;
-    let rounding = match arguments.next() {
-        Some(value) => RoundingMode::parse(&value)?,
+    let rounding = match args.get(2) {
+        Some(value) => RoundingMode::parse(value)?,
         None => RoundingMode::Fix,
     };
-    let plan = BroadcastPlan::new(&left.shape, &right.shape)
+    let borrowed: Vec<_> = args
+        .iter()
+        .take(2)
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect();
+    let output_source = gpu_helpers::select_resident_output_source(borrowed.iter().cloned(), NAME)?;
+    let mut arguments = args.into_iter();
+    let left = AdmittedOperand::new(arguments.next().expect("A"))?;
+    let right = AdmittedOperand::new(arguments.next().expect("B"))?;
+    let class = output_class(&left, &right)?;
+    let plan = BroadcastPlan::new(left.shape(), right.shape())
         .map_err(|detail| error(&ERROR_SIZE_MISMATCH, detail))?;
+    let left = left.materialize().await?;
+    let right = right.materialize().await?;
     let mut values = Vec::with_capacity(plan.len());
     for (_, left_index, right_index) in plan.iter() {
         let divisor = right.data[right_index];
         if divisor == 0 {
             return Err(error(&ERROR_DIVIDE_BY_ZERO, "divisor contains zero"));
         }
-        let quotient = rounding.divide(left.data[left_index], divisor);
+        let quotient = rounding
+            .divide(left.data[left_index], divisor)
+            .ok_or_else(|| {
+                error(
+                    &ERROR_OVERFLOW,
+                    "integer quotient is outside the supported range",
+                )
+            })?;
         let value = class.value_from_i128(quotient).ok_or_else(|| {
             error(
                 &ERROR_OVERFLOW,
@@ -62,8 +78,13 @@ pub(super) async fn evaluate(args: Vec<Value>) -> BuiltinResult<Value> {
     }
     let result = value_from_exact_integers(values, plan.output_shape().to_vec(), class)
         .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))?;
-    resident_output::restore_to_source_provider(result, output_source.as_ref())
-        .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))
+    let protected: Vec<_> = borrowed.iter().collect();
+    resident_output::restore_to_source_provider_protecting(
+        result,
+        output_source.as_ref(),
+        &protected,
+    )
+    .map_err(|detail| error(&ERROR_INVALID_INPUT, detail))
 }
 
 fn error(
