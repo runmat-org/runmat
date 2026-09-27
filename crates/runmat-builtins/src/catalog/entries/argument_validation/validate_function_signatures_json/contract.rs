@@ -39,5 +39,5 @@ pub const VALIDATE_FUNCTION_SIGNATURES_JSON_DESCRIPTOR: BuiltinDescriptor = Buil
 pub const VALIDATE_FUNCTION_SIGNATURES_JSON_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
  id: "signature-json-payload", mode: BuiltinExtensionMode::RunMatOnly,
  description: "JSON payload syntax validation; MATLAB filename and no-input forms are not implemented.",
- error_identifier: Some("RunMat:validateFunctionSignaturesJSON:PayloadExtension"),
+ error_identifier: Some("RunMat:compatibility:ValidateFunctionSignaturesJSONPayloadExtension"),
 };

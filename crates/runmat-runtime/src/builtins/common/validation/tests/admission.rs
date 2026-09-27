@@ -170,6 +170,6 @@ fn json_payload_extension_is_gated_without_filesystem_access() {
         validate_function_signatures_json::evaluate(vec![Value::String("{}".into())]).unwrap_err();
     assert_eq!(
         error.identifier(),
-        Some("RunMat:validateFunctionSignaturesJSON:PayloadExtension")
+        Some("RunMat:compatibility:ValidateFunctionSignaturesJSONPayloadExtension")
     );
 }

@@ -52,9 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .filter_map(|entry| {
             let descriptor = entry.descriptor;
-            if !include_non_public
-                && descriptor.completion_policy != BuiltinCompletionPolicy::Public
-            {
+            if !exports_policy(descriptor.completion_policy, include_non_public) {
                 return None;
             }
             Some(BuiltinDescriptorExport {
@@ -73,9 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .into_iter()
                 .filter_map(|builtin| {
                     let descriptor = builtin.descriptor?;
-                    if !include_non_public
-                        && descriptor.completion_policy != BuiltinCompletionPolicy::Public
-                    {
+                    if !exports_policy(descriptor.completion_policy, include_non_public) {
                         return None;
                     }
                     Some(BuiltinDescriptorExport {
@@ -113,6 +109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn exports_policy(policy: BuiltinCompletionPolicy, include_non_public: bool) -> bool {
+    include_non_public || policy == BuiltinCompletionPolicy::Public
+}
+
 fn validate_unique_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result<(), String> {
     let mut seen = std::collections::BTreeSet::new();
     for name in names {
@@ -125,7 +125,19 @@ fn validate_unique_names<'a>(names: impl IntoIterator<Item = &'a str>) -> Result
 
 #[cfg(test)]
 mod tests {
-    use super::validate_unique_names;
+    use super::{exports_policy, validate_unique_names, BuiltinCompletionPolicy};
+
+    #[test]
+    fn default_export_is_public_only_and_explicit_export_includes_all_policies() {
+        for (policy, publicly_exported) in [
+            (BuiltinCompletionPolicy::Public, true),
+            (BuiltinCompletionPolicy::MethodOnly, false),
+            (BuiltinCompletionPolicy::HiddenInternal, false),
+        ] {
+            assert_eq!(exports_policy(policy, false), publicly_exported);
+            assert!(exports_policy(policy, true));
+        }
+    }
 
     #[test]
     fn duplicate_registrations_cannot_produce_an_ambiguous_catalog() {

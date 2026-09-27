@@ -12,6 +12,7 @@ use runmat_value::Value;
 
 #[runtime_builtin(
     name = "addpath",
+    binding_variant = "default",
     builtin_path = "crate::builtins::io::repl_fs::addpath"
 )]
 async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {

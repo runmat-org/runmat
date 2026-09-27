@@ -4,6 +4,7 @@ use runmat_builtins::*;
 #[test]
 fn migrated_filesystem_and_host_calls_have_one_canonical_binding() {
     let entries = [
+        &ADDPATH_CATALOG_ENTRY,
         &COPYFILE_CATALOG_ENTRY,
         &DIR_CATALOG_ENTRY,
         &EXIST_CATALOG_ENTRY,

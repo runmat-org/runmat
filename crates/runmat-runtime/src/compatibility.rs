@@ -2414,6 +2414,15 @@ mod tests {
         let builtins = catalog["builtins"].as_array().expect("builtin entries");
         for registered in metadata_view::integer_metadata()
             .into_iter()
+            // docs/builtins/meta.json is the producer's default public-only
+            // export. Method/internal definitions still participate in all
+            // live metadata invariants above, but are not public exports.
+            .filter(|builtin| {
+                builtin.descriptor.is_some_and(|descriptor| {
+                    descriptor.completion_policy
+                        == runmat_builtins::BuiltinCompletionPolicy::Public
+                })
+            })
             .filter(|builtin| {
                 !builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_some()
             })
