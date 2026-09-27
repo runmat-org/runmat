@@ -149,7 +149,7 @@ pub(crate) async fn requires_complex(
 
 fn provider_error(builtin: &str, operation: &str, source: anyhow::Error) -> RuntimeError {
     let mut failure = error(builtin, format!("{operation} failed: {source}"));
-    failure.source = Some(source.into_boxed_dyn_error());
+    failure = crate::runtime_error::with_provider_execution_source(failure, source.into());
     failure
 }
 

@@ -6,6 +6,9 @@ use runmat_accelerate_api::{
 use runmat_value::Value;
 use std::sync::Mutex;
 
+#[path = "math_boundaries/trigonometry.rs"]
+mod trigonometry;
+
 #[derive(Debug)]
 struct BoundaryFailure(&'static str);
 impl std::fmt::Display for BoundaryFailure {
@@ -22,6 +25,14 @@ struct Provider {
     probes: Mutex<Vec<(u64, RetirementProbe)>>,
 }
 impl Provider {
+    fn trig(&self, hook: &'static str, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
+        if self.failure == "complex_from_real" {
+            self.trace.lock().unwrap().push(hook);
+            self.allocate(input.shape().to_vec(), GpuTensorStorage::Real)
+        } else {
+            self.fail(hook)
+        }
+    }
     fn allocate(
         &self,
         shape: Vec<usize>,
@@ -100,6 +111,9 @@ impl AccelProvider for Provider {
         _: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if self.failure == "reduce_min" {
+                return self.fail("reduce_min");
+            }
             self.trace.lock().unwrap().push("reduce_min");
             let result = self.owner.allocate_numeric(HostNumericTensorOwned {
                 data: HostNumericDataOwned::F64(vec![1.0]),
@@ -129,6 +143,30 @@ impl AccelProvider for Provider {
     unary!(unary_imag);
     unary!(unary_conj);
     unary!(complex_from_real);
+    fn unary_sin<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.trig("unary_sin", input) })
+    }
+    fn unary_cos<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.trig("unary_cos", input) })
+    }
+    fn unary_tan<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.trig("unary_tan", input) })
+    }
+    fn reduce_max<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail("reduce_max") })
+    }
     fn transpose(&self, input: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         if self.failure == "transpose" {
             return self.fail("transpose");
@@ -220,7 +258,15 @@ fn check_case(
         .unwrap();
     let right = provider
         .owner
-        .allocate_zeroed(shape, NumericElementType::F64, storage)
+        .allocate_zeroed(
+            shape,
+            NumericElementType::F64,
+            if hook == "complex_from_real" && matches!(name, "sin" | "cos" | "tan") {
+                GpuTensorStorage::ComplexInterleaved
+            } else {
+                storage
+            },
+        )
         .unwrap();
     let args = arguments(&left.handle, &right.handle);
     let error =

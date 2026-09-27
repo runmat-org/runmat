@@ -218,7 +218,8 @@ async fn cos_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                         format!("provider unary cosine failed: {error}"),
                     );
                     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    failure.source = Some(error.into_boxed_dyn_error());
+                    failure =
+                        crate::runtime_error::with_provider_execution_source(failure, error.into());
                     return Err(failure);
                 }
             }
