@@ -22,6 +22,7 @@ pub(super) fn compile_connector_observation_plan(
 pub(super) fn resolve_connector_target(
     spec: &ObservationSpec,
     connector_plan: Option<&CanonicalStructuralConnectorPlan>,
+    maximum_selected_entities: usize,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if spec.source_location != FieldLocation::Connector
         || spec.output_location != FieldLocation::Connector
@@ -60,6 +61,9 @@ pub(super) fn resolve_connector_target(
         .enumerate()
         .find(|(_, entry)| entry.connector_id() == connector_id)
         .ok_or_else(|| target_error(spec, "connector target is absent from the canonical plan"))?;
+    if maximum_selected_entities == 0 {
+        return Err(ObservationError::Limit("selected topology entities"));
+    }
     Ok(ResolvedObservationTarget::Connectors {
         indices: vec![index],
         identities: vec![StableDigest::from_bytes(*entry.source_digest().bytes())],

@@ -35,7 +35,7 @@ use crate::{
 
 use super::*;
 
-fn scalar_definition() -> RecoveredFieldDefinition {
+pub(super) fn scalar_definition() -> RecoveredFieldDefinition {
     RecoveredFieldDefinition::new(
         "temperature.recovered",
         ObservationQuantity::Temperature,
@@ -178,7 +178,7 @@ fn catalog_at_sample(
     .unwrap()
 }
 
-fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
+pub(super) fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
     ObservationSpec {
         observation_id: ObservationId(id.into()),
         quantity: ObservationQuantity::Temperature,
@@ -210,7 +210,7 @@ fn spec(id: &str, target: ObservationTarget) -> ObservationSpec {
     }
 }
 
-fn thermal_step(requests: Vec<ObservationRequest>) -> ProcedureStep {
+pub(super) fn thermal_step(requests: Vec<ObservationRequest>) -> ProcedureStep {
     let mut step = ProcedureStep::thermal_transient("thermal");
     step.independent_domain = runmat_analysis_core::IndependentDomain::Static;
     step.observations = requests;
@@ -240,7 +240,7 @@ fn complex_pressure_history_spec(
     spec
 }
 
-fn projection(order: ElementOrder) -> AnalysisProjection {
+pub(super) fn projection(order: ElementOrder) -> AnalysisProjection {
     AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(order)).unwrap()
 }
 

@@ -4,10 +4,10 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    resolve_observation_plan, resolve_structural_observation_plan, ObservationFieldSelection,
-    ObservationLimits, ResolvedObservationPlan,
+use super::resolve::{
+    verify_authored_observations, verify_observation_plan, verify_structural_observation_plan,
 };
+use super::{ObservationFieldSelection, ResolvedObservationPlan};
 use crate::execution::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequest,
     ThermalSolverResultManifest, ThermalWorkload,
@@ -88,6 +88,7 @@ impl ObservationFieldCatalog {
             .find(|step| step.step_id == plan.step_id)
             .ok_or_else(|| invalid("structural authored step absent"))?;
         let sequence = crate::execution::SequenceIdentity::from_solver_contract(&model.sequence)?;
+        verify_authored_observations(step, plan).map_err(invalid)?;
         let producer = crate::execution::StepIdentity::from_solver_contract(sequence, step)?;
         let constraints =
             crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(model, mesh)
@@ -107,21 +108,8 @@ impl ObservationFieldCatalog {
             .filter(|entry| seen.insert(entry.definition.identity()))
             .map(|entry| entry.definition.clone())
             .collect::<Vec<_>>();
-        let authoritative = resolve_structural_observation_plan(
-            step,
-            model,
-            mesh,
-            &constraints,
-            &definitions,
-            verification_limits(),
-        )
-        .map_err(invalid)?;
-        if &authoritative != plan {
-            return Err(invalid(
-                "resolved structural plan differs from authoritative model, topology, and fields",
-            ));
-        }
-        Ok(())
+        verify_structural_observation_plan(step, model, mesh, &constraints, &definitions, plan)
+            .map_err(invalid)
     }
     /// Reconstruct the plan from producer metadata and the actual mesh, not asserted indices.
     pub fn validate_thermal_plan(
@@ -148,22 +136,13 @@ impl ObservationFieldCatalog {
             .iter()
             .find(|step| step.step_id == workload.step_id)
             .ok_or_else(|| invalid("thermal authored step absent"))?;
-        // Limits gate admission only; they never alter resolution. These ceilings are
-        // verification-only, preserving (not replacing) the task's admission policy.
+        verify_authored_observations(step, plan).map_err(invalid)?;
         let projection = crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
         let definitions = first
             .iter()
             .map(|entry| entry.definition.clone())
             .collect::<Vec<_>>();
-        let authoritative =
-            resolve_observation_plan(step, &projection, &definitions, verification_limits())
-                .map_err(invalid)?;
-        if &authoritative != plan {
-            return Err(invalid(
-                "resolved thermal history plan differs from authoritative mesh and fields",
-            ));
-        }
-        Ok(())
+        verify_observation_plan(step, &projection, &definitions, plan).map_err(invalid)
     }
 
     pub fn structural(
@@ -282,18 +261,6 @@ impl ObservationFieldCatalog {
             bytes,
             LIMITS,
         )?)
-    }
-}
-
-fn verification_limits() -> ObservationLimits {
-    ObservationLimits {
-        maximum_observations: usize::MAX,
-        maximum_selected_entities: usize::MAX,
-        maximum_values: usize::MAX,
-        maximum_operation_count: u64::MAX,
-        maximum_peak_resident_bytes: u64::MAX,
-        maximum_stored_bytes: u64::MAX,
-        maximum_transfer_bytes: u64::MAX,
     }
 }
 

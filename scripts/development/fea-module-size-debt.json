@@ -7,7 +7,6 @@
   "crates/runmat-runtime/src/analysis/storage.rs": 1816,
   "crates/runmat-analysis/fea/src/fixtures.rs": 1691,
   "crates/runmat-runtime/src/analysis/operations/query.rs": 1672,
-  "crates/runmat-analysis/fea/src/results/observation/resolve.rs": 1372,
   "crates/runmat-analysis/fea/src/contracts/mod.rs": 703,
   "crates/runmat-analysis/fea/src/results/observation/contract.rs": 1302,
   "crates/runmat-analysis/fea/src/results/observation/distributed.rs": 1160,
