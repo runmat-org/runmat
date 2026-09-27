@@ -42,6 +42,11 @@ impl NativeLogicalProvider {
 }
 
 impl AccelProvider for NativeLogicalProvider {
+    fn upload(&self, _: &HostTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+        Err(unsupported_provider_operation(
+            "fixture native double upload",
+        ))
+    }
     fn device_id(&self) -> u32 {
         self.owner.device_id()
     }
