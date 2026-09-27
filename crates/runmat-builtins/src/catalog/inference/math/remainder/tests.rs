@@ -46,9 +46,32 @@ fn typed_rules_preserve_numeric_facts() {
             })
         ));
         assert_eq!(output.shape, ShapeFact::from(vec![Some(2), Some(3)]));
-        assert!(matches!(output.residency, ResidencyFact::Device { .. }));
+        assert_eq!(output.residency, ResidencyFact::Unknown);
+        assert_eq!(output.storage, StorageFact::Unknown);
         assert_eq!(output.view, ViewFact::Materialized);
         assert_eq!(output.alias, AliasFact::Unique);
+    }
+}
+
+#[test]
+fn single_remainder_singletons_stay_dense_and_mixed_residency_gathers() {
+    for name in ["mod", "rem"] {
+        let entry = builtin_catalog_entry_by_name(name).unwrap();
+        let left = numeric(
+            NumericClass::Single,
+            NumericDomain::Real,
+            vec![Some(1), Some(1)],
+        );
+        let right = left.clone();
+        let result = infer_catalog_call(entry, &request(vec![left.clone(), right.clone()]));
+        assert_eq!(result.outputs[0].storage, StorageFact::Dense);
+        let mut resident = left;
+        resident.residency = ResidencyFact::Device {
+            provider: Some("test".into()),
+        };
+        let result = infer_catalog_call(entry, &request(vec![resident, right]));
+        assert_eq!(result.outputs[0].residency, ResidencyFact::Host);
+        assert_eq!(result.outputs[0].storage, StorageFact::Dense);
     }
 }
 

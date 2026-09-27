@@ -1,11 +1,11 @@
 use super::class;
 use crate::{BuiltinCatalogEntry, RemainderFunction};
 use runmat_types::{
-    broadcast_shape, CallInference, CallRequest, DynamicReason, NumericDomain, ShapeFact,
-    StorageFact, ValueFact, ValueKindFact,
+    broadcast_shape, CallInference, CallRequest, DynamicReason, NumericDomain, ResidencyFact,
+    ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
-use super::super::super::{argument_error, finish_fixed, numeric_kind, preserved_binary_residency};
+use super::super::super::{argument_error, finish_fixed, numeric_kind};
 use super::super::binary_containers::{self, Operation};
 
 pub(super) fn infer(
@@ -79,8 +79,25 @@ pub(super) fn infer(
             ShapeFact::Unknown
         }
     };
-    super::super::super::support::facts::materialize(&mut output);
-    output.residency = preserved_binary_residency(&left.residency, &right.residency);
+    output.residency = match (&left.residency, &right.residency) {
+        (ResidencyFact::Host, ResidencyFact::Host)
+        | (ResidencyFact::Host, ResidencyFact::Device { .. })
+        | (ResidencyFact::Device { .. }, ResidencyFact::Host) => ResidencyFact::Host,
+        // Resident fallback can restore to the provider or retain a gathered
+        // result when automatic placement permits it. Facts do not encode the
+        // handle's explicit/automatic provenance or upload availability.
+        _ => ResidencyFact::Unknown,
+    };
+    if output_class.integer_class().is_none() {
+        super::super::super::support::facts::materialize_floating_result(&mut output, false);
+    } else {
+        super::super::super::support::facts::materialize(&mut output);
+        if output.residency != ResidencyFact::Host {
+            output.storage = StorageFact::Unknown;
+            output.layout = runmat_types::LayoutFact::Unknown;
+            output.contiguity = runmat_types::ContiguityFact::Unknown;
+        }
+    }
     finish_fixed(entry, request, output, diagnostics)
 }
 
