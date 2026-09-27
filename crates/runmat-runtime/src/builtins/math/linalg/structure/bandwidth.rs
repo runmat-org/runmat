@@ -13,6 +13,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
 
+use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -378,8 +379,10 @@ impl MatrixData {
 
     async fn bandwidth(&self) -> BuiltinResult<(usize, usize)> {
         match self {
-            MatrixData::Real(tensor) => bandwidth_host_real_tensor(tensor),
-            MatrixData::Complex(tensor) => bandwidth_host_complex_tensor(tensor),
+            MatrixData::Real(tensor) => bandwidth_host_real_tensor(tensor).map_err(Into::into),
+            MatrixData::Complex(tensor) => {
+                bandwidth_host_complex_tensor(tensor).map_err(Into::into)
+            }
             MatrixData::Gpu(handle) => bandwidth_gpu(handle).await,
         }
     }
@@ -394,7 +397,7 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
         || runmat_accelerate_api::handle_is_logical(handle)
     {
         let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-        return bandwidth_host_real_tensor(&tensor);
+        return bandwidth_host_real_tensor(&tensor).map_err(Into::into);
     }
     if let Some(provider) = gpu_helpers::exact_provider_for_handle(handle) {
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
@@ -416,16 +419,17 @@ async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-    bandwidth_host_real_tensor(&tensor)
+    bandwidth_host_real_tensor(&tensor).map_err(Into::into)
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+pub fn ensure_matrix_shape(shape: &[usize]) -> StructureKernelResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => Ok((1, shape[0])),
         _ => {
             if shape[2..].iter().any(|&dim| dim > 1) {
-                Err(bandwidth_error_with_detail(
+                Err(StructureKernelError::detail(
+                    NAME,
                     &BANDWIDTH_ERROR_INVALID_INPUT,
                     "input must be a 2-D matrix",
                 ))
@@ -436,7 +440,10 @@ pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
     }
 }
 
-pub fn bandwidth_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<(usize, usize)> {
+pub fn bandwidth_host_real_data(
+    shape: &[usize],
+    data: &[f64],
+) -> StructureKernelResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(shape)?;
     Ok(compute_real_bandwidth(rows, cols, data))
 }
@@ -444,12 +451,12 @@ pub fn bandwidth_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<
 pub fn bandwidth_host_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> BuiltinResult<(usize, usize)> {
+) -> StructureKernelResult<(usize, usize)> {
     let (rows, cols) = ensure_matrix_shape(shape)?;
     Ok(compute_complex_bandwidth(rows, cols, data))
 }
 
-pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usize)> {
+pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> StructureKernelResult<(usize, usize)> {
     if let Some(storage) = tensor.integer_storage() {
         let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
         return Ok(compute_integer_bandwidth(rows, cols, storage));
@@ -458,7 +465,9 @@ pub fn bandwidth_host_real_tensor(tensor: &Tensor) -> BuiltinResult<(usize, usiz
     bandwidth_host_real_data(&tensor.shape, &values)
 }
 
-pub fn bandwidth_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<(usize, usize)> {
+pub fn bandwidth_host_complex_tensor(
+    tensor: &ComplexTensor,
+) -> StructureKernelResult<(usize, usize)> {
     if tensor.integer_storage().is_some() {
         let (rows, cols) = ensure_matrix_shape(&tensor.shape)?;
         return Ok(compute_complex_integer_bandwidth(rows, cols, tensor));

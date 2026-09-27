@@ -12,6 +12,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value};
 
+use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -526,13 +527,14 @@ fn scalar_tensor_f64(tensor: &Tensor) -> f64 {
     tensor::tensor_value_f64(tensor, 0)
 }
 
-fn matrix_dimensions_for(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+fn matrix_dimensions_for(shape: &[usize]) -> StructureKernelResult<(usize, usize)> {
     match shape.len() {
         0 => Ok((1, 1)),
         1 => Ok((shape[0], 1)),
         _ => {
             if shape.len() > 2 && shape.iter().skip(2).any(|&dim| dim != 1) {
-                Err(issymmetric_error_with_detail(
+                Err(StructureKernelError::detail(
+                    NAME,
                     &ISSYMMETRIC_ERROR_INVALID_INPUT,
                     "inputs must be 2-D matrices or vectors",
                 ))
@@ -694,11 +696,15 @@ fn complex_within(re: f64, im: f64, ref_re: f64, ref_im: f64, tol: f64) -> bool 
     diff_r.hypot(diff_i) <= tol
 }
 
-pub fn ensure_matrix_shape(shape: &[usize]) -> BuiltinResult<(usize, usize)> {
+pub fn ensure_matrix_shape(shape: &[usize]) -> StructureKernelResult<(usize, usize)> {
     matrix_dimensions_for(shape)
 }
 
-pub fn issymmetric_host_real_tensor(tensor: &Tensor, skew: bool, tol: f64) -> BuiltinResult<bool> {
+pub fn issymmetric_host_real_tensor(
+    tensor: &Tensor,
+    skew: bool,
+    tol: f64,
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
     if rows != cols {
         return Ok(false);
@@ -715,7 +721,7 @@ pub fn issymmetric_host_complex_tensor(
     tensor: &ComplexTensor,
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(&tensor.shape)?;
     if rows != cols {
         return Ok(false);
@@ -733,13 +739,13 @@ pub fn issymmetric_host_real_data(
     data: &[f64],
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = Tensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, e))?;
+        .map_err(|e| StructureKernelError::detail(NAME, &ISSYMMETRIC_ERROR_INTERNAL, e))?;
     issymmetric_host_real_tensor(&tensor, skew, tol)
 }
 
@@ -748,13 +754,13 @@ pub fn issymmetric_host_complex_data(
     data: &[(f64, f64)],
     skew: bool,
     tol: f64,
-) -> BuiltinResult<bool> {
+) -> StructureKernelResult<bool> {
     let (rows, cols) = matrix_dimensions_for(shape)?;
     if rows != cols {
         return Ok(false);
     }
     let tensor = ComplexTensor::new(data.to_vec(), shape.to_vec())
-        .map_err(|e| issymmetric_error_with_detail(&ISSYMMETRIC_ERROR_INTERNAL, e))?;
+        .map_err(|e| StructureKernelError::detail(NAME, &ISSYMMETRIC_ERROR_INTERNAL, e))?;
     issymmetric_host_complex_tensor(&tensor, skew, tol)
 }
 

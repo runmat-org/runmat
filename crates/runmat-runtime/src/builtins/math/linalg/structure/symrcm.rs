@@ -18,6 +18,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
 
+use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
@@ -238,7 +239,7 @@ async fn symrcm_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a real tensor.
-pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_real_tensor(tensor: &Tensor) -> StructureKernelResult<Vec<usize>> {
     if let Some(storage) = tensor.integer_storage() {
         return adjacency_from_integer_storage(&tensor.shape, storage)
             .map(|adjacency| symmetric_reverse_cuthill_mckee(&adjacency));
@@ -248,23 +249,29 @@ pub fn symrcm_host_real_tensor(tensor: &Tensor) -> BuiltinResult<Vec<usize>> {
 }
 
 /// Compute the symmetric reverse Cuthill-McKee ordering for a complex tensor.
-pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_complex_tensor(tensor: &ComplexTensor) -> StructureKernelResult<Vec<usize>> {
     symrcm_host_complex_data(&tensor.shape, &tensor.materialize_f64())
 }
 
 /// Host implementation for dense real data.
-pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_real_data(shape: &[usize], data: &[f64]) -> StructureKernelResult<Vec<usize>> {
     let adjacency = adjacency_from_real_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
 /// Host implementation for dense complex data.
-pub fn symrcm_host_complex_data(shape: &[usize], data: &[(f64, f64)]) -> BuiltinResult<Vec<usize>> {
+pub fn symrcm_host_complex_data(
+    shape: &[usize],
+    data: &[(f64, f64)],
+) -> StructureKernelResult<Vec<usize>> {
     let adjacency = adjacency_from_complex_data(shape, data)?;
     Ok(symmetric_reverse_cuthill_mckee(&adjacency))
 }
 
-fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<Vec<usize>>> {
+fn adjacency_from_real_data(
+    shape: &[usize],
+    data: &[f64],
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |value| *value != 0.0)
 }
@@ -272,7 +279,7 @@ fn adjacency_from_real_data(shape: &[usize], data: &[f64]) -> BuiltinResult<Vec<
 fn adjacency_from_integer_storage(
     shape: &[usize],
     storage: &IntegerStorage,
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency_from_integer_storage(n, storage)
 }
@@ -280,15 +287,16 @@ fn adjacency_from_integer_storage(
 fn adjacency_from_complex_data(
     shape: &[usize],
     data: &[(f64, f64)],
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     let n = ensure_square_matrix_shape(shape)?;
     build_adjacency(n, n, data, |(re, im)| !(*re == 0.0 && *im == 0.0))
 }
 
-fn ensure_square_matrix_shape(shape: &[usize]) -> BuiltinResult<usize> {
+fn ensure_square_matrix_shape(shape: &[usize]) -> StructureKernelResult<usize> {
     let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)?;
     if rows != cols {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "input matrix must be square",
         ));
@@ -301,7 +309,7 @@ fn build_adjacency<T, F>(
     cols: usize,
     data: &[T],
     mut is_nonzero: F,
-) -> BuiltinResult<Vec<Vec<usize>>>
+) -> StructureKernelResult<Vec<Vec<usize>>>
 where
     F: FnMut(&T) -> bool,
 {
@@ -310,13 +318,15 @@ where
     }
 
     let expected = rows.checked_mul(cols).ok_or_else(|| {
-        symrcm_error_with_detail(
+        StructureKernelError::detail(
+            NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if data.len() < expected {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
@@ -353,18 +363,20 @@ where
 fn build_adjacency_from_integer_storage(
     rows: usize,
     storage: &IntegerStorage,
-) -> BuiltinResult<Vec<Vec<usize>>> {
+) -> StructureKernelResult<Vec<Vec<usize>>> {
     if rows == 0 {
         return Ok(Vec::new());
     }
     let expected = rows.checked_mul(rows).ok_or_else(|| {
-        symrcm_error_with_detail(
+        StructureKernelError::detail(
+            NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if storage.len() < expected {
-        return Err(symrcm_error_with_detail(
+        return Err(StructureKernelError::detail(
+            NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
