@@ -46,15 +46,27 @@ pub(super) fn binary_output_class(
     left: &BitBuffer,
     right: &BitBuffer,
 ) -> BuiltinResult<Option<IntegerClass>> {
-    match (left.output_class, right.output_class) {
+    binary_output_class_from_metadata(
+        name,
+        (left.output_class, left.is_scalar),
+        (right.output_class, right.is_scalar),
+    )
+}
+
+pub(super) fn binary_output_class_from_metadata(
+    name: &'static str,
+    left: (Option<IntegerClass>, bool),
+    right: (Option<IntegerClass>, bool),
+) -> BuiltinResult<Option<IntegerClass>> {
+    match (left.0, right.0) {
         (Some(lhs), Some(rhs)) if lhs == rhs => Ok(Some(lhs)),
         (Some(_), Some(_)) => Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,
             "integer operands must have the same class unless the other operand is a scalar double",
         )),
-        (Some(class), None) if right.is_scalar => Ok(Some(class)),
-        (None, Some(class)) if left.is_scalar => Ok(Some(class)),
+        (Some(class), None) if right.1 => Ok(Some(class)),
+        (None, Some(class)) if left.1 => Ok(Some(class)),
         (Some(_), None) | (None, Some(_)) => Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,

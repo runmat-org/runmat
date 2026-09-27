@@ -45,6 +45,10 @@ fn invalid_host_controls_and_shapes_fail_before_resident_download() {
     PROVIDER.0.store(0, Ordering::Relaxed);
     for (name, args) in [
         ("bitand", vec![source(), Value::Num(1.5)]),
+        (
+            "bitand",
+            vec![source(), Value::Int(runmat_value::IntValue::U16(1))],
+        ),
         ("bitor", vec![source(), Value::String("invalid".into())]),
         ("bitxor", vec![source(), Value::Num(f64::NAN)]),
         ("bitget", vec![source(), Value::Num(f64::NAN)]),

@@ -31,6 +31,8 @@ pub(super) async fn binary_bitwise(
     }
     let left = admit_bit_buffer(name, lhs, assumed)?;
     let right = admit_bit_buffer(name, rhs, assumed)?;
+    let output_class =
+        binary_output_class_from_metadata(name, left.result_metadata(), right.result_metadata())?;
     let plan = BroadcastPlan::new(
         left.shape(|value| &value.shape),
         right.shape(|value| &value.shape),
@@ -42,7 +44,6 @@ pub(super) async fn binary_bitwise(
     let right = right
         .materialize(name, |value| tensor_to_bit_buffer(name, value, assumed))
         .await?;
-    let output_class = binary_output_class(name, &left, &right)?;
     let compute_class = assumed.or(output_class);
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {

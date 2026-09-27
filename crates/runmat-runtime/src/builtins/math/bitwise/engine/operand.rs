@@ -36,6 +36,15 @@ impl<T> AdmittedBuffer<T> {
 }
 
 impl AdmittedBuffer<BitBuffer> {
+    pub(super) fn result_metadata(&self) -> (Option<IntegerClass>, bool) {
+        match self {
+            Self::Host(value) => (value.output_class, value.is_scalar),
+            Self::Resident(handle) => (
+                runmat_accelerate_api::handle_integer_class(handle),
+                tensor::element_count(&handle.shape) == 1,
+            ),
+        }
+    }
     pub(super) fn bit_width(&self, assumed: Option<IntegerClass>) -> u32 {
         match self {
             Self::Host(value) => value.compute_class,
