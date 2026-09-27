@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use runmat_builtins::{
-    builtin_functions, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
+    builtin_id_by_name, BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
     BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
     BuiltinSignatureDescriptor,
 };
@@ -476,11 +476,9 @@ fn variable_match(name: &str) -> Option<String> {
 }
 
 fn builtin_matches(name: &str) -> Vec<String> {
-    let lowered = name.to_ascii_lowercase();
-    builtin_functions()
+    builtin_id_by_name(name)
         .into_iter()
-        .filter(|b| b.name.eq_ignore_ascii_case(&lowered))
-        .map(|b| format!("built-in (RunMat builtin: {})", b.name))
+        .map(|identity| format!("built-in (RunMat builtin: {})", identity.0))
         .collect()
 }
 
@@ -635,6 +633,20 @@ pub(crate) mod tests {
 
     fn error_message(err: crate::RuntimeError) -> String {
         err.message().to_string()
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn builtin_lookup_includes_catalog_owned_and_legacy_names_once() {
+        let (_guard, _lock) = test_guard();
+        assert!(runmat_builtins::builtin_catalog_entry_by_name("sin").is_some());
+        assert!(runmat_builtins::builtin_function_by_name("sin").is_none());
+        assert_eq!(builtin_matches("SiN"), ["built-in (RunMat builtin: sin)"]);
+        assert_eq!(
+            builtin_matches("which"),
+            ["built-in (RunMat builtin: which)"]
+        );
+        assert!(builtin_matches("__runmat_nonexistent_which_fixture__").is_empty());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
