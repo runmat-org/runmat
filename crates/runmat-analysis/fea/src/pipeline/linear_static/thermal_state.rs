@@ -5,6 +5,8 @@ use runmat_canonical_codec::{encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 
 #[cfg(test)]
+mod qualification;
+#[cfg(test)]
 mod tests;
 
 use crate::{
