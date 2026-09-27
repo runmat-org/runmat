@@ -1,5 +1,5 @@
 use super::*;
-use crate::MxGpuLease;
+use crate::mxarray::MxGpuLease;
 use runmat_accelerate_api::NativeDeviceAccess;
 
 #[test]

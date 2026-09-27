@@ -1,9 +1,11 @@
 //! Real allocation retirement reenters the host only after arena detachment.
 use super::*;
-use runmat_accelerate_api::{
+use runmat_accelerate_api::allocation::{
     AllocationAcquisitionError, AllocationIdentity, AllocationLease, AllocationOwner,
-    AllocationRegistrationError, AllocationRetirementOutcome, GpuPhysicalDescriptor,
-    GpuTensorHandle, GpuTensorStorage, GpuTensorView, NumericElementType, WeakAllocationLease,
+    AllocationRegistrationError, AllocationRetirementOutcome, WeakAllocationLease,
+};
+use runmat_accelerate_api::{
+    GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorStorage, GpuTensorView, NumericElementType,
 };
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
