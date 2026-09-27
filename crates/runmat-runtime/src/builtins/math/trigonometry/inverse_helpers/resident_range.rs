@@ -175,10 +175,10 @@ mod lease_tests {
         drop(reductions);
         assert_eq!(input.probe.retirements(), 0);
         assert_eq!(temporary.probe.retirements(), 0);
-        alias.validate_live().unwrap();
+        alias.allocation_lease().validate_live().unwrap();
         drop(alias);
         assert_eq!(temporary.probe.retirements(), 1);
-        input.handle.validate_live().unwrap();
+        input.handle.allocation_lease().validate_live().unwrap();
         drop(input.handle);
         assert_eq!(input.probe.retirements(), 1);
     }

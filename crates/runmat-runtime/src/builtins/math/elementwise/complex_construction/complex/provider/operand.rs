@@ -118,7 +118,7 @@ mod lease_tests {
         };
         drop(borrowed);
         assert_eq!(allocation.probe.retirements(), 0);
-        allocation.handle.validate_live().unwrap();
+        allocation.handle.allocation_lease().validate_live().unwrap();
         let owned = RealGpuOperand {
             handle: allocation.handle,
         };

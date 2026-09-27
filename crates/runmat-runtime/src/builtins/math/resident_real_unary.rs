@@ -123,7 +123,7 @@ mod tests {
         );
         drop(error);
         assert_eq!(allocation.probe.retirements(), 0);
-        allocation.handle.validate_live().unwrap();
+        allocation.handle.allocation_lease().validate_live().unwrap();
         drop(allocation.handle);
         assert_eq!(allocation.probe.retirements(), 1);
     }
