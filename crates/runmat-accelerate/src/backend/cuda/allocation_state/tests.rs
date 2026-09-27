@@ -46,7 +46,7 @@ fn cuda_state_retains_context_until_last_owner_and_native_guard() {
     assert!(weak.upgrade().is_none());
     assert_eq!(driver.frees(), vec![101]);
     assert_eq!(driver.release_count(), 1);
-    assert_eq!(driver.events.lock().unwrap().last().unwrap(), "release");
+    assert_eq!(driver.events.lock().unwrap().last().copied(), Some("release"));
 }
 
 #[test]
