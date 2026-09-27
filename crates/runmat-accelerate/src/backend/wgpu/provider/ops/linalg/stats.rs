@@ -276,7 +276,7 @@ impl WgpuProvider {
         }
 
         let sample_preview: Vec<usize> = indices.iter().copied().take(16).collect();
-        let rows_out = output_gpu.shape().first().copied().unwrap_or(cols);
+        let rows_out = output_gpu.shape.first().copied().unwrap_or(cols);
         let diag_len = cols.min(rows_out);
         let mut trace = 0.0f64;
         for d in 0..diag_len {

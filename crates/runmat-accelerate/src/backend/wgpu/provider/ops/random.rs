@@ -535,7 +535,7 @@ impl WgpuProvider {
         scale: f64,
         steps: u32,
     ) -> Result<GpuTensorHandle> {
-        let total_len = product_checked(&state.shape)
+        let total_len = product_checked(state.shape())
             .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
         let start = Instant::now();
         let state_entry = self.get_entry(state)?;

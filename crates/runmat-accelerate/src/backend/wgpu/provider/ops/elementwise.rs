@@ -1,6 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, Pod, Zeroable};
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
+use runmat_accelerate_api::{unsupported_provider_operation, GpuTensorHandle, GpuTensorStorage};
 use runmat_time::Instant;
 use std::sync::Arc;
 

@@ -339,10 +339,7 @@ impl WgpuProvider {
             let selected_len = rows
                 .checked_mul(request.frame_count)
                 .and_then(|len| len.checked_mul(2))
-                .ok_or_else(|| {
-                    drop(spectrum);
-                    anyhow!("uniform_spectral_estimate: output too large")
-                })?;
+                .ok_or_else(|| anyhow!("uniform_spectral_estimate: output too large"))?;
             let shader = spectral_select_shader(request.nfft, rows, range, self.precision);
             let handle = match self.fused_elementwise_with_telemetry_and_storage_exec(
                 &shader,
@@ -361,10 +358,9 @@ impl WgpuProvider {
             handle
         };
 
-        let ps_len = rows.checked_mul(request.frame_count).ok_or_else(|| {
-            drop(selected);
-            anyhow!("uniform_spectral_estimate: power output too large")
-        })?;
+        let ps_len = rows
+            .checked_mul(request.frame_count)
+            .ok_or_else(|| anyhow!("uniform_spectral_estimate: power output too large"))?;
         let ps_shader = spectral_power_shader(
             rows,
             range,
@@ -609,7 +605,7 @@ impl WgpuProvider {
             &inputs,
             request.output_shape,
             real_len,
-            2,
+            &[self.provider_precision_exec().into(); 2],
         ) {
             Ok(outputs) => outputs,
             Err(err) => {
@@ -652,7 +648,7 @@ impl WgpuProvider {
             &inputs,
             request.output_shape,
             real_len,
-            2,
+            &[self.provider_precision_exec().into(); 2],
         ) {
             Ok(outputs) => outputs,
             Err(err) => {
@@ -688,7 +684,7 @@ impl WgpuProvider {
             std::slice::from_ref(request.input),
             request.output_shape,
             real_len,
-            2,
+            &[self.provider_precision_exec().into(); 2],
         )?;
         ensure!(outputs.len() == 2, "signal_envelope: missing outputs");
         let lower = outputs.pop().expect("lower output");

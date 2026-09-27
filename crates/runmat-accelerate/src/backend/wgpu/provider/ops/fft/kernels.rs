@@ -713,11 +713,9 @@ impl WgpuProvider {
         let Some(a_fft) = self.try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)? else {
             return Ok(None);
         };
-        let a_fft = Ok(a_fft)?;
         let Some(b_fft) = self.try_fft_dim_exec_native(&b_handle, Some(m_len), 0, false)? else {
             return Ok(None);
         };
-        let b_fft = Ok(b_fft)?;
 
         let c_fft_buf = self.create_storage_buffer(m_out_scalar_len, "runmat-fft-bluestein-cfft");
         let mut poff = 0usize;
@@ -786,7 +784,6 @@ impl WgpuProvider {
         else {
             return Ok(None);
         };
-        let c_time = Ok(c_time)?;
 
         let out_buffer = self.create_storage_buffer(out_scalar_len, "runmat-fft-bluestein-out");
         let mut foff = 0usize;
