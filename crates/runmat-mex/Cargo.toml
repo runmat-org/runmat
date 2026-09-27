@@ -28,3 +28,6 @@ pollster = "0.3"
 
 [dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
+
+[target.'cfg(target_family = "wasm")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

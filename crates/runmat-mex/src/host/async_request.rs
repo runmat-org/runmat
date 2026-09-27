@@ -3,6 +3,21 @@ use std::time::Duration;
 
 use crate::{MexDiagnostic, MexEngineCompletion, MxArray};
 
+/// Native engine requests may cross worker threads. Browser requests and their
+/// real result allocations belong to the originating WASM worker instead.
+/// This bound does not grant concurrent-host-service access.
+#[doc(hidden)]
+#[cfg(not(target_family = "wasm"))]
+pub trait MexAsyncThreadBound: Send + Sync {}
+#[cfg(not(target_family = "wasm"))]
+impl<T: Send + Sync + ?Sized> MexAsyncThreadBound for T {}
+
+#[doc(hidden)]
+#[cfg(target_family = "wasm")]
+pub trait MexAsyncThreadBound {}
+#[cfg(target_family = "wasm")]
+impl<T: ?Sized> MexAsyncThreadBound for T {}
+
 #[derive(Debug, Clone)]
 pub enum MexAsyncOperation {
     Eval {
@@ -39,16 +54,20 @@ pub enum MexAsyncOperation {
     },
 }
 
-pub trait MexAsyncResult: Send + Sync {
+pub trait MexAsyncResult: MexAsyncThreadBound {
     fn cancel(&self, allow_interrupt: bool) -> bool;
     fn is_ready(&self) -> bool;
     fn wait(&self, timeout: Option<Duration>) -> bool;
     fn result(&self) -> MexEngineCompletion<Vec<MxArray>>;
 }
 
-pub trait MexAsyncHostServices: Send + Sync {
+pub trait MexAsyncHostServices: MexAsyncThreadBound {
     fn submit(
         &self,
         operation: MexAsyncOperation,
     ) -> Result<Arc<dyn MexAsyncResult>, MexDiagnostic>;
 }
+
+#[cfg(test)]
+#[path = "async_request_tests.rs"]
+mod tests;
