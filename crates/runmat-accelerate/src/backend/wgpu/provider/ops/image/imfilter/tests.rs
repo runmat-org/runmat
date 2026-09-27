@@ -34,6 +34,50 @@ fn single_input(
 
 #[test]
 #[ignore = "requires an actual WGPU adapter; execute explicitly in native GPU qualification"]
+fn actual_imfilter_lazy_image_materializes_without_host_image_transfer() {
+    let provider = provider();
+    let original_values = [1.0f32, 4.0, -2.0, 8.0, 3.0, 7.0];
+    let original = single_input(&provider, true, &original_values, &[2, 3]);
+    let image = provider.transpose_exec(&original).unwrap();
+    assert!(runmat_accelerate_api::handle_is_transposed(&image));
+    assert!(image.shares_allocation_with(&original));
+    let original_view = original.view().clone();
+    let image_view = image.view().clone();
+    let image_identity = image.view_identity();
+    let kernel = single_input(&provider, false, &[1.0], &[1, 1]);
+    let before = provider.telemetry_snapshot().download_bytes;
+    let output =
+        block_on(provider.imfilter_exec(&image, &kernel, &ImfilterOptions::default())).unwrap();
+    assert_eq!(
+        provider.telemetry_snapshot().download_bytes - before,
+        4,
+        "only the kernel is downloaded"
+    );
+    assert!(provider.pipelines.imfilter_single.is_initialized());
+    assert_eq!(output.shape(), &[3, 2]);
+    assert_eq!(output.physical().element_type(), NumericElementType::F32);
+    assert!(!output.shares_allocation_with(&original));
+    assert!(!output.shares_allocation_with(&kernel));
+    assert_eq!(image.view_identity(), image_identity);
+    assert_eq!(image.view(), &image_view);
+    assert_eq!(original.view(), &original_view);
+    assert_eq!(
+        block_on(provider.download_numeric_exec(&output))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(vec![1.0, -2.0, 3.0, 4.0, 8.0, 7.0])
+    );
+    drop(image);
+    assert_eq!(
+        block_on(provider.download_numeric_exec(&original))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F32(original_values.to_vec())
+    );
+}
+
+#[test]
+#[ignore = "requires an actual WGPU adapter; execute explicitly in native GPU qualification"]
 fn actual_imfilter_single_kernel_uses_native_bytes_and_preserves_input_aliases() {
     let provider = provider();
     assert!(!provider.pipelines.imfilter_single.is_initialized());

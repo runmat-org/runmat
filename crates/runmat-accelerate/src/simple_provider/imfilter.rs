@@ -12,35 +12,40 @@ impl InProcessProvider {
             let guard = numeric_registry()
                 .lock_for(self.device_id)
                 .map_err(|_| anyhow!("imfilter: allocation owner is poisoned"))?;
-            let snapshot = |handle: &GpuTensorHandle| -> Result<Tensor> {
-                let data = guard
-                    .get(handle)
-                    .ok_or_else(|| anyhow!("imfilter: input is not a live owned allocation"))?;
-                if handle.physical().storage() != GpuTensorStorage::Real
-                    || runmat_accelerate_api::handle_is_logical(handle)
-                    || runmat_accelerate_api::handle_is_transposed(handle)
-                    || matches!(data, InProcessNumericData::Integer(_))
-                {
-                    return Err(runmat_accelerate_api::unsupported_provider_operation(
-                        "imfilter requires contiguous real floating operands",
-                    ));
-                }
-                ensure!(
-                    data.len() == logical_len_for_shape("imfilter", handle.shape())?,
-                    "imfilter payload extent mismatch"
-                );
-                match data {
-                    InProcessNumericData::F32(values) => {
-                        Tensor::from_f32(values.clone(), handle.shape().to_vec())
+            // Authenticate every operand before reporting a numerical capability gap.
+            let image_data = guard
+                .get(image)
+                .ok_or_else(|| anyhow!("imfilter: image is not a live owned allocation"))?;
+            let kernel_data = guard
+                .get(kernel)
+                .ok_or_else(|| anyhow!("imfilter: kernel is not a live owned allocation"))?;
+            let snapshot =
+                |handle: &GpuTensorHandle, data: &InProcessNumericData| -> Result<Tensor> {
+                    if handle.physical().storage() != GpuTensorStorage::Real
+                        || runmat_accelerate_api::handle_is_logical(handle)
+                        || runmat_accelerate_api::handle_is_transposed(handle)
+                        || matches!(data, InProcessNumericData::Integer(_))
+                    {
+                        return Err(runmat_accelerate_api::unsupported_provider_operation(
+                            "imfilter requires contiguous real floating operands",
+                        ));
                     }
-                    InProcessNumericData::F64(values) => {
-                        Tensor::new(values.clone(), handle.shape().to_vec())
+                    ensure!(
+                        data.len() == logical_len_for_shape("imfilter", handle.shape())?,
+                        "imfilter payload extent mismatch"
+                    );
+                    match data {
+                        InProcessNumericData::F32(values) => {
+                            Tensor::from_f32(values.clone(), handle.shape().to_vec())
+                        }
+                        InProcessNumericData::F64(values) => {
+                            Tensor::new(values.clone(), handle.shape().to_vec())
+                        }
+                        InProcessNumericData::Integer(_) => unreachable!("integer rejected above"),
                     }
-                    InProcessNumericData::Integer(_) => unreachable!("integer rejected above"),
-                }
-                .map_err(|error| anyhow!(error))
-            };
-            (snapshot(image)?, snapshot(kernel)?)
+                    .map_err(|error| anyhow!(error))
+                };
+            (snapshot(image, image_data)?, snapshot(kernel, kernel_data)?)
         };
         let result = runmat_runtime::builtins::image::filters::imfilter::apply_imfilter_native(
             &image_tensor,
@@ -63,5 +68,51 @@ impl InProcessProvider {
             }
         };
         self.allocate_numeric_data(data, shape, GpuTensorStorage::Real)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_image_class_does_not_mask_foreign_kernel_owner() {
+        let provider = InProcessProvider::new();
+        let foreign = InProcessProvider::new();
+        let kernel = foreign
+            .allocate_numeric_data(
+                InProcessNumericData::F64(vec![1.0]),
+                vec![1, 1],
+                GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let images = [
+            provider
+                .allocate_integer_tensor(HostIntegerDataOwned::I32(vec![1]), vec![1, 1])
+                .unwrap(),
+            provider
+                .allocate_logical_tensor(vec![1.0], vec![1, 1])
+                .unwrap(),
+            provider
+                .allocate_numeric_data(
+                    InProcessNumericData::F64(vec![1.0, 2.0]),
+                    vec![1, 1],
+                    GpuTensorStorage::ComplexInterleaved,
+                )
+                .unwrap(),
+        ];
+        for image in images {
+            let options = ImfilterOptions::default();
+            let error = futures::executor::block_on(provider.imfilter(&image, &kernel, &options))
+                .unwrap_err();
+            assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+                &error
+            ));
+            assert!(error
+                .to_string()
+                .contains("kernel is not a live owned allocation"));
+            assert!(image.allocation_lease().validate_live().is_ok());
+            assert!(kernel.allocation_lease().validate_live().is_ok());
+        }
     }
 }

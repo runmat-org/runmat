@@ -32,6 +32,28 @@ impl ImfilterShader {
 #[cfg(test)]
 mod recipe_tests {
     use super::ImfilterShader;
+    #[cfg(not(target_arch = "wasm32"))]
+    use wgpu::naga;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    fn recipes_parse_and_validate_with_the_backend_naga_version() {
+        for recipe in [
+            ImfilterShader::Single,
+            ImfilterShader::SingleDouble,
+            ImfilterShader::Double,
+        ] {
+            let source = recipe.source();
+            let module = naga::front::wgsl::parse_str(&source)
+                .unwrap_or_else(|error| panic!("{recipe:?}: {}", error.emit_to_string(&source)));
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .unwrap_or_else(|error| panic!("{recipe:?}: {error:?}"));
+        }
+    }
 
     #[test]
     fn mixed_recipe_changes_io_only_and_retains_double_arithmetic() {

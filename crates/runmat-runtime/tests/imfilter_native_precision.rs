@@ -1,4 +1,5 @@
 //! Real native allocations through public dispatch, independent of provider preference.
+use runmat_accelerate_api::allocation::WeakAllocationLease;
 use runmat_accelerate_api::*;
 use runmat_value::{Tensor, Value};
 use std::sync::{
