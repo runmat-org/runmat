@@ -1,12 +1,14 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::{executor::block_on, task::noop_waker};
-use runmat_accelerate::simple_provider::InProcessProvider;
+#[path = "../../test_owner.rs"]
+mod test_owner;
+use runmat_accelerate_api::{test_support::RetirementProbe, WeakGpuTensorHandle};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, HostTensorView, ThreadProviderGuard,
 };
 use std::{
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
 
@@ -85,10 +87,10 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                 let Value::GpuTensor(output) = result else {
                     panic!("resident complex result")
                 };
-                assert_eq!(output.device_id, prototype.device_id);
-                assert_eq!(output.shape, shape);
+                assert_eq!(output.device_id(), prototype.device_id());
+                assert_eq!(output.shape(), shape);
                 assert_eq!(
-                    output.descriptor.storage,
+                    output.descriptor().storage,
                     Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
                 );
                 assert_eq!(
@@ -109,13 +111,13 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
                     other => panic!("complex device result: {other:?}"),
                 };
                 assert_eq!(actual_values, expected_values);
-                provider.free(&output).unwrap();
+                output.release().unwrap();
                 if let Some(source) = source {
                     assert!(block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
                         source.clone()
                     )))
                     .is_ok());
-                    provider.free(&source).unwrap();
+                    source.release().unwrap();
                 }
             }
         }
@@ -124,7 +126,7 @@ fn atan_complex_template_cases(provider: &'static dyn AccelProvider, single: boo
         prototype.clone()
     )))
     .is_ok());
-    provider.free(&prototype).unwrap();
+    prototype.release().unwrap();
 }
 
 #[test]
@@ -147,16 +149,15 @@ enum Download {
 #[derive(Default)]
 struct State {
     mode: Download,
-    outputs: Vec<GpuTensorHandle>,
-    freed: Vec<u64>,
+    outputs: Vec<RetirementProbe>,
     downloads: usize,
     hooks: usize,
-    hook_alias: Option<GpuTensorHandle>,
-    restore_alias: Option<GpuTensorHandle>,
+    hook_alias: Option<WeakGpuTensorHandle>,
+    restore_alias: Option<WeakGpuTensorHandle>,
     unsupported_hook: bool,
 }
 struct Provider {
-    inner: InProcessProvider,
+    inner: test_owner::Owner,
     state: Mutex<State>,
 }
 impl Provider {
@@ -164,7 +165,7 @@ impl Provider {
         let mut state = self.state.lock().unwrap();
         if let Some(handle) = state.hook_alias.clone() {
             state.hooks += 1;
-            return Some(Ok(handle));
+            return Some(handle.acquire().map_err(anyhow::Error::from));
         }
         if state.unsupported_hook {
             state.hooks += 1;
@@ -177,7 +178,7 @@ impl Provider {
     fn track(&self, output: GpuTensorHandle) -> GpuTensorHandle {
         let mut state = self.state.lock().unwrap();
         state.hooks += 1;
-        state.outputs.push(output.clone());
+        state.outputs.push(self.inner.probe(&output));
         output
     }
 }
@@ -187,13 +188,13 @@ impl AccelProvider for Provider {
         host: &runmat_accelerate_api::HostNumericTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {
         if let Some(handle) = self.state.lock().unwrap().restore_alias.clone() {
-            return Ok(handle);
+            return Ok(handle.acquire()?);
         }
         Ok(self.track(self.inner.upload_numeric(host)?))
     }
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         if let Some(handle) = self.state.lock().unwrap().restore_alias.clone() {
-            return Ok(handle);
+            return Ok(handle.acquire()?);
         }
         Ok(self.track(self.inner.upload(host)?))
     }
@@ -201,10 +202,10 @@ impl AccelProvider for Provider {
         self.inner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
+        "trigonometric like owning fixture".into()
     }
     fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
-        self.inner.precision()
+        runmat_accelerate_api::ProviderPrecision::F64
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
@@ -214,15 +215,11 @@ impl AccelProvider for Provider {
                 state.mode
             };
             match mode {
-                Download::Ready => self.inner.download(handle).await,
+                Download::Ready => self.inner.download(handle),
                 Download::Failure => anyhow::bail!("injected adaptation download failure"),
                 Download::Pending => std::future::pending().await,
             }
         })
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().freed.push(handle.buffer_id);
-        self.inner.free(handle)
     }
     fn unary_sin<'a>(
         &'a self,
@@ -232,7 +229,13 @@ impl AccelProvider for Provider {
             if let Some(result) = self.hook_override() {
                 return result;
             }
-            Ok(self.track(self.inner.unary_sin(input).await?))
+            let host = self.inner.download(input)?;
+            assert_eq!(host.storage, runmat_accelerate_api::GpuTensorStorage::Real);
+            let values: Vec<_> = host.data.into_iter().map(f64::sin).collect();
+            Ok(self.track(self.inner.upload(&HostTensorView {
+                data: &values,
+                shape: &host.shape,
+            })?))
         })
     }
     fn unary_cos<'a>(
@@ -243,7 +246,13 @@ impl AccelProvider for Provider {
             if let Some(result) = self.hook_override() {
                 return result;
             }
-            Ok(self.track(self.inner.unary_cos(input).await?))
+            let host = self.inner.download(input)?;
+            assert_eq!(host.storage, runmat_accelerate_api::GpuTensorStorage::Real);
+            let values: Vec<_> = host.data.into_iter().map(f64::cos).collect();
+            Ok(self.track(self.inner.upload(&HostTensorView {
+                data: &values,
+                shape: &host.shape,
+            })?))
         })
     }
     fn unary_tan<'a>(
@@ -254,7 +263,13 @@ impl AccelProvider for Provider {
             if let Some(result) = self.hook_override() {
                 return result;
             }
-            Ok(self.track(self.inner.unary_tan(input).await?))
+            let host = self.inner.download(input)?;
+            assert_eq!(host.storage, runmat_accelerate_api::GpuTensorStorage::Real);
+            let values: Vec<_> = host.data.into_iter().map(f64::tan).collect();
+            Ok(self.track(self.inner.upload(&HostTensorView {
+                data: &values,
+                shape: &host.shape,
+            })?))
         })
     }
     fn unary_atan<'a>(
@@ -265,16 +280,21 @@ impl AccelProvider for Provider {
             if let Some(result) = self.hook_override() {
                 return result;
             }
-            Ok(self.track(self.inner.unary_atan(input).await?))
+            let host = self.inner.download(input)?;
+            assert_eq!(host.storage, runmat_accelerate_api::GpuTensorStorage::Real);
+            let values: Vec<_> = host.data.into_iter().map(f64::atan).collect();
+            Ok(self.track(self.inner.upload(&HostTensorView {
+                data: &values,
+                shape: &host.shape,
+            })?))
         })
     }
 }
 fn fixture(mode: Download) -> (&'static Provider, GpuTensorHandle, GpuTensorHandle) {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
-        inner: InProcessProvider::new(),
+    let provider = Box::leak(Box::new(Provider {
+        inner: test_owner::Owner::new(),
         state: Mutex::default(),
-    });
+    }));
     *provider.state.lock().unwrap() = State {
         mode,
         ..State::default()
@@ -304,14 +324,8 @@ fn args(source: &GpuTensorHandle, prototype: Value) -> [Value; 3] {
 }
 fn borrowed_live(provider: &Provider, source: &GpuTensorHandle, prototype: &GpuTensorHandle) {
     for input in [source, prototype] {
-        assert!(!provider
-            .state
-            .lock()
-            .unwrap()
-            .freed
-            .contains(&input.buffer_id));
-        assert!(block_on(provider.inner.download(input)).is_ok());
-        provider.inner.free(input).unwrap();
+        assert_eq!(provider.inner.probe(input).retirements(), 0);
+        assert!(provider.inner.download(input).is_ok());
     }
 }
 
@@ -323,7 +337,7 @@ fn trigonometric_like_math_and_restore_never_adopt_or_free_borrowed_prototypes()
         for restoration in [false, true] {
             for malformed in [false, true] {
                 let (provider, source, old_prototype) = fixture(Download::Ready);
-                provider.inner.free(&old_prototype).unwrap();
+                old_prototype.release().unwrap();
                 let prototype = provider
                     .inner
                     .upload(&HostTensorView {
@@ -331,17 +345,20 @@ fn trigonometric_like_math_and_restore_never_adopt_or_free_borrowed_prototypes()
                         shape: &[1, 2],
                     })
                     .unwrap();
-                let mut alias = prototype.clone();
-                if malformed {
-                    alias.shape = vec![9, 9];
-                }
+                let alias = if malformed {
+                    prototype
+                        .with_view(prototype.view().clone().with_shape(vec![2, 1]))
+                        .unwrap()
+                } else {
+                    prototype.clone()
+                };
                 {
                     let mut state = provider.state.lock().unwrap();
                     if restoration {
                         state.unsupported_hook = true;
-                        state.restore_alias = Some(alias);
+                        state.restore_alias = Some(alias.downgrade());
                     } else {
-                        state.hook_alias = Some(alias);
+                        state.hook_alias = Some(alias.downgrade());
                     }
                 }
                 let _selected = ThreadProviderGuard::set(Some(provider));
@@ -355,11 +372,11 @@ fn trigonometric_like_math_and_restore_never_adopt_or_free_borrowed_prototypes()
                 assert_eq!(state.hooks, 1);
                 assert_eq!(state.downloads, usize::from(restoration));
                 assert!(state.outputs.is_empty());
-                assert!(state.freed.is_empty());
+                assert!(state.outputs.iter().all(|probe| probe.retirements() == 0));
                 drop(state);
                 borrowed_live(provider, &source, &prototype);
-                provider.inner.free(&source).unwrap();
-                provider.inner.free(&prototype).unwrap();
+                source.release().unwrap();
+                prototype.release().unwrap();
             }
         }
     }
@@ -384,11 +401,11 @@ fn trigonometric_like_fallback_abandonment_preserves_all_borrowed_handles() {
         assert_eq!(state.hooks, 1);
         assert_eq!(state.downloads, 1);
         assert!(state.outputs.is_empty());
-        assert!(state.freed.is_empty());
+        assert!(state.outputs.iter().all(|probe| probe.retirements() == 0));
         drop(state);
         borrowed_live(provider, &source, &prototype);
-        provider.inner.free(&source).unwrap();
-        provider.inner.free(&prototype).unwrap();
+        source.release().unwrap();
+        prototype.release().unwrap();
     }
 }
 
@@ -412,7 +429,14 @@ fn trigonometric_like_actual_calls_free_replaced_intermediates_and_retain_publis
             .unwrap();
             let state = provider.state.lock().unwrap();
             assert_eq!(state.outputs.len(), 1);
-            assert_eq!(state.freed.len(), usize::from(!resident));
+            assert_eq!(
+                state
+                    .outputs
+                    .iter()
+                    .map(|probe| probe.retirements())
+                    .sum::<usize>(),
+                usize::from(!resident)
+            );
             drop(state);
             let gathered = block_on(gpu_helpers::gather_value_async(&result)).unwrap();
             let Value::Tensor(tensor) = gathered else {
@@ -429,7 +453,7 @@ fn trigonometric_like_actual_calls_free_replaced_intermediates_and_retain_publis
                 assert!((value - expected).abs() < 1e-12);
             }
             if let Value::GpuTensor(result) = result {
-                provider.free(&result).unwrap();
+                result.release().unwrap();
             }
             borrowed_live(provider, &source, &prototype);
         }
@@ -458,7 +482,8 @@ fn trigonometric_like_actual_call_error_and_polled_drop_release_intermediates() 
             let state = provider.state.lock().unwrap();
             assert_eq!(state.hooks, 1);
             assert_eq!(state.downloads, 1);
-            assert_eq!(state.freed, vec![state.outputs[0].buffer_id]);
+            assert_eq!(state.outputs.len(), 1);
+            assert_eq!(state.outputs[0].retirements(), 1);
             drop(state);
             borrowed_live(provider, &source, &prototype);
         }
@@ -470,21 +495,21 @@ fn trigonometric_like_invalid_prototype_rejects_before_provider_work() {
     let _serial = test_support::accel_test_lock();
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["sin", "cos", "tan", "atan"] {
-        let (provider, source, mut prototype) = fixture(Download::Ready);
+        let (provider, source, prototype) = fixture(Download::Ready);
         let _selected = ThreadProviderGuard::set(Some(provider));
         let original = prototype.clone();
-        prototype.descriptor.storage = None;
-        for prototype in [Value::String("invalid".into()), Value::GpuTensor(prototype)] {
-            assert!(block_on(crate::dispatcher::call_builtin_async(
-                name,
-                &args(&source, prototype)
-            ))
+        assert!(prototype
+            .with_view(prototype.view().clone().with_shape(vec![9, 9]))
             .is_err());
-        }
+        assert!(block_on(crate::dispatcher::call_builtin_async(
+            name,
+            &args(&source, Value::String("invalid".into()))
+        ))
+        .is_err());
         let state = provider.state.lock().unwrap();
         assert_eq!(state.hooks, 0);
         assert_eq!(state.downloads, 0);
-        assert!(state.freed.is_empty());
+        assert!(state.outputs.iter().all(|probe| probe.retirements() == 0));
         drop(state);
         borrowed_live(provider, &source, &original);
     }
@@ -497,11 +522,14 @@ fn atan_complex_gpu_template_download_failure_or_abandonment_releases_real_inter
     for mode in [Download::Failure, Download::Pending] {
         let (provider, source, spare) = fixture(mode);
         let _selected = ThreadProviderGuard::set(Some(provider));
-        let prototype = gpu_helpers::upload_complex_tensor(
-            &provider.inner,
-            &runmat_value::ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap(),
-        )
-        .unwrap();
+        let prototype = provider
+            .inner
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[0.0, 1.0]),
+                shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            })
+            .unwrap();
         let inputs = args(&source, Value::GpuTensor(prototype.clone()));
         let mut call = Box::pin(crate::dispatcher::call_builtin_async_with_outputs(
             "atan", &inputs, 0,
@@ -518,10 +546,11 @@ fn atan_complex_gpu_template_download_failure_or_abandonment_releases_real_inter
         let state = provider.state.lock().unwrap();
         assert_eq!(state.hooks, 1);
         assert_eq!(state.downloads, 1);
-        assert_eq!(state.freed, vec![state.outputs[0].buffer_id]);
-        assert!(!state.freed.contains(&prototype.buffer_id));
+        assert_eq!(state.outputs.len(), 1);
+        assert_eq!(state.outputs[0].retirements(), 1);
+        assert_eq!(provider.inner.probe(&prototype).retirements(), 0);
         drop(state);
-        provider.inner.free(&prototype).unwrap();
+        prototype.release().unwrap();
         borrowed_live(provider, &source, &spare);
     }
 }
