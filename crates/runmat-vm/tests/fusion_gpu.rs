@@ -124,6 +124,7 @@ struct TestProvider {
     buffers: Mutex<BufferStore>,
     frees: Mutex<HashMap<u64, usize>>,
     inspect_roots_on_free: AtomicBool,
+    fail_free_buffer: AtomicU64,
     reject_fusion: AtomicBool,
     fused_dispatches: AtomicU64,
 }
@@ -135,6 +136,7 @@ impl TestProvider {
             buffers: Mutex::new(HashMap::new()),
             frees: Mutex::new(HashMap::new()),
             inspect_roots_on_free: AtomicBool::new(false),
+            fail_free_buffer: AtomicU64::new(0),
             reject_fusion: AtomicBool::new(false),
             fused_dispatches: AtomicU64::new(0),
         }
@@ -395,6 +397,9 @@ impl AccelProvider for TestProvider {
     }
 
     fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+        if self.fail_free_buffer.load(Ordering::Relaxed) == handle.buffer_id {
+            return Err(anyhow!("injected release failure for allocated buffer"));
+        }
         if self.inspect_roots_on_free.load(Ordering::Relaxed) {
             assert!(
                 runmat_gc::gc_visit_retained_values(&[], &mut |_| Some(())).is_some(),

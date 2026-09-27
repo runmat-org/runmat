@@ -1141,7 +1141,6 @@ mod tests {
     use runmat_accelerate::fusion_residency;
     use runmat_accelerate::graph::VarBinding;
     use runmat_accelerate::VarKind;
-    use runmat_accelerate_api::GpuTensorHandle;
     use runmat_value::Value;
 
     #[test]
@@ -1190,51 +1189,69 @@ mod tests {
 
     #[test]
     fn fusion_writeback_preserves_shared_gpu_handles() {
-        let shared = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 17,
-            buffer_id: 17001,
-            descriptor: Default::default(),
-        };
-        let old_only = GpuTensorHandle {
-            shape: vec![1],
-            device_id: 17,
-            buffer_id: 17002,
-            descriptor: Default::default(),
-        };
-        fusion_residency::mark(&shared);
-        fusion_residency::mark(&old_only);
-        assert!(fusion_residency::is_resident(&shared));
-        assert!(fusion_residency::is_resident(&old_only));
+        use futures::executor::block_on;
+        use once_cell::sync::Lazy;
+        use runmat_accelerate::simple_provider::InProcessProvider;
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ThreadProviderGuard};
 
-        let mut vars = vec![Value::OutputList(vec![
-            Value::GpuTensor(shared.clone()),
-            Value::GpuTensor(old_only.clone()),
-        ])];
-        let mut context = ExecutionContext {
-            call_stack: Vec::new(),
-            locals: Vec::new(),
-            instruction_pointer: 0,
-            ..ExecutionContext::default()
-        };
-        write_elementwise_materialized_stores(
-            vec![(
-                FusionStoreMaterialization {
-                    value_id: 1,
-                    binding: VarBinding {
-                        kind: VarKind::Global,
-                        index: 0,
+        static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
+        runmat_gc::gc_test_context(|| {
+            let _provider = ThreadProviderGuard::set(Some(&*PROVIDER));
+            let upload = |value| {
+                PROVIDER
+                    .upload(&HostTensorView {
+                        data: &[value],
+                        shape: &[1, 1],
+                    })
+                    .unwrap()
+            };
+            let shared = upload(7.0);
+            let old_only = upload(9.0);
+            fusion_residency::mark(&shared);
+            fusion_residency::mark(&old_only);
+            let stack = Vec::new();
+            let mut vars = vec![Value::Cell(
+                runmat_value::CellArray::new_with_shape(
+                    vec![
+                        Value::GpuTensor(shared.clone()),
+                        Value::GpuTensor(old_only.clone()),
+                    ],
+                    vec![1, 2],
+                )
+                .unwrap(),
+            )];
+            let _frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
+            let mut context = ExecutionContext::default();
+            let retired = write_elementwise_materialized_stores(
+                vec![(
+                    FusionStoreMaterialization {
+                        value_id: 1,
+                        binding: VarBinding {
+                            kind: VarKind::Global,
+                            index: 0,
+                        },
                     },
-                },
-                Value::GpuTensor(shared.clone()),
-            )],
-            &mut vars,
-            &mut context,
-        );
-
-        assert!(fusion_residency::is_resident(&shared));
-        assert!(!fusion_residency::is_resident(&old_only));
-        fusion_residency::clear(&shared);
+                    Value::GpuTensor(shared.clone()),
+                )],
+                &mut vars,
+                &mut context,
+            );
+            // Writeback is published, but final-output adoption still owns the
+            // retirement boundary: neither original allocation is freed yet.
+            assert!(block_on(PROVIDER.download(&shared)).is_ok());
+            assert!(block_on(PROVIDER.download(&old_only)).is_ok());
+            assert!(fusion_residency::is_resident(&old_only));
+            retired.finish(std::slice::from_ref(&vars[0]));
+            assert_eq!(
+                block_on(PROVIDER.download(&shared)).unwrap().data,
+                vec![7.0]
+            );
+            assert!(block_on(PROVIDER.download(&old_only)).is_err());
+            assert!(fusion_residency::is_resident(&shared));
+            assert!(!fusion_residency::is_resident(&old_only));
+            PROVIDER.free(&shared).unwrap();
+            fusion_residency::clear(&shared);
+        });
     }
 
     #[test]

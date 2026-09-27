@@ -24,6 +24,50 @@ impl Drop for InspectRootsOnFree {
     }
 }
 
+struct FailFreeBuffer(&'static TestProvider);
+impl Drop for FailFreeBuffer {
+    fn drop(&mut self) {
+        self.0.fail_free_buffer.store(0, Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn failed_retirement_preserves_residency_marker_and_live_allocation() {
+    gc_test_context(|| {
+        let _lock = accel_test_lock();
+        ensure_provider_registered();
+        let provider = PROVIDER.get().unwrap();
+        let owned = provider.push(vec![11.0], vec![1, 1]);
+        runmat_accelerate::fusion_residency::mark(&owned);
+        provider
+            .fail_free_buffer
+            .store(owned.buffer_id, Ordering::Relaxed);
+        let failure = FailFreeBuffer(provider);
+        let mut vars = vec![Value::GpuTensor(owned.clone())];
+        let mut context = Default::default();
+        runmat_vm::accel::fusion::write_elementwise_materialized_stores(
+            vec![(
+                runmat_accelerate::fusion::FusionStoreMaterialization {
+                    value_id: 0,
+                    binding: runmat_accelerate::graph::VarBinding {
+                        kind: runmat_accelerate::VarKind::Global,
+                        index: 0,
+                    },
+                },
+                Value::Num(0.0),
+            )],
+            &mut vars,
+            &mut context,
+        )
+        .finish(&[]);
+        assert!(runmat_accelerate::fusion_residency::is_resident(&owned));
+        assert_eq!(provider.pull(&owned).unwrap(), (vec![11.0], vec![1, 1]));
+        drop(failure);
+        provider.free(&owned).unwrap();
+        runmat_accelerate::fusion_residency::clear(&owned);
+    });
+}
+
 fn resident_outputs(values: &[Value]) -> Vec<GpuTensorHandle> {
     let mut seen = HashSet::new();
     let mut handles = Vec::new();

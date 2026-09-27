@@ -113,7 +113,10 @@ pub(super) fn release(
     for allocation in owned {
         if !keep.contains(&handle_identity(&allocation.handle)) {
             match allocation.owner.free(&allocation.handle) {
-                Ok(()) => runmat_accelerate_api::clear_handle_metadata(&allocation.handle),
+                Ok(()) => {
+                    runmat_accelerate_api::clear_handle_metadata(&allocation.handle);
+                    runmat_accelerate::fusion_residency::clear(&allocation.handle);
+                }
                 Err(error) => log::warn!("VM resident release failed: {error}"),
             }
         }
