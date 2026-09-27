@@ -286,6 +286,12 @@ impl WgpuProvider {
         Ok(arc)
     }
     pub fn device_id(&self) -> u32 {
+        self.runtime_device_id
+    }
+
+    /// Hardware identifier used to partition persistent pipeline caches.
+    /// It is not the process-local owner identity carried by tensor handles.
+    pub fn pipeline_cache_device_id(&self) -> u32 {
         self.cache_device_id
     }
 
