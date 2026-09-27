@@ -891,6 +891,23 @@ fn take_releases(released: &ReleaseQueue) -> Result<Vec<u64>, RuntimeError> {
 }
 
 impl ForeignAdapter for PythonAdapter {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        let callbacks = self.callbacks.try_borrow().ok()?;
+        if !callbacks.is_empty() {
+            // Callback registrations retain RuntimeContexts as well as Values.
+            // Their recursively injected services are not enumerable through
+            // this adapter alone; never pretend callback values are all roots.
+            return None;
+        }
+        Some(
+            self.nested_isolated_calls
+                .try_borrow()
+                .ok()?
+                .iter()
+                .flat_map(|request| request.call.arguments.iter().cloned())
+                .collect(),
+        )
+    }
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
             adapter: runmat_types::ForeignAdapterId::new(PYTHON_ADAPTER_ID)
@@ -1122,6 +1139,51 @@ fn invalid_call(message: impl Into<String>) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn retained_queue_values_disappear_on_queue_cancellation_and_callbacks_fail_closed() {
+        use crate::foreign::ForeignAdapter;
+        let adapter = super::PythonAdapter::new(super::ForeignHandleRegistry::default()).unwrap();
+        let (reply, _receiver) = futures::channel::oneshot::channel();
+        adapter
+            .nested_isolated_calls
+            .borrow_mut()
+            .push_back(super::NestedPythonCall {
+                call: crate::context::ForeignCall {
+                    adapter: "python".into(),
+                    symbol: "pending".into(),
+                    arguments: vec![runmat_value::Value::String("retained-argument".into())],
+                    requested_outputs: 1,
+                },
+                reply,
+            });
+        assert_eq!(
+            adapter.retained_values(),
+            Some(vec![runmat_value::Value::String(
+                "retained-argument".into()
+            )])
+        );
+        adapter.nested_isolated_calls.borrow_mut().clear();
+        assert_eq!(adapter.retained_values(), Some(vec![]));
+        let foreign: std::rc::Rc<dyn crate::context::RuntimeForeignService> = std::rc::Rc::new(
+            crate::foreign::ForeignRuntime::new(crate::foreign::ForeignPlatform::Native),
+        );
+        adapter.callbacks.borrow_mut().insert(
+            1,
+            super::PythonCallbackRegistration {
+                callback: runmat_value::Value::String("nested-capture".into()),
+                context: crate::context::RuntimeContext::new(std::rc::Rc::new(
+                    crate::execution::RuntimeExecutionService::new(),
+                )),
+                foreign: std::rc::Rc::downgrade(&foreign),
+            },
+        );
+        assert!(
+            adapter.retained_values().is_none(),
+            "callback context services must not be mistaken for an empty root set"
+        );
+        adapter.callbacks.borrow_mut().clear();
+        assert_eq!(adapter.retained_values(), Some(vec![]));
+    }
     use super::*;
     use crate::execution::RuntimeExecutionService;
     use crate::foreign::{ForeignPlatform, ForeignRuntime};

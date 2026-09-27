@@ -22,6 +22,10 @@ pub struct RuntimeCallRequest {
 }
 
 pub trait RuntimeCallService {
+    /// Complete implementation-owned Values; unavailable is not an empty set.
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        None
+    }
     fn resolve(&self, name: &str) -> Option<usize>;
 
     fn invoke(
@@ -42,6 +46,10 @@ pub trait RuntimeCallService {
 pub struct RuntimeCallRouter;
 
 impl RuntimeCallService for RuntimeCallRouter {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        // This router has no state; pending requests belong to caller futures.
+        Some(Vec::new())
+    }
     fn resolve(&self, name: &str) -> Option<usize> {
         crate::user_functions::resolve_semantic_function_by_name(name)
     }
@@ -212,6 +220,10 @@ pub struct ForeignCall {
 }
 
 pub trait RuntimeForeignService {
+    /// Complete adapter-owned Values, including retained callback captures.
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        None
+    }
     fn execution_stack_requirement(&self) -> runmat_types::ExecutionStackRequirement {
         runmat_types::ExecutionStackRequirement::Any
     }
@@ -381,6 +393,10 @@ pub struct RuntimeDistributedRetirement {
 /// Implementations preserve partition ownership and decide locality; callers
 /// never obtain raw partition storage through this port.
 pub trait RuntimeDistributedService {
+    /// Complete local Values retained after request ownership is transferred.
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        None
+    }
     fn retire_pool(
         &self,
         pool: runmat_execution::PoolHandle,

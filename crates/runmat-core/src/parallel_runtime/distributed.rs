@@ -36,6 +36,11 @@ impl CoreDistributedService {
 }
 
 impl RuntimeDistributedService for CoreDistributedService {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        // DistributedStore owns validated ValuePayloads, never process-local
+        // Value handles. Pending input Values remain in caller-owned futures.
+        Some(Vec::new())
+    }
     fn retire_pool(
         &self,
         pool: runmat_execution::PoolHandle,

@@ -825,6 +825,11 @@ fn classpath_paths<'a>(
 }
 
 impl ForeignAdapter for JavaAdapter {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        // JNI object identities and JavaValue conversions do not retain local
+        // RunMat Values; invocation arguments belong to the returned future.
+        Some(Vec::new())
+    }
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
             adapter: runmat_types::ForeignAdapterId::new(JAVA_ADAPTER_ID)

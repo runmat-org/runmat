@@ -288,6 +288,10 @@ struct IsolatedCallbackRouter {
 }
 
 impl NativeFfiCallbackRouter for IsolatedCallbackRouter {
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        // Channel and snapshot storage contain serialized payloads only.
+        Some(Vec::new())
+    }
     fn dispatch(&self, callback_id: u64, arguments: &[Value]) -> Result<Value, String> {
         let request_id = self.active_request.get();
         if request_id == 0 {
