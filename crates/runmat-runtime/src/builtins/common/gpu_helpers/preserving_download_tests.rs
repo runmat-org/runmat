@@ -380,7 +380,7 @@ fn class_preserving_restore_uses_shared_single_and_complex_integer_storage() {
 
 #[test]
 fn class_preserving_logical_restore_uses_native_logical_encoding() {
-    test_support::with_f32_test_provider(|provider| {
+    test_support::with_native_logical_test_provider(|provider| {
         let source = upload_tensor(
             provider,
             &Tensor::from_f32(vec![0.0, 0.0], vec![1, 2]).unwrap(),

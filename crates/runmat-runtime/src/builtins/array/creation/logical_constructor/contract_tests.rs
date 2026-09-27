@@ -276,7 +276,7 @@ fn logical_constructors_preserve_borrowed_alias_metadata_and_storage() {
 
 #[test]
 fn logical_constructors_upload_native_logical_when_f32_provider_has_no_fill_hooks() {
-    test_support::with_f32_test_provider(|provider| {
+    test_support::with_native_logical_test_provider(|provider| {
         assert!(provider.ones(&[2, 3]).is_err());
         assert!(provider.zeros(&[2, 3]).is_err());
         let host = Tensor::from_f32(vec![7.0], vec![1, 1]).expect("single prototype");

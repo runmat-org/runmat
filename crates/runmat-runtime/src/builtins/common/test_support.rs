@@ -8,6 +8,18 @@ use std::sync::{Mutex, MutexGuard, OnceLock};
 #[path = "test_support/owning_tests.rs"]
 mod owning_tests;
 
+mod native_logical;
+
+pub fn with_native_logical_test_provider<F, R>(f: F) -> R
+where
+    F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,
+{
+    let _guard = accel_test_lock();
+    let provider = Box::leak(Box::new(native_logical::NativeLogicalProvider::default()));
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    f(provider)
+}
+
 pub mod fs {
     use std::io;
     use std::path::Path;
