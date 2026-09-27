@@ -37,6 +37,9 @@ fn structure_hooks_preserve_native_storage_or_request_typed_fallback() {
         assert!(runmat_accelerate_api::is_unsupported_provider_operation(
             &block_on(provider.sym_rcm(&input)).unwrap_err()
         ));
+        assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+            &block_on(provider.lu(&input)).unwrap_err()
+        ));
         assert!(input.allocation_lease().validate_live().is_ok());
     }
 }

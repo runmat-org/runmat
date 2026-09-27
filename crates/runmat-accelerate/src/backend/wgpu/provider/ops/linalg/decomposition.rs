@@ -431,10 +431,14 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn lu_exec(&self, handle: &GpuTensorHandle) -> Result<ProviderLuResult> {
-        ensure!(
-            runmat_accelerate_api::handle_integer_type(handle).is_none(),
-            "lu: typed-integer buffers require an explicit typed fallback"
-        );
+        let entry = self.get_entry_raw(handle)?;
+        if entry.integer_type().is_some()
+            || entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "lu: real floating kernel cannot consume this physical storage",
+            ));
+        }
         let host = self.download_exec(handle).await?;
         let LuHostFactors {
             combined,

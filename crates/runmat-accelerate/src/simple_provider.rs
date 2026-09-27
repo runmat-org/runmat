@@ -9617,6 +9617,19 @@ impl AccelProvider for InProcessProvider {
 
     fn lu<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, ProviderLuResult> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("lu: allocation owner is poisoned"))?;
+                ensure!(guard.get(a).is_some(), "lu: unknown buffer");
+                if a.physical().element_type() != NumericElementType::F64
+                    || a.physical().storage() != GpuTensorStorage::Real
+                {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "lu: real F64 kernel cannot consume this physical storage",
+                    ));
+                }
+            }
             let data = {
                 let guard = registry(self.device_id).lock().unwrap();
                 guard
