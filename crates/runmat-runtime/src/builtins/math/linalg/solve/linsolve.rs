@@ -593,8 +593,6 @@ async fn try_gpu_linsolve(
         Ok(result) => Some(result),
         Err(error) if error.is_unsupported() => None,
         Err(source) => {
-            release_operand(provider, &mut lhs_operand);
-            release_operand(provider, &mut rhs_operand);
             return Err(crate::runtime_error::with_provider_execution_source(
                 builtin_error(source.to_string()),
                 source,
