@@ -74,6 +74,8 @@ For the VM-side fusion planner, stack layout, and handle cleanup behavior, see [
 
 ## wgpu Backend
 
+Provider implementors should also read [Numeric upload ownership](/docs/runtime/gpu/numeric-upload) for typed transfers, borrowed-handle protection, rejection cleanup, and the `upload_numeric_raw` implementation contract.
+
 The `WgpuProvider` owns the active `wgpu::Device`, `wgpu::Queue`, adapter metadata, pipeline caches, buffer table, and operation modules. It implements the `AccelProvider` trait and exposes provider-owned buffers for zero-copy consumers such as plotting when the backend supports it.
 
 For backend organization, dispatch flow, and operation categories, see [wgpu Backend & Accelerate Provider](/docs/runtime/gpu/wgpu).
