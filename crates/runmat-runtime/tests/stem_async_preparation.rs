@@ -61,7 +61,7 @@ fn dispatched_stem_and_stairs_publish_only_after_preparation_completes() {
     });
     let _plot = lock_plot_test_context();
     let _current = ThreadProviderGuard::set(Some(provider));
-    for name in ["stem", "stairs", "quiver3"] {
+    for name in ["stem", "stairs", "quiver3", "area"] {
         provider.mode.store(0, Ordering::SeqCst);
         provider.freed.store(0, Ordering::SeqCst);
         assert_preparation_lifecycle(name, provider);

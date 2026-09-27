@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::plotting::common::gather_tensor_from_gpu;
+use crate::builtins::plotting::common::gather_tensor_from_gpu_async;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::op_common::line_inputs::NumericInput;
@@ -590,7 +590,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     integer_capabilities(crate::builtins::plotting::area::AREA_INTEGER_CAPABILITIES),
     builtin_path = "crate::builtins::plotting::area"
 )]
-pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let (target_axes, x_value, y_value, rest) = parse_area_args(args)?;
     if begins_with_linespec(&rest) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -598,13 +598,10 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    let mut x_input = Some(area_numeric_input(x_value, "X")?);
-    let mut y_input = Some(area_numeric_input(y_value, "Y")?);
-    let parsed = parse_area_style_args(&rest)?;
-    let direct_gpu_geometry = matches!(
-        x_input.as_ref(),
-        Some(NumericInput::Host(tensor)) if host_x_is_nondecreasing_vector(tensor)
-    );
+    let x_input = area_numeric_input(x_value, "X")?;
+    let y_input = area_numeric_input(y_value, "Y")?;
+    let parsed = parse_area_style_args(&rest).await?;
+    let mut prepared = prepare_area_plots(x_input, y_input, &parsed).await?;
 
     let plot_handles = Rc::new(RefCell::new(Vec::new()));
     let plot_handles_slot = Rc::clone(&plot_handles);
@@ -619,48 +616,7 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         },
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
-            if direct_gpu_geometry {
-                if let Some(y_gpu) = y_input.as_ref().and_then(NumericInput::gpu_handle) {
-                    if let Ok(plots) =
-                        build_area_gpu_plots(x_input.as_ref().expect("x present"), y_gpu, &parsed)
-                    {
-                        for plot in plots {
-                            let plot_index = figure.add_area_plot_on_axes(plot, axes);
-                            plot_handles_slot.borrow_mut().push((axes, plot_index));
-                        }
-                        return Ok(());
-                    }
-                }
-            }
-            let x_tensor = x_input
-                .take()
-                .expect("x consumed")
-                .into_tensor(BUILTIN_NAME)?;
-            let y_tensor = y_input
-                .take()
-                .expect("y consumed")
-                .into_tensor(BUILTIN_NAME)?;
-            let series = area_series_from_tensors(&x_tensor, &y_tensor)?;
-            for (idx, (x, upper, lower)) in series.iter().enumerate() {
-                let mut plot = AreaPlot::new(x.clone(), upper.clone())
-                    .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, &e))?;
-                plot.baseline = parsed.base_value;
-                if let Some(lower) = lower.clone() {
-                    plot = plot.with_lower_curve(lower);
-                }
-                let color = parsed
-                    .color
-                    .unwrap_or(MATLAB_COLOR_ORDER[idx % MATLAB_COLOR_ORDER.len()]);
-                plot.color = color;
-                plot.label = Some(
-                    parsed
-                        .label
-                        .clone()
-                        .unwrap_or_else(|| format!("Series {}", idx + 1)),
-                );
-                if let Some(visible) = parsed.visible {
-                    plot.set_visible(visible);
-                }
+            for plot in prepared.drain(..) {
                 let plot_index = figure.add_area_plot_on_axes(plot, axes);
                 plot_handles_slot.borrow_mut().push((axes, plot_index));
             }
@@ -687,7 +643,49 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     Ok(super::line::handles_value(handles))
 }
 
-fn build_area_gpu_plots(
+async fn prepare_area_plots(
+    x: NumericInput,
+    y: NumericInput,
+    parsed: &ParsedAreaStyle,
+) -> crate::BuiltinResult<Vec<AreaPlot>> {
+    if matches!(&x, NumericInput::Host(tensor) if host_x_is_nondecreasing_vector(tensor)) {
+        if let Some(y_gpu) = y.gpu_handle() {
+            if let Ok(plots) = build_area_gpu_plots(&x, y_gpu, parsed).await {
+                return Ok(plots);
+            }
+        }
+    }
+    let x = x.into_tensor_async(BUILTIN_NAME).await?;
+    let y = y.into_tensor_async(BUILTIN_NAME).await?;
+    let series = area_series_from_tensors(&x, &y)?;
+    series
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (x, upper, lower))| {
+            let mut plot = AreaPlot::new(x, upper)
+                .map_err(|e| area_error_with_detail(&AREA_ERROR_INTERNAL, &e))?;
+            plot.baseline = parsed.base_value;
+            if let Some(lower) = lower {
+                plot = plot.with_lower_curve(lower);
+            }
+            plot.color = parsed
+                .color
+                .unwrap_or(MATLAB_COLOR_ORDER[idx % MATLAB_COLOR_ORDER.len()]);
+            plot.label = Some(
+                parsed
+                    .label
+                    .clone()
+                    .unwrap_or_else(|| format!("Series {}", idx + 1)),
+            );
+            if let Some(visible) = parsed.visible {
+                plot.set_visible(visible);
+            }
+            Ok(plot)
+        })
+        .collect()
+}
+
+async fn build_area_gpu_plots(
     x: &NumericInput,
     y: &runmat_accelerate_api::GpuTensorHandle,
     parsed: &ParsedAreaStyle,
@@ -711,8 +709,7 @@ fn build_area_gpu_plots(
                     "X length must match rows of Y",
                 ));
             }
-            let bounds =
-                super::gpu_helpers::axis_bounds(handle, BUILTIN_NAME).unwrap_or((0.0, 0.0));
+            let bounds = super::gpu_helpers::axis_bounds_async(handle, BUILTIN_NAME).await?;
             (
                 runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
                 runmat_plot::gpu::axis::OwnedAxisData::Buffer(x_ref.buffer.clone()),
@@ -763,8 +760,7 @@ fn build_area_gpu_plots(
         }
     };
     let mut plots = Vec::with_capacity(cols);
-    let (min_cell, max_cell) =
-        super::gpu_helpers::axis_bounds(y, BUILTIN_NAME).unwrap_or((0.0, 0.0));
+    let (min_cell, max_cell) = super::gpu_helpers::axis_bounds_async(y, BUILTIN_NAME).await?;
     let min_stack = if min_cell < 0.0 {
         parsed.base_value as f32 + (min_cell * cols as f32)
     } else {
@@ -844,18 +840,20 @@ struct ParsedAreaStyle {
     base_value: f64,
 }
 
-fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle> {
+async fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle> {
     let mut filtered = Vec::new();
-    let mut base_value = 0.0;
+    let mut base_values = Vec::new();
     let mut idx = 0usize;
     if let Some(value) = args.first().filter(|value| is_area_numeric_scalar(value)) {
-        base_value = area_scalar_f64(value)?;
+        validate_area_scalar(value)?;
+        base_values.push(value);
         idx = 1;
     }
     while idx < args.len() {
         if let Some(key) = super::style::value_as_string(&args[idx]) {
             if key.trim().eq_ignore_ascii_case("BaseValue") && idx + 1 < args.len() {
-                base_value = area_scalar_f64(&args[idx + 1])?;
+                validate_area_scalar(&args[idx + 1])?;
+                base_values.push(&args[idx + 1]);
                 idx += 2;
                 continue;
             }
@@ -865,6 +863,10 @@ fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
     let explicit_color = area_color_was_explicit(&filtered);
+    let mut base_value = 0.0;
+    for value in base_values {
+        base_value = area_scalar_f64(value).await?;
+    }
     Ok(ParsedAreaStyle {
         visible: parsed.appearance.visible,
         color: explicit_color.then_some(parsed.appearance.color),
@@ -1025,7 +1027,36 @@ fn is_area_numeric_scalar(value: &Value) -> bool {
     }
 }
 
-fn area_scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+fn validate_area_scalar(value: &Value) -> crate::BuiltinResult<()> {
+    match value {
+        Value::GpuTensor(handle)
+            if handle.shape.iter().product::<usize>() == 1
+                && !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_storage(handle)
+                    != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
+        {
+            Ok(())
+        }
+        Value::GpuTensor(_) => Err(area_error_with_detail(
+            &AREA_ERROR_INVALID_ARGUMENT,
+            "BaseValue must be a real numeric scalar",
+        )),
+        other => area_host_scalar_f64(other).map(|_| ()),
+    }
+}
+
+async fn area_scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
+    validate_area_scalar(value)?;
+    match value {
+        Value::GpuTensor(handle) => {
+            let tensor = gather_tensor_from_gpu_async(handle.clone(), BUILTIN_NAME).await?;
+            area_host_scalar_f64(&Value::Tensor(tensor))
+        }
+        other => area_host_scalar_f64(other),
+    }
+}
+
+fn area_host_scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
     match value {
         Value::Num(value) => Ok(*value),
         Value::Int(value) => Ok(NumericScalar::from(value.clone()).materialize_f64()),
@@ -1035,19 +1066,6 @@ fn area_scalar_f64(value: &Value) -> crate::BuiltinResult<f64> {
             .ok_or_else(|| {
                 area_error_with_detail(&AREA_ERROR_INVALID_ARGUMENT, "BaseValue must be numeric")
             }),
-        Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() == 1 => {
-            if runmat_accelerate_api::handle_is_logical(handle)
-                || runmat_accelerate_api::handle_storage(handle)
-                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-            {
-                return Err(area_error_with_detail(
-                    &AREA_ERROR_INVALID_ARGUMENT,
-                    "BaseValue must be a real numeric scalar",
-                ));
-            }
-            let tensor = gather_tensor_from_gpu(handle.clone(), BUILTIN_NAME)?;
-            area_scalar_f64(&Value::Tensor(tensor))
-        }
         _ => Err(area_error_with_detail(
             &AREA_ERROR_INVALID_ARGUMENT,
             "BaseValue must be a real numeric scalar",
@@ -1205,6 +1223,12 @@ fn compare_floating<T: PartialOrd>(left: T, right: T) -> Ordering {
 
 #[cfg(test)]
 mod tests {
+    fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+        futures::executor::block_on(super::area_builtin(args))
+    }
+    fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<super::ParsedAreaStyle> {
+        futures::executor::block_on(super::parse_area_style_args(args))
+    }
     use super::*;
     use crate::builtins::common::{gpu_helpers, test_support};
     use crate::builtins::plotting::get::get_builtin;
