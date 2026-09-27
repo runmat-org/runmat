@@ -516,7 +516,7 @@ async fn build_sequence(
                     source.owner,
                     runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                 ) {
-                    return Ok(finalize_sequence_handle(handle, Some(source)));
+                    return finalize_sequence_handle(handle, Some(source));
                 }
             }
             if source.explicit {
@@ -538,7 +538,7 @@ async fn build_sequence(
             })
     {
         if let Some(value) = try_gpu_logspace(start_re, stop_re, count, source).await {
-            return Ok(value);
+            return value;
         }
     }
 
@@ -571,7 +571,7 @@ async fn build_sequence(
                     provider,
                     runmat_accelerate_api::GpuTensorStorage::Real,
                 ) {
-                    return Ok(finalize_sequence_handle(handle, source));
+                    return finalize_sequence_handle(handle, source);
                 }
             }
         }
@@ -600,7 +600,7 @@ async fn try_gpu_logspace(
     stop: f64,
     count: usize,
     source: Option<SourceResidency>,
-) -> Option<Value> {
+) -> Option<crate::BuiltinResult<Value>> {
     #[cfg(all(test, feature = "wgpu"))]
     {
         if runmat_accelerate_api::provider().is_none() {
@@ -655,15 +655,20 @@ fn valid_uploaded_sequence_handle(
 }
 
 fn finalize_sequence_handle(
-    mut handle: runmat_accelerate_api::GpuTensorHandle,
+    handle: runmat_accelerate_api::GpuTensorHandle,
     source: Option<SourceResidency>,
-) -> Value {
+) -> crate::BuiltinResult<Value> {
     let provenance = if source.is_some_and(|source| source.explicit) {
         runmat_accelerate_api::GpuHandleProvenance::Explicit
     } else {
         runmat_accelerate_api::GpuHandleProvenance::Automatic
     };
-    runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+    let handle = handle.with_provenance(provenance).map_err(|cause| {
+        crate::build_runtime_error(format!("logspace: cannot adopt sequence output: {cause}"))
+            .with_builtin("logspace")
+            .with_source(cause)
+            .build()
+    })?;
     gpu_helpers::resident_gpu_value(handle)
 }
 
@@ -681,7 +686,7 @@ fn valid_sequence_handle(
         && output.device_id() == owner.device_id()
         && protected
             .iter()
-            .all(|input| !gpu_helpers::same_gpu_handle(output, input))
+            .all(|input| !output.shares_allocation_with(input))
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_integer_type(output).is_none()

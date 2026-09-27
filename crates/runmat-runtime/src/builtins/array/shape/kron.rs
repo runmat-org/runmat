@@ -212,20 +212,20 @@ async fn kron_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRes
     let source = preferred_kron_source(&a, &b);
     if let (Value::GpuTensor(left), Value::GpuTensor(right)) = (&a, &b) {
         if let Some(mut result) = try_kron_gpu_pair(left, right)? {
-            set_kron_output_provenance(&mut result, left, Some(right));
+            set_kron_output_provenance(&mut result, left, Some(right))?;
             return gpu_helpers::resident_gpu_value(result);
         }
     }
     match (&a, &b) {
         (Value::GpuTensor(source), host) => {
             if let Some(mut result) = try_kron_gpu_host(source, host, true)? {
-                set_kron_output_provenance(&mut result, source, None);
+                set_kron_output_provenance(&mut result, source, None)?;
                 return gpu_helpers::resident_gpu_value(result);
             }
         }
         (host, Value::GpuTensor(source)) => {
             if let Some(mut result) = try_kron_gpu_host(source, host, false)? {
-                set_kron_output_provenance(&mut result, source, None);
+                set_kron_output_provenance(&mut result, source, None)?;
                 return gpu_helpers::resident_gpu_value(result);
             }
         }
@@ -257,14 +257,8 @@ fn set_kron_output_provenance(
     output: &mut GpuTensorHandle,
     source: &GpuTensorHandle,
     other: Option<&GpuTensorHandle>,
-) {
-    let provenance = [Some(source), other]
-        .into_iter()
-        .flatten()
-        .filter_map(runmat_accelerate_api::handle_provenance)
-        .find(|provenance| *provenance == runmat_accelerate_api::GpuHandleProvenance::Explicit)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-    runmat_accelerate_api::set_handle_provenance(output, provenance);
+) -> crate::BuiltinResult<()> {
+    gpu_helpers::propagate_output_provenance(output, std::iter::once(source).chain(other))
 }
 
 fn try_kron_gpu_pair(
@@ -291,7 +285,7 @@ fn try_kron_gpu_pair(
     if !std::ptr::eq(owner, right_owner) || left.device_id() != right.device_id() {
         return Ok(None);
     }
-    let expected_shape = aligned_shapes(&left.shape, &right.shape)?.2;
+    let expected_shape = aligned_shapes(left.shape(), right.shape())?.2;
     let Some(expected_precision) = runmat_accelerate_api::handle_precision(left) else {
         return Ok(None);
     };
@@ -306,15 +300,14 @@ fn try_kron_gpu_pair(
         && output.device_id() == left.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
-        && !gpu_helpers::same_gpu_handle(&output, left)
-        && !gpu_helpers::same_gpu_handle(&output, right)
+        && !output.shares_allocation_with(left)
+        && !output.shares_allocation_with(right)
         && runmat_accelerate_api::handle_storage(&output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&output) == Some(expected_precision)
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output);
     if !valid {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[left, right]);
         return Ok(None);
     }
     Ok(Some(output))
@@ -372,20 +365,18 @@ fn try_kron_gpu_host(
         && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
         && runmat_accelerate_api::handle_integer_type(&uploaded).is_none()
         && !runmat_accelerate_api::handle_is_logical(&uploaded)
-        && !gpu_helpers::same_gpu_handle(&uploaded, source);
+        && !uploaded.shares_allocation_with(source);
     if !uploaded_valid {
-        gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source]);
         return Ok(None);
     }
     let expected_shape = if source_is_left {
-        aligned_shapes(&source.shape, &uploaded.shape)
+        aligned_shapes(source.shape(), uploaded.shape())
     } else {
-        aligned_shapes(&uploaded.shape, &source.shape)
+        aligned_shapes(uploaded.shape(), source.shape())
     };
     let expected_shape = match expected_shape {
         Ok((_, _, shape)) => shape,
         Err(error) => {
-            gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source]);
             return Err(error);
         }
     };
@@ -395,28 +386,19 @@ fn try_kron_gpu_host(
         owner.kron(&uploaded, source)
     };
     let Some(output) = output.ok() else {
-        gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source]);
         return Ok(None);
     };
     let valid = output.shape() == expected_shape
         && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|output_owner| std::ptr::eq(output_owner, owner))
-        && !gpu_helpers::same_gpu_handle(&output, source)
-        && !gpu_helpers::same_gpu_handle(&output, &uploaded)
+        && !output.shares_allocation_with(source)
+        && !output.shares_allocation_with(&uploaded)
         && runmat_accelerate_api::handle_storage(&output)
             == runmat_accelerate_api::GpuTensorStorage::Real
         && runmat_accelerate_api::handle_precision(&output) == expected_precision
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output);
-    if !valid {
-        if gpu_helpers::same_gpu_handle(&output, &uploaded) {
-            gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source]);
-            return Ok(None);
-        }
-        gpu_helpers::free_unprotected_exact_owner(&output, &[source, &uploaded]);
-    }
-    gpu_helpers::free_unprotected_exact_owner(&uploaded, &[source, &output]);
     Ok(valid.then_some(output))
 }
 
@@ -1351,7 +1333,7 @@ pub(crate) mod tests {
                 panic!("explicit gpuArray kron must remain resident");
             };
             assert!(runmat_accelerate_api::handle_is_explicit(&output));
-            assert!(!gpu_helpers::same_gpu_handle(&source, &output));
+            assert!(!source.shares_allocation_with(&output));
             let original = test_support::gather(Value::GpuTensor(source)).expect("source survives");
             assert_eq!(
                 original.integer_storage(),

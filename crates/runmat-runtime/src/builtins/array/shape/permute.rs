@@ -553,24 +553,26 @@ pub(crate) async fn permute_gpu(
             format!("{builtin}: no acceleration provider owns the input handle"),
         )
     })?;
-    let metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
     if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
         let native = provider.permute(&handle, &zero_based);
-        gpu_helpers::restore_handle_metadata(&handle, &metadata);
+
         if let Ok(out) = native {
             if valid_native_permute_output(&handle, &out, provider, order) {
                 return Ok(Value::GpuTensor(out));
             }
-            gpu_helpers::free_unprotected_exact_owner(&out, &[&handle]);
-            return Err(permute_error(
-                builtin,
-                format!("{builtin}: provider returned an invalid permute result"),
+            return Err(gpu_helpers::reject_gpu_output(
+                out,
+                permute_error(
+                    builtin,
+                    format!("{builtin}: provider returned an invalid permute result"),
+                ),
             ));
         }
     }
     let host = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &metadata);
+
     let host_tensor = match host? {
         Value::Tensor(tensor) => tensor,
         other => {
@@ -601,7 +603,7 @@ fn valid_native_permute_output(
         && output.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && !gpu_helpers::same_gpu_handle(input, output)
+        && !input.shares_allocation_with(output)
         && runmat_accelerate_api::handle_storage(output)
             == runmat_accelerate_api::handle_storage(input)
         && runmat_accelerate_api::handle_precision(output)

@@ -25,18 +25,9 @@ fn resident_integer_outputs_keep_owner_and_do_not_alias() {
             let Value::GpuTensor(levels) = &values[2] else {
                 panic!("expected resident levels")
             };
-            assert_ne!(
-                (g.device_id, g.buffer_id),
-                (prototype.device_id, prototype.buffer_id)
-            );
-            assert_ne!(
-                (levels.device_id, levels.buffer_id),
-                (prototype.device_id, prototype.buffer_id)
-            );
-            assert_ne!(
-                (g.device_id, g.buffer_id),
-                (levels.device_id, levels.buffer_id)
-            );
+            assert!(!g.shares_allocation_with(&prototype));
+            assert!(!levels.shares_allocation_with(&prototype));
+            assert!(!g.shares_allocation_with(levels));
             assert!(std::ptr::eq(
                 runmat_accelerate_api::provider_for_handle(g).unwrap(),
                 provider

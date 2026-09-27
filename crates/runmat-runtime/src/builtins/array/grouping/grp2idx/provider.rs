@@ -40,7 +40,6 @@ pub(super) fn restore(
             &protected,
         );
         let Ok(output) = output else {
-            free_outputs(&restored, &resident.prototype);
             return Ok((host[0].clone(), host[1].clone()));
         };
         let valid = handle(&output).is_some_and(|candidate| {
@@ -51,10 +50,6 @@ pub(super) fn restore(
                     .all(|prior| !same(&candidate, &prior))
         });
         if !valid {
-            if let Some(candidate) = handle(&output) {
-                free_if_fresh(&candidate, &resident.prototype, &restored);
-            }
-            free_outputs(&restored, &resident.prototype);
             return Ok((host[0].clone(), host[1].clone()));
         }
         restored.push(output);
@@ -70,31 +65,5 @@ fn handle(value: &Value) -> Option<GpuTensorHandle> {
 }
 
 fn same(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
-}
-
-fn free_if_fresh(handle: &GpuTensorHandle, prototype: &GpuTensorHandle, protected: &[Value]) {
-    if same(handle, prototype)
-        || protected
-            .iter()
-            .filter_map(self::handle)
-            .any(|other| same(handle, &other))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(handle) {
-        let _ = owner.free(handle);
-    }
-}
-
-fn free_outputs(outputs: &[Value], prototype: &GpuTensorHandle) {
-    let mut freed = std::collections::BTreeSet::new();
-    for handle in outputs.iter().filter_map(self::handle) {
-        if same(&handle, prototype) || !freed.insert((handle.device_id(), handle.buffer_id())) {
-            continue;
-        }
-        if let Some(owner) = runmat_accelerate_api::provider_for_handle(&handle) {
-            let _ = owner.free(&handle);
-        }
-    }
+    left.shares_allocation_with(right)
 }

@@ -389,9 +389,8 @@ fn try_gpu_ind2sub(
         } else {
             handle.shape().to_vec()
         };
-        let source_metadata = gpu_helpers::snapshot_handle_metadata(handle);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(handle);
         let result = provider.ind2sub(dims, strides, handle, total, len, &output_shape);
-        gpu_helpers::restore_handle_metadata(handle, &source_metadata);
         match result {
             Ok(mut handles) => {
                 if handles.len() != dims.len() {
@@ -416,20 +415,18 @@ fn try_gpu_ind2sub(
                             None,
                             false,
                         )
-                        && !gpu_helpers::same_gpu_handle(output, handle)
+                        && !output.shares_allocation_with(handle)
                         && handles[..index]
                             .iter()
-                            .all(|prior| !gpu_helpers::same_gpu_handle(output, prior))
+                            .all(|prior| !output.shares_allocation_with(prior))
                 });
                 if !valid {
                     return Err(ind2sub_provider_error(
                         "ind2sub: provider returned an invalid output handle.",
                     ));
                 }
-                let provenance = runmat_accelerate_api::handle_provenance(handle)
-                    .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
                 for output in &mut handles {
-                    runmat_accelerate_api::set_handle_provenance(output, provenance);
+                    gpu_helpers::propagate_output_provenance(output, [handle])?;
                     runmat_accelerate_api::mark_residency(output);
                 }
                 let values: Vec<Value> = handles.into_iter().map(Value::GpuTensor).collect();

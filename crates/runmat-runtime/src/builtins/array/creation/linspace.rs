@@ -700,7 +700,7 @@ fn validated_sequence_output(
         NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
         _ => runmat_accelerate_api::ProviderPrecision::F64,
     };
-    let valid = !gpu_helpers::same_gpu_handle(source, &output)
+    let valid = !source.shares_allocation_with(&output)
         && output.shape() == shape
         && output.device_id() == source.device_id()
         && gpu_helpers::exact_provider_for_handle(&output)
@@ -711,17 +711,15 @@ fn validated_sequence_output(
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output);
     if !valid {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[source]);
-        return Err(builtin_error(format!(
-            "{builtin}: provider returned malformed sequence output"
-        )));
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error(format!(
+                "{builtin}: provider returned malformed sequence output"
+            )),
+        ));
     }
     let mut output = output;
-    runmat_accelerate_api::set_handle_provenance(
-        &mut output,
-        runmat_accelerate_api::handle_provenance(source)
-            .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-    );
+    gpu_helpers::propagate_output_provenance(&mut output, [source])?;
     gpu_helpers::resident_gpu_value(output)
 }
 
@@ -746,10 +744,12 @@ fn validated_unowned_sequence_output(
         && runmat_accelerate_api::handle_integer_type(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output);
     if !valid {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[]);
-        return Err(builtin_error(format!(
-            "{builtin}: provider returned malformed sequence output"
-        )));
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            builtin_error(format!(
+                "{builtin}: provider returned malformed sequence output"
+            )),
+        ));
     }
     gpu_helpers::resident_gpu_value(output)
 }
@@ -848,6 +848,30 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn sequence_rejects_distinct_view_of_borrowed_allocation_without_retiring_source() {
+        test_support::with_test_provider(|provider| {
+            let source = gpu_helpers::upload_tensor(
+                provider,
+                &Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )
+            .unwrap();
+            let alias = source.with_view(source.view().clone()).unwrap();
+            assert_ne!(alias.view_identity(), source.view_identity());
+            assert!(super::validated_sequence_output(
+                &source,
+                provider,
+                alias,
+                vec![1, 2],
+                NumericDType::F64,
+                "linspace",
+            )
+            .is_err());
+            let host = block_on(gpu_helpers::gather_tensor_async(&source)).unwrap();
+            assert_eq!(host.materialize_f64(), vec![1.0, 2.0]);
+        });
     }
 
     #[test]
