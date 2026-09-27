@@ -652,7 +652,7 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
                 format!("interp1: X upload failed: {error}"),
                 &INTERP1_ERROR_INTERNAL,
             );
-            failure.source = Some(error.into_boxed_dyn_error());
+            failure = crate::runtime_error::with_provider_execution_source(failure, error.into());
             return Err(failure);
         }
     };
@@ -768,7 +768,7 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
                     )
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .build();
-            failure.source = Some(error.into_boxed_dyn_error());
+            failure = crate::runtime_error::with_provider_execution_source(failure, error.into());
             Err(failure)
         }
     }
@@ -957,7 +957,8 @@ async fn gpu_query_points(
                         format!("interp1: Xq upload failed: {err}"),
                         &INTERP1_ERROR_INTERNAL,
                     );
-                    failure.source = Some(err.into_boxed_dyn_error());
+                    failure =
+                        crate::runtime_error::with_provider_execution_source(failure, err.into());
                     failure
                 })?;
             Ok(Some(GpuInterp1Query {

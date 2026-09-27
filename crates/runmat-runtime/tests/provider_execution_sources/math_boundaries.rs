@@ -9,6 +9,9 @@ use std::sync::Mutex;
 #[path = "math_boundaries/trigonometry.rs"]
 mod trigonometry;
 
+#[path = "math_boundaries/interpolation.rs"]
+mod interpolation;
+
 #[derive(Debug)]
 struct BoundaryFailure(&'static str);
 impl std::fmt::Display for BoundaryFailure {
@@ -82,8 +85,30 @@ impl AccelProvider for Provider {
     fn device_info(&self) -> String {
         "math boundary source witness".into()
     }
-    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        panic!("terminal hook failure must not upload")
+    fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        assert!(
+            matches!(self.failure, "upload_x" | "upload_query" | "interp1"),
+            "terminal hook failure must not upload"
+        );
+        let hook = if self.trace.lock().unwrap().is_empty() {
+            "upload_x"
+        } else {
+            "upload_query"
+        };
+        if hook == self.failure {
+            return self.fail(hook);
+        }
+        self.trace.lock().unwrap().push(hook);
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(view.data.to_vec()),
+            shape: view.shape.to_vec(),
+            storage: GpuTensorStorage::Real,
+        })?;
+        self.probes
+            .lock()
+            .unwrap()
+            .push((allocation.handle.buffer_id(), allocation.probe));
+        Ok(allocation.handle)
     }
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
@@ -143,6 +168,12 @@ impl AccelProvider for Provider {
     unary!(unary_imag);
     unary!(unary_conj);
     unary!(complex_from_real);
+    fn interp1<'a>(
+        &'a self,
+        _: &'a ProviderInterp1Request<'a>,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail("interp1") })
+    }
     fn unary_sin<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
