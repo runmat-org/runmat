@@ -310,7 +310,17 @@ fn try_provider_outputs(
     };
     let result = match provider.ndgrid(&request) {
         Ok(result) => result,
-        Err(_) => return Ok(None),
+        Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+            return Ok(None);
+        }
+        Err(cause) => {
+            return Err(crate::build_runtime_error(format!(
+                "ndgrid: provider expansion failed: {cause}"
+            ))
+            .with_builtin(BUILTIN_NAME)
+            .with_source(cause)
+            .build())
+        }
     };
     if result.outputs.len() != parsed.output_count {
         return Err(ndgrid_error_with_detail(

@@ -316,7 +316,7 @@ pub const EYE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 async fn eye_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_eye_extensions(&rest)?;
     let parsed = ParsedEye::parse(rest).await?;
-    build_output(parsed).await.map_err(Into::into)
+    build_output(parsed).await
 }
 
 fn ensure_eye_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
@@ -558,15 +558,16 @@ fn ensure_eye_numeric_prototype(value: &Value) -> Result<(), String> {
     }
 }
 
-async fn build_output(parsed: ParsedEye) -> Result<Value, String> {
+async fn build_output(parsed: ParsedEye) -> crate::BuiltinResult<Value> {
     let shape = normalize_shape(&parsed.shape);
     match parsed.template {
         EyeTemplate::Double => eye_double(&shape),
         EyeTemplate::Single => eye_single(&shape),
         EyeTemplate::Logical => eye_logical(&shape),
         EyeTemplate::Integer(storage) => eye_integer_like(&storage, &shape),
-        EyeTemplate::Like(proto) => eye_like(&proto, &shape).await,
+        EyeTemplate::Like(proto) => return eye_like(&proto, &shape).await,
     }
+    .map_err(Into::into)
 }
 
 fn eye_double(shape: &[usize]) -> Result<Value, String> {
@@ -614,7 +615,7 @@ fn integer_storage_prototype_from_keyword(keyword: &str) -> Option<IntegerStorag
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
+async fn eye_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
     match proto {
         Value::LogicalArray(_) | Value::Bool(_) => eye_logical(shape),
         Value::ComplexTensor(tensor) if tensor.integer_storage().is_some() => {
@@ -628,7 +629,7 @@ async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
         }
         Value::ComplexTensor(tensor) => eye_complex(shape, tensor.numeric_dtype()),
         Value::Complex(_, _) => eye_complex(shape, NumericDType::F64),
-        Value::GpuTensor(handle) => eye_like_gpu(handle, shape).await,
+        Value::GpuTensor(handle) => return eye_like_gpu(handle, shape).await,
         Value::SparseTensor(sparse) => eye_sparse_like(sparse, shape),
         Value::Tensor(tensor) => match tensor.integer_storage() {
             Some(storage) => eye_integer_like(storage, shape),
@@ -642,9 +643,10 @@ async fn eye_like(proto: &Value, shape: &[usize]) -> Result<Value, String> {
             let gathered = crate::dispatcher::gather_if_needed_async(other)
                 .await
                 .map_err(|e| format!("eye: {e}"))?;
-            eye_like(&gathered, shape).await
+            return eye_like(&gathered, shape).await;
         }
     }
+    .map_err(Into::into)
 }
 
 fn eye_sparse_like(proto: &SparseTensor, shape: &[usize]) -> Result<Value, String> {
@@ -723,72 +725,100 @@ fn eye_complex_integer_like(
     ComplexTensor::new_integer(storage, shape).map(Value::ComplexTensor)
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> Result<Value, String> {
-    let shape_vec = shape.to_vec();
-    if let Some(provider) = runmat_accelerate_api::provider_for_handle(handle) {
-        let uploaded = if let Some(integer_type) =
-            runmat_accelerate_api::handle_integer_type(handle)
-        {
-            let prototype = integer_storage_prototype_from_element_type(integer_type);
-            let host = integer_identity_tensor(&prototype, &shape_vec)?;
-            gpu_helpers::upload_tensor(provider, &host)
-        } else if runmat_accelerate_api::handle_is_logical(handle) {
-            let host = identity_tensor(&shape_vec)?;
-            gpu_helpers::upload_tensor(provider, &host).inspect(|gpu| {
-                runmat_accelerate_api::set_handle_logical(gpu, true);
-            })
-        } else if runmat_accelerate_api::handle_storage(handle)
-            == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        {
-            let dtype = match runmat_accelerate_api::handle_precision(handle)
-                .unwrap_or_else(|| provider.precision())
-            {
-                runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
-                runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
-            };
-            let Value::ComplexTensor(host) = eye_complex(&shape_vec, dtype)? else {
-                unreachable!("eye_complex always returns a complex tensor")
-            };
-            gpu_helpers::upload_complex_tensor(provider, &host).map_err(|error| error.to_string())
-        } else {
-            let expected_precision = runmat_accelerate_api::handle_precision(handle)
-                .unwrap_or_else(|| provider.precision());
-            if expected_precision != provider.precision() {
-                Err("eye: owning provider cannot preserve prototype precision".into())
-            } else {
-                provider
-                    .eye(&shape_vec)
-                    .map(|mut gpu| {
-                        gpu.descriptor.element_type = Some(match expected_precision {
-                            runmat_accelerate_api::ProviderPrecision::F32 => {
-                                runmat_accelerate_api::NumericElementType::F32
-                            }
-                            runmat_accelerate_api::ProviderPrecision::F64 => {
-                                runmat_accelerate_api::NumericElementType::F64
-                            }
-                        });
-                        gpu.descriptor.storage =
-                            Some(runmat_accelerate_api::GpuTensorStorage::Real);
-                        runmat_accelerate_api::set_handle_logical(&gpu, false);
-                        gpu
-                    })
-                    .map_err(|error| error.to_string())
-            }
+async fn eye_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
+    use runmat_accelerate_api::{GpuTensorStorage, HostLogicalTensorView, ProviderPrecision};
+    let provider = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| crate::RuntimeError::from("eye: GPU prototype has no owning provider"))?;
+    let logical = handle.view().is_logical();
+    let integer = runmat_accelerate_api::handle_integer_type(handle);
+    let storage = handle.physical().storage();
+    let precision = runmat_accelerate_api::handle_precision(handle);
+    let output = if logical {
+        let Value::LogicalArray(host) = eye_logical(shape)? else {
+            unreachable!("eye_logical returns logical array")
         };
-        if let Ok(gpu) = uploaded {
-            if valid_eye_gpu_result(provider, handle, &gpu, &shape_vec) {
-                return Ok(gpu_helpers::resident_gpu_value(gpu));
+        runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &HostLogicalTensorView {
+                data: &host.data,
+                shape: &host.shape,
+            },
+            &[handle],
+        )
+        .map_err(|cause| {
+            crate::build_runtime_error(format!("eye: logical upload failed: {cause}"))
+                .with_builtin("eye")
+                .with_source(cause)
+                .build()
+        })?
+    } else if storage == GpuTensorStorage::ComplexInterleaved {
+        let host = if let Some(integer) = integer {
+            let real = integer_storage_prototype_from_element_type(integer);
+            let prototype = IntegerComplexStorage::new(real.clone(), real)?;
+            eye_complex_integer_like(&prototype, shape)?
+        } else {
+            let dtype = match precision.ok_or("eye: complex prototype is missing precision")? {
+                ProviderPrecision::F32 => NumericDType::F32,
+                ProviderPrecision::F64 => NumericDType::F64,
+            };
+            eye_complex(shape, dtype)?
+        };
+        let Value::ComplexTensor(host) = host else {
+            unreachable!("complex identity retains tensor storage")
+        };
+        gpu_helpers::upload_complex_tensor_protecting(provider, &host, &[handle])?
+    } else if let Some(integer) = integer {
+        let prototype = integer_storage_prototype_from_element_type(integer);
+        let host = integer_identity_tensor(&prototype, shape)?;
+        gpu_helpers::upload_tensor_protecting(provider, &host, &[handle])?
+    } else {
+        let precision = precision.ok_or("eye: numeric prototype is missing precision")?;
+        let direct = if precision == provider.precision() {
+            match provider.eye(shape) {
+                Ok(output) => Some(output),
+                Err(cause) if runmat_accelerate_api::is_unsupported_provider_operation(&cause) => {
+                    None
+                }
+                Err(cause) => {
+                    return Err(crate::build_runtime_error(format!(
+                        "eye: provider identity failed: {cause}"
+                    ))
+                    .with_builtin("eye")
+                    .with_source(cause)
+                    .build())
+                }
             }
-            let owner = runmat_accelerate_api::provider_for_handle(&gpu).unwrap_or(provider);
-            let _ = owner.free(&gpu);
+        } else {
+            None
+        };
+        if let Some(output) = direct {
+            output
+        } else {
+            let host = match precision {
+                ProviderPrecision::F32 => {
+                    let mut data = vec![0.0f32; tensor::element_count(shape)];
+                    visit_identity_positions(shape, |index| data[index] = 1.0);
+                    Tensor::from_f32(data, shape.to_vec())?
+                }
+                ProviderPrecision::F64 => identity_tensor(shape)?,
+            };
+            gpu_helpers::upload_tensor_protecting(provider, &host, &[handle])?
         }
-    }
-
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| format!("eye: {e}"))?;
-    eye_like(&gathered, shape).await
+    };
+    let mut output =
+        crate::builtins::common::random_args::validate_constructor_gpu_output_protecting(
+            "eye",
+            provider,
+            output,
+            shape,
+            storage,
+            if logical { None } else { precision },
+            if logical { None } else { integer },
+            logical,
+            &[handle],
+        )?;
+    gpu_helpers::propagate_output_provenance(&mut output, [handle])?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
 fn integer_identity_tensor(storage: &IntegerStorage, shape: &[usize]) -> Result<Tensor, String> {
@@ -818,22 +848,6 @@ fn integer_storage_prototype_from_element_type(
         runmat_accelerate_api::IntegerElementType::U32 => IntegerStorage::U32(Vec::new()),
         runmat_accelerate_api::IntegerElementType::U64 => IntegerStorage::U64(Vec::new()),
     }
-}
-
-fn valid_eye_gpu_result(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    prototype: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    shape: &[usize],
-) -> bool {
-    let same_owner = runmat_accelerate_api::provider_for_handle(output)
-        .is_some_and(|owner| std::ptr::eq(owner, provider));
-    same_owner
-        && output.device_id() == prototype.device_id()
-        && output.shape() == shape
-        && gpu_helpers::numeric_descriptor_matches_source(prototype, output)
-        && runmat_accelerate_api::handle_is_logical(output)
-            == runmat_accelerate_api::handle_is_logical(prototype)
 }
 
 fn identity_tensor(shape: &[usize]) -> Result<Tensor, String> {
@@ -1188,6 +1202,80 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn resident_complex_integer_eye_retains_paired_class_and_borrowed_input() {
+        test_support::with_test_provider(|provider| {
+            let storage = IntegerComplexStorage::new(
+                IntegerStorage::U64(vec![u64::MAX]),
+                IntegerStorage::U64(vec![1u64 << 63]),
+            )
+            .unwrap();
+            let host = ComplexTensor::new_integer(storage, vec![1, 1]).unwrap();
+            let input = gpu_helpers::upload_complex_tensor(provider, &host).unwrap();
+            let value = block_on(eye_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::GpuTensor(input.clone()),
+            ]))
+            .unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident paired identity")
+            };
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                output.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+            );
+            assert_eq!(
+                output.physical().element_type(),
+                runmat_accelerate_api::NumericElementType::U64
+            );
+            let Value::ComplexTensor(gathered) =
+                block_on(gpu_helpers::gather_value_async(&value)).unwrap()
+            else {
+                panic!("paired host storage")
+            };
+            let storage = gathered.integer_storage().unwrap();
+            assert_eq!(storage.real, IntegerStorage::U64(vec![1, 0, 0, 1, 0, 0]));
+            assert_eq!(storage.imag, IntegerStorage::U64(vec![0; 6]));
+            let Value::ComplexTensor(original) =
+                block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(input))).unwrap()
+            else {
+                panic!("paired prototype")
+            };
+            assert_eq!(original.integer_storage(), host.integer_storage());
+        });
+    }
+
+    #[test]
+    fn resident_logical_eye_is_produced_as_logical() {
+        test_support::with_test_provider(|provider| {
+            let input = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            let value = block_on(eye_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(3.0),
+                Value::from("like"),
+                Value::GpuTensor(input.clone()),
+            ]))
+            .unwrap();
+            let Value::GpuTensor(output) = &value else {
+                panic!("resident logical identity")
+            };
+            assert!(output.view().is_logical());
+            assert!(!output.shares_allocation_with(&input));
+            assert_eq!(
+                test_support::gather(value).unwrap().materialize_f64(),
+                vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            );
+        });
+    }
+
+    #[test]
     fn eye_like_preserves_every_exact_integer_class() {
         let storages = vec![
             IntegerStorage::I8(vec![i8::MIN]),
@@ -1382,7 +1470,7 @@ pub(crate) mod tests {
             let result = block_on(eye_builtin(args)).expect("eye");
             match result {
                 Value::GpuTensor(gpu) => {
-                    assert_eq!(gpu.shape, vec![2, 3]);
+                    assert_eq!(gpu.shape(), &[2, 3]);
                     let gathered = test_support::gather(Value::GpuTensor(gpu)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 3]);
                     assert_eq!(gathered.materialize_f64()[0], 1.0);
