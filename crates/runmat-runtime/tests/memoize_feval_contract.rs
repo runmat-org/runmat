@@ -7,8 +7,13 @@ use std::sync::{Arc, Mutex};
 #[test]
 fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() {
     for name in ["memoize", "MemoizedFunction.subsref"] {
+        let canonical = runmat_runtime::builtin::runtime_builtin_bindings_by_name(name).len();
+        let legacy = runmat_builtins::builtin_functions()
+            .into_iter()
+            .filter(|binding| binding.name == name)
+            .count();
         assert_eq!(
-            runmat_runtime::builtin::runtime_builtin_bindings_by_name(name).len(),
+            canonical + legacy,
             1,
             "single-library binding precondition: {name}"
         );
