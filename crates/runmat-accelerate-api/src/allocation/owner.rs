@@ -1,4 +1,4 @@
-use super::{AllocationIdentity, WeakAllocationLease};
+use super::{AllocationIdentity, GpuPhysicalDescriptor, WeakAllocationLease};
 
 /// Native leases may cross threads. Browser-only owners need not assert
 /// thread safety for JS-backed resources; their leases remain non-Send.
@@ -62,11 +62,37 @@ pub trait AllocationOwner: AllocationOwnerThreadBound + 'static {
     ///
     /// The new weak lease cannot acquire until registration returns Ok. This
     /// prevents publishing partially admitted ownership to another caller.
+    /// Return the validated immutable physical descriptor from the payload
+    /// record. The lease installs it before making the weak association live;
+    /// callers cannot supply replacement physical facts through a tensor view.
     fn register_lease(
         &self,
         identity: AllocationIdentity,
         lease: WeakAllocationLease,
-    ) -> Result<(), AllocationRegistrationError>;
+    ) -> Result<GpuPhysicalDescriptor, AllocationRegistrationError>;
+
+    /// Validate the existing payload phase and owner availability. This cannot
+    /// grant a new lease, revive retirement, or promise future device health.
+    fn validate_live(
+        &self,
+        identity: AllocationIdentity,
+    ) -> Result<(), super::AllocationAcquisitionError>;
+
+    /// Admit the requested interpretation using the existing allocation/view
+    /// record and trusted producer facts. Structural capacity validation alone
+    /// does not prove logical payload encoding. A numeric allocation cannot
+    /// acquire logical classification from a caller or deserialized flag;
+    /// only an already admitted producer result (or lawful transformation of
+    /// that result) supplies that evidence. Do not scan or download payloads
+    /// here. Reject interpretations lacking existing evidence.
+    ///
+    /// The lease stays strong throughout this call. As with live validation,
+    /// release any map lock before returning or invoking external code.
+    fn validate_view(
+        &self,
+        identity: AllocationIdentity,
+        view: &super::GpuTensorView,
+    ) -> Result<(), super::AllocationAcquisitionError>;
 
     /// Called exactly once by the final strong lease, without a primitive lock.
     /// Before backend work, mark the existing entry retiring/unacquirable.

@@ -1,5 +1,7 @@
 mod owner;
 mod publication;
+mod tensor;
+mod native_export;
 
 use super::*;
 use owner::{Entry, TestOwner};

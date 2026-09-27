@@ -3,6 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{GpuTensorDescriptor, GpuTensorHandle, GpuTensorStorage, NumericElementType};
+mod export;
+pub use export::{export_native_device_buffer, OwnedNativeDeviceBuffer};
 
 /// Native device ABI exposed by an acceleration provider to compatible
 /// extension code.
@@ -135,35 +137,29 @@ pub fn validate_native_device_buffer(
             api
         );
     }
-    if buffer.context.provider_device_id != handle.device_id {
+    if buffer.context.provider_device_id != handle.device_id() {
         anyhow::bail!(
             "provider exported device {} for handle device {}",
             buffer.context.provider_device_id,
-            handle.device_id
+            handle.device_id()
         );
     }
     if buffer.device_address == 0 && buffer.byte_length != 0 {
         anyhow::bail!("provider exported a null address for a non-empty native buffer");
     }
-    if buffer.descriptor.element_type != handle.descriptor.element_type
-        || buffer.descriptor.storage != handle.descriptor.storage
+    if buffer.descriptor.element_type != Some(handle.physical().element_type())
+        || buffer.descriptor.storage != Some(handle.physical().storage())
     {
         anyhow::bail!("provider native-buffer descriptor does not match its handle");
     }
-    let element_type = handle
-        .descriptor
-        .element_type
-        .ok_or_else(|| anyhow::anyhow!("native device handle is missing its element type"))?;
-    let storage = handle
-        .descriptor
-        .storage
-        .ok_or_else(|| anyhow::anyhow!("native device handle is missing its storage layout"))?;
-    let expected = native_buffer_byte_length(&handle.shape, element_type, storage)?;
+    let element_type = handle.physical().element_type();
+    let storage = handle.physical().storage();
+    let expected = native_buffer_byte_length(handle.shape(), element_type, storage)?;
     if buffer.byte_length < expected {
         anyhow::bail!(
             "provider native buffer has {} bytes; shape {:?} requires at least {}",
             buffer.byte_length,
-            handle.shape,
+            handle.shape(),
             expected
         );
     }
@@ -184,26 +180,24 @@ pub fn validate_native_device_result(
     element_type: NumericElementType,
     storage: GpuTensorStorage,
 ) -> anyhow::Result<()> {
-    if handle.device_id != provider_device_id {
+    if handle.device_id() != provider_device_id {
         anyhow::bail!(
             "provider returned device {} for an operation on device {}",
-            handle.device_id,
+            handle.device_id(),
             provider_device_id
         );
     }
-    if handle.shape != shape {
+    if handle.shape() != shape {
         anyhow::bail!(
             "provider returned shape {:?}; requested shape was {:?}",
-            handle.shape,
+            handle.shape(),
             shape
         );
     }
-    if handle.descriptor.element_type != Some(element_type)
-        || handle.descriptor.storage != Some(storage)
-    {
+    if handle.physical().element_type() != element_type || handle.physical().storage() != storage {
         anyhow::bail!(
             "provider returned numeric layout {:?}; requested {:?} {:?}",
-            handle.descriptor,
+            handle.descriptor(),
             element_type,
             storage
         );
@@ -217,9 +211,13 @@ pub fn native_buffer_byte_length(
     element_type: NumericElementType,
     storage: GpuTensorStorage,
 ) -> anyhow::Result<usize> {
-    let logical_elements = shape
-        .iter()
-        .try_fold(1usize, |length, dimension| length.checked_mul(*dimension));
+    let logical_elements = if shape.contains(&0) {
+        Some(0)
+    } else {
+        shape
+            .iter()
+            .try_fold(1usize, |length, dimension| length.checked_mul(*dimension))
+    };
     let logical_elements =
         logical_elements.ok_or_else(|| anyhow::anyhow!("native device shape overflows usize"))?;
     let lanes = match storage {
@@ -238,15 +236,12 @@ mod tests {
     use super::*;
 
     fn handle() -> GpuTensorHandle {
-        GpuTensorHandle {
-            shape: vec![2, 3],
-            device_id: 41,
-            buffer_id: 7,
-            descriptor: GpuTensorDescriptor::numeric(
-                NumericElementType::F64,
-                GpuTensorStorage::Real,
-            ),
-        }
+        crate::test_support::handle(
+            41,
+            vec![2, 3],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
     }
 
     #[test]
@@ -261,8 +256,12 @@ mod tests {
         )
         .unwrap();
 
-        let mut wrong_device = expected.clone();
-        wrong_device.device_id = 42;
+        let wrong_device = crate::test_support::handle(
+            42,
+            vec![2, 3],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        );
         assert!(validate_native_device_result(
             &wrong_device,
             41,
@@ -272,8 +271,9 @@ mod tests {
         )
         .is_err());
 
-        let mut wrong_shape = expected.clone();
-        wrong_shape.shape = vec![3, 2];
+        let wrong_shape = expected
+            .with_view(crate::GpuTensorView::contiguous(vec![3, 2]))
+            .unwrap();
         assert!(validate_native_device_result(
             &wrong_shape,
             41,
@@ -283,8 +283,9 @@ mod tests {
         )
         .is_err());
 
-        let mut wrong_layout = expected;
-        wrong_layout.descriptor = GpuTensorDescriptor::numeric(
+        let wrong_layout = crate::test_support::handle(
+            41,
+            vec![2, 3],
             NumericElementType::F32,
             GpuTensorStorage::ComplexInterleaved,
         );

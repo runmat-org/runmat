@@ -4,7 +4,7 @@ use runmat_types::{standard, ClassIdentity};
 use serde::{Deserialize, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::Cell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -14,21 +14,20 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 pub mod allocation;
+pub use allocation::{
+    GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
+};
 mod native_device;
 pub mod observation;
-mod handle_metadata;
+mod residency;
 mod numeric_upload;
 mod placement;
 mod power;
 mod numerical_domain;
 
-pub use handle_metadata::{
-    clear_handle_annotations_checked, clear_residency_checked, HandleAnnotationLock,
-    HandleAnnotationLockPoisoned,
-    restore_handle_metadata, snapshot_handle_metadata, GpuHandleMetadataSnapshot,
-    HandleMetadataRestoreGuard,
-};
 pub use native_device::*;
 pub use numeric_upload::{
     is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
@@ -36,9 +35,10 @@ pub use numeric_upload::{
 pub use numerical_domain::{NumericalDomainEvidence, RoundDigitsMode};
 pub use placement::*;
 pub use power::PowerResultDomain;
+pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRestoreGuard};
 
 type ResidencyMarkFn = fn(&GpuTensorHandle);
-type ResidencyClearFn = fn(&GpuTensorHandle);
+type ResidencyClearFn = fn(GpuHandleIdentity) -> Result<(), ResidencyCleanupError>;
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
 type ExecutionProviderAuthorizer = fn(&dyn AccelProvider) -> ExecutionProviderAuthorization;
@@ -67,23 +67,13 @@ pub fn register_execution_provider_authorizer(authorizer: ExecutionProviderAutho
     let _ = EXECUTION_PROVIDER_AUTHORIZER.set(authorizer);
 }
 
-pub type GpuHandleIdentity = (u32, u64);
+pub type GpuHandleIdentity = allocation::TensorViewIdentity;
 
-static LOGICAL_HANDLES: Lazy<RwLock<HashSet<GpuHandleIdentity>>> =
-    Lazy::new(|| RwLock::new(HashSet::new()));
-static LOGICAL_HANDLE_HITS: Lazy<RwLock<HashMap<GpuHandleIdentity, u64>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<GpuHandleIdentity, TransposeInfo>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-
-static HANDLE_CLASS_IDENTITIES: Lazy<RwLock<HashMap<GpuHandleIdentity, ClassIdentity>>> =
-    Lazy::new(|| RwLock::new(HashMap::new()));
-
-pub const fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
-    (handle.device_id, handle.buffer_id)
+pub fn handle_identity(handle: &GpuTensorHandle) -> GpuHandleIdentity {
+    handle.view_identity()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TransposeInfo {
     pub base_rows: usize,
     pub base_cols: usize,
@@ -112,10 +102,8 @@ pub fn register_residency_clear(handler: ResidencyClearFn) {
 
 /// Clear residency metadata for the provided GPU tensor handle, if a backend
 /// has registered a handler via [`register_residency_clear`].
-pub fn clear_residency(handle: &GpuTensorHandle) {
-    if let Some(handler) = RESIDENCY_CLEAR.get() {
-        handler(handle);
-    }
+pub fn clear_residency(handle: &GpuTensorHandle) -> Result<(), ResidencyCleanupError> {
+    clear_residency_checked(handle)
 }
 
 /// Register a callback that exposes the current sequence length threshold
@@ -160,133 +148,30 @@ pub fn export_wgpu_buffer(handle: &GpuTensorHandle) -> Option<WgpuBufferRef> {
     provider_for_handle(handle).and_then(|p| p.export_wgpu_buffer(handle))
 }
 
-/// Return the floating precision encoded by the handle's durable element type.
+/// Floating precision is an immutable physical allocation fact.
 pub fn handle_precision(handle: &GpuTensorHandle) -> Option<ProviderPrecision> {
-    handle
-        .descriptor
-        .element_type
-        .and_then(NumericElementType::precision)
+    handle.physical().element_type().precision()
 }
 
-/// Record the underlying runtime class associated with a GPU tensor handle.
-///
-/// Precision alone cannot represent integer gpuArray classes, so runtime
-/// introspection and validation use this metadata when the upload path knows
-/// the exact requested or inferred class.
-pub fn set_handle_class_identity(
-    handle: &GpuTensorHandle,
-    class_identity: impl Into<ClassIdentity>,
-) {
-    if let Ok(mut guard) = HANDLE_CLASS_IDENTITIES.write() {
-        guard.insert(handle_identity(handle), class_identity.into());
-    }
-}
-
-/// Look up the recorded underlying runtime class for a GPU tensor handle.
+/// Underlying numeric class derives from physical storage and the admitted
+/// logical interpretation. No mutable annotation can override either authority.
 pub fn handle_class_identity(handle: &GpuTensorHandle) -> Option<ClassIdentity> {
-    HANDLE_CLASS_IDENTITIES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).cloned())
-        .or_else(|| {
-            handle
-                .descriptor
-                .element_type
-                .map(NumericElementType::class_identity)
-        })
-}
-
-/// Clear any recorded underlying runtime class metadata for a GPU tensor handle.
-pub fn clear_handle_class_identity(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = HANDLE_CLASS_IDENTITIES.write() {
-        guard.remove(&handle_identity(handle));
-    }
-}
-
-/// Annotate a GPU tensor handle as logically-typed (`logical` in MATLAB terms)
-/// or clear the logical flag when `logical` is `false`.
-pub fn set_handle_logical(handle: &GpuTensorHandle, logical: bool) {
-    let identity = handle_identity(handle);
-    if let Ok(mut guard) = LOGICAL_HANDLES.write() {
-        if logical {
-            guard.insert(identity);
-            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                *hits.entry(identity).or_insert(0) += 1;
-            }
-        } else {
-            guard.remove(&identity);
-            if let Ok(mut hits) = LOGICAL_HANDLE_HITS.write() {
-                hits.remove(&identity);
-            }
-        }
-    }
-    if logical {
-        if let Ok(mut classes) = HANDLE_CLASS_IDENTITIES.write() {
-            classes.insert(identity, standard::LOGICAL.owned());
-        }
-    } else if let Ok(mut classes) = HANDLE_CLASS_IDENTITIES.write() {
-        if classes
-            .get(&identity)
-            .is_some_and(|class| class.is(standard::LOGICAL))
-        {
-            classes.remove(&identity);
-        }
-    }
-}
-
-/// Convenience helper for clearing logical annotations explicitly.
-pub fn clear_handle_logical(handle: &GpuTensorHandle) {
-    set_handle_logical(handle, false);
-}
-
-/// Returns true when the supplied handle has been marked as logical.
-pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
-    LOGICAL_HANDLES
-        .read()
-        .map(|guard| guard.contains(&handle_identity(handle)))
-        .unwrap_or(false)
-}
-
-pub fn handle_logical_hits(buffer_id: u64) -> Option<u64> {
-    LOGICAL_HANDLE_HITS.read().ok().and_then(|guard| {
-        let mut matches = guard
-            .iter()
-            .filter_map(|((_, candidate), hits)| (*candidate == buffer_id).then_some(*hits));
-        let first = matches.next()?;
-        Some(matches.fold(first, u64::saturating_add))
+    Some(if handle.view().is_logical() {
+        standard::LOGICAL.owned()
+    } else {
+        handle.physical().element_type().class_identity()
     })
 }
 
-pub fn handle_logical_hits_for_handle(handle: &GpuTensorHandle) -> Option<u64> {
-    LOGICAL_HANDLE_HITS
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
-}
-
-pub fn record_handle_transpose(handle: &GpuTensorHandle, base_rows: usize, base_cols: usize) {
-    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
-        guard.insert(
-            handle_identity(handle),
-            TransposeInfo {
-                base_rows,
-                base_cols,
-            },
-        );
-    }
-}
-
-pub fn clear_handle_transpose(handle: &GpuTensorHandle) {
-    if let Ok(mut guard) = TRANSPOSED_HANDLES.write() {
-        guard.remove(&handle_identity(handle));
-    }
+pub fn handle_is_logical(handle: &GpuTensorHandle) -> bool {
+    handle.view().is_logical()
 }
 
 pub fn handle_transpose_info(handle: &GpuTensorHandle) -> Option<TransposeInfo> {
-    TRANSPOSED_HANDLES
-        .read()
-        .ok()
-        .and_then(|guard| guard.get(&handle_identity(handle)).copied())
+    match handle.view().layout() {
+        GpuTensorLayout::Contiguous => None,
+        GpuTensorLayout::Transpose(info) => Some(info),
+    }
 }
 
 pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
@@ -361,10 +246,7 @@ impl From<runmat_types::IntegerClass> for IntegerElementType {
 
 /// Look up the exact native integer class stored by a GPU tensor handle.
 pub fn handle_integer_type(handle: &GpuTensorHandle) -> Option<IntegerElementType> {
-    handle
-        .descriptor
-        .element_type
-        .and_then(NumericElementType::integer_type)
+    handle.physical().element_type().integer_type()
 }
 
 /// Look up the source-language integer class stored by a GPU tensor handle.
@@ -402,44 +284,6 @@ impl GpuTensorDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GpuTensorHandle {
-    pub shape: Vec<usize>,
-    /// Stable provider/device namespace identifier. Distinct live provider
-    /// instances that can own handles must use distinct identifiers because
-    /// provider routing is keyed by this value.
-    pub device_id: u32,
-    pub buffer_id: u64,
-    #[serde(default)]
-    pub descriptor: GpuTensorDescriptor,
-}
-
-impl GpuTensorHandle {
-    pub fn new(shape: Vec<usize>, device_id: u32, buffer_id: u64) -> Self {
-        Self {
-            shape,
-            device_id,
-            buffer_id,
-            descriptor: GpuTensorDescriptor::default(),
-        }
-    }
-
-    pub fn with_numeric_descriptor(
-        mut self,
-        element_type: NumericElementType,
-        storage: GpuTensorStorage,
-    ) -> Self {
-        self.descriptor.element_type = Some(element_type);
-        self.descriptor.storage = Some(storage);
-        self
-    }
-
-    pub fn with_provenance(mut self, provenance: GpuHandleProvenance) -> Self {
-        self.descriptor.provenance = Some(provenance);
-        self
-    }
-}
-
 /// Semantic origin of a resident handle.
 ///
 /// Automatic residency is an implementation detail and may transparently return
@@ -451,35 +295,12 @@ pub enum GpuHandleProvenance {
     Explicit,
 }
 
-pub fn set_handle_provenance(handle: &mut GpuTensorHandle, provenance: GpuHandleProvenance) {
-    handle.descriptor.provenance = Some(provenance);
-}
-
 pub fn handle_provenance(handle: &GpuTensorHandle) -> Option<GpuHandleProvenance> {
-    handle.descriptor.provenance
-}
-
-pub fn mark_handle_explicit(handle: &mut GpuTensorHandle) {
-    set_handle_provenance(handle, GpuHandleProvenance::Explicit);
-}
-
-pub fn mark_handle_automatic(handle: &mut GpuTensorHandle) {
-    set_handle_provenance(handle, GpuHandleProvenance::Automatic);
+    handle.view().provenance()
 }
 
 pub fn handle_is_explicit(handle: &GpuTensorHandle) -> bool {
     handle_provenance(handle) == Some(GpuHandleProvenance::Explicit)
-}
-
-/// Clear mutable API side annotations for a released or freshly reused handle,
-/// including backend residency tracking registered through
-/// [`register_residency_clear`]. The handle-owned physical descriptor remains
-/// available on existing handle values.
-pub fn clear_handle_metadata(handle: &GpuTensorHandle) {
-    clear_residency(handle);
-    clear_handle_class_identity(handle);
-    clear_handle_logical(handle);
-    clear_handle_transpose(handle);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -656,7 +477,7 @@ pub async fn signal_envelope(
         .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
     let input_len = request
         .input
-        .shape
+        .shape()
         .iter()
         .try_fold(1usize, |acc, &dim| acc.checked_mul(dim))
         .ok_or_else(|| anyhow!("signal_envelope: invalid request"))?;
@@ -666,7 +487,7 @@ pub async fn signal_envelope(
         || output_len != expected_len
         || input_len != expected_len
         || !provider_envelope_input_shape_matches(
-            &request.input.shape,
+            request.input.shape(),
             request.channel_len,
             request.channel_count,
         )
@@ -711,7 +532,7 @@ pub async fn signal_hilbert(
     if request.length == Some(0) {
         return Err(anyhow!("signal_hilbert: invalid request"));
     }
-    if request.dim >= request.input.shape.len() {
+    if request.dim >= request.input.shape().len() {
         return Err(anyhow!("signal_hilbert: invalid request"));
     }
 
@@ -729,13 +550,13 @@ pub struct ApiDeviceInfo {
     pub backend: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ReduceDimResult {
     pub values: GpuTensorHandle,
     pub indices: GpuTensorHandle,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderCumminResult {
     pub values: GpuTensorHandle,
     pub indices: GpuTensorHandle,
@@ -804,7 +625,7 @@ pub struct WgpuBufferRef {
 }
 
 pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
-    handle.descriptor.storage.unwrap_or_default()
+    handle.physical().storage()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -812,7 +633,7 @@ pub enum PagefunOp {
     Mtimes,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PagefunRequest {
     pub op: PagefunOp,
     pub inputs: Vec<GpuTensorHandle>,
@@ -827,7 +648,7 @@ pub enum FindDirection {
     Last,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderFindResult {
     pub linear: GpuTensorHandle,
     pub rows: GpuTensorHandle,
@@ -853,7 +674,7 @@ pub enum ProviderHermitianKind {
     Skew,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderLuResult {
     pub combined: GpuTensorHandle,
     pub lower: GpuTensorHandle,
@@ -862,14 +683,14 @@ pub struct ProviderLuResult {
     pub perm_vector: GpuTensorHandle,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderCholResult {
     pub factor: GpuTensorHandle,
     /// MATLAB-compatible failure index (0 indicates success).
     pub info: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderQrResult {
     pub q: GpuTensorHandle,
     pub r: GpuTensorHandle,
@@ -877,7 +698,7 @@ pub struct ProviderQrResult {
     pub perm_vector: GpuTensorHandle,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderQrPowerIterResult {
     pub q: GpuTensorHandle,
     pub r: GpuTensorHandle,
@@ -898,7 +719,7 @@ pub struct ProviderLinsolveOptions {
     pub rcond: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderLinsolveResult {
     pub solution: GpuTensorHandle,
     pub reciprocal_condition: f64,
@@ -933,7 +754,7 @@ pub struct ProviderPolyfitResult {
 }
 
 /// Numerator/denominator payload returned by provider-backed `polyder` quotient rule.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderPolyderQuotient {
     pub numerator: GpuTensorHandle,
     pub denominator: GpuTensorHandle,
@@ -990,7 +811,7 @@ pub struct ProviderInterp1Request<'a> {
     pub extrapolation_value: f64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderEigResult {
     pub eigenvalues: GpuTensorHandle,
     pub diagonal: GpuTensorHandle,
@@ -1503,7 +1324,7 @@ pub struct ProviderConv1dOptions {
     pub orientation: ProviderConvOrientation,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderIirFilterOptions {
     /// Zero-based dimension along which filtering should be applied.
     pub dim: usize,
@@ -1516,7 +1337,7 @@ pub struct ProviderIirFilterOptions {
     pub unit_denominator: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderIirFilterResult {
     /// Filtered output tensor, matching the input signal shape.
     pub output: GpuTensorHandle,
@@ -1524,7 +1345,7 @@ pub struct ProviderIirFilterResult {
     pub final_state: Option<GpuTensorHandle>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProviderMoments2 {
     pub mean: GpuTensorHandle,
     pub ex2: GpuTensorHandle,
@@ -1690,12 +1511,8 @@ pub trait AccelProvider: Send + Sync {
     /// single data as native `f32`.
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            let element_type = h.descriptor.element_type.ok_or_else(|| {
-                anyhow!("numeric handle is missing its durable element descriptor")
-            })?;
-            let storage = h.descriptor.storage.ok_or_else(|| {
-                anyhow!("numeric handle is missing its durable storage descriptor")
-            })?;
+            let element_type = h.physical().element_type();
+            let storage = h.physical().storage();
             if element_type.integer_type().is_some() {
                 if storage != GpuTensorStorage::Real {
                     return Err(anyhow!(
@@ -1744,7 +1561,14 @@ pub trait AccelProvider: Send + Sync {
         })
     }
 
-    fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()>;
+    /// Explicit same-process acquisition only. Parsing a wire descriptor never
+    /// consults ambient provider selection or creates a new allocation lease.
+    fn acquire_live(
+        &self,
+        _wire: &GpuTensorWireDescriptor,
+    ) -> Result<GpuTensorHandle, allocation::AllocationAcquisitionError> {
+        Err(allocation::AllocationAcquisitionError::Unsupported)
+    }
     fn device_info(&self) -> String;
 
     /// Native device ABI this provider can expose to extension code.
@@ -1773,7 +1597,7 @@ pub trait AccelProvider: Send + Sync {
     }
 
     /// Export one provider-owned buffer to compatible native extension code.
-    fn export_native_device_buffer(
+    fn export_native_device_buffer_raw(
         &self,
         _handle: &GpuTensorHandle,
         _access: NativeDeviceAccess,
@@ -2042,7 +1866,7 @@ pub trait AccelProvider: Send + Sync {
 
     /// Allocate a zero-initialised tensor matching the prototype tensor.
     fn zeros_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.zeros(&prototype.shape)
+        self.zeros(prototype.shape())
     }
 
     /// Allocate an exact native-integer zero buffer using the element class of
@@ -2066,11 +1890,11 @@ pub trait AccelProvider: Send + Sync {
         if let Ok(base) = self.zeros(shape) {
             match self.scalar_add(&base, value) {
                 Ok(out) => {
-                    let _ = self.free(&base);
+                    drop(base);
                     return Ok(out);
                 }
                 Err(_) => {
-                    let _ = self.free(&base);
+                    drop(base);
                 }
             }
         }
@@ -2092,20 +1916,20 @@ pub trait AccelProvider: Send + Sync {
         if let Ok(base) = self.zeros_like(prototype) {
             match self.scalar_add(&base, value) {
                 Ok(out) => {
-                    let _ = self.free(&base);
+                    drop(base);
                     return Ok(out);
                 }
                 Err(_) => {
-                    let _ = self.free(&base);
+                    drop(base);
                 }
             }
         }
-        self.fill(&prototype.shape, value)
+        self.fill(prototype.shape(), value)
     }
 
     /// Allocate a one-initialised tensor matching the prototype tensor.
     fn ones_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.ones(&prototype.shape)
+        self.ones(prototype.shape())
     }
 
     /// Allocate an identity tensor with ones along the leading diagonal of the first two axes.
@@ -2115,7 +1939,7 @@ pub trait AccelProvider: Send + Sync {
 
     /// Allocate an identity tensor matching the prototype tensor's shape.
     fn eye_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.eye(&prototype.shape)
+        self.eye(prototype.shape())
     }
 
     /// Construct MATLAB-style coordinate grids from axis vectors.
@@ -2276,7 +2100,7 @@ pub trait AccelProvider: Send + Sync {
 
     /// Allocate a tensor filled with random values matching the prototype shape.
     fn random_uniform_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.random_uniform(&prototype.shape)
+        self.random_uniform(prototype.shape())
     }
 
     /// Allocate a tensor filled with standard normal (mean 0, stddev 1) random values.
@@ -2286,7 +2110,7 @@ pub trait AccelProvider: Send + Sync {
 
     /// Allocate a tensor of standard normal values matching a prototype's shape.
     fn random_normal_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        self.random_normal(&prototype.shape)
+        self.random_normal(prototype.shape())
     }
 
     /// Exponentially-distributed random values with mean `mu`.
@@ -3280,9 +3104,19 @@ pub trait AccelProvider: Send + Sync {
                 "reshape of a lazy transpose requires provider materialization",
             ));
         }
-        let mut updated = handle.clone();
-        updated.shape = new_shape.to_vec();
-        Ok(updated)
+        let count = |shape: &[usize]| -> anyhow::Result<usize> {
+            if shape.contains(&0) {
+                return Ok(0);
+            }
+            shape
+                .iter()
+                .try_fold(1usize, |n, &d| n.checked_mul(d))
+                .ok_or_else(|| anyhow!("reshape size overflow"))
+        };
+        if count(handle.shape())? != count(new_shape)? {
+            return Err(anyhow!("reshape must preserve element count"));
+        }
+        Ok(handle.with_view(handle.view().clone().with_shape(new_shape.to_vec()))?)
     }
     /// Concatenate the provided tensors along the 1-based dimension `dim`.
     fn cat(&self, _dim: usize, _inputs: &[GpuTensorHandle]) -> anyhow::Result<GpuTensorHandle> {
@@ -4037,7 +3871,7 @@ pub fn registered_providers() -> Vec<&'static dyn AccelProvider> {
 }
 
 pub fn provider_for_handle(handle: &GpuTensorHandle) -> Option<&'static dyn AccelProvider> {
-    provider_for_device(handle.device_id)
+    provider_for_device(handle.device_id())
 }
 
 /// Select a registered provider that explicitly exposes `api`.
@@ -4121,7 +3955,7 @@ pub fn set_thread_provider(provider: Option<&'static dyn AccelProvider>) {
 
 /// Convenience: perform elementwise add via provider if possible; otherwise return None
 pub async fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if a.device_id == b.device_id {
+    if a.device_id() == b.device_id() {
         let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_add(a, b).await {
             return Some(h);
@@ -4132,7 +3966,7 @@ pub async fn try_elem_add(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise hypot via provider if possible; otherwise return None
 pub async fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if a.device_id == b.device_id {
+    if a.device_id() == b.device_id() {
         let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_hypot(a, b).await {
             return Some(h);
@@ -4143,7 +3977,7 @@ pub async fn try_elem_hypot(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<
 
 /// Convenience: perform elementwise max via provider if possible; otherwise return None
 pub async fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if a.device_id == b.device_id {
+    if a.device_id() == b.device_id() {
         let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_max(a, b).await {
             return Some(h);
@@ -4154,7 +3988,7 @@ pub async fn try_elem_max(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise min via provider if possible; otherwise return None
 pub async fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if a.device_id == b.device_id {
+    if a.device_id() == b.device_id() {
         let p = provider_for_handle(a)?;
         if let Ok(h) = p.elem_min(a, b).await {
             return Some(h);
@@ -4165,7 +3999,7 @@ pub async fn try_elem_min(a: &GpuTensorHandle, b: &GpuTensorHandle) -> Option<Gp
 
 /// Convenience: perform elementwise atan2 via provider if possible; otherwise return None
 pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<GpuTensorHandle> {
-    if y.device_id == x.device_id {
+    if y.device_id() == x.device_id() {
         let p = provider_for_handle(y)?;
         if let Ok(h) = p.elem_atan2(y, x).await {
             return Some(h);
@@ -4842,24 +4676,24 @@ mod tests {
     struct DefaultNumericAdapterProvider;
 
     impl AccelProvider for DefaultNumericAdapterProvider {
+        fn device_id(&self) -> u32 {
+            404
+        }
         fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
             assert_eq!(host.data, &[1.0, 2.0]);
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: 404,
-                buffer_id: 1,
-                descriptor: GpuTensorDescriptor::numeric(
-                    NumericElementType::F64,
-                    GpuTensorStorage::Real,
-                ),
-            })
+            Ok(crate::test_support::handle(
+                404,
+                host.shape.to_vec(),
+                NumericElementType::F64,
+                GpuTensorStorage::Real,
+            ))
         }
 
         fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async move {
                 Ok(HostTensorOwned {
                     data: vec![1.0, 2.0],
-                    shape: h.shape.clone(),
+                    shape: h.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 })
             })
@@ -4867,15 +4701,12 @@ mod tests {
 
         fn upload_integer(&self, host: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
             assert!(matches!(host.data, HostIntegerDataView::U64([1, u64::MAX])));
-            Ok(GpuTensorHandle {
-                shape: host.shape.to_vec(),
-                device_id: 404,
-                buffer_id: 2,
-                descriptor: GpuTensorDescriptor::numeric(
-                    NumericElementType::U64,
-                    GpuTensorStorage::Real,
-                ),
-            })
+            Ok(crate::test_support::handle(
+                404,
+                host.shape.to_vec(),
+                NumericElementType::U64,
+                GpuTensorStorage::Real,
+            ))
         }
 
         fn download_integer<'a>(
@@ -4885,13 +4716,9 @@ mod tests {
             Box::pin(async move {
                 Ok(HostIntegerTensorOwned {
                     data: HostIntegerDataOwned::U64(vec![1, u64::MAX]),
-                    shape: h.shape.clone(),
+                    shape: h.shape().to_vec(),
                 })
             })
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -4906,10 +4733,6 @@ mod tests {
 
         fn download<'a>(&'a self, _h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             unsupported_future("test provider download should not be called")
-        }
-
-        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
-            Err(anyhow!("test provider free should not be called"))
         }
 
         fn device_info(&self) -> String {
@@ -4965,7 +4788,12 @@ mod tests {
     }
 
     fn test_handle(device_id: u32) -> GpuTensorHandle {
-        GpuTensorHandle::new(vec![1], device_id, 42)
+        crate::test_support::handle(
+            device_id,
+            vec![1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+        )
     }
 
     #[test]
@@ -5085,44 +4913,45 @@ mod tests {
 
     #[test]
     fn gpu_handle_descriptor_survives_clone_serialization_and_semantic_metadata_cleanup() {
-        let handle = GpuTensorHandle::new(vec![2, 3], 17, 29)
-            .with_numeric_descriptor(
-                NumericElementType::U64,
-                GpuTensorStorage::ComplexInterleaved,
-            )
-            .with_provenance(GpuHandleProvenance::Explicit);
+        let handle = crate::test_support::handle(
+            17,
+            vec![2, 3],
+            NumericElementType::U64,
+            GpuTensorStorage::ComplexInterleaved,
+        )
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
         let cloned = handle.clone();
-        clear_handle_metadata(&handle);
+        assert!(cloned.shares_allocation_with(&handle));
         assert_eq!(handle_integer_type(&cloned), Some(IntegerElementType::U64));
-        assert_eq!(handle_precision(&cloned), None);
         assert_eq!(
             handle_storage(&cloned),
             GpuTensorStorage::ComplexInterleaved
         );
         assert_eq!(
-            handle_provenance(&cloned),
-            Some(GpuHandleProvenance::Explicit)
-        );
-        assert_eq!(
             handle_class_identity(&cloned),
             Some(standard::UINT64.owned())
         );
-
-        let encoded = serde_json::to_string(&cloned).expect("serialize durable handle");
-        let decoded: GpuTensorHandle =
-            serde_json::from_str(&encoded).expect("deserialize durable handle");
-        assert_eq!(decoded, cloned);
-
-        let legacy: GpuTensorHandle =
-            serde_json::from_str(r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#)
-                .expect("deserialize legacy handle");
-        assert_eq!(legacy.descriptor, GpuTensorDescriptor::default());
-        assert_eq!(handle_storage(&legacy), GpuTensorStorage::Real);
+        let wire: GpuTensorWireDescriptor =
+            serde_json::from_str(&serde_json::to_string(&cloned).unwrap()).unwrap();
+        assert_eq!(wire, handle.wire_descriptor());
+        let acquired = handle
+            .allocation_lease()
+            .downgrade()
+            .acquire_tensor(&wire)
+            .unwrap();
+        assert!(acquired.shares_allocation_with(&handle));
+        assert!(serde_json::from_str::<GpuTensorWireDescriptor>(
+            r#"{"shape":[1,1],"device_id":5,"buffer_id":8}"#
+        )
+        .is_err());
     }
 
     #[test]
     fn durable_physical_descriptor_is_the_only_numeric_authority() {
-        let floating = GpuTensorHandle::new(vec![1, 2], 23, 31).with_numeric_descriptor(
+        let floating = crate::test_support::handle(
+            23,
+            vec![1, 2],
             NumericElementType::F32,
             GpuTensorStorage::ComplexInterleaved,
         );
@@ -5137,10 +4966,13 @@ mod tests {
             handle_class_identity(&floating),
             Some(standard::SINGLE.owned())
         );
-        clear_handle_metadata(&floating);
 
-        let integer = GpuTensorHandle::new(vec![1, 2], 37, 41)
-            .with_numeric_descriptor(NumericElementType::U64, GpuTensorStorage::Real);
+        let integer = crate::test_support::handle(
+            37,
+            vec![1, 2],
+            NumericElementType::U64,
+            GpuTensorStorage::Real,
+        );
 
         assert_eq!(handle_precision(&integer), None);
         assert_eq!(handle_integer_type(&integer), Some(IntegerElementType::U64));
@@ -5148,13 +4980,15 @@ mod tests {
             handle_class_identity(&integer),
             Some(standard::UINT64.owned())
         );
-        clear_handle_metadata(&integer);
     }
 
     #[test]
     fn removed_physical_side_metadata_surface_stays_absent() {
         let source = include_str!("lib.rs");
         let forbidden = [
+            ["set_handle_", "class_identity"].concat(),
+            ["set_handle_", "logical"].concat(),
+            ["record_handle_", "transpose"].concat(),
             ["set_handle_", "precision"].concat(),
             ["set_handle_", "integer_type"].concat(),
             ["set_handle_", "storage"].concat(),
@@ -5205,7 +5039,6 @@ mod tests {
             integer_download.data,
             HostNumericDataOwned::U64(vec![1, u64::MAX])
         );
-        clear_handle_metadata(&integer_handle);
     }
 
     #[test]
@@ -5225,38 +5058,28 @@ mod tests {
         };
         assert!(provider.upload_numeric(&complex_integer).is_err());
 
-        let single_handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 404,
-            buffer_id: 3,
-            descriptor: GpuTensorDescriptor::numeric(
-                NumericElementType::F32,
-                GpuTensorStorage::Real,
-            ),
-        };
+        let single_handle = crate::test_support::handle(
+            404,
+            vec![1, 2],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+        );
         let error = resolve_ready(provider.download_numeric(&single_handle))
             .expect_err("widened single download must reject");
         assert!(error.to_string().contains("native single"));
-        clear_handle_metadata(&single_handle);
 
-        let complex_integer_handle = GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 404,
-            buffer_id: 4,
-            descriptor: GpuTensorDescriptor::numeric(
-                NumericElementType::I16,
-                GpuTensorStorage::ComplexInterleaved,
-            ),
-        };
+        let complex_integer_handle = crate::test_support::handle(
+            404,
+            vec![1, 2],
+            NumericElementType::I16,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         let error = resolve_ready(provider.download_numeric(&complex_integer_handle))
             .expect_err("complex integer default download must reject");
         assert!(error.to_string().contains("complex integer"));
-        clear_handle_metadata(&complex_integer_handle);
 
-        let descriptorless = GpuTensorHandle::new(vec![1, 2], 404, 5);
-        let error = resolve_ready(provider.download_numeric(&descriptorless))
-            .expect_err("descriptorless numeric download must reject");
-        assert!(error.to_string().contains("durable element descriptor"));
+        // Descriptor-less data remains wire data; it cannot mint a live handle.
+        assert!(serde_json::from_str::<GpuTensorWireDescriptor>(r#"{}"#).is_err());
     }
 
     #[test]
@@ -5300,24 +5123,34 @@ mod tests {
 
     #[test]
     fn semantic_handle_metadata_is_namespaced_by_device_and_buffer() {
-        let mut first = test_handle(PROVIDER_A.device_id())
-            .with_numeric_descriptor(NumericElementType::F32, GpuTensorStorage::Real);
-        let mut second = test_handle(PROVIDER_B.device_id()).with_numeric_descriptor(
+        let (logical, _) = crate::test_support::owned(
+            PROVIDER_A.device_id(),
+            vec![2, 3],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+            true,
+        );
+        let first = logical
+            .with_view(
+                logical
+                    .view()
+                    .clone()
+                    .with_shape(vec![3, 2])
+                    .with_layout(GpuTensorLayout::Transpose(TransposeInfo {
+                        base_rows: 2,
+                        base_cols: 3,
+                    }))
+                    .with_provenance(GpuHandleProvenance::Automatic),
+            )
+            .unwrap();
+        let second = crate::test_support::handle(
+            PROVIDER_B.device_id(),
+            vec![2, 3],
             NumericElementType::U64,
             GpuTensorStorage::ComplexInterleaved,
-        );
-        clear_handle_metadata(&first);
-        clear_handle_metadata(&second);
-
-        set_handle_class_identity(&first, standard::SINGLE);
-        set_handle_class_identity(&second, standard::UINT64);
-        set_handle_logical(&first, true);
-        record_handle_transpose(&first, 2, 3);
-        mark_handle_automatic(&mut first);
-        mark_handle_explicit(&mut second);
-
-        assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
-        assert_eq!(handle_precision(&second), None);
+        )
+        .with_provenance(GpuHandleProvenance::Explicit)
+        .unwrap();
         assert_eq!(
             handle_class_identity(&first),
             Some(standard::LOGICAL.owned())
@@ -5326,42 +5159,26 @@ mod tests {
             handle_class_identity(&second),
             Some(standard::UINT64.owned())
         );
-        assert_eq!(handle_integer_type(&first), None);
-        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
-        assert!(handle_is_logical(&first));
-        assert!(!handle_is_logical(&second));
-        assert_eq!(
-            handle_transpose_info(&first).map(|info| (info.base_rows, info.base_cols)),
-            Some((2, 3))
-        );
-        assert_eq!(handle_transpose_info(&second), None);
-        assert_eq!(handle_storage(&first), GpuTensorStorage::Real);
-        assert_eq!(
-            handle_storage(&second),
-            GpuTensorStorage::ComplexInterleaved
-        );
-        assert_eq!(
-            handle_provenance(&first),
-            Some(GpuHandleProvenance::Automatic)
-        );
-        assert!(handle_is_explicit(&second));
-
-        clear_handle_metadata(&first);
         assert_eq!(handle_precision(&first), Some(ProviderPrecision::F32));
+        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
+        assert!(handle_is_transposed(&first));
+        assert!(!handle_is_transposed(&logical));
+        assert!(first.shares_allocation_with(&logical));
+        assert_ne!(handle_identity(&first), handle_identity(&logical));
+        assert!(handle_is_explicit(&second));
+        let numeric = crate::test_support::handle(
+            17,
+            vec![2, 3],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+        );
+        assert!(numeric
+            .with_view(numeric.view().clone().with_logical(true))
+            .is_err());
         assert_eq!(
-            handle_class_identity(&first),
+            handle_class_identity(&numeric),
             Some(standard::SINGLE.owned())
         );
-        assert!(!handle_is_logical(&first));
-        assert_eq!(handle_transpose_info(&first), None);
-        assert_eq!(
-            handle_provenance(&first),
-            Some(GpuHandleProvenance::Automatic)
-        );
-        assert_eq!(handle_precision(&second), None);
-        assert_eq!(handle_integer_type(&second), Some(IntegerElementType::U64));
-        assert!(handle_is_explicit(&second));
-        clear_handle_metadata(&second);
     }
 
     fn spectral_request<'a>(

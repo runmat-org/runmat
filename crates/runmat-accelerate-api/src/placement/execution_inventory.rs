@@ -125,10 +125,6 @@ mod tests {
             Box::pin(async { anyhow::bail!("not used by inventory tests") })
         }
 
-        fn free(&self, _handle: &GpuTensorHandle) -> Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "test device".into()
         }

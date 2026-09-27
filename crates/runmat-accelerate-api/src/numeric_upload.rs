@@ -4,11 +4,24 @@ use crate::{AccelProvider, GpuTensorHandle, HostNumericTensorView};
 /// A provider returned a malformed or borrowed numeric upload result.
 /// This is an execution failure, not an unsupported-representation signal.
 #[derive(Debug)]
-pub struct InvalidNumericUploadResult(String);
+pub struct InvalidNumericUploadResult {
+    detail: String,
+    cleanup: Option<crate::allocation::GpuHandleReleaseError>,
+}
+impl InvalidNumericUploadResult {
+    /// Failed retirement retains the exact owner through this error carrier.
+    pub fn cleanup_error(&self) -> Option<&crate::allocation::GpuHandleReleaseError> {
+        self.cleanup.as_ref()
+    }
+}
 
 impl std::fmt::Display for InvalidNumericUploadResult {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        write!(formatter, "{}", self.detail)?;
+        if let Some(cleanup) = &self.cleanup {
+            write!(formatter, "; {cleanup}")?;
+        }
+        Ok(())
     }
 }
 impl std::error::Error for InvalidNumericUploadResult {}
@@ -28,17 +41,17 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     host.validate()?;
     let _borrowed_metadata: Vec<_> = protected
         .iter()
-        .map(|handle| crate::HandleMetadataRestoreGuard::new(handle))
+        .map(|handle| crate::ResidencyRestoreGuard::new(handle))
         .collect();
     let handle = provider.upload_numeric_raw(host)?;
     let aliases = protected
         .iter()
-        .any(|input| (input.device_id, input.buffer_id) == (handle.device_id, handle.buffer_id));
+        .any(|input| input.shares_allocation_with(&handle));
     if !aliases
-        && handle.device_id == provider.device_id()
-        && handle.shape == host.shape
-        && handle.descriptor.element_type == Some(host.element_type())
-        && handle.descriptor.storage == Some(host.storage)
+        && handle.device_id() == provider.device_id()
+        && handle.shape() == host.shape
+        && handle.descriptor().element_type == Some(host.element_type())
+        && handle.descriptor().storage == Some(host.storage)
         && !crate::handle_is_logical(&handle)
         && !crate::handle_is_transposed(&handle)
         && crate::handle_class_identity(&handle)
@@ -51,24 +64,13 @@ pub fn upload_numeric_protecting<P: AccelProvider + ?Sized>(
     } else {
         format!("provider returned an invalid numeric upload descriptor: expected device {}, shape {:?}, element {:?}, storage {:?}; got device {}, shape {:?}, element {:?}, storage {:?}, logical {}, class {:?}, transpose {:?}",
             provider.device_id(), host.shape, host.element_type(), host.storage,
-            handle.device_id, handle.shape, handle.descriptor.element_type, handle.descriptor.storage,
+            handle.device_id(), handle.shape(), handle.descriptor().element_type, handle.descriptor().storage,
             crate::handle_is_logical(&handle), crate::handle_class_identity(&handle), crate::handle_transpose_info(&handle))
     };
-    if !aliases {
-        // Unknown device ids belong to the invocation that produced the
-        // rejected result, never an unrelated ambient default provider.
-        let freed = if let Some(owner) = crate::provider_for_device(handle.device_id)
-            .filter(|owner| owner.device_id() == handle.device_id)
-        {
-            owner.free(&handle)
-        } else {
-            provider.free(&handle)
-        };
-        if freed.is_ok() {
-            crate::clear_handle_metadata(&handle);
-        }
-    }
-    Err(InvalidNumericUploadResult(detail).into())
+    // Release only the result's owning reference. Borrowed aliases retain
+    // their own leases; no ambient or producing-provider free authority exists.
+    let cleanup = handle.release().err();
+    Err(InvalidNumericUploadResult { detail, cleanup }.into())
 }
 
 #[cfg(test)]

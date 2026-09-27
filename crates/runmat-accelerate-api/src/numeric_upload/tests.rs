@@ -5,24 +5,17 @@ use std::sync::{
     Mutex,
 };
 
-#[path = "metadata_tests.rs"]
-mod metadata;
-
 struct Legacy {
     device: u32,
-    returned: GpuTensorHandle,
+    result: Mutex<Option<GpuTensorHandle>>,
     calls: AtomicUsize,
-    freed: Mutex<Vec<GpuHandleIdentity>>,
 }
 impl Legacy {
-    fn new() -> Self {
-        let device = next_device_id();
+    fn returning(device: u32, handle: GpuTensorHandle) -> Self {
         Self {
             device,
-            returned: GpuTensorHandle::new(vec![1, 1], device, 1)
-                .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real),
+            result: Mutex::new(Some(handle)),
             calls: AtomicUsize::new(0),
-            freed: Mutex::default(),
         }
     }
 }
@@ -31,25 +24,24 @@ impl AccelProvider for Legacy {
         self.device
     }
     fn device_info(&self) -> String {
-        "numeric upload ownership fixture".into()
+        "owning numeric upload fixture".into()
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self.returned.clone())
-    }
-    fn upload_integer(&self, _: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(self.returned.clone())
-    }
-    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        Box::pin(async { anyhow::bail!("fixture has no payload") })
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed
+        self.result
             .lock()
             .unwrap()
-            .push((handle.device_id, handle.buffer_id));
-        Ok(())
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("fixture consumed"))
+    }
+    fn upload_integer(&self, _: &HostIntegerTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.upload(&HostTensorView {
+            data: &[],
+            shape: &[0],
+        })
+    }
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unused fixture download") })
     }
 }
 fn double() -> HostNumericTensorView<'static> {
@@ -61,47 +53,139 @@ fn double() -> HostNumericTensorView<'static> {
 }
 
 #[test]
-fn numeric_upload_legacy_adapter_protects_valid_and_malformed_borrowed_aliases() {
-    for integer in [false, true] {
-        for malformed in [false, true] {
-            let mut provider = Legacy::new();
-            let mut view = double();
-            if integer {
-                view.data = HostNumericDataView::I64(&[9_007_199_254_740_993]);
-                provider.returned.descriptor.element_type = Some(NumericElementType::I64);
-            }
-            let borrowed = provider.returned.clone();
-            if malformed {
-                provider.returned.shape = vec![7, 9];
-                provider.returned.descriptor.storage = None;
-            }
-            let error = upload_numeric_protecting(&provider, &view, &[&borrowed]).unwrap_err();
-            assert!(is_invalid_numeric_upload_result(&error));
-            assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
-            assert!(provider.freed.lock().unwrap().is_empty());
-            assert_eq!(borrowed.shape, vec![1, 1]);
-            assert_eq!(borrowed.descriptor.storage, Some(GpuTensorStorage::Real));
-        }
+fn numeric_upload_protects_same_view_and_different_view_of_borrowed_allocation() {
+    for different_view in [false, true] {
+        let (borrowed, owner) = crate::test_support::owned(
+            17,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            false,
+        );
+        let returned = if different_view {
+            borrowed
+                .with_view(GpuTensorView::contiguous(vec![1]))
+                .unwrap()
+        } else {
+            borrowed.clone()
+        };
+        let provider = Legacy::returning(17, returned);
+        let before = borrowed.wire_descriptor();
+        let error = upload_numeric_protecting(&provider, &double(), &[&borrowed]).unwrap_err();
+        assert!(is_invalid_numeric_upload_result(&error));
+        assert_eq!(borrowed.wire_descriptor(), before);
+        assert_eq!(owner.retired.load(Ordering::SeqCst), 0);
+        drop(borrowed);
+        assert_eq!(owner.retired.load(Ordering::SeqCst), 1);
     }
 }
 
 #[test]
 fn numeric_upload_request_validation_precedes_raw_hook_and_success_is_validated() {
-    let provider = Legacy::new();
+    let (handle, owner) = crate::test_support::owned(
+        17,
+        vec![1, 1],
+        NumericElementType::F64,
+        GpuTensorStorage::Real,
+        false,
+    );
+    let provider = Legacy::returning(17, handle);
     let mut invalid = double();
     invalid.shape = &[2, 2];
     assert!(provider.upload_numeric(&invalid).is_err());
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        provider.upload_numeric(&double()).unwrap(),
-        provider.returned
-    );
-    assert!(provider.freed.lock().unwrap().is_empty());
+    let result = provider.upload_numeric(&double()).unwrap();
+    assert_eq!(result.shape(), &[1, 1]);
+    assert_eq!(owner.retired.load(Ordering::SeqCst), 0);
+    drop(result);
+    assert_eq!(owner.retired.load(Ordering::SeqCst), 1);
 }
 
 #[test]
-fn numeric_upload_legacy_adapter_rejects_unsupported_native_storage_without_widening() {
-    let provider = Legacy::new();
+fn fresh_rejection_releases_captured_owner_not_invoked_or_ambient_provider() {
+    for (device, shape, element, storage, logical, transpose) in [
+        (
+            18,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            false,
+            false,
+        ),
+        (
+            17,
+            vec![2, 2],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            false,
+            false,
+        ),
+        (
+            17,
+            vec![1, 1],
+            NumericElementType::F32,
+            GpuTensorStorage::Real,
+            false,
+            false,
+        ),
+        (
+            17,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::ComplexInterleaved,
+            false,
+            false,
+        ),
+        (
+            17,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            true,
+            false,
+        ),
+        (
+            17,
+            vec![1, 1],
+            NumericElementType::F64,
+            GpuTensorStorage::Real,
+            false,
+            true,
+        ),
+    ] {
+        let (handle, owner) = crate::test_support::owned(device, shape, element, storage, logical);
+        let returned = if transpose {
+            handle
+                .with_view(
+                    handle
+                        .view()
+                        .clone()
+                        .with_layout(GpuTensorLayout::Transpose(TransposeInfo {
+                            base_rows: 1,
+                            base_cols: 1,
+                        })),
+                )
+                .unwrap()
+        } else {
+            handle.clone()
+        };
+        drop(handle);
+        let provider = Legacy::returning(17, returned);
+        let error = provider.upload_numeric(&double()).unwrap_err();
+        assert!(is_invalid_numeric_upload_result(&error));
+        assert_eq!(owner.retired.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[test]
+fn legacy_adapter_keeps_native_wide_integer_and_rejects_unsupported_representations() {
+    let handle = crate::test_support::handle(
+        17,
+        vec![1, 1],
+        NumericElementType::I64,
+        GpuTensorStorage::Real,
+    );
+    let provider = Legacy::returning(17, handle);
     for view in [
         HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0]),
@@ -114,108 +198,50 @@ fn numeric_upload_legacy_adapter_rejects_unsupported_native_storage_without_wide
             storage: GpuTensorStorage::ComplexInterleaved,
         },
     ] {
-        let error = upload_numeric_protecting(&provider, &view, &[]).unwrap_err();
-        assert!(error.to_string().contains("upload_numeric_raw"));
+        let error = provider.upload_numeric(&view).unwrap_err();
         assert!(!is_invalid_numeric_upload_result(&error));
     }
     assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
-    assert!(provider.freed.lock().unwrap().is_empty());
-}
-
-#[test]
-fn numeric_upload_default_integer_hook_reports_typed_unsupported() {
-    struct LegacyWithoutInteger(Legacy);
-    impl AccelProvider for LegacyWithoutInteger {
-        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            self.0.upload(host)
-        }
-        fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            self.0.download(handle)
-        }
-        fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            self.0.free(handle)
-        }
-        fn device_info(&self) -> String {
-            self.0.device_info()
-        }
-        fn device_id(&self) -> u32 {
-            self.0.device_id()
-        }
-    }
-    let provider = LegacyWithoutInteger(Legacy::new());
     let view = HostNumericTensorView {
         data: HostNumericDataView::I64(&[9_007_199_254_740_993]),
         shape: &[1, 1],
         storage: GpuTensorStorage::Real,
     };
-    let error = upload_numeric_protecting(&provider, &view, &[]).unwrap_err();
-    assert!(is_unsupported_provider_operation(&error));
-    assert_eq!(provider.0.calls.load(Ordering::SeqCst), 0);
-    assert!(provider.0.freed.lock().unwrap().is_empty());
+    let result = provider.upload_numeric(&view).unwrap();
+    assert_eq!(result.physical().element_type(), NumericElementType::I64);
 }
 
-#[test]
-fn numeric_upload_fresh_rejection_uses_exact_or_invoked_owner_not_ambient() {
-    let ambient = Box::leak(Box::new(Legacy::new()));
-    let _selection = ThreadProviderGuard::set(Some(ambient));
-    let mut invoked = Legacy::new();
-    invoked.returned.shape = vec![4, 4];
-    invoked.returned.device_id = next_device_id();
-    let error = invoked.upload_numeric(&double()).unwrap_err();
-    assert!(is_invalid_numeric_upload_result(&error));
-    assert_eq!(invoked.freed.lock().unwrap().len(), 1);
-    assert!(ambient.freed.lock().unwrap().is_empty());
-    invoked.returned.device_id = ambient.device_id();
-    assert!(invoked.upload_numeric(&double()).is_err());
-    assert_eq!(invoked.freed.lock().unwrap().len(), 1);
-    assert_eq!(ambient.freed.lock().unwrap().len(), 1);
-}
-
-struct Native {
-    legacy: Legacy,
-    observed: Mutex<Vec<(NumericElementType, GpuTensorStorage)>>,
-}
+struct Native;
 impl AccelProvider for Native {
-    fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        panic!("the protected authority must bypass an overridden convenience method")
-    }
     fn device_id(&self) -> u32 {
-        self.legacy.device
+        17
     }
     fn device_info(&self) -> String {
-        "native numeric upload fixture".into()
+        "native fixture".into()
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        panic!("native transfers must not use legacy double upload")
+        panic!("native upload must not widen")
     }
-    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        self.legacy.download(handle)
+    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        Box::pin(async { anyhow::bail!("unused") })
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.legacy.free(handle)
+    fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        panic!("validated free function must bypass convenience override")
     }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         if let HostNumericDataView::I64(values) = host.data {
             assert_eq!(values, &[9_007_199_254_740_993, -3]);
         }
-        self.observed
-            .lock()
-            .unwrap()
-            .push((host.element_type(), host.storage));
-        Ok(
-            GpuTensorHandle::new(host.shape.to_vec(), self.device_id(), 2)
-                .with_numeric_descriptor(host.element_type(), host.storage),
-        )
+        Ok(crate::test_support::handle(
+            17,
+            host.shape.to_vec(),
+            host.element_type(),
+            host.storage,
+        ))
     }
 }
-
 #[test]
-fn numeric_upload_protected_authority_bypasses_convenience_override_and_preserves_native_payloads()
-{
-    let provider = Native {
-        legacy: Legacy::new(),
-        observed: Mutex::default(),
-    };
+fn protected_authority_bypasses_convenience_override_without_widening() {
     for view in [
         HostNumericTensorView {
             data: HostNumericDataView::F32(&[1.0]),
@@ -233,11 +259,8 @@ fn numeric_upload_protected_authority_bypasses_convenience_override_and_preserve
             storage: GpuTensorStorage::ComplexInterleaved,
         },
     ] {
-        let result =
-            upload_numeric_protecting(&provider, &view, &[&provider.legacy.returned]).unwrap();
-        assert_eq!(result.descriptor.element_type, Some(view.element_type()));
-        assert_eq!(result.descriptor.storage, Some(view.storage));
+        let result = upload_numeric_protecting(&Native, &view, &[]).unwrap();
+        assert_eq!(result.physical().element_type(), view.element_type());
+        assert_eq!(result.physical().storage(), view.storage);
     }
-    assert_eq!(provider.observed.lock().unwrap().len(), 3);
-    assert!(provider.legacy.freed.lock().unwrap().is_empty());
 }

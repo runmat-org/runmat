@@ -98,7 +98,7 @@ impl AllocationOwner for TestOwner {
         &self,
         id: AllocationIdentity,
         lease: WeakAllocationLease,
-    ) -> Result<(), AllocationRegistrationError> {
+    ) -> Result<GpuPhysicalDescriptor, AllocationRegistrationError> {
         if id.device_id() != self.device {
             return Err(AllocationRegistrationError::WrongOwner);
         }
@@ -146,7 +146,47 @@ impl AllocationOwner for TestOwner {
             }
             RegistrationFault::None => {}
         }
+        let physical = GpuPhysicalDescriptor::new(
+            crate::NumericElementType::U8,
+            crate::GpuTensorStorage::Real,
+            2,
+            2,
+            2,
+        )
+        .unwrap();
         entries.get_mut(&id).unwrap().phase = Entry::Live(lease);
+        Ok(physical)
+    }
+
+    fn validate_live(&self, id: AllocationIdentity) -> Result<(), AllocationAcquisitionError> {
+        if id.device_id() != self.device {
+            return Err(AllocationAcquisitionError::WrongOwner);
+        }
+        let entries = self
+            .entries
+            .lock()
+            .map_err(|_| AllocationAcquisitionError::NotLive)?;
+        if entries
+            .get(&id)
+            .is_some_and(|record| matches!(record.phase, Entry::Live(_)))
+        {
+            Ok(())
+        } else {
+            Err(AllocationAcquisitionError::NotLive)
+        }
+    }
+
+    fn validate_view(
+        &self,
+        id: AllocationIdentity,
+        view: &GpuTensorView,
+    ) -> Result<(), AllocationAcquisitionError> {
+        self.validate_live(id)?;
+        if view.is_logical() {
+            return Err(AllocationAcquisitionError::InvalidView(
+                GpuViewError::InvalidLogicalClass,
+            ));
+        }
         Ok(())
     }
 

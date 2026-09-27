@@ -6326,6 +6326,7 @@ dependencies = [
  "runmat-types",
  "serde",
  "serde_json",
+ "tracing",
  "wgpu 0.19.4",
  "wgpu 24.0.5",
 ]
