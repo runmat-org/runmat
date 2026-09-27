@@ -58,7 +58,7 @@ impl AllocationOwner for AllocationState {
         if record.lease.is_some() {
             return Err(Register::AlreadyRegistered);
         }
-        let physical = record.physical.clone();
+        let physical = record.physical;
         record.lease = Some(lease);
         Ok(physical)
     }

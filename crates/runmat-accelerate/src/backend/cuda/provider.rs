@@ -220,7 +220,7 @@ impl CudaProvider {
                 / element_bytes;
         self.allocate_initialized(
             real.shape(),
-            element_type,
+            NativeDeviceClass::Numeric(element_type),
             GpuTensorStorage::ComplexInterleaved,
             |pointer, _| {
                 self.driver.copy_strided(
