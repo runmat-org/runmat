@@ -49,7 +49,8 @@ if [[ "$profile" == "dev" ]]; then
   profile_directory="debug"
 fi
 
-target_directory="target/$profile_directory"
+target_root="${CARGO_TARGET_DIR:-target}"
+target_directory="$target_root/$profile_directory"
 runtime_build=(cargo rustc -p runmat-aot-runtime --profile "$profile")
 pack_command=(cargo run)
 for locked_argument in "${locked_args[@]-}"; do
@@ -60,7 +61,7 @@ done
 if [[ -n "$target" ]]; then
   runtime_build+=(--target "$target")
   pack_command+=(--target "$target")
-  target_directory="target/$target/$profile_directory"
+  target_directory="$target_root/$target/$profile_directory"
 fi
 runtime_build+=(--lib --crate-type staticlib -- --print native-static-libs)
 
