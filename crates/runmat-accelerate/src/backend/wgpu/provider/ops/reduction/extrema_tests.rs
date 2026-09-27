@@ -8,6 +8,17 @@ use runmat_accelerate_api::{
 async fn dimensional_extrema_include_nan_layout_empty_and_workgroup_boundary() {
     let provider = crate::backend::wgpu::provider::register_wgpu_provider(Default::default())
         .expect("actual WGPU qualification requires an adapter");
+    if let Ok(requested) = std::env::var("RUNMAT_WGPU_FORCE_PRECISION") {
+        let actual = match provider.precision {
+            crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
+            crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
+        };
+        assert_eq!(
+            requested.to_ascii_lowercase(),
+            actual,
+            "required precision unavailable; fallback is not hardware qualification"
+        );
+    }
     let upload = |values: &[f64], shape: &[usize]| {
         if provider.precision == crate::backend::wgpu::types::NumericPrecision::F32 {
             let values = values.iter().map(|&v| v as f32).collect::<Vec<_>>();
