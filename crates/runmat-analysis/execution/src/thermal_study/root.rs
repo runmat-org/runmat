@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     import_thermal_study_completion, CompletedThermalStudy, ThermalStudyPreparation,
-    ThermalStudyResultClosure,
+    ThermalStudyResultClosure, ThermalStudyScope,
 };
 use crate::{
     import_analysis_objects, prepare_analysis_objects, AnalysisBridgeError, AnalysisBridgeResult,
@@ -42,6 +42,7 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    scope: ThermalStudyScope,
     compiled: CompiledAnalysisStudy,
     workload: ThermalWorkload,
     mesh: SolverMeshArtifact,
@@ -58,6 +59,7 @@ impl PreparationWire {
     fn new(preparation: ThermalStudyPreparation) -> Self {
         let limits = preparation.output_policy.inventory_limits();
         Self {
+            scope: preparation.scope,
             compiled: preparation.product.compiled,
             workload: preparation.product.workload,
             mesh: preparation.mesh,
@@ -87,6 +89,7 @@ impl PreparationWire {
             return Err(invalid("noncanonical thermal output chunk size"));
         }
         Ok(ThermalStudyPreparation {
+            scope: self.scope,
             product: ThermalStudyProduct {
                 compiled: self.compiled,
                 workload: self.workload,
@@ -127,7 +130,7 @@ pub fn prepare_thermal_study_root(
     let descendants = descendant_catalog(completed, &access)?;
     check_inventory(&descendants.objects, &access, policy.inventory_limits())?;
     let wire = CompletionWire {
-        schema_version: 1,
+        schema_version: 2,
         preparation: PreparationWire::new(preparation),
         closures: completed.result_closures().to_vec(),
         descendants,
@@ -198,7 +201,7 @@ pub fn import_thermal_study_root(
     }
     let wire: CompletionWire =
         decode_contract(PREFIX, "thermal-study-completion", &payload, LIMITS)?;
-    if wire.schema_version != 1 {
+    if wire.schema_version != 2 {
         return Err(invalid("unsupported thermal completion schema"));
     }
     if wire.preparation.max_objects > limits.max_objects

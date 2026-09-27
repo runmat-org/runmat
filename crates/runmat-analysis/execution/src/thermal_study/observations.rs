@@ -58,7 +58,7 @@ impl Context<'_> {
             ))
     }
     fn step(&self) -> &runmat_analysis_core::ProcedureStep {
-        &self.setup.product.workload.model.sequence.steps[0]
+        self.setup.selected_step()
     }
     fn source(&self) -> ObservationHistorySourceContext<'_> {
         ObservationHistorySourceContext::Thermal {

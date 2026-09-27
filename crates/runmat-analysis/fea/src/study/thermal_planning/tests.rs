@@ -73,6 +73,114 @@ fn plans_steady_without_inventing_a_time_domain() {
     assert_eq!(workload.model, study.model);
 }
 
+fn mixed_study() -> CompiledAnalysisStudy {
+    let mut study = compiled(ProcedureStep::thermal_steady("heat"));
+    let fixture =
+        crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
+    let mechanical = fixture.sequence.steps[0].clone();
+    let mechanical_id = mechanical.step_id.0.clone();
+    study.model.sequence.steps.insert(0, mechanical);
+    study.model.constraints.extend(fixture.constraints);
+    study.model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+        reference_temperature: Temperature::new(293.15),
+    });
+    study.model.signals = fixture.signals;
+    study.model.excitations = fixture.excitations;
+    study.model.excitation_cases = fixture.excitation_cases;
+    for case in &mut study.model.excitation_cases {
+        case.activation =
+            runmat_analysis_core::ExcitationCaseActivation::Steps(vec![mechanical_id.clone()]);
+    }
+    for action in &mut study.model.excitations {
+        action.excitation_mut().active_step_ids = vec![mechanical_id.clone()];
+    }
+    study
+}
+
+#[test]
+fn selected_nonfirst_thermal_step_preserves_full_authored_identity_and_context() {
+    let study = mixed_study();
+    let workload = plan_thermal_step(&study, "heat", policy()).unwrap();
+    assert_eq!(workload.model, study.model);
+    assert_eq!(workload.step_id.0, "heat");
+    let roundtrip =
+        ThermalWorkload::from_canonical_bytes(&workload.canonical_bytes().unwrap()).unwrap();
+    assert_eq!(roundtrip.model, study.model);
+    assert_eq!(roundtrip.identity().unwrap(), workload.identity().unwrap());
+    let mut changed_context = workload.clone();
+    changed_context.model.sequence.steps[0].accuracy.criteria[0].tolerance =
+        AccuracyTolerance::Relative(7.0e-8);
+    // The surrounding authored sequence participates in the exact workload identity.
+    assert_ne!(
+        changed_context.identity().unwrap(),
+        workload.identity().unwrap()
+    );
+    assert!(matches!(
+        plan_thermal_study(&study, policy()),
+        Err(ThermalStudyPlanningError::UnsupportedSequence)
+    ));
+}
+
+#[test]
+fn selected_planner_rejects_missing_ambiguous_nonthermal_and_inbound_steps() {
+    let mut study = mixed_study();
+    assert!(matches!(
+        plan_thermal_step(&study, "missing", policy()),
+        Err(ThermalStudyPlanningError::InvalidSelection(_))
+    ));
+    assert!(matches!(
+        plan_thermal_step(&study, &study.model.sequence.steps[0].step_id.0, policy()),
+        Err(ThermalStudyPlanningError::UnsupportedSequence)
+    ));
+    study
+        .model
+        .sequence
+        .steps
+        .push(study.model.sequence.steps[1].clone());
+    assert!(matches!(
+        plan_thermal_step(&study, "heat", policy()),
+        Err(ThermalStudyPlanningError::InvalidSelection(_))
+    ));
+    study.model.sequence.steps.pop();
+    study
+        .model
+        .sequence
+        .dependencies
+        .push(runmat_analysis_core::SequenceDependency {
+            predecessor: study.model.sequence.steps[0].step_id.clone(),
+            successor: study.model.sequence.steps[1].step_id.clone(),
+            reason: runmat_analysis_core::SequenceDependencyReason::AuthoredOrdering,
+        });
+    assert!(matches!(
+        plan_thermal_step(&study, "heat", policy()),
+        Err(ThermalStudyPlanningError::UnsupportedSequence)
+    ));
+    study.model.sequence.dependencies.clear();
+    study.model.sequence.steps[1].restart = RestartPolicy::ResumeCheckpoint {
+        checkpoint_id: "checkpoint".into(),
+        required_state_digest: "digest".into(),
+    };
+    assert!(matches!(
+        plan_thermal_step(&study, "heat", policy()),
+        Err(ThermalStudyPlanningError::UnsupportedSequence)
+    ));
+}
+
+#[test]
+fn selected_planner_rejects_realized_nonthermal_loads_on_selected_step() {
+    let mut study = mixed_study();
+    for case in &mut study.model.excitation_cases {
+        case.activation = runmat_analysis_core::ExcitationCaseActivation::Always;
+    }
+    for action in &mut study.model.excitations {
+        action.excitation_mut().active_step_ids.clear();
+    }
+    assert!(matches!(
+        plan_thermal_step(&study, "heat", policy()),
+        Err(ThermalStudyPlanningError::Source(_))
+    ));
+}
+
 #[test]
 fn rejects_multiple_steps_and_upstream_state() {
     let mut study = compiled(ProcedureStep::thermal_steady("first"));

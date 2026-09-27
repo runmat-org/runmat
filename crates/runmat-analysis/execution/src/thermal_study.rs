@@ -1,4 +1,4 @@
-//! Placement-neutral orchestration of a fresh, standalone authored thermal study.
+//! Placement-neutral orchestration of a fresh authored thermal step.
 //!
 //! Prepared tasks remain owned here: callers execute their immutable requests and return the
 //! associated scheduler response/accounting pair. Failed imports never advance the lifecycle.
@@ -8,9 +8,7 @@ use runmat_analysis_core::AuthoredOutput;
 use runmat_analysis_fea::{
     execution::{AccuracySourceKind, SemanticStatePublicationSource, SequenceIdentity},
     planning::resource::FeaResourcePlan,
-    study::{
-        plan_thermal_study, CompiledAnalysisStudy, ThermalStudyPlanningPolicy, ThermalStudyProduct,
-    },
+    study::{CompiledAnalysisStudy, ThermalStudyProduct},
 };
 use runmat_execution::{Digest, ProgramRevision};
 use runmat_execution_artifact::{cache::CacheImport, ArtifactAccess, ProgramExecutionResponse};
@@ -33,15 +31,18 @@ use crate::{
 mod completion;
 mod observations;
 mod root;
+mod scope;
 pub use completion::{
     import_thermal_study_completion, ThermalStudyResultClosure, ThermalStudyResultPhase,
 };
 pub use root::{import_thermal_study_root, prepare_thermal_study_root, PreparedThermalStudyRoot};
+pub use scope::ThermalStudyScope;
 #[cfg(test)]
 mod tests;
 pub use observations::{CompletedThermalObservations, ThermalObservationTask};
 
-/// Owned terminal artifacts; consuming the coordinator does not clone numerical storage.
+/// Owned terminal artifacts for the declared scope, not necessarily the whole authored study.
+/// Consuming the coordinator does not clone numerical storage.
 pub struct CompletedThermalStudy {
     replay: completion::ThermalStudyReplayContext,
     closures: Vec<ThermalStudyResultClosure>,
@@ -57,6 +58,7 @@ pub struct CompletedThermalStudy {
 }
 
 pub struct ThermalStudyPreparation {
+    pub scope: ThermalStudyScope,
     pub product: ThermalStudyProduct,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
@@ -109,14 +111,7 @@ impl ThermalStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = plan_thermal_study(
-            &preparation.product.compiled,
-            ThermalStudyPlanningPolicy {
-                backend: preparation.product.workload.backend,
-                formulation_requirement: preparation.product.workload.formulation_requirement,
-            },
-        )
-        .map_err(|error| invalid(error.to_string()))?;
+        let expected = preparation.planned_workload()?;
         if expected != preparation.product.workload {
             return Err(AnalysisBridgeError::Identity(
                 "thermal workload differs from the compiled authored study",
@@ -190,10 +185,7 @@ impl ThermalStudyCoordinator {
         self.result = Some(completion.result);
         self.usage = Some(completion.solve_usage);
         self.closures.push(closure);
-        self.phase = if self.preparation.product.workload.model.sequence.steps[0]
-            .observations
-            .is_empty()
-        {
+        self.phase = if self.preparation.selected_step().observations.is_empty() {
             ThermalStudyPhase::ReadyForAccuracy
         } else {
             ThermalStudyPhase::ReadyForObservations
@@ -273,7 +265,7 @@ impl ThermalStudyCoordinator {
                     .cloned()
                     .collect(),
                 sequence: SequenceIdentity::from_solver_contract(&workload.model.sequence)?,
-                step: workload.model.sequence.steps[0].clone(),
+                step: self.preparation.selected_step().clone(),
                 formulation_requirement: workload.formulation_requirement,
                 program_revision: self.preparation.program_revision.clone(),
                 chunk_bytes: self.preparation.output_policy.chunk_bytes(),
@@ -320,9 +312,7 @@ impl ThermalStudyCoordinator {
         let ordinal = self.states.len();
         self.require(ThermalStudyPhase::ReadyForState { ordinal })?;
         let result = self.result.as_ref().expect("completed solve");
-        let declaration = self.preparation.product.workload.model.sequence.steps[0].state_outputs
-            [ordinal]
-            .clone();
+        let declaration = self.preparation.selected_step().state_outputs[ordinal].clone();
         let task = prepare_semantic_state_publication(SemanticStatePublicationPreparation {
             source_host: result.host.clone(),
             source_result: result.objects.clone(),
@@ -459,6 +449,7 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::Complete)?;
         Ok(CompletedThermalStudy {
             replay: completion::ThermalStudyReplayContext {
+                scope: self.preparation.scope,
                 mesh: self.preparation.mesh,
                 frozen_project_digest: self.preparation.frozen_project_digest,
                 artifact_access: self.preparation.artifact_access,
@@ -480,6 +471,12 @@ impl ThermalStudyCoordinator {
     }
     pub fn is_complete(&self) -> bool {
         self.phase == ThermalStudyPhase::Complete
+    }
+    pub fn scope(&self) -> ThermalStudyScope {
+        self.preparation.scope
+    }
+    pub fn selected_step(&self) -> &runmat_analysis_core::ProcedureStep {
+        self.preparation.selected_step()
     }
     pub fn compiled_study(&self) -> &CompiledAnalysisStudy {
         &self.preparation.product.compiled
@@ -521,11 +518,7 @@ impl ThermalStudyCoordinator {
     }
 
     fn advance_state(&mut self) {
-        self.phase = if self.states.len()
-            < self.preparation.product.workload.model.sequence.steps[0]
-                .state_outputs
-                .len()
-        {
+        self.phase = if self.states.len() < self.preparation.selected_step().state_outputs.len() {
             ThermalStudyPhase::ReadyForState {
                 ordinal: self.states.len(),
             }

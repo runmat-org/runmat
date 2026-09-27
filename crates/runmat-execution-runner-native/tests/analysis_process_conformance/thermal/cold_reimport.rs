@@ -13,7 +13,7 @@ pub(super) fn assert_closed_completion(
     original: &impl CacheImport,
     completed: CompletedThermalStudy,
     limits: ObjectInventoryLimits,
-) {
+) -> CompletedThermalStudy {
     let prepared = prepare_thermal_study_root(&completed).unwrap();
     prepared.catalog.validate().unwrap();
     assert_eq!(prepared.catalog.roots, vec![prepared.root.clone()]);
@@ -48,6 +48,9 @@ pub(super) fn assert_closed_completion(
     // Keep only expected semantic values for assertions, not the old coordinator or a store
     // fallback. The import below cannot consult the producing session/cache.
     let expected_result = completed.result.manifest.clone();
+    let expected_model = completed.compiled.model.clone();
+    let expected_workload = completed.workload.clone();
+    let expected_scope = completed.preparation().scope;
     let expected_receipt = completed.result.numerical_receipt.clone();
     let expected_profiles = completed.result.state_publication_profiles.clone();
     let expected_accuracy = completed.accuracy.artifact.clone();
@@ -78,6 +81,9 @@ pub(super) fn assert_closed_completion(
     let imported =
         import_thermal_study_root(&cold, &prepared.root, trusted_root, &access, limits).unwrap();
     assert_eq!(imported.result.manifest, expected_result);
+    assert_eq!(imported.compiled.model, expected_model);
+    assert_eq!(imported.workload, expected_workload);
+    assert_eq!(imported.preparation().scope, expected_scope);
     assert_eq!(imported.result.numerical_receipt, expected_receipt);
     assert_eq!(
         imported.result.state_publication_profiles,
@@ -165,6 +171,8 @@ pub(super) fn assert_closed_completion(
         cold.0.insert(reference.logical_digest, bytes);
     }
     assert_bad_transcripts(&cold, &imported);
+    assert_foreign_contexts(&cold, &imported);
+    imported
 }
 
 fn assert_bad_transcripts(cold: &MemoryStore, completed: &CompletedThermalStudy) {
@@ -209,6 +217,73 @@ fn assert_bad_transcripts(cold: &MemoryStore, completed: &CompletedThermalStudy)
         ordinal: usize::MAX,
     };
     reject("foreign state ordinal", wrong_state);
+}
+
+fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy) {
+    use runmat_analysis_execution::ThermalStudyScope;
+    use runmat_analysis_fea::study::{plan_thermal_step, ThermalStudyPlanningPolicy};
+    let policy = ThermalStudyPlanningPolicy {
+        backend: completed.workload.backend,
+        formulation_requirement: completed.workload.formulation_requirement,
+    };
+    let mut foreign_model = completed.preparation();
+    foreign_model.product.compiled.model.materials[0]
+        .thermal
+        .as_mut()
+        .unwrap()
+        .expansion_coefficient_per_k += 1.0e-5;
+    foreign_model.product.compiled.properties =
+        runmat_analysis_fea::properties::compile_property_map(
+            &foreign_model.product.compiled.model,
+            Some(&foreign_model.mesh),
+        )
+        .unwrap();
+    foreign_model.product.workload = plan_thermal_step(
+        &foreign_model.product.compiled,
+        completed.workload.step_id.as_str(),
+        policy,
+    )
+    .unwrap();
+    assert!(
+        import_thermal_study_completion(cold, foreign_model, completed.result_closures().to_vec())
+            .is_err(),
+        "saved thermal transcript cannot be reused under a foreign full material model"
+    );
+    if completed.preparation().scope == ThermalStudyScope::SelectedStep {
+        let mut foreign_step = completed.preparation();
+        foreign_step.product.workload =
+            plan_thermal_step(&foreign_step.product.compiled, "unselected_heat", policy).unwrap();
+        assert!(
+            import_thermal_study_completion(
+                cold,
+                foreign_step,
+                completed.result_closures().to_vec()
+            )
+            .is_err(),
+            "valid alternate thermal step cannot consume the selected heat transcript"
+        );
+        let mut standalone = completed.preparation();
+        standalone.scope = ThermalStudyScope::Standalone;
+        assert!(
+            import_thermal_study_completion(cold, standalone, completed.result_closures().to_vec())
+                .is_err(),
+            "mixed-model selected scope cannot be downgraded to standalone"
+        );
+    } else {
+        // Explicit selection of the sole step is physically identical. Scope is a root
+        // contract distinction, not an artificial change to the numerical task identity.
+        let original_root = prepare_thermal_study_root(completed).unwrap();
+        let mut selected = completed.preparation();
+        selected.scope = ThermalStudyScope::SelectedStep;
+        let selected =
+            import_thermal_study_completion(cold, selected, completed.result_closures().to_vec())
+                .unwrap();
+        assert_eq!(selected.result.manifest, completed.result.manifest);
+        assert_ne!(
+            prepare_thermal_study_root(&selected).unwrap().root,
+            original_root.root
+        );
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

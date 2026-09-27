@@ -54,6 +54,7 @@ impl ThermalStudyResultClosure {
 }
 
 pub(super) struct ThermalStudyReplayContext {
+    pub scope: ThermalStudyScope,
     pub mesh: SolverMeshArtifact,
     pub frozen_project_digest: Option<Digest>,
     pub artifact_access: ArtifactAccess,
@@ -63,6 +64,10 @@ pub(super) struct ThermalStudyReplayContext {
 }
 
 impl CompletedThermalStudy {
+    pub fn scope(&self) -> ThermalStudyScope {
+        self.replay.scope
+    }
+
     pub fn result_closures(&self) -> &[ThermalStudyResultClosure] {
         &self.closures
     }
@@ -70,6 +75,7 @@ impl CompletedThermalStudy {
     /// Original validated preparation, retained for durable artifact packaging.
     pub fn preparation(&self) -> ThermalStudyPreparation {
         ThermalStudyPreparation {
+            scope: self.replay.scope,
             product: ThermalStudyProduct {
                 compiled: self.compiled.clone(),
                 workload: self.workload.clone(),

@@ -83,7 +83,7 @@ pub use thermal_study::{
     import_thermal_study_completion, import_thermal_study_root, prepare_thermal_study_root,
     CompletedThermalObservations, CompletedThermalStudy, PreparedThermalStudyRoot,
     ThermalObservationTask, ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
-    ThermalStudyResultClosure, ThermalStudyResultPhase,
+    ThermalStudyResultClosure, ThermalStudyResultPhase, ThermalStudyScope,
 };
 mod thermal_task;
 mod thermal_task_result;

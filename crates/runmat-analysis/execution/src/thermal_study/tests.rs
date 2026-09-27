@@ -5,6 +5,7 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::{
     fixtures::{fixture_model, FixtureId},
     properties::compile_property_map,
+    study::{plan_thermal_study, ThermalStudyPlanningPolicy},
     ComputeBackend,
 };
 use runmat_execution::ProgramEnvironment;
@@ -62,6 +63,7 @@ pub(super) fn preparation() -> ThermalStudyPreparation {
     )
     .unwrap();
     ThermalStudyPreparation {
+        scope: ThermalStudyScope::Standalone,
         product: ThermalStudyProduct { compiled, workload },
         mesh,
         frozen_project_digest: None,
@@ -172,4 +174,64 @@ fn all_declared_states_precede_baseline_in_authored_order() {
             .len(),
         2
     );
+}
+
+pub(super) fn selected_preparation() -> ThermalStudyPreparation {
+    let mut input = preparation();
+    let selected = input.product.compiled.model.sequence.steps[0].clone();
+    input.product.compiled.model.sequence = AnalysisSequence::from_steps(
+        "mixed-study",
+        vec![
+            ProcedureStep::structural_static("independent-mechanical"),
+            selected,
+        ],
+    );
+    input.product.compiled.model.sequence.dependencies.clear();
+    input.product.compiled.properties =
+        compile_property_map(&input.product.compiled.model, Some(&input.mesh)).unwrap();
+    input.product.workload.model = input.product.compiled.model.clone();
+    input.scope = ThermalStudyScope::SelectedStep;
+    input
+}
+
+#[test]
+fn selected_lifecycle_keeps_full_model_and_routes_nonfirst_state_declarations() {
+    let input = selected_preparation();
+    let model = input.product.compiled.model.clone();
+    let mut study = ThermalStudyCoordinator::new(input).unwrap();
+    assert_eq!(study.scope(), ThermalStudyScope::SelectedStep);
+    assert_eq!(study.selected_step().step_id.0, "heat");
+    assert_eq!(study.compiled_study().model, model);
+    let task = study.prepare_solve().unwrap();
+    assert_eq!(
+        task.host.workload.step,
+        runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+            runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(&model.sequence)
+                .unwrap(),
+            &model.sequence.steps[1],
+        )
+        .unwrap()
+    );
+    // The unrelated first step has a different state kind; routing must use selected heat.
+    assert_eq!(
+        study.preparation.selected_step().state_outputs[0].kind,
+        runmat_analysis_core::StateKind::Thermal
+    );
+    study.advance_state();
+    assert_eq!(
+        study.phase(),
+        ThermalStudyPhase::ReadyForState { ordinal: 0 }
+    );
+}
+
+#[test]
+fn selected_lifecycle_rejects_false_standalone_and_foreign_selection() {
+    let mut input = selected_preparation();
+    input.scope = ThermalStudyScope::Standalone;
+    assert!(ThermalStudyCoordinator::new(input).is_err());
+    for selected in ["missing", "independent-mechanical"] {
+        let mut input = selected_preparation();
+        input.product.workload.step_id.0 = selected.into();
+        assert!(ThermalStudyCoordinator::new(input).is_err());
+    }
 }

@@ -67,9 +67,7 @@ async fn execute_with_pool(
 ) -> NativeExecutionResult<CompletedThermalStudy> {
     policy.validate()?;
     let mut coordinator = ThermalStudyCoordinator::new(preparation).map_err(protocol)?;
-    let state_count = coordinator.compiled_study().model.sequence.steps[0]
-        .state_outputs
-        .len();
+    let state_count = coordinator.selected_step().state_outputs.len();
     let solve = coordinator.prepare_solve().map_err(protocol)?;
     let (executed, accounting) = execute_one(
         pool,

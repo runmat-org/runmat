@@ -47,6 +47,22 @@ fn preparation_codec_preserves_authored_and_execution_inputs() {
 }
 
 #[test]
+fn preparation_codec_preserves_selected_scope_and_full_model() {
+    let input = super::super::tests::selected_preparation();
+    let access = input.artifact_access.clone();
+    let compiled = input.product.compiled.clone();
+    let wire = PreparationWire::new(input);
+    let decoded = roundtrip(&wire).into_preparation(access.clone()).unwrap();
+    assert_eq!(decoded.scope, ThermalStudyScope::SelectedStep);
+    assert_eq!(decoded.product.compiled, compiled);
+    let coordinator = ThermalStudyCoordinator::new(decoded).unwrap();
+    assert_eq!(coordinator.selected_step().step_id.0, "heat");
+    let mut wrong_scope = roundtrip(&wire);
+    wrong_scope.scope = ThermalStudyScope::Standalone;
+    assert!(ThermalStudyCoordinator::new(wrong_scope.into_preparation(access).unwrap()).is_err());
+}
+
+#[test]
 fn preparation_wire_rejects_invalid_or_silently_clamped_policy() {
     for chunk_bytes in [0, usize::MAX] {
         let input = preparation();

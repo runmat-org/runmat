@@ -6,13 +6,14 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_execution::{
     import_thermal_completion, import_thermal_result, AnalysisOutputPolicy, ImportedThermalResult,
-    ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation,
+    ThermalStudyCoordinator, ThermalStudyPhase, ThermalStudyPreparation, ThermalStudyScope,
 };
 use runmat_analysis_fea::{
     properties::compile_property_map,
     results::{accuracy::AccuracyStatus, field::RecoveredFieldPartition},
     study::{
-        plan_thermal_study, CompiledAnalysisStudy, ThermalStudyPlanningPolicy, ThermalStudyProduct,
+        plan_thermal_step, plan_thermal_study, CompiledAnalysisStudy, ThermalStudyPlanningPolicy,
+        ThermalStudyProduct,
     },
     ComputeBackend,
 };
@@ -25,6 +26,8 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOr
 
 #[path = "thermal/cold_reimport.rs"]
 mod cold_reimport;
+#[path = "thermal/selected.rs"]
+mod selected;
 
 pub(super) async fn run(session: &NativeProgramSession) {
     let mut store = session.object_store();
@@ -45,7 +48,12 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
     revision: runmat_execution::ProgramRevision,
 ) {
     let limits = NativeAnalysisHostLimits::default();
-    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+    for (order, scope) in [
+        (ElementOrder::Tet4, ThermalStudyScope::Standalone),
+        (ElementOrder::Tet10, ThermalStudyScope::Standalone),
+        (ElementOrder::Tet4, ThermalStudyScope::SelectedStep),
+        (ElementOrder::Tet10, ThermalStudyScope::SelectedStep),
+    ] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let mut model = super::fixture_model(super::FixtureId::CantileverLinearStatic);
         model.constraints.clear();
@@ -88,7 +96,11 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let declarations = step.state_outputs.clone();
         step.observations = authored_observations();
         step.accuracy.resources.maximum_samples = 3;
-        model.sequence = AnalysisSequence::from_steps("isolated-thermal", vec![step]);
+        if scope == ThermalStudyScope::SelectedStep {
+            selected::configure_model(&mut model, &mesh, step);
+        } else {
+            model.sequence = AnalysisSequence::from_steps("isolated-thermal", vec![step]);
+        }
         let compiled = CompiledAnalysisStudy {
             module_path: "conformance/thermal.fea".into(),
             study_id: "thermal".into(),
@@ -99,17 +111,34 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             model,
             solver_mesh_digest: mesh.canonical_digest,
         };
-        let workload = plan_thermal_study(
-            &compiled,
-            ThermalStudyPlanningPolicy {
-                backend: ComputeBackend::Cpu,
-                formulation_requirement: FormulationRequirement::Experimental,
-            },
+        let policy = ThermalStudyPlanningPolicy {
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+        };
+        let workload = match scope {
+            ThermalStudyScope::Standalone => plan_thermal_study(&compiled, policy),
+            ThermalStudyScope::SelectedStep => plan_thermal_step(&compiled, "heat", policy),
+        }
+        .unwrap();
+        assert_eq!(workload.model, compiled.model);
+        let expected_model = compiled.model.clone();
+        let expected_step = runmat_analysis_fea::execution::StepIdentity::from_solver_contract(
+            runmat_analysis_fea::execution::SequenceIdentity::from_solver_contract(
+                &expected_model.sequence,
+            )
+            .unwrap(),
+            expected_model
+                .sequence
+                .steps
+                .iter()
+                .find(|step| step.step_id.as_str() == "heat")
+                .unwrap(),
         )
         .unwrap();
         let output_policy =
             AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
         let mut study = ThermalStudyCoordinator::new(ThermalStudyPreparation {
+            scope,
             product: ThermalStudyProduct { compiled, workload },
             mesh,
             frozen_project_digest: None,
@@ -123,6 +152,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         })
         .unwrap();
         let prepared = study.prepare_solve().unwrap();
+        assert_eq!(prepared.host.workload.step, expected_step);
         let solve_plan = prepared.resource_plan.identity;
         let directory = tempfile::tempdir().unwrap();
         let mut inline_store = runmat_execution_runner_native::FilesystemObjectStore::open(
@@ -227,6 +257,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             let Some(task) = study.prepare_next_observation(driver.store()).unwrap() else {
                 break;
             };
+            assert_eq!(task.host.workload.step, expected_step);
             task.program.write_to(&mut inline_store).unwrap();
             let inline_response = execute_analysis_program_request(
                 &task.program.request,
@@ -261,6 +292,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let observation_catalog = study.observations().catalog.as_ref().unwrap().identity();
 
         let accuracy = study.prepare_accuracy().unwrap();
+        assert_eq!(accuracy.host.workload.step, expected_step);
         let response = driver
             .execute(
                 &accuracy.host,
@@ -283,6 +315,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
 
         for declaration in &declarations {
             let task = study.prepare_next_state().unwrap();
+            assert_eq!(task.host.workload.step, expected_step);
             let response = driver
                 .execute(&task.host, &task.program, Some(&task.resource_plan))
                 .await;
@@ -291,6 +324,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
                 .unwrap();
             let state = &study.states().last().unwrap().state;
             assert_eq!(state.state_id, declaration.state_id);
+            assert_eq!(state.producer, expected_step);
             assert_eq!(state.kind, runmat_analysis_core::StateKind::Thermal);
             assert_eq!(
                 state.topology_digest,
@@ -308,6 +342,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             2 + observation_phases + declarations.len()
         );
         let task = study.prepare_publication().unwrap();
+        assert_eq!(task.host.workload.step, expected_step);
         let response = driver
             .execute(&task.host, &task.program, Some(&task.resource_plan))
             .await;
@@ -315,6 +350,9 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             .complete_publication(driver.store(), response.response, response.resources)
             .unwrap();
         let completed = study.into_completed().unwrap();
+        assert_eq!(completed.compiled.model, expected_model);
+        assert_eq!(completed.workload.model, expected_model);
+        assert_eq!(completed.preparation().scope, scope);
         assert_eq!(completed.baseline_usage, baseline);
         assert_eq!(completed.states.len(), declarations.len());
         assert_eq!(
@@ -341,7 +379,11 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
             FormulationRequirement::Experimental
         );
         assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
-        cold_reimport::assert_closed_completion(driver.store(), completed, limits.inventory);
+        let recovered =
+            cold_reimport::assert_closed_completion(driver.store(), completed, limits.inventory);
+        if scope == ThermalStudyScope::SelectedStep {
+            selected::execute_downstream(driver, &recovered).await;
+        }
     }
 }
 

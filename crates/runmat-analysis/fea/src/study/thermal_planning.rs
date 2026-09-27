@@ -38,6 +38,56 @@ pub fn plan_thermal_study(
     if !sequence.dependencies.is_empty()
         || !sequence.transitions.is_empty()
         || !sequence.branches.is_empty()
+    {
+        return Err(ThermalStudyPlanningError::UnsupportedSequence);
+    }
+    plan_selected(study, &step.step_id.0, policy, false)
+}
+
+/// Plan an independent thermal producer in its full authored mixed-physics sequence.
+/// This selects one task; it does not schedule or execute the surrounding study.
+pub fn plan_thermal_step(
+    study: &CompiledAnalysisStudy,
+    step_id: &str,
+    policy: ThermalStudyPlanningPolicy,
+) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
+    plan_selected(study, step_id, policy, true)
+}
+
+fn plan_selected(
+    study: &CompiledAnalysisStudy,
+    step_id: &str,
+    policy: ThermalStudyPlanningPolicy,
+    mixed_context: bool,
+) -> Result<ThermalWorkload, ThermalStudyPlanningError> {
+    if policy.formulation_requirement != study.formulation_requirement {
+        return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
+    }
+    let sequence = &study.model.sequence;
+    let mut matches = sequence
+        .steps
+        .iter()
+        .filter(|step| step.step_id.0 == step_id);
+    let step = matches
+        .next()
+        .ok_or_else(|| ThermalStudyPlanningError::InvalidSelection(step_id.to_owned()))?;
+    if matches.next().is_some() {
+        return Err(ThermalStudyPlanningError::InvalidSelection(
+            step_id.to_owned(),
+        ));
+    }
+    if sequence
+        .dependencies
+        .iter()
+        .any(|dependency| dependency.successor == step.step_id)
+        || sequence
+            .transitions
+            .iter()
+            .any(|transition| transition.consumer_step == step.step_id)
+        || sequence
+            .branches
+            .iter()
+            .any(|branch| branch.consumer_steps.contains(&step.step_id))
         || !step.activations.is_empty()
         || !step.state_inputs.is_empty()
         || step.restart != RestartPolicy::Fresh
@@ -114,7 +164,7 @@ pub fn plan_thermal_study(
     let schedule = workload
         .solve_schedule()
         .map_err(|error| ThermalStudyPlanningError::Schedule(error.to_string()))?;
-    sources::validate(&workload, &schedule)?;
+    sources::validate(&workload, &schedule, mixed_context)?;
     Ok(workload)
 }
 
@@ -122,8 +172,10 @@ pub fn plan_thermal_study(
 pub enum ThermalStudyPlanningError {
     #[error("thermal planning policy differs from the compiled formulation requirement")]
     FormulationRequirementMismatch,
-    #[error("thermal study requires one fresh standalone step without transitions, branches or lifecycle controls")]
+    #[error("thermal planning requires a fresh independent step without inbound state or lifecycle controls; standalone planning additionally requires a single-step sequence")]
     UnsupportedSequence,
+    #[error("thermal step selection must identify exactly one authored step: {0}")]
+    InvalidSelection(String),
     #[error("thermal study requires a direct steady or backward-Euler time-domain procedure")]
     UnsupportedProcedure,
     #[error("authored thermal interval count overflows the sample contract")]

@@ -18,12 +18,17 @@ use runmat_analysis_core::{
 pub(super) fn validate(
     workload: &ThermalWorkload,
     schedule: &ThermalSolveSchedule,
+    mixed_context: bool,
 ) -> Result<(), ThermalStudyPlanningError> {
     let model = &workload.model;
-    let step = &model.sequence.steps[0];
+    let step = model
+        .sequence
+        .steps
+        .iter()
+        .find(|step| step.step_id == workload.step_id)
+        .ok_or_else(|| invalid("selected thermal step is missing"))?;
     if model.thermal.is_none()
-        || model.structural.is_some()
-        || model.thermo_mechanical.is_some()
+        || (!mixed_context && (model.structural.is_some() || model.thermo_mechanical.is_some()))
         || model.electro_thermal.is_some()
         || model.electromagnetic.is_some()
         || model.cfd.is_some()
@@ -69,6 +74,9 @@ pub(super) fn validate(
         }
         for constraint in &model.constraints {
             let AnalysisConstraint::Thermal(constraint) = constraint else {
+                if mixed_context && matches!(constraint, AnalysisConstraint::Structural(_)) {
+                    continue;
+                }
                 return Err(invalid("nonthermal constraint in standalone thermal study"));
             };
             let ThermalConstraintKind::Prescribed { value, .. } = &constraint.kind else {
@@ -90,6 +98,7 @@ pub(super) fn validate(
                     ..
                 } => sample_prescribed_temperature(ambient_temperature, &model.signals, sample)
                     .map_err(invalid)?,
+                BoundaryOperator::StructuralPressure { .. } if mixed_context => continue,
                 _ => return Err(invalid("nonthermal boundary in standalone thermal study")),
             };
             real(value.real, value.imaginary)?;

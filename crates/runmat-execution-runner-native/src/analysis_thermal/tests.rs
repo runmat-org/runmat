@@ -119,6 +119,7 @@ fn preparation(order: ElementOrder, transient: bool) -> ThermalStudyPreparation 
     let digest = Digest::sha256("native-thermal-study-test");
     let limits = NativeAnalysisHostLimits::default();
     ThermalStudyPreparation {
+        scope: runmat_analysis_execution::ThermalStudyScope::Standalone,
         product: ThermalStudyProduct { compiled, workload },
         mesh,
         frozen_project_digest: None,
@@ -198,16 +199,40 @@ fn execute(
 fn whole_thermal_study_executes_every_phase_for_both_orders_and_procedures() {
     for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
         for transient in [false, true] {
-            run_chain(order, transient);
+            for scope in [
+                runmat_analysis_execution::ThermalStudyScope::Standalone,
+                runmat_analysis_execution::ThermalStudyScope::SelectedStep,
+            ] {
+                run_chain(order, transient, scope);
+            }
         }
     }
 }
 
-fn run_chain(order: ElementOrder, transient: bool) {
-    let mut study = ThermalStudyCoordinator::new(preparation(order, transient)).unwrap();
-    let declarations = study.compiled_study().model.sequence.steps[0]
-        .state_outputs
-        .clone();
+fn run_chain(
+    order: ElementOrder,
+    transient: bool,
+    scope: runmat_analysis_execution::ThermalStudyScope,
+) {
+    let mut setup = preparation(order, transient);
+    if scope == runmat_analysis_execution::ThermalStudyScope::SelectedStep {
+        setup.product.compiled.model.sequence.steps.insert(
+            0,
+            ProcedureStep::structural_static("independent-mechanical"),
+        );
+        setup.product.compiled.properties =
+            compile_property_map(&setup.product.compiled.model, Some(&setup.mesh)).unwrap();
+        setup.product.workload = runmat_analysis_fea::study::plan_thermal_step(
+            &setup.product.compiled,
+            "heat",
+            planning_policy(),
+        )
+        .unwrap();
+    }
+    setup.scope = scope;
+    let mut study = ThermalStudyCoordinator::new(setup).unwrap();
+    assert_eq!(study.scope(), scope);
+    let declarations = study.selected_step().state_outputs.clone();
     let directory = tempfile::tempdir().unwrap();
     let mut store = FilesystemObjectStore::open(
         directory.path().join("objects"),
