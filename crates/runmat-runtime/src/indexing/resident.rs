@@ -22,6 +22,93 @@ pub(super) fn failure(context: &str, source: ProviderExecutionError) -> RuntimeE
     )
 }
 
+pub(super) async fn gather(input: &GpuTensorHandle) -> Result<runmat_value::Value, RuntimeError> {
+    gpu_helpers::download_value_preserving_residency_async(owner(input)?, input).await
+}
+
+pub(super) async fn gather_numeric(
+    input: &GpuTensorHandle,
+) -> Result<runmat_value::Value, RuntimeError> {
+    match gather(input).await? {
+        runmat_value::Value::LogicalArray(array) => {
+            crate::builtins::common::tensor::logical_to_tensor(&array)
+                .map(runmat_value::Value::Tensor)
+                .map_err(|cause| semantic_error("AccelerationOperationFailed", cause))
+        }
+        value => Ok(value),
+    }
+}
+
+pub(super) fn restore(
+    input: &GpuTensorHandle,
+    value: runmat_value::Value,
+    other: &[&GpuTensorHandle],
+) -> Result<runmat_value::Value, RuntimeError> {
+    use runmat_value::Value;
+    let provider = owner(input)?;
+    let protected: Vec<_> = std::iter::once(input)
+        .chain(other.iter().copied())
+        .collect();
+    let mut output = match value {
+        Value::Tensor(tensor) if runmat_accelerate_api::handle_is_logical(input) => {
+            let data: Vec<u8> = (0..tensor.len())
+                .map(|index| {
+                    u8::from(
+                        tensor
+                            .numeric_value_at(index)
+                            .expect("validated tensor")
+                            .materialize_f64()
+                            != 0.0,
+                    )
+                })
+                .collect();
+            runmat_accelerate_api::upload_logical_protecting(
+                provider,
+                &runmat_accelerate_api::HostLogicalTensorView {
+                    data: &data,
+                    shape: &tensor.shape,
+                },
+                &protected,
+            )
+            .map_err(|cause| {
+                failure(
+                    "logical indexed result",
+                    ProviderExecutionError::from_source(cause),
+                )
+            })?
+        }
+        Value::Tensor(tensor) => gpu_helpers::upload_tensor_protecting_typed(
+            provider, &tensor, &protected,
+        )
+        .map_err(|cause| failure("indexed result", ProviderExecutionError::from_source(cause)))?,
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &protected)?
+        }
+        Value::LogicalArray(array) => runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &runmat_accelerate_api::HostLogicalTensorView {
+                data: &array.data,
+                shape: &array.shape,
+            },
+            &protected,
+        )
+        .map_err(|cause| {
+            failure(
+                "logical indexed result",
+                ProviderExecutionError::from_source(cause),
+            )
+        })?,
+        _ => {
+            return Err(semantic_error(
+                "AccelerationOperationFailed",
+                "Indexed mutation produced an unsupported host carrier",
+            ))
+        }
+    };
+    gpu_helpers::propagate_output_provenance(&mut output, [input])?;
+    gpu_helpers::resident_gpu_value(output)
+}
+
 pub(super) fn admit_read(
     mut output: GpuTensorHandle,
     input: &GpuTensorHandle,
@@ -98,6 +185,80 @@ pub(super) fn empty_read(
 mod tests {
     use super::*;
     use runmat_accelerate_api::{GpuTensorStorage, HostNumericDataView, HostNumericTensorView};
+    #[test]
+    fn scalar_assignment_preserves_single_and_paired_integer_payloads() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let single = runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::F32(&[1.0, 2.0]),
+                    shape: &[1, 2],
+                    storage: GpuTensorStorage::Real,
+                },
+                &[],
+            )
+            .unwrap();
+            let output =
+                futures::executor::block_on(crate::indexing::write_linear::assign_gpu_scalar(
+                    &single,
+                    &[1],
+                    &runmat_value::Value::Num(7.0),
+                    false,
+                ))
+                .unwrap();
+            let runmat_value::Value::GpuTensor(output) = output else {
+                panic!("resident");
+            };
+            assert_eq!(
+                output.physical().element_type(),
+                single.physical().element_type()
+            );
+            let actual = futures::executor::block_on(provider.download_numeric(&output)).unwrap();
+            assert_eq!(
+                actual.data,
+                runmat_accelerate_api::HostNumericDataOwned::F32(vec![7.0, 2.0])
+            );
+            assert!(!output.shares_allocation_with(&single));
+            let original = futures::executor::block_on(provider.download_numeric(&single)).unwrap();
+            assert_eq!(
+                original.data,
+                runmat_accelerate_api::HostNumericDataOwned::F32(vec![1.0, 2.0])
+            );
+
+            let complex = runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
+                    data: HostNumericDataView::U64(&[u64::MAX, 9_007_199_254_740_993, 4, 5]),
+                    shape: &[1, 2],
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                },
+                &[],
+            )
+            .unwrap();
+            let output =
+                futures::executor::block_on(crate::indexing::write_linear::assign_gpu_scalar(
+                    &complex,
+                    &[2],
+                    &runmat_value::Value::Int(runmat_value::IntValue::U64(7)),
+                    false,
+                ))
+                .unwrap();
+            let runmat_value::Value::GpuTensor(output) = output else {
+                panic!("resident complex");
+            };
+            let actual = futures::executor::block_on(provider.download_numeric(&output)).unwrap();
+            assert_eq!(actual.storage, GpuTensorStorage::ComplexInterleaved);
+            assert_eq!(
+                actual.data,
+                runmat_accelerate_api::HostNumericDataOwned::U64(vec![
+                    u64::MAX,
+                    9_007_199_254_740_993,
+                    7,
+                    0
+                ])
+            );
+        });
+    }
     #[test]
     fn empty_reads_preserve_single_complex_and_logical_producer_classes() {
         crate::builtins::common::test_support::with_test_provider(|provider| {

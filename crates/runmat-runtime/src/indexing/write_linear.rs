@@ -7,7 +7,7 @@ use crate::indexing::integer_assignment::{
 };
 use crate::indexing::write_slice::{
     delete_integer_complex_storage_positions, deleted_vector_shape, download_integer_tensor,
-    real_tensor_to_complex, upload_tensor_to_gpu,
+    real_tensor_to_complex,
 };
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
@@ -18,10 +18,6 @@ use runmat_value::{
 
 fn map_assignment_shape_error(err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("assignment: {err}"))
-}
-
-fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", format!("{context}: {err}"))
 }
 
 fn is_empty_tensor(value: &Value) -> bool {
@@ -262,21 +258,11 @@ pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
             }
         }
         Value::GpuTensor(h2) => {
-            let total = h2.shape.iter().copied().product::<usize>();
-            if total != 1 {
+            if !h2.shape().iter().all(|&extent| extent == 1) {
                 return Err(mex("ScalarRequired", "RHS must be scalar"));
             }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex(
-                    "AccelerationProviderUnavailable",
-                    "No acceleration provider registered",
-                )
-            })?;
-            let host = provider
-                .download(h2)
-                .await
-                .map_err(|e| map_acceleration_error("gather rhs", e))?;
-            Ok(host.data[0])
+            let host = super::resident::gather(h2).await?;
+            Box::pin(rhs_to_real_scalar(&host)).await
         }
         _ => rhs
             .try_into()
@@ -295,22 +281,15 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
             let value = complex_tensor_value_complex64(t, 0);
             Ok((value.re, value.im))
         }
+        Value::LogicalArray(array) if array.data.len() == 1 => {
+            Ok((f64::from(array.data[0] != 0), 0.0))
+        }
         Value::GpuTensor(h) => {
-            let total = h.shape.iter().copied().product::<usize>();
-            if total != 1 {
+            if !h.shape().iter().all(|&extent| extent == 1) {
                 return Err(mex("ScalarRequired", "RHS must be scalar"));
             }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex(
-                    "AccelerationProviderUnavailable",
-                    "No acceleration provider registered",
-                )
-            })?;
-            let host = provider
-                .download(h)
-                .await
-                .map_err(|e| map_acceleration_error("gather rhs", e))?;
-            Ok((host.data[0], 0.0))
+            let host = super::resident::gather(h).await?;
+            Box::pin(rhs_to_complex_scalar(&host)).await
         }
         _ => Err(mex("NumericRequired", "RHS must be numeric")),
     }
@@ -702,48 +681,33 @@ async fn assign_typed_complex_integer_scalar(
 }
 
 pub async fn assign_gpu_scalar(
-    h: &runmat_accelerate_api::GpuTensorHandle,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
     indices: &[usize],
     rhs: &Value,
     delete: bool,
 ) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(h).is_some() {
-        let tensor = download_integer_tensor(h).await?;
-        let Value::Tensor(updated) = assign_tensor_scalar(tensor, indices, rhs, delete).await?
-        else {
-            unreachable!("real integer scalar assignment must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    let host = provider
-        .download(h)
-        .await
-        .map_err(|e| map_acceleration_error("gather for assignment", e))?;
-    let t = Tensor::new(host.data, host.shape).map_err(map_assignment_shape_error)?;
-    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs, delete).await? else {
-        unreachable!()
+    let host = super::resident::gather_numeric(handle).await?;
+    let updated = match host {
+        Value::Tensor(tensor) => assign_tensor_scalar(tensor, indices, rhs, delete).await?,
+        Value::ComplexTensor(tensor) => assign_complex_scalar(tensor, indices, rhs, delete).await?,
+        _ => {
+            return Err(mex(
+                "AccelerationOperationFailed",
+                "Invalid resident assignment carrier",
+            ))
+        }
     };
-    let data = updated.materialize_f64();
-    let view = runmat_accelerate_api::HostTensorView {
-        data: &data,
-        shape: &updated.shape,
+    let protected: Vec<_> = match rhs {
+        Value::GpuTensor(rhs) => vec![rhs],
+        _ => Vec::new(),
     };
-    let new_h = provider
-        .upload(&view)
-        .map_err(|e| map_acceleration_error("reupload after assignment", e))?;
-    Ok(Value::GpuTensor(new_h))
+    super::resident::restore(handle, updated, &protected)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        assign_complex_scalar, assign_sparse_scalar, assign_tensor_scalar, map_acceleration_error,
+        assign_complex_scalar, assign_sparse_scalar, assign_tensor_scalar,
         map_assignment_shape_error,
     };
     use futures::executor::block_on;
@@ -1263,7 +1227,10 @@ mod tests {
 
     #[test]
     fn assignment_acceleration_error_mapping_reports_identifier() {
-        let err = map_acceleration_error("gather rhs", "provider failed");
+        let err = crate::indexing::resident::failure(
+            "gather rhs",
+            anyhow::anyhow!("provider failed").into(),
+        );
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }
