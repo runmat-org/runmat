@@ -206,6 +206,7 @@ fn native_and_fallback_dot_preserve_input_driven_class_under_f64_preference() {
                 let Value::GpuTensor(output) = result else {
                     panic!("actual native class is supported, including nonpreferred Single")
                 };
+                assert_eq!(handle_provenance(&output), Some(provenance));
                 assert_eq!(
                     handle_precision(&output),
                     Some(if single_left && single_right {
