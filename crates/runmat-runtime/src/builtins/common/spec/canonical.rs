@@ -1,4 +1,4 @@
-use super::{builtin_fusion_spec_registrations, BuiltinFusionSpec};
+use super::{builtin_fusion_spec_registrations, BuiltinFusionSpec, FusionSemanticDeclaration};
 use runmat_builtins::{
     builtin_catalog_entry_by_name, builtin_implementation_provenance, BuiltinBindingIdentity,
     BuiltinImplementationAuthority,
@@ -6,21 +6,47 @@ use runmat_builtins::{
 
 /// Resolve a fusion declaration for an already selected canonical binding.
 ///
-/// Current spec declarations identify a builtin, not a binding variant. They
-/// therefore authorize only an unambiguous, single-binding catalog entry. A
-/// future multi-variant owner must declare variant-specific fusion semantics
-/// before it can use this boundary. Duplicate declarations fail closed.
+/// Typed semantic declarations identify the exact binding variant. Legacy
+/// declarations without that field authorize only an unambiguous,
+/// single-binding catalog entry. Duplicate declarations fail closed.
 /// The selected binding's compiled implementation provenance is the join key.
 /// A spec's textual name is checked for consistency, never used to select an
 /// implementation. Whole-registry validation remains the inventory's owner.
+#[derive(Clone, Copy)]
+pub struct CanonicalFusionDeclaration {
+    pub binding: BuiltinBindingIdentity,
+    pub spec: &'static BuiltinFusionSpec,
+    pub semantics: Option<&'static FusionSemanticDeclaration>,
+}
+
+impl std::fmt::Debug for CanonicalFusionDeclaration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CanonicalFusionDeclaration")
+            .field("binding", &self.binding)
+            .field(
+                "revision",
+                &self.semantics.map(|semantics| semantics.revision),
+            )
+            .finish_non_exhaustive()
+    }
+}
+
 pub fn canonical_fusion_spec(
     identity: BuiltinBindingIdentity,
 ) -> Option<&'static BuiltinFusionSpec> {
+    canonical_fusion_declaration(identity).map(|declaration| declaration.spec)
+}
+
+pub fn canonical_fusion_declaration(
+    identity: BuiltinBindingIdentity,
+) -> Option<CanonicalFusionDeclaration> {
     let entry = builtin_catalog_entry_by_name(identity.builtin.name)?;
-    let [binding] = entry.bindings else {
-        return None;
-    };
-    if entry.binding_identity(binding) != identity {
+    if !entry
+        .bindings
+        .iter()
+        .any(|binding| entry.binding_identity(binding) == identity)
+    {
         return None;
     }
     let provenance = builtin_implementation_provenance();
@@ -33,28 +59,20 @@ pub fn canonical_fusion_spec(
     if implementations.next().is_some() {
         return None;
     }
-    let mut candidates = builtin_fusion_spec_registrations()
-        .filter(|spec| spec.builtin_path == implementation.builtin_path);
+    let mut candidates = builtin_fusion_spec_registrations().filter(|spec| {
+        spec.builtin_path == implementation.builtin_path
+            && match spec.semantics {
+                Some(semantics) => semantics.binding == identity,
+                None => entry.bindings.len() == 1,
+            }
+    });
     let registration = candidates.next()?;
     if candidates.next().is_some() || registration.spec.name != identity.builtin.name {
         return None;
     }
-    Some(registration.spec)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn selected_binding_cannot_borrow_another_variants_expression() {
-        let entry = builtin_catalog_entry_by_name("single").expect("single catalog entry");
-        let identity = entry.binding_identity(&entry.bindings[0]);
-        assert!(canonical_fusion_spec(identity).is_some());
-        assert!(canonical_fusion_spec(BuiltinBindingIdentity {
-            variant: "not-the-selected-binding",
-            ..identity
-        })
-        .is_none());
-    }
+    Some(CanonicalFusionDeclaration {
+        binding: identity,
+        spec: registration.spec,
+        semantics: registration.semantics,
+    })
 }

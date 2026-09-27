@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use runmat_builtins::BuiltinCatalogEntry;
 use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_spec, FusionExprContext, ScalarType,
+    canonical_fusion_declaration, CanonicalFusionDeclaration, FusionExprContext, ScalarType,
 };
 
 use crate::graph::ValueId;
@@ -18,8 +18,25 @@ pub(super) fn canonical_expression(
     let [binding] = entry.bindings else {
         return None;
     };
-    let spec = canonical_fusion_spec(entry.binding_identity(binding))?;
-    let template = spec.elementwise.as_ref()?;
+    let declaration = canonical_fusion_declaration(entry.binding_identity(binding))?;
+    // Untyped legacy/reduction emission has no operation-owned admission or
+    // helper publication boundary. It cannot bypass a declared requirement.
+    if declaration
+        .semantics
+        .is_some_and(|semantics| semantics.admit.is_some() || !semantics.helpers.is_empty())
+    {
+        return None;
+    }
+    admitted_expression(declaration, inputs, expressions, scalar_ty)
+}
+
+pub(super) fn admitted_expression(
+    declaration: CanonicalFusionDeclaration,
+    inputs: &[ValueId],
+    expressions: &HashMap<ValueId, String>,
+    scalar_ty: ScalarType,
+) -> Option<String> {
+    let template = declaration.spec.elementwise.as_ref()?;
     if !template.scalar_precisions.contains(&scalar_ty) {
         return None;
     }
@@ -33,6 +50,23 @@ pub(super) fn canonical_expression(
         constants: &[],
     })
     .ok()
+}
+
+pub(super) fn structural_support(plan: &super::FusionGroupPlan) -> bool {
+    plan.operations.iter().all(|operation| match operation {
+        super::FusionOp::Primitive { .. } => true,
+        super::FusionOp::Builtin { name, .. } => {
+            let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) else {
+                return plan.generate_wgsl("f32").is_some() || plan.generate_wgsl("f64").is_some();
+            };
+            let [binding] = entry.bindings else {
+                return false;
+            };
+            canonical_fusion_declaration(entry.binding_identity(binding))
+                .and_then(|declaration| declaration.spec.elementwise.as_ref())
+                .is_some_and(|template| !template.scalar_precisions.is_empty())
+        }
+    })
 }
 
 #[cfg(test)]

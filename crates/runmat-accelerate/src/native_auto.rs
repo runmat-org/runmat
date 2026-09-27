@@ -1310,6 +1310,7 @@ impl NativeAutoOffload {
                 preparation: CandidatePreparationState::Warm,
                 cpu,
                 provider_fallback,
+                required_upload_bytes: None,
                 required_download_bytes: 0,
                 downstream_materialization: false,
                 compare_profitability: true,

@@ -1384,7 +1384,8 @@ impl FusionGroupPlan {
         }
 
         // Determine kernel support:
-        // - Elementwise: require WGSL generation at plan time.
+        // - Elementwise: retain declared candidates; runtime facts and domain
+        //   admission determine the actual typed shader before any upload.
         // - Reduction: require WGSL generation at plan time as well.
         // - Other kinds: executed via provider paths.
         let supported = if plan.has_native_integer_constants() {
@@ -1399,7 +1400,7 @@ impl FusionGroupPlan {
             if scalar_shape_known_one(&plan.group.shape) {
                 false
             } else {
-                plan.generate_wgsl("f32").is_some()
+                expression::structural_support(&plan)
             }
         } else if plan.kernel.kind.is_reduction() {
             plan.generate_reduction_wgsl("f32").is_some()
@@ -4006,7 +4007,7 @@ mod tests {
         assert_eq!(single.unwrap(), "v0");
 
         let double = super::builtin_expr("double", &[0], &exprs, "f64");
-        assert_eq!(double.unwrap(), "v0");
+        assert_eq!(double.unwrap(), "(v0)");
     }
 
     #[test]

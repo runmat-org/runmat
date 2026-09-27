@@ -24,8 +24,20 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts inputs to float64. Providers without native float64 support gather to host; float64-capable providers keep results on device.",
 };
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::DOUBLE_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        helpers: &[],
+    };
+
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::floating_conversions::double"
+    builtin_path = "crate::builtins::math::elementwise::floating_conversions::double",
+    semantics = FUSION_SEMANTICS
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "double",

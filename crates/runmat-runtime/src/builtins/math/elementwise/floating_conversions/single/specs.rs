@@ -24,8 +24,20 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "Casts tensors to float32. Providers may implement `unary_single`; otherwise the runtime gathers, converts, and re-uploads to keep gpuArray results resident.",
 };
 
+const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration =
+    crate::builtins::common::spec::FusionSemanticDeclaration {
+        binding: runmat_builtins::BuiltinBindingIdentity {
+            builtin: runmat_builtins::SINGLE_CATALOG_ENTRY.identity,
+            variant: "default",
+        },
+        revision: 1,
+        admit: None,
+        helpers: &[],
+    };
+
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::floating_conversions::single"
+    builtin_path = "crate::builtins::math::elementwise::floating_conversions::single",
+    semantics = FUSION_SEMANTICS
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "single",

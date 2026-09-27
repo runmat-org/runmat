@@ -842,17 +842,21 @@ pub fn register_constant(input: TokenStream) -> TokenStream {
 struct RegisterSpecAttrArgs {
     spec_expr: Option<Expr>,
     builtin_path: Option<LitStr>,
+    semantics: Option<Expr>,
 }
 
 impl Parse for RegisterSpecAttrArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut spec_expr = None;
         let mut builtin_path = None;
+        let mut semantics = None;
         while !input.is_empty() {
             let ident: syn::Ident = input.parse()?;
             input.parse::<syn::Token![=]>()?;
             if ident == "spec" {
                 spec_expr = Some(input.parse()?);
+            } else if ident == "semantics" {
+                semantics = Some(input.parse()?);
             } else if ident == "builtin_path" {
                 let lit: LitStr = input.parse()?;
                 builtin_path = Some(lit);
@@ -866,6 +870,7 @@ impl Parse for RegisterSpecAttrArgs {
         Ok(Self {
             spec_expr,
             builtin_path,
+            semantics,
         })
     }
 }
@@ -876,7 +881,16 @@ pub fn register_gpu_spec(attr: TokenStream, item: TokenStream) -> TokenStream {
     let RegisterSpecAttrArgs {
         spec_expr,
         builtin_path,
+        semantics,
     } = args;
+    if semantics.is_some() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "semantics belongs to a fusion registration",
+        )
+        .to_compile_error()
+        .into();
+    }
     let item_const = parse_macro_input!(item as ItemConst);
     let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
         let ident = &item_const.ident;
@@ -947,7 +961,11 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
     let RegisterSpecAttrArgs {
         spec_expr,
         builtin_path,
+        semantics,
     } = args;
+    let semantics = semantics
+        .map(|value| quote! { Some(&#value) })
+        .unwrap_or_else(|| quote! { None });
     let item_const = parse_macro_input!(item as ItemConst);
     let spec_tokens = spec_expr.map(|expr| quote! { #expr }).unwrap_or_else(|| {
         let ident = &item_const.ident;
@@ -971,6 +989,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
             crate::builtins::common::spec::wasm_registry::submit_fusion_spec(
                 crate::builtins::common::spec::FusionSpecRegistration {
                     spec: &#spec_tokens_helper, builtin_path: #builtin_path_lit, declaration: #declaration,
+                    semantics: #semantics,
                     source_file: file!(), module_path: module_path!(),
                 }
             );
@@ -996,6 +1015,7 @@ pub fn register_fusion_spec(attr: TokenStream, item: TokenStream) -> TokenStream
         inventory::submit! {
             crate::builtins::common::spec::FusionSpecInventory {
                 spec: &#spec_for_native,
+                semantics: #semantics,
                 builtin_path: #builtin_path_lit,
                 declaration: #declaration,
                 source_file: file!(),

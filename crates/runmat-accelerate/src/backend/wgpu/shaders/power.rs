@@ -9,25 +9,11 @@ pub(crate) enum PowerShader {
 
 pub(crate) fn shader(precision: NumericPrecision, mode: PowerShader) -> String {
     let ty = precision.as_str();
-    let bits = match precision {
-        NumericPrecision::F32 => {
-            r#"
-fn finite(v: f32) -> bool { return (bitcast<u32>(v) & 0x7f800000u) != 0x7f800000u; }
-fn nan(v: f32) -> bool { return (bitcast<u32>(v) & 0x7fffffffu) > 0x7f800000u; }
-fn negative(v: f32) -> bool { return (bitcast<u32>(v) & 0x80000000u) != 0u; }
-"#
-        }
-        NumericPrecision::F64 => {
-            r#"
-fn finite(v: f64) -> bool { return (bitcast<vec2<u32>>(v).y & 0x7ff00000u) != 0x7ff00000u; }
-fn nan(v: f64) -> bool {
-    let b = bitcast<vec2<u32>>(v);
-    return (b.y & 0x7ff00000u) == 0x7ff00000u && ((b.y & 0x000fffffu) != 0u || b.x != 0u);
-}
-fn negative(v: f64) -> bool { return (bitcast<vec2<u32>>(v).y & 0x80000000u) != 0u; }
-"#
-        }
+    let precision_api = match precision {
+        NumericPrecision::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+        NumericPrecision::F64 => runmat_accelerate_api::ProviderPrecision::F64,
     };
+    let math = crate::kernel_math::power::functions(precision_api);
     let (width, body) = match mode {
         PowerShader::Classify => (
             1,
@@ -49,6 +35,10 @@ fn negative(v: f64) -> bool { return (bitcast<vec2<u32>>(v).y & 0x80000000u) != 
 "#,
         ),
     };
+    let name = crate::kernel_math::power::entrypoint(precision_api);
+    let body = body
+        .replace("real_power(", &format!("{name}("))
+        .replace("needs_complex(", &format!("{name}_needs_complex("));
     let max_rank = crate::backend::wgpu::params::BCAST_MAX_RANK;
     format!(
         r#"
@@ -66,29 +56,7 @@ struct Params {{
 @group(0) @binding(1) var<storage, read> B: Tensor;
 @group(0) @binding(2) var<storage, read_write> Out: Tensor;
 @group(0) @binding(3) var<uniform> params: Params;
-{bits}
-fn needs_complex(a: T, b: T) -> bool {{
-    return finite(a) && a < T(0.0) && finite(b) && trunc(b) != b;
-}}
-fn real_power(a: T, b: T) -> T {{
-    let infinity = T(bitcast<f32>(0x7f800000u));
-    let not_number = T(bitcast<f32>(0x7fc00000u));
-    if nan(a) || nan(b) {{ return not_number; }}
-    if b == T(0.0) {{ return T(1.0); }}
-    let magnitude = abs(a);
-    if !finite(b) {{
-        if magnitude == T(1.0) {{ return T(1.0); }}
-        return select(T(0.0), infinity, (magnitude > T(1.0)) == (b > T(0.0)));
-    }}
-    let odd = trunc(b) == b && abs(b - T(2.0) * trunc(b / T(2.0))) == T(1.0);
-    var result: T;
-    if magnitude == T(0.0) {{ result = select(T(0.0), infinity, b < T(0.0)); }}
-    else if !finite(a) {{ result = select(T(0.0), infinity, b > T(0.0)); }}
-    else {{ result = pow(magnitude, b); }}
-    if negative(a) && odd {{ return -result; }}
-    if needs_complex(a, b) {{ return not_number; }}
-    return result;
-}}
+{math}
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {{
     if gid.x >= params.len {{ return; }}

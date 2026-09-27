@@ -1,5 +1,7 @@
 //! Value-domain evidence belongs to this admitted pair, not a cached name.
-use super::{domain::PowerResultDomain, power_error_with_detail};
+#[cfg(test)]
+use super::domain::PowerResultDomain;
+use super::power_error_with_detail;
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::context::preparation::{
     execute_current_request, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
@@ -58,17 +60,11 @@ fn classify(operands: &[Value]) -> BuiltinResult<NumericalDomainEvidence> {
     };
     let plan = BroadcastPlan::new(&left.shape, &right.shape)
         .map_err(|detail| power_error_with_detail(&POWER_ERROR_SIZE_MISMATCH, detail))?;
-    let mut domain = PowerResultDomain::Real;
-    for (_, left_index, right_index) in plan.iter() {
-        // Both inputs were admitted as native floating tensors. Reading single
-        // as f64 is exact; classification precedes mixed-output rounding.
-        let base = crate::builtins::common::tensor::tensor_value_f64(left, left_index);
-        let exponent = crate::builtins::common::tensor::tensor_value_f64(right, right_index);
-        domain = domain.join(PowerResultDomain::for_real_pair(base, exponent));
-        if domain == PowerResultDomain::Complex {
-            break;
-        }
-    }
+    let domain = super::domain::classify_pair(
+        &plan,
+        |index| crate::builtins::common::tensor::tensor_value_f64(left, index),
+        |index| crate::builtins::common::tensor::tensor_value_f64(right, index),
+    );
     Ok(NumericalDomainEvidence::RealPower(domain))
 }
 

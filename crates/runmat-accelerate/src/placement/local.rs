@@ -30,6 +30,9 @@ pub(crate) struct LocalPlacementRequest<'a> {
     /// Provider execution prior without transfer components. It is used only
     /// when the provider has no trustworthy estimate of its own.
     pub(crate) provider_fallback: ExecutionCostEstimate,
+    /// Physical transfer bytes when an admitted preparation changes the input
+    /// representation. None preserves ordinary residency-based accounting.
+    pub(crate) required_upload_bytes: Option<u64>,
     pub(crate) required_download_bytes: u64,
     pub(crate) downstream_materialization: bool,
     /// Direct provider APIs preserve caller intent after feasibility succeeds;
@@ -105,7 +108,9 @@ pub(crate) fn plan_local(
         });
     }
 
-    let upload_bytes = residency.required_upload_bytes(provider.device_id());
+    let upload_bytes = request
+        .required_upload_bytes
+        .unwrap_or_else(|| residency.required_upload_bytes(provider.device_id()));
     let cost_query = ProviderCostQuery {
         operation: query.clone(),
         preparation: request.preparation,

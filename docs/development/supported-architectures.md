@@ -114,6 +114,8 @@ Precision support depends on the active provider. Providers advertise supported 
 
 `RUNMAT_ALLOW_PRECISION_DOWNCAST=1` permits implicit downcast from double precision to provider-native precision and emits a warning.
 
+Under this opt-in, fused arithmetic on an F32 provider returns actual F32 storage and subsequent operations see that effective precision. It is not a promise of Double arithmetic in an F32 buffer. An explicit `double(...)` conversion still requires a genuine Double result and may use the shared runtime instead of an F32 fusion kernel.
+
 ### ARM And Mali GPUs
 
 Mali GPUs are not targeted directly by RunMat, but they are reachable as an acceleration provider through the platform GPU API exposed to WGPU, usually Vulkan on Linux/Android or browser WebGPU in a supported browser.

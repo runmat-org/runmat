@@ -1,7 +1,11 @@
 use std::fmt;
 
 mod canonical;
-pub use canonical::canonical_fusion_spec;
+mod admission;
+pub use admission::*;
+pub use canonical::{
+    canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
@@ -247,6 +251,7 @@ pub struct GpuSpecInventory {
 /// Inventory wrapper for fusion specs.
 pub struct FusionSpecInventory {
     pub spec: &'static BuiltinFusionSpec,
+    pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -265,6 +270,7 @@ pub(crate) struct GpuSpecRegistration {
 #[derive(Clone, Copy)]
 pub(crate) struct FusionSpecRegistration {
     pub spec: &'static BuiltinFusionSpec,
+    pub semantics: Option<&'static FusionSemanticDeclaration>,
     pub builtin_path: &'static str,
     pub declaration: &'static str,
     pub source_file: &'static str,
@@ -318,6 +324,7 @@ pub fn builtin_fusion_specs() -> std::vec::IntoIter<&'static BuiltinFusionSpec> 
 pub(crate) fn builtin_fusion_spec_registrations() -> impl Iterator<Item = FusionSpecRegistration> {
     inventory::iter::<FusionSpecInventory>().map(|entry| FusionSpecRegistration {
         spec: entry.spec,
+        semantics: entry.semantics,
         builtin_path: entry.builtin_path,
         declaration: entry.declaration,
         source_file: entry.source_file,

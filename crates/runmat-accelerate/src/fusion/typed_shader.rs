@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
-use runmat_builtins::builtin_catalog_entry_by_name;
-use runmat_runtime::builtins::common::spec::ScalarType;
+use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
 
-use super::{expression::canonical_expression, primitive_expr, semantics::ResolvedProgram};
+use super::{expression::admitted_expression, primitive_expr, semantics::ResolvedProgram};
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::ValueId;
 
@@ -25,6 +24,7 @@ impl FusionGroupPlan {
             expressions.insert(*id, format!("input{index}.data[i{index}]"));
         }
         let mut body = String::new();
+        let mut helpers = Vec::new();
         for (index, operation) in self.operations.iter().enumerate() {
             let (inputs, output) = match operation {
                 FusionOp::Primitive { inputs, output, .. }
@@ -53,12 +53,23 @@ impl FusionGroupPlan {
                     Ok((*id, format!("{operation_name}({expression})")))
                 })
                 .collect::<Result<HashMap<_, _>>>()?;
-            let expression = match operation {
-                FusionOp::Primitive { op, .. } => primitive_expr(*op, inputs, &operands),
-                FusionOp::Builtin { name, .. } => {
-                    let entry = builtin_catalog_entry_by_name(name)
-                        .ok_or_else(|| anyhow!("missing canonical fusion binding"))?;
-                    canonical_expression(entry, inputs, &operands, operation_type)
+            let expression = if let Some(declaration) = program.declaration(output) {
+                for helper in declaration
+                    .semantics
+                    .into_iter()
+                    .flat_map(|semantics| semantics.helpers)
+                {
+                    if !helpers.contains(&(*helper, operation_type)) {
+                        helpers.push((*helper, operation_type));
+                    }
+                }
+                admitted_expression(declaration, inputs, &operands, operation_type)
+            } else {
+                match operation {
+                    FusionOp::Primitive { op, .. } => primitive_expr(*op, inputs, &operands),
+                    FusionOp::Builtin { .. } => {
+                        return Err(anyhow!("fusion builtin was not admitted"))
+                    }
                 }
             }
             .ok_or_else(|| anyhow!("no typed fusion expression for the selected operation"))?;
@@ -86,8 +97,21 @@ impl FusionGroupPlan {
         // even when two otherwise identical programs happen to emit the same
         // arithmetic, so representation contracts do not share a stale key.
         let identity = program.cache_identity()?;
+        let mut math = String::new();
+        for (helper, precision) in helpers {
+            let precision = match precision {
+                ScalarType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
+                ScalarType::F64 => runmat_accelerate_api::ProviderPrecision::F64,
+                _ => return Err(anyhow!("unsupported fusion math helper precision")),
+            };
+            match helper {
+                FusionMathHelper::RealPower => {
+                    math.push_str(&crate::kernel_math::power::functions(precision))
+                }
+            }
+        }
         Ok(format!(
-            "// {identity}\n{}",
+            "// {identity}\n{math}\n{}",
             self.build_wgsl_shader(
                 buffer_name,
                 &bindings,

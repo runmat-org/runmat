@@ -3,9 +3,14 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use crate::precision::PrecisionPolicy;
 use anyhow::{anyhow, Result};
+use runmat_accelerate_api::ProviderPrecision;
 use runmat_builtins::{builtin_catalog_entry_by_name, infer_catalog_call, BuiltinBindingIdentity};
 use runmat_execution::Digest;
+use runmat_runtime::builtins::common::spec::{
+    canonical_fusion_declaration, CanonicalFusionDeclaration, FusionAdmissionContext,
+};
 use runmat_runtime::value_fact::value_fact;
 use runmat_types::{
     infer_binary, infer_unary, CallRequest, LiteralContext, NumericClass, NumericDomain,
@@ -19,26 +24,64 @@ use crate::graph::{PrimitiveOp, ValueId};
 #[derive(Debug)]
 pub(crate) struct ResolvedProgram {
     facts: HashMap<ValueId, ValueFact>,
+    source_inputs: Vec<ValueFact>,
+    precision_policy: PrecisionPolicy,
+    provider_precision: ProviderPrecision,
     /// Selected bindings are part of request identity, not inferred from output
     /// class or a spelling-based expression dispatch table.
     pub bindings: Vec<BuiltinBindingIdentity>,
+    declarations: HashMap<ValueId, CanonicalFusionDeclaration>,
+    evidence: BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("fusion operation admission failed: {0}")]
+pub(crate) struct FusionAdmissionFailure(pub anyhow::Error);
+
 impl ResolvedProgram {
-    pub fn resolve(plan: &FusionGroupPlan, inputs: &[Value]) -> Result<Self> {
+    pub async fn resolve(
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        provider_precision: ProviderPrecision,
+    ) -> Result<Self> {
+        Self::resolve_with_policy(plan, inputs, provider_precision, PrecisionPolicy::current())
+            .await
+    }
+
+    pub async fn resolve_with_policy(
+        plan: &FusionGroupPlan,
+        inputs: &[Value],
+        provider_precision: ProviderPrecision,
+        precision_policy: PrecisionPolicy,
+    ) -> Result<Self> {
         if inputs.len() != plan.inputs.len() {
             return Err(anyhow!("fusion operand count does not match the plan"));
         }
+        let source_inputs: Vec<_> = inputs.iter().map(value_fact).collect();
+        let effective_input = |mut fact: ValueFact| {
+            if precision_policy.permits_double_to_single()
+                && provider_precision == ProviderPrecision::F32
+            {
+                if let runmat_types::ValueKindFact::Numeric(ref mut numeric) = fact.kind {
+                    if numeric.class == NumericClass::Double {
+                        numeric.class = NumericClass::Single;
+                    }
+                }
+            }
+            fact
+        };
         let mut facts: HashMap<_, _> = plan
             .inputs
             .iter()
             .copied()
-            .zip(inputs.iter().map(value_fact))
+            .zip(source_inputs.iter().cloned().map(effective_input))
             .collect();
         for (id, value) in &plan.const_values {
-            facts.insert(*id, value_fact(value));
+            facts.insert(*id, effective_input(value_fact(value)));
         }
         let mut bindings = Vec::new();
+        let mut declarations = HashMap::new();
+        let mut evidence = BTreeMap::new();
         for operation in &plan.operations {
             let (input_ids, output) = match operation {
                 FusionOp::Primitive { inputs, output, .. }
@@ -53,42 +96,104 @@ impl ResolvedProgram {
                         .ok_or_else(|| anyhow!("missing fusion operand fact {id}"))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let fact = match operation {
-                FusionOp::Primitive { op, .. } => primitive_fact(*op, &arguments)?,
-                FusionOp::Builtin { name, .. } => {
-                    let entry = builtin_catalog_entry_by_name(name)
-                        .ok_or_else(|| anyhow!("fusion builtin has no canonical type authority"))?;
-                    let [binding] = entry.bindings else {
-                        return Err(anyhow!("fusion builtin binding is ambiguous"));
-                    };
-                    bindings.push(entry.binding_identity(binding));
-                    let inference = infer_catalog_call(
-                        entry,
-                        &CallRequest {
-                            arguments,
-                            // Do not manufacture literal proofs from computed
-                            // intermediates. Unknown controls stay unknown.
-                            literals: LiteralContext::default(),
-                            outputs: OutputSelection::default(),
-                        },
-                    );
-                    if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
-                        return Err(anyhow!("fusion call does not have one admitted output"));
-                    }
-                    inference.outputs.into_iter().next().unwrap()
+            let entry = match operation {
+                FusionOp::Builtin { name, .. } => Some(
+                    builtin_catalog_entry_by_name(name)
+                        .ok_or_else(|| anyhow!("fusion builtin has no canonical type authority"))?,
+                ),
+                FusionOp::Primitive {
+                    op: PrimitiveOp::ElemPow,
+                    ..
+                } => Some(&runmat_builtins::POWER_CATALOG_ENTRY),
+                FusionOp::Primitive { .. } => None,
+            };
+            let fact = if let Some(entry) = entry {
+                let [binding] = entry.bindings else {
+                    return Err(anyhow!("fusion builtin binding is ambiguous"));
+                };
+                bindings.push(entry.binding_identity(binding));
+                let declaration = canonical_fusion_declaration(entry.binding_identity(binding))
+                    .ok_or_else(|| anyhow!("missing canonical fusion declaration"))?;
+                let inference = infer_catalog_call(
+                    entry,
+                    &CallRequest {
+                        arguments: arguments.clone(),
+                        // Do not manufacture literal proofs from computed
+                        // intermediates. Unknown controls stay unknown.
+                        literals: LiteralContext::default(),
+                        outputs: OutputSelection::default(),
+                    },
+                );
+                if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
+                    return Err(anyhow!("fusion call does not have one admitted output"));
                 }
+                let mut fact = inference.outputs.into_iter().next().unwrap();
+                if let Some(output) = output {
+                    if let Some(admit) = declaration.semantics.and_then(|semantics| semantics.admit)
+                    {
+                        let values: Vec<_> = input_ids
+                            .iter()
+                            .map(|id| {
+                                plan.inputs
+                                    .iter()
+                                    .position(|input| input == id)
+                                    .and_then(|index| inputs.get(index))
+                                    .or_else(|| plan.const_values.get(id))
+                            })
+                            .collect();
+                        let admitted = admit(FusionAdmissionContext {
+                            operands: &values,
+                            facts: &arguments,
+                        })
+                        .await
+                        .map_err(FusionAdmissionFailure)?
+                        .ok_or_else(|| {
+                            anyhow!("fusion operation requires unavailable domain evidence")
+                        })?;
+                        fact.kind = admitted.output_kind;
+                        evidence.insert(*output, admitted.numerical_domain);
+                    }
+                    declarations.insert(*output, declaration);
+                }
+                fact
+            } else {
+                let FusionOp::Primitive { op, .. } = operation else {
+                    return Err(anyhow!("fusion builtin has no selected binding"));
+                };
+                primitive_fact(*op, &arguments)?
             };
             if let Some(output) = output {
                 facts.insert(*output, fact);
             }
         }
-        Ok(Self { facts, bindings })
+        Ok(Self {
+            facts,
+            bindings,
+            source_inputs,
+            precision_policy,
+            provider_precision,
+            declarations,
+            evidence,
+        })
     }
 
     pub fn fact(&self, id: ValueId) -> Result<&ValueFact> {
         self.facts
             .get(&id)
             .ok_or_else(|| anyhow!("missing fusion value fact {id}"))
+    }
+
+    pub fn uses_implicit_downcast(&self) -> bool {
+        self.precision_policy.permits_double_to_single()
+            && self.provider_precision == ProviderPrecision::F32
+            && self.source_inputs.iter().any(|fact| {
+                fact.numeric()
+                    .is_some_and(|numeric| numeric.class == NumericClass::Double)
+            })
+    }
+
+    pub fn declaration(&self, id: ValueId) -> Option<CanonicalFusionDeclaration> {
+        self.declarations.get(&id).copied()
     }
 
     pub fn floating_class(&self, id: ValueId) -> Result<NumericClass> {
@@ -120,11 +225,28 @@ impl ResolvedProgram {
                 Ok((identity, entry.contract, entry.placement))
             })
             .collect::<Result<Vec<_>>>()?;
+        let revisions: BTreeMap<_, _> = self
+            .declarations
+            .iter()
+            .map(|(id, declaration)| {
+                (
+                    *id,
+                    declaration
+                        .semantics
+                        .map(|semantics| (semantics.revision, semantics.helpers)),
+                )
+            })
+            .collect();
         Ok(Digest::sha256(serde_json::to_vec(&(
             "typed-fusion-v1",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             declarations,
             facts,
+            &self.source_inputs,
+            self.precision_policy,
+            self.provider_precision,
+            revisions,
+            &self.evidence,
         ))?))
     }
 }

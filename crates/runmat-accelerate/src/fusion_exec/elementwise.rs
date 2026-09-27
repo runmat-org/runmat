@@ -57,9 +57,13 @@ async fn execute_elementwise_outputs(
         ProviderPrecision::F32 => runmat_runtime::builtins::common::spec::ScalarType::F32,
         ProviderPrecision::F64 => runmat_runtime::builtins::common::spec::ScalarType::F64,
     };
-    let typed = (|| {
-        let program =
-            crate::fusion::semantics::ResolvedProgram::resolve(request.plan, &request.inputs)?;
+    let typed = async {
+        let program = crate::fusion::semantics::ResolvedProgram::resolve(
+            request.plan,
+            &request.inputs,
+            provider.precision(),
+        )
+        .await?;
         let classes = output_ids
             .iter()
             .map(|id| program.floating_class(*id))
@@ -70,10 +74,15 @@ async fn execute_elementwise_outputs(
             .generate_typed_wgsl(output_ids, &program, scalar_type)?;
         FusionPlacementObserver::new(request.placement).compile(started);
         Ok::<_, anyhow::Error>((program, classes, shader))
-    })();
+    }
+    .await;
     let (program, output_classes, shader) = match typed {
         Ok(typed) => typed,
         Err(error) => {
+            let error = match error.downcast::<crate::fusion::semantics::FusionAdmissionFailure>() {
+                Ok(failure) => return Err(failure.0),
+                Err(unsupported) => unsupported,
+            };
             log::debug!("fusion retained shared runtime: {error}");
             FusionPlacementObserver::new(request.placement).selected(
                 PlacementVariant::SharedRuntime,
@@ -169,6 +178,12 @@ async fn execute_elementwise_outputs(
     let mut allocations = outputs::FusionAllocations::new(&request.inputs);
     let mut temp_scalars: Vec<Vec<f64>> = Vec::new();
     let scalar_dtype = scalar_upload_dtype(provider);
+    if program.uses_implicit_downcast() {
+        // Reuse the existing policy warning and admission authority. Explicit
+        // Single conversions need no implicit-policy warning: typed codegen
+        // has already proved every operation on an F32 backend is F32.
+        ensure_provider_supports_dtype(provider, NumericDType::F64).map_err(anyhow::Error::msg)?;
+    }
     for value in &request.inputs {
         match value {
             Value::GpuTensor(handle) => {
@@ -201,7 +216,7 @@ async fn execute_elementwise_outputs(
                 });
             }
             Value::Tensor(t) => {
-                if let Err(msg) = ensure_provider_supports_dtype(provider, t.numeric_dtype()) {
+                if let Err(msg) = ensure_provider_supports_dtype(provider, scalar_dtype) {
                     return Err(anyhow!(
                         "fusion: tensor input requires unsupported precision ({msg})"
                     ));
@@ -218,7 +233,10 @@ async fn execute_elementwise_outputs(
                     &t.shape,
                     provider.precision(),
                 )?;
-                observer.upload(started, host_f64_bytes(data.len()));
+                observer.upload(
+                    started,
+                    physical_upload_bytes(provider.precision(), data.len()),
+                );
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: None,
@@ -247,7 +265,10 @@ async fn execute_elementwise_outputs(
                     &scalar_shape,
                     provider.precision(),
                 )?;
-                observer.upload(started, host_f64_bytes(data.len()));
+                observer.upload(
+                    started,
+                    physical_upload_bytes(provider.precision(), data.len()),
+                );
                 prepared.push(PreparedInput {
                     handle: handle.clone(),
                     owned: None,
@@ -269,7 +290,10 @@ async fn execute_elementwise_outputs(
         let output_id = output_ids[0];
         timer.mark("generate_wgsl");
         let started = Instant::now();
-        let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+        let metadata = protect_kernel_inputs(&handles);
+        let output = provider.fused_elementwise(&shader, &handles, &output_shape, len);
+        drop(metadata);
+        let output = output?;
         let output = allocations.admit(output, provider, &output_shape, provider.precision())?;
         observer.queue(started);
         observer.kernel_unmeasured();
@@ -279,6 +303,7 @@ async fn execute_elementwise_outputs(
         // reducing O(N²) GPU work (N full-chain recomputations) to O(N).
         timer.mark("generate_wgsl");
         let started = Instant::now();
+        let metadata = protect_kernel_inputs(&handles);
         let multi_result = provider.fused_elementwise_multi(
             &shader,
             &handles,
@@ -286,6 +311,7 @@ async fn execute_elementwise_outputs(
             len,
             output_ids.len(),
         );
+        drop(metadata);
         observer.queue(started);
         match multi_result {
             Ok(out_handles) => {
@@ -311,8 +337,11 @@ async fn execute_elementwise_outputs(
                             .generate_typed_wgsl(&[output_id], &program, scalar_type)?;
                     observer.compile(started);
                     let started = Instant::now();
+                    let metadata = protect_kernel_inputs(&handles);
                     let output =
-                        provider.fused_elementwise(&single_shader, &handles, &output_shape, len)?;
+                        provider.fused_elementwise(&single_shader, &handles, &output_shape, len);
+                    drop(metadata);
+                    let output = output?;
                     let output =
                         allocations.admit(output, provider, &output_shape, provider.precision())?;
                     observer.queue(started);
@@ -367,6 +396,23 @@ async fn execute_elementwise_outputs(
     Ok(FusionExecutionOutcome::Executed(outputs))
 }
 
+fn physical_upload_bytes(precision: ProviderPrecision, elements: usize) -> Option<u64> {
+    let width = match precision {
+        ProviderPrecision::F32 => 4,
+        ProviderPrecision::F64 => 8,
+    };
+    u64::try_from(elements).ok()?.checked_mul(width)
+}
+
+fn protect_kernel_inputs(
+    handles: &[GpuTensorHandle],
+) -> Vec<runmat_runtime::builtins::common::gpu_helpers::HandleMetadataRestoreGuard<'_>> {
+    handles
+        .iter()
+        .map(runmat_runtime::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new)
+        .collect()
+}
+
 /// Execute a direct provider request. VM placement uses the typed entrypoint.
 pub async fn execute_elementwise(
     request: FusionExecutionRequest<'_>,
@@ -411,7 +457,9 @@ pub async fn execute_elementwise_placed(
             let value = if store.value_id == final_output {
                 Some(final_value.clone())
             } else {
-                outputs.remove(&store.value_id)
+                // Several bindings may materialize the same SSA value. They
+                // share its allocation rather than consuming it on first use.
+                outputs.get(&store.value_id).cloned()
             };
             value
                 .map(|v| (store.clone(), v))

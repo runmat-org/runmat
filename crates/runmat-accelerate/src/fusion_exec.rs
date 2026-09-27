@@ -236,7 +236,38 @@ fn select_fusion_provider_with_contract(
     semantic_identity: Option<runmat_execution::Digest>,
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
     let observer = FusionPlacementObserver::new(request.placement);
-    let elements = fusion_input_elements(&request.inputs);
+    let typed_elementwise = semantic_identity.is_some() && request.plan.group.kind.is_elementwise();
+    let elements = if typed_elementwise {
+        outputs
+            .first()
+            .and_then(|output| output.checked_element_count())
+            .and_then(|count| usize::try_from(count).ok())
+    } else {
+        fusion_input_elements(&request.inputs)
+    };
+    let required_upload_bytes = if typed_elementwise {
+        let width = match provider.precision() {
+            ProviderPrecision::F32 => 4u64,
+            ProviderPrecision::F64 => 8u64,
+        };
+        Some(
+            request
+                .inputs
+                .iter()
+                .try_fold(0u64, |bytes, value| {
+                    let elements = match value {
+                        Value::Num(_) => 1,
+                        Value::Tensor(tensor) => u64::try_from(tensor.len()).ok()?,
+                        Value::GpuTensor(_) => 0,
+                        _ => return None,
+                    };
+                    bytes.checked_add(elements.checked_mul(width)?)
+                })
+                .ok_or_else(|| anyhow!("fusion upload byte count overflows"))?,
+        )
+    } else {
+        None
+    };
     if request.placement.is_none() {
         let _ = observer.select_provider(
             provider,
@@ -306,6 +337,7 @@ fn select_fusion_provider_with_contract(
             preparation: CandidatePreparationState::Warm,
             cpu,
             provider_fallback,
+            required_upload_bytes,
             required_download_bytes: 0,
             downstream_materialization: false,
             compare_profitability: true,

@@ -36,6 +36,28 @@ static ALLOW_DOWNCAST: Lazy<bool> = Lazy::new(|| {
 
 static DOWNCAST_WARNING: OnceCell<()> = OnceCell::new();
 
+/// Execution-owned precision policy. Tests and typed planners can carry a
+/// snapshot without mutating the process environment or re-reading an option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+pub(crate) enum PrecisionPolicy {
+    Exact,
+    AllowDoubleToSingle,
+}
+
+impl PrecisionPolicy {
+    pub(crate) fn current() -> Self {
+        if *ALLOW_DOWNCAST {
+            Self::AllowDoubleToSingle
+        } else {
+            Self::Exact
+        }
+    }
+
+    pub(crate) fn permits_double_to_single(self) -> bool {
+        self == Self::AllowDoubleToSingle
+    }
+}
+
 /// True if the provider can execute kernels with the requested logical dtype.
 pub fn provider_supports_dtype(provider: &dyn AccelProvider, dtype: NumericDType) -> bool {
     match dtype {
@@ -53,7 +75,7 @@ pub fn provider_supports_dtype(provider: &dyn AccelProvider, dtype: NumericDType
 }
 
 fn downcast_permitted_for(dtype: NumericDType) -> bool {
-    matches!(dtype, NumericDType::F64) && *ALLOW_DOWNCAST
+    matches!(dtype, NumericDType::F64) && PrecisionPolicy::current().permits_double_to_single()
 }
 
 /// Returns an error message if the provider cannot execute the requested dtype.

@@ -58,7 +58,7 @@ fn interior_single_arithmetic_remains_f32_before_double_publication() {
         5,
     );
     let inputs = [Value::Num(16_777_216.0), Value::Num(1.0)];
-    let program = ResolvedProgram::resolve(&plan, &inputs).unwrap();
+    let program = resolve(&plan, &inputs).unwrap();
     assert_eq!(program.floating_class(4).unwrap(), NumericClass::Single);
     assert_eq!(program.floating_class(5).unwrap(), NumericClass::Double);
     let shader = plan
@@ -76,8 +76,8 @@ fn equal_final_class_does_not_collapse_different_interior_program_identities() {
     let rounded = plan(vec![cast("single", 0, 2), cast("double", 2, 3)], 3);
     let direct = plan(vec![cast("double", 0, 3)], 3);
     let inputs = [Value::Num(16_777_217.0), Value::Num(-0.0)];
-    let first = ResolvedProgram::resolve(&rounded, &inputs).unwrap();
-    let second = ResolvedProgram::resolve(&direct, &inputs).unwrap();
+    let first = resolve(&rounded, &inputs).unwrap();
+    let second = resolve(&direct, &inputs).unwrap();
     assert_eq!(
         first.floating_class(3).unwrap(),
         second.floating_class(3).unwrap()
@@ -88,7 +88,7 @@ fn equal_final_class_does_not_collapse_different_interior_program_identities() {
     );
     assert_eq!(
         first.cache_identity().unwrap(),
-        ResolvedProgram::resolve(&rounded, &inputs)
+        resolve(&rounded, &inputs)
             .unwrap()
             .cache_identity()
             .unwrap()
@@ -105,5 +105,116 @@ fn real_inputs_do_not_fabricate_power_domain_evidence() {
         }],
         2,
     );
-    assert!(ResolvedProgram::resolve(&plan, &[Value::Num(-1.0), Value::Num(0.5)]).is_err());
+    assert!(resolve(&plan, &[Value::Num(-1.0), Value::Num(0.5)]).is_err());
+}
+
+#[test]
+fn power_uses_exact_paired_evidence_and_the_shared_exceptional_value_helper() {
+    let power_plan = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::ElemPow,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    for inputs in [
+        [Value::Num(-2.0), Value::Num(3.0)],
+        [Value::Num(f64::NAN), Value::Num(0.0)],
+        [Value::Num(-0.0), Value::Num(-3.0)],
+    ] {
+        let program = resolve(&power_plan, &inputs).unwrap();
+        let shader = power_plan
+            .generate_typed_wgsl(&[2], &program, ScalarType::F64)
+            .unwrap();
+        assert!(shader.contains("fn rm_power_f64("), "{shader}");
+        assert!(shader.contains("= rm_power_f64("), "{shader}");
+        assert_eq!(
+            program.evidence.get(&2),
+            Some(&runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+                runmat_accelerate_api::PowerResultDomain::Real
+            ))
+        );
+    }
+    let computed = plan(
+        vec![
+            cast("single", 0, 2),
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![2, 1],
+                output: Some(3),
+            },
+        ],
+        3,
+    );
+    assert!(resolve(&computed, &[Value::Num(-2.0), Value::Num(3.0)]).is_err());
+}
+
+fn resolve(plan: &FusionGroupPlan, inputs: &[Value]) -> Result<ResolvedProgram> {
+    resolve_policy(plan, inputs, ProviderPrecision::F64, PrecisionPolicy::Exact)
+}
+
+#[test]
+fn explicit_downcast_policy_changes_effective_facts_but_never_erases_double_conversion() {
+    let arithmetic = plan(
+        vec![FusionOp::Primitive {
+            op: PrimitiveOp::Add,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }],
+        2,
+    );
+    let inputs = [Value::Num(16_777_216.0), Value::Num(1.0)];
+    let exact = resolve_policy(
+        &arithmetic,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert!(arithmetic
+        .generate_typed_wgsl(&[2], &exact, ScalarType::F32)
+        .is_err());
+    let opted = resolve_policy(
+        &arithmetic,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::AllowDoubleToSingle,
+    )
+    .unwrap();
+    assert_eq!(
+        opted.source_inputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    assert_eq!(opted.floating_class(2).unwrap(), NumericClass::Single);
+    assert!(arithmetic
+        .generate_typed_wgsl(&[2], &opted, ScalarType::F32)
+        .is_ok());
+    assert_ne!(
+        exact.cache_identity().unwrap(),
+        opted.cache_identity().unwrap()
+    );
+    let explicit = plan(vec![cast("double", 0, 2)], 2);
+    let opted = resolve_policy(
+        &explicit,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::AllowDoubleToSingle,
+    )
+    .unwrap();
+    assert_eq!(opted.floating_class(2).unwrap(), NumericClass::Double);
+    assert!(explicit
+        .generate_typed_wgsl(&[2], &opted, ScalarType::F32)
+        .is_err());
+}
+
+fn resolve_policy(
+    plan: &FusionGroupPlan,
+    inputs: &[Value],
+    precision: ProviderPrecision,
+    policy: PrecisionPolicy,
+) -> Result<ResolvedProgram> {
+    futures::executor::block_on(ResolvedProgram::resolve_with_policy(
+        plan, inputs, precision, policy,
+    ))
 }

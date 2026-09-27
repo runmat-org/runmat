@@ -37,7 +37,8 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
 };
 
 #[runmat_macros::register_fusion_spec(
-    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::power"
+    builtin_path = "crate::builtins::math::elementwise::binary_arithmetic::power",
+    semantics = fusion::SEMANTICS
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "power",
@@ -51,12 +52,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
                 .first()
                 .ok_or(FusionError::MissingInput(0))?;
             let exp = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("pow({base}, {exp})"))
+            let function = crate::builtins::common::spec::FusionMathHelper::RealPower.entrypoint(ctx.scalar_ty)?;
+            Ok(format!("{function}({base}, {exp})"))
         },
     }),
     reduction: None,
     emits_nan: true,
-    notes: "Fusion planner lowers A.^B into WGSL pow() when both inputs are real; complex fallbacks execute on the host.",
+    notes: "Fusion requires exact paired real-domain admission and the shared exceptional-value-correct power helper. Unknown intermediate pairs and complex results retain shared runtime execution.",
 };
 
 const BUILTIN_NAME: &str = "power";
@@ -141,6 +143,7 @@ const OUTPUT_PROTOTYPE_CONTEXT: OutputPrototypeContext = OutputPrototypeContext 
 
 mod host;
 mod domain;
+mod fusion;
 mod preparation;
 use host::power_host;
 

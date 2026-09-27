@@ -10,6 +10,24 @@
 //! those exceptional pairs.
 pub(super) use runmat_accelerate_api::PowerResultDomain;
 
+pub(super) fn classify_pair(
+    plan: &crate::builtins::common::broadcast::BroadcastPlan,
+    left: impl Fn(usize) -> f64,
+    right: impl Fn(usize) -> f64,
+) -> PowerResultDomain {
+    let mut domain = PowerResultDomain::Real;
+    for (_, left_index, right_index) in plan.iter() {
+        domain = domain.join(PowerResultDomain::for_real_pair(
+            left(left_index),
+            right(right_index),
+        ));
+        if domain == PowerResultDomain::Complex {
+            break;
+        }
+    }
+    domain
+}
+
 pub(super) fn evaluate_f64(base: f64, exponent: f64) -> (PowerResultDomain, (f64, f64)) {
     let domain = PowerResultDomain::for_real_pair(base, exponent);
     let value = if base.is_nan() || exponent.is_nan() {
