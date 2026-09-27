@@ -33,6 +33,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision across pages",
+        program: "x = reshape(single([1.25 -0.75 3.25 -2.75]), [2 1 2]);\ny = mod(x, single(2));",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(y), 'single')); assert(isequal(size(y), [2 1 2])); assert(isequal(y(:), single([1.25 1.25 1.25 1.25])'));",
+        },
+    },
+    BuiltinExample {
         id: "positive",
         title: "Compute a positive modulus",
         program: "r = mod(17, 5)",

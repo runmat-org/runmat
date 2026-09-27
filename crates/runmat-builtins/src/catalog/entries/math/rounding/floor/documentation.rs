@@ -27,6 +27,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision across pages",
+        program: "x = reshape(single([1.25 -2.75 3.25 -4.75]), [2 1 2]);\ny = floor(x);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(y), 'single')); assert(isequal(size(y), [2 1 2])); assert(isequal(y(:), single([1 -3 3 -5])'));",
+        },
+    },
+    BuiltinExample {
         id: "vector",
         title: "Round a vector toward negative infinity",
         program: "x = [-2.7, -0.3, 0, 0.8, 3.9];\ny = floor(x)",

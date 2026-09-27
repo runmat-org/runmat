@@ -33,6 +33,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
+        id: "single-pages",
+        title: "Preserve single precision across pages",
+        program: "x = reshape(single([1.25 -2.75 3.25 -4.75]), [2 1 2]);\ny = round(x);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(strcmp(class(y), 'single')); assert(isequal(size(y), [2 1 2])); assert(isequal(y(:), single([1 -3 3 -5])'));",
+        },
+    },
+    BuiltinExample {
         id: "nearest",
         title: "Round halfway values away from zero",
         program: "x = [-3.5 -2.2 -0.5 0 0.5 1.7];\ny = round(x)",
