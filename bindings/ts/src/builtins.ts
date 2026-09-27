@@ -32,6 +32,9 @@ export type BuiltinDocFAQ = {
   answer: string;
 };
 
+import type { BuiltinDesktopHostFixture } from "./builtin-desktop-fixture.js";
+export type { BuiltinDesktopHostFixture, BuiltinDesktopHostInteraction, BuiltinDocumentExpectation } from "./builtin-desktop-fixture.js";
+
 export type BuiltinExampleFixtureId = { local_name: string };
 
 export type BuiltinFilesystemFixture = {
@@ -99,10 +102,7 @@ export type BuiltinExampleFixture =
       };
     }
   | {
-      DesktopHostOnly: {
-        id: BuiltinExampleFixtureId;
-        scenario: "FilePicker" | "FigureWindow" | "InteractivePrompt";
-      };
+      DesktopHostOnly: BuiltinDesktopHostFixture;
     };
 
 export type BuiltinNativeSourceLanguage = "C" | "Cxx" | "Fortran" | "Cuda";
