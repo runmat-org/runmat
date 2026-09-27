@@ -61,6 +61,7 @@ impl AccelProvider for NativeProvider {
                 .clone();
             let data = probe.with_data(input, |data| match data {
                 HostNumericDataView::F32(data) => HostNumericDataOwned::F32(data.to_vec()),
+                HostNumericDataView::F64(data) => HostNumericDataOwned::F64(data.to_vec()),
                 HostNumericDataView::U64(data) => HostNumericDataOwned::U64(data.to_vec()),
                 _ => panic!("unexpected fixture class"),
             })?;
@@ -83,6 +84,22 @@ fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars(
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for name in ["min", "max"] {
         for (left_data, right_data, storage, expected) in [
+            (
+                HostNumericDataOwned::F64(vec![3.0, 0.0]),
+                HostNumericDataOwned::F64(vec![4.0, 0.0]),
+                GpuTensorStorage::ComplexInterleaved,
+                Value::Num(if name == "min" { 3.0 } else { 4.0 }),
+            ),
+            (
+                HostNumericDataOwned::F64(vec![3.0, 4.0]),
+                HostNumericDataOwned::F64(vec![4.0, 0.0]),
+                GpuTensorStorage::ComplexInterleaved,
+                if name == "min" {
+                    Value::Complex(4.0, 0.0)
+                } else {
+                    Value::Complex(3.0, 4.0)
+                },
+            ),
             (
                 HostNumericDataOwned::F32(vec![3.5]),
                 HostNumericDataOwned::F32(vec![1.25]),
@@ -142,7 +159,7 @@ fn resident_extrema_fallback_preserves_single_complex_and_exact_integer_scalars(
                     Value::ComplexTensor(t) => {
                         assert!(matches!(t.into_complex_storage(), ComplexStorage::F32(_)))
                     }
-                    Value::Int(_) => (),
+                    Value::Int(_) | Value::Num(_) | Value::Complex(..) => (),
                     other => panic!("unexpected result {other:?}"),
                 }
             }

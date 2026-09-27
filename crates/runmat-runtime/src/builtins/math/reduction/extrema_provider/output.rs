@@ -20,27 +20,32 @@ pub(super) fn pair_contract(
     let b = class(right);
     let complex = left.physical().storage() != GpuTensorStorage::Real
         || right.physical().storage() != GpuTensorStorage::Real;
+    // The existing Double scalar selector returns real storage when both
+    // imaginary parts are zero. Descriptors cannot prove that value-dependent
+    // fact; retain the exact host route rather than change its semantics.
+    if complex
+        && a == NumericElementType::F64
+        && b == NumericElementType::F64
+        && shape.iter().all(|extent| *extent == 1)
+    {
+        return None;
+    }
     let element = if a.integer_type().is_some() || b.integer_type().is_some() {
         if complex {
             return None;
         }
-        if a == b {
-            a
-        } else if a.integer_type().is_some()
-            && b == NumericElementType::F64
-            && !right.view().is_logical()
-            && right.shape().iter().all(|extent| *extent == 1)
-        {
-            a
-        } else if b.integer_type().is_some()
-            && a == NumericElementType::F64
-            && !left.view().is_logical()
-            && left.shape().iter().all(|extent| *extent == 1)
-        {
-            b
-        } else {
-            return None;
-        }
+        let scalar_double = |input: &GpuTensorHandle| {
+            !input.view().is_logical()
+                && input.physical().element_type() == NumericElementType::F64
+                && input.shape().iter().all(|extent| *extent == 1)
+        };
+        let class = crate::builtins::math::reduction::integer_native::elementwise_result_class(
+            a.integer_type().map(Into::into),
+            b.integer_type().map(Into::into),
+            scalar_double(left),
+            scalar_double(right),
+        )?;
+        NumericElementType::from(runmat_accelerate_api::IntegerElementType::from(class))
     } else if a == NumericElementType::F32 && b == NumericElementType::F32 {
         NumericElementType::F32
     } else {
@@ -107,3 +112,6 @@ impl ExtremaKind {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod matrix_tests;
