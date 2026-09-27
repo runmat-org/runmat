@@ -286,6 +286,9 @@ fn fftn_host(value: Value, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
 }
 
 async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
+    super::common::validate_forward_input(&handle, || {
+        fftn_error_with_detail(&FFTN_ERROR_INTERNAL, "provider FFT input is not live")
+    })?;
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut current = handle.clone();
         let mut logical_shape = current.shape().to_vec();
@@ -301,6 +304,23 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
             let len = sizes.as_ref().and_then(|v| v.get(axis).copied());
             match provider.fft_dim(&current, len, axis).await {
                 Ok(next) => {
+                    let next = super::common::admit_forward_output(
+                        provider,
+                        next,
+                        &current,
+                        &handle,
+                        len,
+                        axis,
+                        || {
+                            fftn_error_with_detail(
+                                &FFTN_ERROR_INTERNAL,
+                                format!(
+                                    "provider FFT pass {} returned invalid or aliased output",
+                                    axis + 1
+                                ),
+                            )
+                        },
+                    )?;
                     // Replacing the actual owning reference retires the old
                     // intermediate; aliased input/output leases remain live.
                     current = next;

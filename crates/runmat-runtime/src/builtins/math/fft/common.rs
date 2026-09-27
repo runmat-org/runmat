@@ -16,6 +16,9 @@ use std::collections::HashSet;
 use std::mem::size_of;
 use std::sync::Arc;
 
+mod forward_output;
+pub(super) use forward_output::{admit_forward_output, validate_forward_input};
+
 #[cfg(test)]
 mod owned_download_tests;
 
@@ -395,7 +398,7 @@ pub fn valid_provider_fft_output(
     expected_storage: GpuTensorStorage,
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    handle.shape() == expected_shape
+    handle.shape() == crate::builtins::common::shape::normalize_scalar_shape(expected_shape)
         && handle.device_id() == provider.device_id()
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
@@ -674,6 +677,15 @@ pub fn trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
     }
 }
 
+/// FFT results use the public scalar shape, including after singleton trimming.
+/// Non-scalar ranks/dimensions retain the existing transform contract.
+fn trim_transform_output_shape(shape: &mut Vec<usize>, minimum_rank: usize) {
+    trim_trailing_ones(shape, minimum_rank);
+    if crate::builtins::common::shape::is_scalar_shape(shape) {
+        *shape = crate::builtins::common::shape::canonical_scalar_shape();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransformDirection {
     Forward,
@@ -785,7 +797,7 @@ pub fn transform_complex_tensor(
     if target_len == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = 0;
-        trim_trailing_ones(&mut out_shape, origin_rank);
+        trim_transform_output_shape(&mut out_shape, origin_rank);
         return ComplexTensor::from_complex_storage(
             match output_dtype {
                 NumericDType::F32 => ComplexStorage::F32(Vec::<ComplexElement<f32>>::new().into()),
@@ -804,7 +816,7 @@ pub fn transform_complex_tensor(
     if num_slices == 0 {
         let mut out_shape = shape;
         out_shape[dim_index] = target_len;
-        trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+        trim_transform_output_shape(&mut out_shape, origin_rank.max(dim_index + 1));
         return ComplexTensor::from_complex_storage(
             match output_dtype {
                 NumericDType::F32 => ComplexStorage::F32(Vec::<ComplexElement<f32>>::new().into()),
@@ -818,7 +830,7 @@ pub fn transform_complex_tensor(
 
     let mut out_shape = shape;
     out_shape[dim_index] = target_len;
-    trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+    trim_transform_output_shape(&mut out_shape, origin_rank.max(dim_index + 1));
 
     let storage = match tensor.into_complex_storage() {
         ComplexStorage::F32(values) => {

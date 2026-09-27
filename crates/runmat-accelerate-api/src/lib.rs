@@ -3253,7 +3253,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
             "gradient_dim_with_coordinates not supported by provider",
         ))
     }
-    /// Perform an in-place FFT along a zero-based dimension, optionally padding/truncating to `len`.
+    /// Transform a zero-based dimension, optionally padding/truncating to `len`.
+    /// The borrowed input and its aliases must remain unchanged. Return a fresh
+    /// physical result for a nontrivial transform; an immutable view alias is
+    /// permitted for an unchanged complex unit-length axis (no padding or
+    /// truncation), with the same native class/storage and correct output shape.
     fn fft_dim<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,

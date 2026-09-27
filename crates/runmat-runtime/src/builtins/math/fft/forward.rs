@@ -373,6 +373,9 @@ async fn fft_gpu(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<Value> {
+    super::common::validate_forward_input(&handle, || {
+        fft_error_with_detail(&FFT_ERROR_INTERNAL, "provider FFT input is not live")
+    })?;
     let mut shape = normalize_scalar_shape(handle.shape());
 
     let dim_one_based = match dimension {
@@ -400,7 +403,23 @@ async fn fft_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         match provider.fft_dim(&handle, length, dim_index).await {
-            Ok(out) => return Ok(Value::GpuTensor(out)),
+            Ok(out) => {
+                return super::common::admit_forward_output(
+                    provider,
+                    out,
+                    &handle,
+                    &handle,
+                    length,
+                    dim_index,
+                    || {
+                        fft_error_with_detail(
+                            &FFT_ERROR_INTERNAL,
+                            "provider FFT returned invalid or aliased output",
+                        )
+                    },
+                )
+                .map(Value::GpuTensor)
+            }
             Err(error) if error.is_unsupported() => {}
             Err(error) => {
                 return Err(crate::runtime_error::with_provider_execution_source(
