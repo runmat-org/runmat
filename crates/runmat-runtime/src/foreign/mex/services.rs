@@ -271,6 +271,15 @@ mod tests {
     }
 
     impl RuntimeWorkspaceService for ScopedWorkspace {
+        fn visit_retained_values(
+            &self,
+            visitor: &mut dyn FnMut(&Value) -> Option<()>,
+        ) -> Option<()> {
+            for value in self.values.try_borrow().ok()?.values() {
+                visitor(value)?;
+            }
+            Some(())
+        }
         fn lookup(&self, name: &str) -> Option<Value> {
             self.values.borrow().get(name).cloned()
         }

@@ -19,7 +19,10 @@ pub type ForeignAdapterFuture =
     Pin<Box<dyn Future<Output = Result<ValueSequence, RuntimeError>> + 'static>>;
 
 pub trait ForeignAdapter {
-    fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
+    fn visit_retained_values(
+        &self,
+        _visitor: &mut dyn FnMut(&runmat_value::Value) -> Option<()>,
+    ) -> Option<()> {
         None
     }
     fn descriptor(&self) -> ForeignAdapterDescriptor;
@@ -141,7 +144,10 @@ impl ForeignRuntime {
 }
 
 impl RuntimeForeignService for ForeignRuntime {
-    fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
+    fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&runmat_value::Value) -> Option<()>,
+    ) -> Option<()> {
         // Release the adapter table borrow before calling injected adapters.
         let adapters = self
             .adapters
@@ -150,11 +156,10 @@ impl RuntimeForeignService for ForeignRuntime {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        let mut values = Vec::new();
         for adapter in adapters {
-            values.extend(adapter.retained_values()?);
+            adapter.visit_retained_values(visitor)?;
         }
-        Some(values)
+        Some(())
     }
     fn execution_stack_requirement(&self) -> runmat_types::ExecutionStackRequirement {
         self.adapters

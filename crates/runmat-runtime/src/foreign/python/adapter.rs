@@ -891,7 +891,7 @@ fn take_releases(released: &ReleaseQueue) -> Result<Vec<u64>, RuntimeError> {
 }
 
 impl ForeignAdapter for PythonAdapter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let callbacks = self.callbacks.try_borrow().ok()?;
         if !callbacks.is_empty() {
             // Callback registrations retain RuntimeContexts as well as Values.
@@ -899,14 +899,12 @@ impl ForeignAdapter for PythonAdapter {
             // this adapter alone; never pretend callback values are all roots.
             return None;
         }
-        Some(
-            self.nested_isolated_calls
-                .try_borrow()
-                .ok()?
-                .iter()
-                .flat_map(|request| request.call.arguments.iter().cloned())
-                .collect(),
-        )
+        for request in self.nested_isolated_calls.try_borrow().ok()?.iter() {
+            for value in &request.call.arguments {
+                visitor(value)?;
+            }
+        }
+        Some(())
     }
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {
@@ -1139,9 +1137,18 @@ fn invalid_call(message: impl Into<String>) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
+    impl super::PythonAdapter {
+        fn retained_values(&self) -> Option<Vec<runmat_value::Value>> {
+            let mut values = Vec::new();
+            crate::foreign::ForeignAdapter::visit_retained_values(self, &mut |value| {
+                values.push(value.clone());
+                Some(())
+            })?;
+            Some(values)
+        }
+    }
     #[test]
     fn retained_queue_values_disappear_on_queue_cancellation_and_callbacks_fail_closed() {
-        use crate::foreign::ForeignAdapter;
         let adapter = super::PythonAdapter::new(super::ForeignHandleRegistry::default()).unwrap();
         let (reply, _receiver) = futures::channel::oneshot::channel();
         adapter

@@ -248,14 +248,16 @@ impl GcRoot for ArenaRoot {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl runmat_gc::ValueRoot for ArenaRoot {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         // Same pinned arena lifetime and exclusive scan as the GC projection.
-        Some(
-            self.entries()
-                .iter()
-                .filter_map(|entry| entry.value.clone())
-                .collect(),
-        )
+        for value in self
+            .entries()
+            .iter()
+            .filter_map(|entry| entry.value.as_ref())
+        {
+            visitor(value)?;
+        }
+        Some(())
     }
 }
 
@@ -339,13 +341,18 @@ mod tests {
         runmat_gc::gc_test_context(|| {
             let mut arena = ValueArena::new().unwrap();
             let reference = arena.insert(Value::String("retained-by-native".into()));
-            assert!(runmat_gc::gc_retained_values()
-                .unwrap()
-                .contains(&Value::String("retained-by-native".into())));
+            let visible = || {
+                let mut found = false;
+                runmat_gc::gc_visit_retained_values(&[], &mut |value| {
+                    found |= value == &Value::String("retained-by-native".into());
+                    Some(())
+                })
+                .unwrap();
+                found
+            };
+            assert!(visible());
             arena.release(reference).unwrap();
-            assert!(!runmat_gc::gc_retained_values()
-                .unwrap()
-                .contains(&Value::String("retained-by-native".into())));
+            assert!(!visible());
         });
     }
 

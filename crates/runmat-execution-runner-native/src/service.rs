@@ -109,14 +109,15 @@ impl NativeExecutionService {
 }
 
 impl RuntimeExecutionServices for NativeExecutionService {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let state = self.state.try_lock().ok()?;
-        let mut values = Vec::new();
         for future in state.futures.values() {
             match future {
-                FutureState::Deferred(call) => values.extend(call.invocation.retained_values()),
+                FutureState::Deferred(call) => call.invocation.visit_retained_values(visitor)?,
                 FutureState::Completed(Ok(sequence)) => {
-                    values.extend(sequence.value().iter().cloned())
+                    for value in sequence.value().iter() {
+                        visitor(value)?;
+                    }
                 }
                 // Running workers retain serialized ValuePayload/AttemptSuccess,
                 // never this process's resident Value handles.
@@ -125,7 +126,7 @@ impl RuntimeExecutionServices for NativeExecutionService {
                 | FutureState::Cancelled => {}
             }
         }
-        Some(values)
+        Some(())
     }
 
     fn scope_id(&self) -> ExecutionScopeId {

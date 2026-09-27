@@ -42,8 +42,11 @@ impl InProcessMultiLabExecutionService {
 }
 
 impl runmat_runtime::execution::RuntimeExecutionServices for InProcessMultiLabExecutionService {
-    fn retained_values(&self) -> Option<Vec<Value>> {
-        runmat_runtime::execution::RuntimeExecutionServices::retained_values(&self.serial)
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        runmat_runtime::execution::RuntimeExecutionServices::visit_retained_values(
+            &self.serial,
+            visitor,
+        )
     }
 
     fn scope_id(&self) -> runmat_execution::ExecutionScopeId {

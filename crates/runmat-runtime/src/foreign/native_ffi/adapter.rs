@@ -73,7 +73,7 @@ pub struct NativeFfiAdapter {
 }
 
 pub trait NativeFfiCallbackRouter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
     fn dispatch(&self, callback_id: u64, arguments: &[Value]) -> Result<Value, String>;
@@ -1285,18 +1285,16 @@ impl Drop for NativeFfiAdapter {
 }
 
 impl ForeignAdapter for NativeFfiAdapter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
-        let mut values = self
-            .pending_isolated_calls
-            .try_borrow()
-            .ok()?
-            .iter()
-            .flat_map(|call| call.arguments.iter().cloned())
-            .collect::<Vec<_>>();
-        if let Some(router) = &self.callback_router {
-            values.extend(router.retained_values()?);
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        for call in self.pending_isolated_calls.try_borrow().ok()?.iter() {
+            for value in &call.arguments {
+                visitor(value)?;
+            }
         }
-        Some(values)
+        if let Some(router) = &self.callback_router {
+            router.visit_retained_values(visitor)?;
+        }
+        Some(())
     }
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         let mut artifact_identities = self

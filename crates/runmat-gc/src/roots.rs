@@ -215,19 +215,33 @@ impl RootScanner {
 
     /// Snapshot all registered retained values, or fail closed for an opaque
     /// active root or an unavailable registration lock.
-    pub fn retained_values(&self) -> Option<Vec<Value>> {
-        self.retained_values_excluding(&[])
-    }
-
-    pub fn retained_values_excluding(&self, excluded: &[RootId]) -> Option<Vec<Value>> {
+    pub fn visit_retained_values(
+        &self,
+        excluded: &[RootId],
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
         let roots = self.roots.try_read()?;
-        let mut values = Vec::new();
         for (_, root) in roots
             .iter()
             .filter(|(id, root)| !excluded.contains(id) && root.is_active())
         {
-            values.extend(root.retained_values()?);
+            root.visit_retained_values(visitor)?;
         }
+        Some(())
+    }
+
+    #[cfg(test)]
+    fn retained_values(&self) -> Option<Vec<Value>> {
+        self.retained_values_excluding(&[])
+    }
+
+    #[cfg(test)]
+    fn retained_values_excluding(&self, excluded: &[RootId]) -> Option<Vec<Value>> {
+        let mut values = Vec::new();
+        self.visit_retained_values(excluded, &mut |value| {
+            values.push(value.clone());
+            Some(())
+        })?;
         Some(values)
     }
 

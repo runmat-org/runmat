@@ -3,7 +3,9 @@ use super::*;
 
 /// Complete current-thread registry roots unless another thread or an active
 /// borrow makes alias visibility unavailable. `None` never means no roots.
-pub fn static_property_retained_values() -> Option<Vec<Value>> {
+pub fn visit_static_property_retained_values(
+    visitor: &mut dyn FnMut(&Value) -> Option<()>,
+) -> Option<()> {
     let current = std::thread::current().id();
     if STATIC_VALUE_THREADS
         .lock()
@@ -13,9 +15,13 @@ pub fn static_property_retained_values() -> Option<Vec<Value>> {
     {
         return None;
     }
-    let mut values = Vec::new();
-    visit_values(&mut |value| values.push(value.clone()))?;
-    Some(values)
+    let mut result = Some(());
+    visit_values(&mut |value| {
+        if result.is_some() {
+            result = visitor(value);
+        }
+    })?;
+    result
 }
 
 #[cfg(test)]

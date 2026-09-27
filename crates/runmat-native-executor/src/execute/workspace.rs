@@ -218,6 +218,12 @@ struct NativeWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for NativeWorkspaceService {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        for entry in self.values.try_borrow().ok()?.values() {
+            visitor(&entry.value)?;
+        }
+        Some(())
+    }
     fn lookup(&self, name: &str) -> Option<Value> {
         self.values
             .borrow()

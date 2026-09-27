@@ -23,7 +23,7 @@ pub struct RuntimeCallRequest {
 
 pub trait RuntimeCallService {
     /// Complete implementation-owned Values; unavailable is not an empty set.
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
     fn resolve(&self, name: &str) -> Option<usize>;
@@ -46,9 +46,9 @@ pub trait RuntimeCallService {
 pub struct RuntimeCallRouter;
 
 impl RuntimeCallService for RuntimeCallRouter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         // This router has no state; pending requests belong to caller futures.
-        Some(Vec::new())
+        Some(())
     }
     fn resolve(&self, name: &str) -> Option<usize> {
         crate::user_functions::resolve_semantic_function_by_name(name)
@@ -95,6 +95,9 @@ pub trait RuntimeBuiltinService {
 }
 
 pub trait RuntimeWorkspaceService {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        None
+    }
     fn lookup(&self, name: &str) -> Option<Value>;
     fn snapshot(&self) -> Vec<(String, Value)>;
     fn global_names(&self) -> Vec<String>;
@@ -107,7 +110,7 @@ pub trait RuntimeObjectService {
     /// Complete retained values, including published static properties and
     /// implementation-owned captures. `None` means alias visibility is not
     /// available; callers must not interpret it as an empty root set.
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
 
@@ -221,7 +224,7 @@ pub struct ForeignCall {
 
 pub trait RuntimeForeignService {
     /// Complete adapter-owned Values, including retained callback captures.
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
     fn execution_stack_requirement(&self) -> runmat_types::ExecutionStackRequirement {
@@ -394,7 +397,7 @@ pub struct RuntimeDistributedRetirement {
 /// never obtain raw partition storage through this port.
 pub trait RuntimeDistributedService {
     /// Complete local Values retained after request ownership is transferred.
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
     fn retire_pool(

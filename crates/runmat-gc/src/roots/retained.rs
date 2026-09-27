@@ -6,7 +6,7 @@ use super::*;
 /// Like scanning, projection must not register/unregister roots or reenter the
 /// root scanner: the registration read lock protects all projected lifetimes.
 pub trait ValueRoot: GcRoot {
-    fn retained_values(&self) -> Option<Vec<Value>>;
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()>;
 }
 
 pub(super) enum RegisteredRoot {
@@ -15,10 +15,13 @@ pub(super) enum RegisteredRoot {
 }
 
 impl RegisteredRoot {
-    pub(super) fn retained_values(&self) -> Option<Vec<Value>> {
+    pub(super) fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
         match self {
             Self::Opaque(_) => None,
-            Self::Values(root) => root.retained_values(),
+            Self::Values(root) => root.visit_retained_values(visitor),
         }
     }
 }
@@ -51,27 +54,65 @@ impl GcRoot for RegisteredRoot {
 }
 
 impl ValueRoot for StackRoot {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         // SAFETY: precisely the same registered-vector lifetime and exclusive
         // scan requirement as StackRoot::scan; registration owns both views.
-        Some(unsafe { self.stack.as_ref() }.clone())
+        for value in unsafe { self.stack.as_ref() } {
+            visitor(value)?;
+        }
+        Some(())
     }
 }
 impl ValueRoot for VariableArrayRoot {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         // SAFETY: same registered-vector invariant as VariableArrayRoot::scan.
-        Some(unsafe { self.vars.as_ref() }.clone())
+        for value in unsafe { self.vars.as_ref() } {
+            visitor(value)?;
+        }
+        Some(())
     }
 }
 impl ValueRoot for GlobalRoot {
-    fn retained_values(&self) -> Option<Vec<Value>> {
-        Some(self.values.clone())
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        for value in &self.values {
+            visitor(value)?;
+        }
+        Some(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_projection_does_not_copy_large_host_values_and_stops_on_failure() {
+        let values = vec![
+            Value::Tensor(runmat_value::Tensor::new(vec![3.0; 65_536], vec![256, 256]).unwrap()),
+            Value::Num(7.0),
+        ];
+        // SAFETY: values remain pinned and immutable throughout both visits.
+        let root = unsafe { StackRoot::new(NonNull::from(&values), "borrowed".into()) };
+        let mut index = 0;
+        root.visit_retained_values(&mut |value| {
+            assert!(
+                std::ptr::eq(value, &values[index]),
+                "visitor must receive the actual stored Value"
+            );
+            index += 1;
+            Some(())
+        })
+        .unwrap();
+        assert_eq!(index, 2);
+        let mut seen = 0;
+        assert!(root
+            .visit_retained_values(&mut |_| {
+                seen += 1;
+                None
+            })
+            .is_none());
+        assert_eq!(seen, 1);
+    }
 
     #[test]
     fn nested_stack_aliases_follow_the_existing_registration_lifetime() {

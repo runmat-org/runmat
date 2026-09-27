@@ -26,16 +26,21 @@ pub enum DeferredInvocation {
 
 impl DeferredInvocation {
     /// Values retained by this invocation, including a forwarded callable's captures.
-    pub fn retained_values(&self) -> Vec<Value> {
-        let mut values = self.arguments().to_vec();
+    pub fn visit_retained_values(
+        &self,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        for value in self.arguments() {
+            visitor(value)?;
+        }
         if let Self::Callable(crate::call::descriptor::CallableDescriptor {
             target: crate::call::descriptor::CallableTarget::FevalForward(value),
             ..
         }) = self
         {
-            values.push(value.clone());
+            visitor(value)?;
         }
-        values
+        Some(())
     }
 
     pub fn requested_outputs(&self) -> usize {
@@ -147,7 +152,7 @@ pub enum AwaitAction {
 pub trait RuntimeExecutionServices {
     /// Complete process-local values retained by this service. `None` means
     /// alias visibility is unavailable, not that the service retains nothing.
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         None
     }
 
@@ -332,21 +337,22 @@ impl Default for RuntimeExecutionService {
 }
 
 impl RuntimeExecutionServices for RuntimeExecutionService {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let state = self.state.try_lock().ok()?;
-        let mut values = Vec::new();
         for future in state.futures.values() {
             match future {
-                FutureState::Deferred(call) => values.extend(call.invocation.retained_values()),
+                FutureState::Deferred(call) => call.invocation.visit_retained_values(visitor)?,
                 FutureState::Completed(Ok(sequence)) => {
-                    values.extend(sequence.value().iter().cloned())
+                    for value in sequence.value().iter() {
+                        visitor(value)?;
+                    }
                 }
                 // The caller owns the moved invocation while Running; its
                 // execution frame must participate in the same root scan.
                 FutureState::Running | FutureState::Completed(Err(_)) | FutureState::Cancelled => {}
             }
         }
-        Some(values)
+        Some(())
     }
 
     fn scope_id(&self) -> ExecutionScopeId {
@@ -723,6 +729,29 @@ fn future_state(state: &FutureState) -> ExecutionHandleState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    impl RuntimeExecutionService {
+        fn retained_values(&self) -> Option<Vec<Value>> {
+            let mut values = Vec::new();
+            self.visit_retained_values(&mut |value| {
+                values.push(value.clone());
+                Some(())
+            })?;
+            Some(values)
+        }
+    }
+
+    impl DeferredInvocation {
+        fn retained_values(&self) -> Vec<Value> {
+            let mut values = Vec::new();
+            self.visit_retained_values(&mut |value| {
+                values.push(value.clone());
+                Some(())
+            })
+            .unwrap();
+            values
+        }
+    }
 
     fn deferred_call(function: usize, arguments: Vec<Value>) -> DeferredCall {
         DeferredCall {

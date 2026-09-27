@@ -825,10 +825,10 @@ fn classpath_paths<'a>(
 }
 
 impl ForeignAdapter for JavaAdapter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         // JNI object identities and JavaValue conversions do not retain local
         // RunMat Values; invocation arguments belong to the returned future.
-        Some(Vec::new())
+        Some(())
     }
     fn descriptor(&self) -> ForeignAdapterDescriptor {
         ForeignAdapterDescriptor {

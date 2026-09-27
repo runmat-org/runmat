@@ -19,7 +19,7 @@ use runmat_types::{
 use runmat_value::Value;
 
 mod retained;
-pub use retained::static_property_retained_values;
+pub use retained::visit_static_property_retained_values;
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProperty {

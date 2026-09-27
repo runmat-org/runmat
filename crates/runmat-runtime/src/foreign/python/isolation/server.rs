@@ -246,16 +246,11 @@ struct HostCallbackRouter {
 }
 
 impl RuntimeCallService for HostCallbackRouter {
-    fn retained_values(&self) -> Option<Vec<Value>> {
-        Some(
-            self.resources
-                .try_borrow()
-                .ok()?
-                .values
-                .values()
-                .cloned()
-                .collect(),
-        )
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+        for value in self.resources.try_borrow().ok()?.values.values() {
+            visitor(value)?;
+        }
+        Some(())
     }
     fn resolve(&self, _name: &str) -> Option<usize> {
         None

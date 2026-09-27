@@ -840,20 +840,19 @@ impl GcRoot for MapRegistryRoot {
 }
 
 impl runmat_gc::ValueRoot for MapRegistryRoot {
-    fn retained_values(&self) -> Option<Vec<Value>> {
+    fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         MAP_REGISTRY.with(|registry| {
             let registry = registry.try_borrow().ok()?;
-            let mut values = Vec::new();
             for store in registry.values() {
                 if let Some(storage) = store.storage {
-                    values.push(runmat_gc::gc_clone_value(&storage).ok()?);
+                    runmat_gc::gc_with_value(&storage, &mut *visitor).ok()??;
                 }
                 for entry in &store.entries {
-                    values.push(entry.key_value.clone());
-                    values.push(entry.value.clone());
+                    visitor(&entry.key_value)?;
+                    visitor(&entry.value)?;
                 }
             }
-            Some(values)
+            Some(())
         })
     }
 }

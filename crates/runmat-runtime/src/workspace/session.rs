@@ -72,6 +72,32 @@ pub fn roots() -> Vec<Value> {
     })
 }
 
+/// Borrow session roots without copying tensor payloads. An active mutation
+/// makes the view unavailable rather than proving there are no retained aliases.
+pub fn visit_roots(visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
+    fn visit(
+        state: &SessionVariableState,
+        visitor: &mut dyn FnMut(&Value) -> Option<()>,
+    ) -> Option<()> {
+        for value in state
+            .globals
+            .values()
+            .chain(state.persistent_slots.values())
+            .chain(state.persistent_names.values())
+        {
+            visitor(value)?;
+        }
+        Some(())
+    }
+    if let Some(context) = crate::context::legacy::active() {
+        return visit(
+            &context.state().session_variables.try_borrow().ok()?,
+            visitor,
+        );
+    }
+    LEGACY_SESSION_VARIABLES.with(|state| visit(&state.try_borrow().ok()?, visitor))
+}
+
 pub fn update_global_slot(index: usize, alias: Option<&str>, value: &Value) {
     with_state_mut(|state| {
         let slot_key = format!("var_{index}");
