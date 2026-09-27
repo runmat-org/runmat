@@ -1,96 +1,139 @@
-//! Fault-injected provider results exercise the complete builtin boundary.
+//! Fault-injected owned results exercise the complete builtin boundary.
 use super::*;
 use futures::executor::block_on;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView};
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
+use runmat_accelerate_api::{
+    test_support::{RetirementProbe, TestAllocationOwner},
+    AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostTensorOwned, HostTensorView, WeakGpuTensorHandle,
 };
+use std::sync::Mutex;
+
+enum Injection {
+    None,
+    Borrowed(WeakGpuTensorHandle),
+    FreshMalformed,
+}
 struct Provider {
-    inner: runmat_accelerate::simple_provider::InProcessProvider,
-    result: Mutex<Option<GpuTensorHandle>>,
-    frees: AtomicUsize,
+    owner: TestAllocationOwner,
+    result: Mutex<Injection>,
+    allocations: Mutex<Vec<RetirementProbe>>,
+}
+impl Provider {
+    fn allocate(&self, data: Vec<f64>, shape: Vec<usize>) -> anyhow::Result<GpuTensorHandle> {
+        let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+            data: HostNumericDataOwned::F64(data),
+            shape,
+            storage: GpuTensorStorage::Real,
+        })?;
+        self.allocations.lock().unwrap().push(allocation.probe);
+        Ok(allocation.handle)
+    }
 }
 impl AccelProvider for Provider {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload(host)
+        self.allocate(host.data.to_vec(), host.shape.to_vec())
     }
     fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {
-        // Inject at the actual boundary consumed by restoration. The default
-        // adapter owns validation/cleanup of its legacy upload result, so
-        // overriding only upload would hide malformed results from the runtime.
-        if let Some(handle) = self.result.lock().unwrap().as_ref() {
-            return Ok(handle.clone());
+        match &*self.result.lock().unwrap() {
+            Injection::Borrowed(handle) => {
+                return Ok(handle.acquire().expect("live fixture input"))
+            }
+            Injection::FreshMalformed => return self.allocate(vec![0.0], vec![1, 1]),
+            Injection::None => {}
         }
-        self.inner.upload_numeric(host)
+        let HostNumericDataView::F64(data) = host.data else {
+            anyhow::bail!("fixture accepts F64 payloads only");
+        };
+        self.allocate(data.to_vec(), host.shape.to_vec())
     }
     fn download<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-        self.inner.download(handle)
-    }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.frees.fetch_add(1, Ordering::SeqCst);
-        self.inner.free(handle)
+        Box::pin(async move {
+            for probe in self.allocations.lock().unwrap().iter() {
+                if let Ok(data) = probe.with_data(handle, |data| {
+                    let HostNumericDataView::F64(values) = data else {
+                        panic!("F64 fixture")
+                    };
+                    values.to_vec()
+                }) {
+                    return Ok(HostTensorOwned {
+                        data,
+                        shape: handle.shape().to_vec(),
+                    });
+                }
+            }
+            anyhow::bail!("fixture allocation is not live");
+        })
     }
     fn device_info(&self) -> String {
-        "toeplitz test owner".into()
+        "toeplitz owned fixture".into()
     }
     fn device_id(&self) -> u32 {
-        self.inner.device_id()
+        self.owner.device_id()
     }
 }
+
 #[test]
-fn rejected_uploads_preserve_both_operands_and_release_fresh_results() {
+fn rejected_uploads_preserve_both_operands_and_retire_only_fresh_results() {
     let _lock = crate::builtins::common::test_support::accel_test_lock();
     let provider = Box::leak(Box::new(Provider {
-        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
-        result: Mutex::new(None),
-        frees: AtomicUsize::new(0),
+        owner: TestAllocationOwner::new(),
+        result: Mutex::new(Injection::None),
+        allocations: Mutex::new(Vec::new()),
     }));
-    // The unique in-process device id and leaked lifetime satisfy ownership registration.
-    unsafe {
-        runmat_accelerate_api::register_device_provider(provider);
-    }
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let c = provider
         .upload(&HostTensorView {
-            data: &[1., 2.],
+            data: &[1.0, 2.0],
             shape: &[2, 1],
         })
         .unwrap();
     let r = provider
         .upload(&HostTensorView {
-            data: &[1., 3.],
+            data: &[1.0, 3.0],
             shape: &[1, 2],
         })
         .unwrap();
-    let malformed = provider
-        .upload(&HostTensorView {
-            data: &[0.],
-            shape: &[1, 1],
-        })
-        .unwrap();
-    let column_metadata = gpu_helpers::snapshot_handle_metadata(&c);
-    let row_metadata = gpu_helpers::snapshot_handle_metadata(&r);
-    for (result, expected_frees) in [(&c, 0), (&r, 0), (&malformed, 1)] {
-        *provider.result.lock().unwrap() = Some(result.clone());
+    let column_view = c.view().clone();
+    let row_view = r.view().clone();
+    for injection in [
+        Injection::Borrowed(c.downgrade()),
+        Injection::Borrowed(r.downgrade()),
+        Injection::FreshMalformed,
+    ] {
+        *provider.result.lock().unwrap() = injection;
         let error = block_on(toeplitz_builtin(vec![
             Value::GpuTensor(c.clone()),
             Value::GpuTensor(r.clone()),
         ]))
         .unwrap_err();
         assert_eq!(error.identifier(), ERROR_INTERNAL.identifier);
-        assert_eq!(provider.frees.load(Ordering::SeqCst), expected_frees);
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&c), column_metadata);
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&r), row_metadata);
-        assert!(block_on(provider.download(&c)).is_ok());
-        assert!(block_on(provider.download(&r)).is_ok());
+        assert_eq!(c.view(), &column_view);
+        assert_eq!(r.view(), &row_view);
+        assert_eq!(
+            block_on(provider.download(&c)).unwrap().data,
+            vec![1.0, 2.0]
+        );
+        assert_eq!(
+            block_on(provider.download(&r)).unwrap().data,
+            vec![1.0, 3.0]
+        );
+        let probes = provider.allocations.lock().unwrap();
+        assert_eq!(probes[0].retirements(), 0);
+        assert_eq!(probes[1].retirements(), 0);
+        for probe in &probes[2..] {
+            assert_eq!(probe.retirements(), 1);
+        }
     }
-    provider.free(&c).unwrap();
-    provider.free(&r).unwrap();
+    *provider.result.lock().unwrap() = Injection::None;
+    drop(c);
+    drop(r);
+    let probes = provider.allocations.lock().unwrap();
+    assert_eq!(probes.len(), 3);
+    assert!(probes.iter().all(|probe| probe.retirements() == 1));
 }
