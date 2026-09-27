@@ -110,6 +110,8 @@ async fn mod_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 }
 
 async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
+    super::binary::admit_real_resident(&lhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
+    super::binary::admit_real_resident(&rhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
     if crate::builtins::duration::is_duration_object(&lhs)
         || crate::builtins::duration::is_duration_object(&rhs)
     {
@@ -144,11 +146,11 @@ async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     match (lhs, rhs) {
         (Value::GpuTensor(a), Value::GpuTensor(b)) => mod_gpu_pair(a, b).await,
         (Value::GpuTensor(a), other) => {
-            let gathered = gpu_helpers::gather_tensor_async(&a).await?;
+            let gathered = super::binary::gather_real(&a).await?;
             mod_host(Value::Tensor(gathered), other)
         }
         (other, Value::GpuTensor(b)) => {
-            let gathered = gpu_helpers::gather_tensor_async(&b).await?;
+            let gathered = super::binary::gather_real(&b).await?;
             mod_host(other, Value::Tensor(gathered))
         }
         (left, right) => mod_host(left, right),
@@ -157,9 +159,7 @@ async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
 
 async fn gather_value(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map(Value::Tensor),
+        Value::GpuTensor(handle) => super::binary::gather_real(&handle).await.map(Value::Tensor),
         other => Ok(other),
     }
 }
@@ -171,8 +171,20 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
         && runmat_accelerate_api::handle_integer_type(&b).is_some()
         && common_binary::matching_physical_inputs(&a, &b)
     {
-        match provider.elem_mod(&a, &b).await {
+        let result = {
+            let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
+            let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&b);
+            provider.elem_mod(&a, &b).await
+        };
+        match result {
             Ok(output) => {
+                if !gpu_helpers::numeric_descriptor_matches_source(&a, &output) {
+                    gpu_helpers::free_rejected_provider_output(&output, &[&a, &b], provider);
+                    return Err(mod_error_with_detail(
+                        &MOD_ERROR_INTERNAL,
+                        "provider returned malformed binary output",
+                    ));
+                }
                 let contract = gpu_helpers::BinaryGpuOutputContract {
                     shape: a.shape.clone(),
                     storage: runmat_accelerate_api::GpuTensorStorage::Real,
@@ -195,10 +207,15 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
             }
         }
     }
-    let left = gpu_helpers::gather_tensor_async(&a).await?;
-    let right = gpu_helpers::gather_tensor_async(&b).await?;
+    let (left, right) = {
+        let _left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&a);
+        let _right_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&b);
+        let left = gpu_helpers::gather_tensor_async(&a).await?;
+        let right = gpu_helpers::gather_tensor_async(&b).await?;
+        (left, right)
+    };
     let result = mod_host(Value::Tensor(left), Value::Tensor(right))?;
-    gpu_helpers::restore_class_preserving_value(&a, result, BUILTIN_NAME)
+    gpu_helpers::restore_class_preserving_value_protecting(&a, result, BUILTIN_NAME, &[&b])
 }
 
 fn mod_host(lhs: Value, rhs: Value) -> BuiltinResult<Value> {

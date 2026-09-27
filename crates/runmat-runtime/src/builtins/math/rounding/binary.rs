@@ -3,6 +3,47 @@ use runmat_value::{Tensor, Value};
 use crate::builtins::common::{binary::BinaryInputPlan, tensor};
 use crate::BuiltinResult;
 
+pub(super) fn admit_real_resident(
+    value: &Value,
+    builtin: &str,
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    let Value::GpuTensor(handle) = value else {
+        return Ok(());
+    };
+    let helpers =
+        crate::builtins::common::gpu_helpers::expected_handle_numeric_element_type(handle);
+    let valid = helpers.is_ok_and(|element| {
+        crate::builtins::common::gpu_helpers::numeric_descriptor_matches(
+            handle,
+            element,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+    }) && crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .is_some()
+        && (handle.shape.contains(&0)
+            || handle
+                .shape
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+                .is_some());
+    if !valid {
+        return Err(super::unary::error_with_detail(
+            builtin,
+            error,
+            "expected an owned real numeric resident input",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) async fn gather_real(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<Tensor> {
+    let _metadata = crate::builtins::common::gpu_helpers::HandleMetadataRestoreGuard::new(handle);
+    crate::builtins::common::gpu_helpers::gather_tensor_async(handle).await
+}
+
 pub(super) struct DurationBinaryPlan {
     pub(super) left: Tensor,
     pub(super) right: Tensor,

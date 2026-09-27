@@ -30,6 +30,36 @@ struct Provider {
     state: Mutex<State>,
 }
 impl Provider {
+    fn binary<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let fault = {
+                let mut state = self.state.lock().unwrap();
+                state.calls += 1;
+                state.fault
+            };
+            runmat_accelerate_api::set_handle_logical(left, true);
+            runmat_accelerate_api::set_handle_logical(right, true);
+            match fault {
+                Fault::Pending => std::future::pending().await,
+                Fault::Failed => anyhow::bail!("injected remainder failure"),
+                Fault::Alias => Ok(right.clone()),
+                Fault::MissingStorage => {
+                    let mut output = self.inner.upload_integer(
+                        &runmat_accelerate_api::HostIntegerTensorView {
+                            data: runmat_accelerate_api::HostIntegerDataView::I64(&[1, 1]),
+                            shape: &[1, 2],
+                        },
+                    )?;
+                    output.descriptor.storage = None;
+                    Ok(output)
+                }
+            }
+        })
+    }
     fn invoke<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -58,6 +88,20 @@ impl Provider {
     }
 }
 impl AccelProvider for Provider {
+    fn elem_mod<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary(left, right)
+    }
+    fn elem_rem<'a>(
+        &'a self,
+        left: &'a GpuTensorHandle,
+        right: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        self.binary(left, right)
+    }
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view)
     }
@@ -122,6 +166,7 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
         state: Mutex::default(),
     });
     let _provider = ThreadProviderGuard::set(Some(provider));
+    exercise_remainder_lifetimes(provider);
     for (name, controls) in [
         ("ceil", vec![]),
         ("floor", vec![]),
@@ -190,6 +235,66 @@ fn rounding_dispatch_preserves_borrowed_metadata_and_releases_invalid_outputs() 
                 vec![1.25, 4.75]
             );
             provider.inner.free(&input).unwrap();
+        }
+    }
+}
+
+fn exercise_remainder_lifetimes(provider: &'static Provider) {
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
+    for name in ["mod", "rem"] {
+        for fault in [
+            Fault::Pending,
+            Fault::Failed,
+            Fault::Alias,
+            Fault::MissingStorage,
+        ] {
+            *provider.state.lock().unwrap() = State {
+                fault,
+                ..State::default()
+            };
+            let left = provider
+                .inner
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::I64(&[7, -7]),
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            let right = provider
+                .inner
+                .upload_integer(&HostIntegerTensorView {
+                    data: HostIntegerDataView::I64(&[3, 3]),
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            let args = [
+                Value::GpuTensor(left.clone()),
+                Value::GpuTensor(right.clone()),
+            ];
+            let mut call = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
+                name, &args, 1,
+            ));
+            let result = call.as_mut().poll(&mut Context::from_waker(&noop_waker()));
+            if matches!(fault, Fault::Pending) {
+                assert!(matches!(result, Poll::Pending), "{name}");
+            } else {
+                assert!(matches!(result, Poll::Ready(Err(_))), "{name}");
+            }
+            drop(call);
+            assert!(!runmat_accelerate_api::handle_is_logical(&left));
+            assert!(!runmat_accelerate_api::handle_is_logical(&right));
+            let state = provider.state.lock().unwrap();
+            assert_eq!(state.calls, 1);
+            assert!(!state.freed.contains(&left.buffer_id));
+            assert!(!state.freed.contains(&right.buffer_id));
+            assert_eq!(
+                state.freed.len(),
+                usize::from(matches!(fault, Fault::MissingStorage))
+            );
+            drop(state);
+            block_on(provider.inner.download_integer(&left)).unwrap();
+            block_on(provider.inner.download_integer(&right)).unwrap();
+            provider.inner.free(&left).unwrap();
+            provider.inner.free(&right).unwrap();
         }
     }
 }
