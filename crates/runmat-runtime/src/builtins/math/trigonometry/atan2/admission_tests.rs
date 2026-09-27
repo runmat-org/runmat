@@ -28,9 +28,6 @@ impl AccelProvider for Probe {
     fn device_info(&self) -> String {
         self.inner.device_info()
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.inner.free(handle)
-    }
 }
 
 #[test]
@@ -63,14 +60,12 @@ fn atan2_rejects_invalid_pair_before_resident_download() {
             assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
         }
     }
-    let mut malformed = source.clone();
-    malformed.descriptor.storage = None;
-    assert!(block_on(crate::dispatcher::call_builtin_async(
-        "atan2",
-        &[Value::GpuTensor(malformed), Value::Num(1.0)]
-    ))
-    .is_err());
+    // Live owners always provide complete immutable storage facts. An invalid
+    // view is rejected at admission, before it can become a runtime argument.
+    assert!(source
+        .with_view(source.view().clone().with_shape(vec![1, 3]))
+        .is_err());
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
     assert!(block_on(provider.inner.download(&source)).is_ok());
-    provider.free(&source).unwrap();
+    source.release().unwrap();
 }

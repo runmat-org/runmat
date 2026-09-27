@@ -209,8 +209,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(handle) = &output else {
                 panic!("expected resident result")
             };
-            assert_eq!(handle.shape, vec![1, 2]);
-            assert_eq!(handle.device_id, input.device_id);
+            assert_eq!(handle.shape(), vec![1, 2]);
+            assert_eq!(handle.device_id(), input.device_id());
             assert_eq!(
                 runmat_accelerate_api::handle_storage(handle),
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved

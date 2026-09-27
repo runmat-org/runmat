@@ -629,7 +629,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected resident result")
             };
-            assert_eq!(result_handle.device_id, provider.device_id());
+            assert_eq!(result_handle.device_id(), provider.device_id());
             assert!(runmat_accelerate_api::provider_for_handle(&result_handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             let gathered = test_support::gather(Value::GpuTensor(result_handle)).expect("gather");
@@ -661,7 +661,7 @@ pub(crate) mod tests {
             else {
                 panic!("expected resident complex result")
             };
-            assert_eq!(result_handle.device_id, provider.device_id());
+            assert_eq!(result_handle.device_id(), provider.device_id());
             assert!(runmat_accelerate_api::provider_for_handle(&result_handle)
                 .is_some_and(|owner| std::ptr::eq(owner, provider)));
             let result = Value::GpuTensor(result_handle);

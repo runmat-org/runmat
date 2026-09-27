@@ -373,7 +373,7 @@ mod tests {
             let Value::GpuTensor(out_handle) = call(Value::GpuTensor(handle)).unwrap() else {
                 panic!("expected owner-resident tensor");
             };
-            assert_eq!(out_handle.device_id, provider.device_id());
+            assert_eq!(out_handle.device_id(), provider.device_id());
             let out = test_support::gather(Value::GpuTensor(out_handle)).expect("gather output");
             assert_eq!(out.materialize_f64(), vec![1.0, 0.0, -1.0]);
         });

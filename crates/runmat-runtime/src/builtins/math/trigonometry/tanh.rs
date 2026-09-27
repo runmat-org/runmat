@@ -505,13 +505,13 @@ pub(crate) mod tests {
                     shape: &[3, 1],
                 })
                 .expect("upload");
-            let source_device = source.device_id;
+            let source_device = source.device_id();
             let result =
                 block_on(super::tanh_builtin(Value::GpuTensor(source))).expect("tanh fallback");
             let Value::GpuTensor(handle) = &result else {
                 panic!("expected resident result")
             };
-            assert_eq!(handle.device_id, source_device);
+            assert_eq!(handle.device_id(), source_device);
             let gathered = test_support::gather(result).expect("gather result");
             assert_eq!(gathered.numeric_dtype(), NumericDType::F32);
             assert_eq!(gathered.shape, vec![3, 1]);

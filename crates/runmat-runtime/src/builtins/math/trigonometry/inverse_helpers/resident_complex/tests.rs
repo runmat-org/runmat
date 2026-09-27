@@ -31,7 +31,7 @@ fn check(provider: &'static dyn AccelProvider, single: bool) {
         let Value::GpuTensor(output_handle) = &result else {
             panic!("{name}: owner restoration required")
         };
-        assert_eq!(output_handle.device_id, handle.device_id);
+        assert_eq!(output_handle.device_id(), handle.device_id());
         assert!(!gpu_helpers::same_gpu_handle(output_handle, &handle));
         let actual = block_on(gpu_helpers::gather_value_async(&result)).unwrap();
         let (Value::ComplexTensor(actual), Value::ComplexTensor(expected)) = (actual, expected)
@@ -62,7 +62,7 @@ fn check(provider: &'static dyn AccelProvider, single: bool) {
                 "{name}: imaginary component"
             );
         }
-        provider.free(output_handle).unwrap();
+        drop(result);
     }
     // Every invocation borrowed this handle; none may free it or rewrite its storage.
     let preserved = block_on(gpu_helpers::gather_value_async(&Value::GpuTensor(
@@ -73,7 +73,7 @@ fn check(provider: &'static dyn AccelProvider, single: bool) {
         panic!("borrowed complex input was corrupted")
     };
     assert_eq!(preserved.materialize_f64(), input.materialize_f64());
-    provider.free(&handle).unwrap();
+    handle.release().unwrap();
 }
 
 #[test]
