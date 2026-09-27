@@ -141,6 +141,9 @@ fn inaccessible_borrowed_graph_fails_before_any_upload() {
             valid: true,
         });
         runmat_gc::gc_with_value_mut(&target, |_| {
+            assert!(
+                runmat_runtime::dispatcher::try_visit_gpu_handles(&value, &mut |_| {}).is_err()
+            );
             assert!(prepare(provider, &[host(), host(), value]).is_err());
         })
         .unwrap();
@@ -184,7 +187,7 @@ fn cpu_selection_preserves_inaccessible_control_and_result() {
 }
 
 #[test]
-fn inaccessible_result_graph_fails_without_publishing_and_releases_uploads() {
+fn inaccessible_result_retains_owned_payload_without_publication_scan() {
     runmat_gc::gc_test_context(|| {
         let provider = provider(None);
         let prepared = prepare(provider, &[host(), host()]).unwrap();
@@ -194,14 +197,27 @@ fn inaccessible_result_graph_fails_without_publishing_and_releases_uploads() {
             target,
             valid: true,
         });
-        runmat_gc::gc_with_value_mut(&target, |_| {
-            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }));
-            assert!(result.is_err());
+        let result = runmat_gc::gc_with_value_mut(&target, |_| {
+            assert!(
+                runmat_runtime::dispatcher::try_visit_gpu_handles(&value, &mut |_| {}).is_err()
+            );
+            assert!(runmat_runtime::dispatcher::value_contains_gpu(&value));
+            let result = futures::executor::block_on(prepared.execute(|_| async { Ok(value) }))
+                .expect("returned managed owner needs no publication scan");
+            let Value::HandleObject(returned) = &result else {
+                panic!("original managed owner");
+            };
+            assert_eq!(returned.target, target);
+            result
         })
         .unwrap();
-        // The managed target is still a real owner, even though publication failed.
+        // Retain the returned value while its managed payload owns the first upload.
+        assert!(runmat_runtime::dispatcher::try_visit_gpu_handles(&result, &mut |_| {}).is_ok());
         assert_eq!(provider.retired(), vec![2]);
         runmat_gc::gc_with_value_mut(&target, |value| *value = Value::Num(0.)).unwrap();
+        assert_eq!(provider.retired(), vec![1, 2]);
+        assert!(!runmat_runtime::dispatcher::value_contains_gpu(&result));
+        drop(result);
         assert_eq!(provider.retired(), vec![1, 2]);
     });
 }
