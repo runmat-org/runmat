@@ -812,21 +812,11 @@ mod tests {
             .iter()
             .flat_map(|(real, imag)| [*real, *imag])
             .collect::<Vec<_>>();
-        let raw = provider
-            .upload(&runmat_accelerate_api::HostTensorView {
-                data: &interleaved,
-                shape: &[2, 2, 2, 2],
-            })
-            .expect("upload spectrum");
-        let source = GpuTensorHandle {
-            shape: frequency.shape.clone(),
-            device_id: raw.device_id,
-            buffer_id: raw.buffer_id,
-            descriptor: runmat_accelerate_api::GpuTensorDescriptor {
-                storage: Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved),
-                ..raw.descriptor
-            },
-        };
+        let source = crate::builtins::math::fft::ifft::tests::upload_complex_spectrum(
+            provider,
+            &interleaved,
+            &frequency.shape,
+        );
         let gpu = block_on(ifftn_builtin(Value::GpuTensor(source.clone()), Vec::new()))
             .expect("resident ifftn");
         let cpu = block_on(ifftn_builtin(Value::ComplexTensor(frequency), Vec::new()))
@@ -848,7 +838,8 @@ mod tests {
             assert!((actual.1 - expected.1).abs() < tolerance);
         }
         assert!(runmat_accelerate_api::provider_for_handle(&source).is_some());
-        provider.free(&source).ok();
-        runmat_accelerate_api::clear_residency(&source);
+        let physical = source.allocation_lease().downgrade();
+        source.release().expect("release IFFT input");
+        assert!(physical.acquire().is_none());
     }
 }

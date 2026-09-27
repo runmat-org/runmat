@@ -75,7 +75,8 @@ impl AccelProvider for Provider {
         Box::pin(async move {
             match mode {
                 ResultMode::Pending => {
-                    runmat_accelerate_api::clear_residency(input);
+                    runmat_accelerate_api::clear_residency(input)
+                        .expect("live fixture residency can be cleared");
                     futures::future::pending().await
                 }
                 ResultMode::Alias => Ok(input.clone()),

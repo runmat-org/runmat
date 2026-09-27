@@ -835,8 +835,9 @@ pub(crate) mod tests {
         {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
-        provider.free(&handle).ok();
-        runmat_accelerate_api::clear_residency(&handle);
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release FFT input");
+        assert!(physical.acquire().is_none());
     }
 
     fn fft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

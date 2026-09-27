@@ -1462,7 +1462,11 @@ pub(crate) mod tests {
         assert!(matches!(out, Value::GpuTensor(_)));
         let gathered = test_support::gather(out).expect("gather automatic result");
         assert_close(gathered.materialize_f64()[0], 5.0);
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("admit explicit provenance view");
+        drop(handle);
+        let handle = explicit;
         let out = norm_builtin(Value::GpuTensor(handle), Vec::new()).expect("explicit norm");
         assert!(matches!(out, Value::GpuTensor(_)));
         let gathered = test_support::gather(out).expect("gather explicit result");

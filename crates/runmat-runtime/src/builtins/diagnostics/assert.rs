@@ -1364,7 +1364,10 @@ pub(crate) mod tests {
             let err = assert_builtin(vec![Value::GpuTensor(handle.clone())])
                 .expect_err("resident zero fails");
             assert_eq!(err.identifier(), Some(assert_default_identifier()));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         }
 
         let handle = gpu_helpers::upload_tensor(
@@ -1380,7 +1383,10 @@ pub(crate) mod tests {
         ])
         .expect_err("resident scalar formats");
         assert_eq!(err.message(), u64::MAX.to_string());
-        let _ = provider.free(&handle);
+        handle.allocation_lease().validate_live().unwrap();
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().unwrap();
+        assert!(physical.acquire().is_none());
     }
 
     #[test]

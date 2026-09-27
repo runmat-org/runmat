@@ -1398,7 +1398,11 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().expect("wgpu provider");
         let handle = provider.upload(&view).expect("upload");
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let explicit = handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("admit explicit provenance view");
+        drop(handle);
+        let handle = explicit;
         let source_precision = runmat_accelerate_api::handle_precision(&handle);
 
         let gpu_value = null_builtin(Value::GpuTensor(handle), Vec::new()).expect("gpu null");

@@ -382,7 +382,10 @@ fn mod_wgpu_matches_cpu() {
             .data,
         runmat_accelerate_api::HostIntegerDataOwned::I64(vec![1, -1, -7, 5])
     );
-    for handle in [&numer, &denom, &output] {
-        provider.free(handle).expect("free integer modulus handle");
+    for handle in [numer, denom, output] {
+        handle.allocation_lease().validate_live().unwrap();
+        let physical = handle.allocation_lease().downgrade();
+        handle.release().expect("release integer modulus handle");
+        assert!(physical.acquire().is_none());
     }
 }
