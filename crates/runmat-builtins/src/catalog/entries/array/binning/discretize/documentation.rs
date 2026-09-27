@@ -12,6 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Computed edges and replacement values",
         paragraphs: &[
             "A positive scalar `N` asks RunMat to compute `N` uniform-width double bins. The two-output form returns the computed edge row as `E`; a second output is not available when explicit edges are supplied.",
+            "A one-element numeric array is also a scalar bin count, including single precision and fixed-width integer arrays. Explicit edges and replacement values must be vectors; trailing singleton dimensions are accepted. Computed edges require at least one finite input and fewer than 50 million bins. Explicit-edge calls preserve empty and N-D input shapes.",
             "A numeric or text vector after the edges replaces bin indices. Numeric output preserves the replacement vector's class. Out-of-range and missing inputs become `NaN` for floating replacement values, exact zero for fixed-width integer replacement values, and an empty string for text replacement values.",
         ],
     },
@@ -20,11 +21,38 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "This implementation currently accepts real numeric and logical `X`, numeric or logical edges, numeric or text replacement values, and the `IncludedEdge` option. Datetime, duration, calendar-duration bin widths, and categorical output are not implemented yet.",
             "Provider-resident inputs are gathered and the result is host-resident. This differs from the compatible GPU-array contract, which retains supported work on the GPU; the catalog records the current host-placement boundary rather than claiming device parity.",
+            "Known invalid output counts, option names, option values, and host edge or replacement shapes are rejected before provider transfers. Download failure or cancellation preserves borrowed inputs and their metadata. There is no fused binning kernel or identity-local timing policy; execution uses the shared runtime call and transfer paths.",
         ],
     },
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "single-count-pages",
+        title: "Use a single-precision count with N-D input",
+        program: "X = reshape([0 1 2 3], [2 1 2]);\n[Y, E] = discretize(X, single(2));",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(size(Y), [2 1 2])); assert(isequal(Y(:), [1; 1; 2; 2])); assert(isequal(E, [0 1.5 3]));",
+        },
+    },
+    BuiltinExample {
+        id: "empty-explicit-edges",
+        title: "Preserve an empty input shape",
+        program: "Y = discretize(zeros(0, 3), [0 1 2]);",
+        display_output: None,
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: crate::BuiltinExampleFixture::None,
+        requirements: crate::BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(isequal(size(Y), [0 3])); assert(isa(Y, 'double'));",
+        },
+    },
     BuiltinExample {
         id: "explicit-edges",
         title: "Assign values to explicit bins",

@@ -26,3 +26,16 @@ pub(super) fn too_large(message: impl Into<String>) -> RuntimeError {
 pub(super) fn internal(detail: impl std::fmt::Display) -> RuntimeError {
     described(&DISCRETIZE_ERROR_INTERNAL, format!("discretize: {detail}"))
 }
+
+pub(super) fn transfer(source: RuntimeError) -> RuntimeError {
+    build_runtime_error(format!("discretize: {source}"))
+        .with_builtin("discretize")
+        .with_identifier(
+            DISCRETIZE_ERROR_INTERNAL
+                .identifier
+                .expect("discretize error identity"),
+        )
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(source)
+        .build()
+}

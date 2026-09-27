@@ -91,17 +91,12 @@ fn text_values(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
         Value::String(value) => Ok(vec![value.clone()]),
         Value::StringArray(value) => Ok(value.data.clone()),
-        Value::CharArray(value) if value.rows <= 1 => Ok(vec![value.data.iter().collect()]),
+        Value::CharArray(_) => {
+            super::arguments::scalar_text(value, "replacement value").map(|text| vec![text])
+        }
         Value::Cell(value) => value
-            .data
-            .iter()
-            .map(|item| match item {
-                Value::String(text) => Ok(text.clone()),
-                Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
-                other => Err(error::invalid(format!(
-                    "discretize: text replacement cell contains {other:?}"
-                ))),
-            })
+            .iter_column_major()
+            .map(|item| super::arguments::scalar_text(item, "text replacement cell"))
             .collect(),
         other => Err(error::invalid(format!(
             "discretize: replacement values must be real numeric or text, got {other:?}"

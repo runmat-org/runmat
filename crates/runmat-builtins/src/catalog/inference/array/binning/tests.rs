@@ -97,7 +97,7 @@ fn replacement_class_and_computed_edge_output_are_typed_separately() {
     ));
     assert_eq!(
         output.outputs[1].shape,
-        ShapeFact::from(vec![Some(1), None])
+        ShapeFact::from(vec![Some(1), Some(3)])
     );
 }
 
@@ -122,4 +122,67 @@ fn explicit_edge_two_output_and_unsupported_input_are_diagnostics() {
         .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "RM-CATALOG-DISCRETIZE-OUTPUTS"));
+}
+
+#[test]
+fn scalar_results_are_dense_and_unknown_count_does_not_reject_second_output() {
+    let output = infer(
+        vec![
+            numeric(NumericClass::Double, ShapeFact::Scalar),
+            ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+        ],
+        vec![],
+        RequestedOutputCount::Exactly(2),
+    );
+    assert!(output.diagnostics.is_empty());
+    assert_eq!(output.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(
+        output.outputs[1].shape,
+        ShapeFact::from(vec![Some(1), None])
+    );
+}
+
+#[test]
+fn runtime_option_name_does_not_invent_text_output() {
+    let output = infer(
+        vec![
+            numeric(NumericClass::Double, ShapeFact::Scalar),
+            numeric(
+                NumericClass::Double,
+                ShapeFact::from(vec![Some(1), Some(3)]),
+            ),
+            ValueFact::scalar(ValueKindFact::String),
+            ValueFact::scalar(ValueKindFact::String),
+        ],
+        vec![],
+        RequestedOutputCount::One,
+    );
+    assert!(matches!(output.outputs[0].kind, ValueKindFact::Unknown));
+    assert_eq!(output.outputs[0].shape, ShapeFact::Scalar);
+}
+
+#[test]
+fn known_matrix_edges_are_rejected_but_unknown_extents_stay_conservative() {
+    for (shape, rejected) in [
+        (ShapeFact::from(vec![Some(2), Some(2)]), true),
+        (ShapeFact::from(vec![Some(1), Some(3), Some(2)]), true),
+        (ShapeFact::from(vec![Some(1), Some(3), Some(1)]), false),
+        (ShapeFact::from(vec![Some(1), None, None]), false),
+    ] {
+        let output = infer(
+            vec![
+                numeric(NumericClass::Double, ShapeFact::Scalar),
+                numeric(NumericClass::Double, shape),
+            ],
+            vec![],
+            RequestedOutputCount::One,
+        );
+        assert_eq!(
+            output
+                .diagnostics
+                .iter()
+                .any(|d| d.code == "RM-CATALOG-DISCRETIZE-EDGES"),
+            rejected
+        );
+    }
 }

@@ -14,20 +14,27 @@ pub(super) async fn apply(
     let shape = shape_of(&inputs.x);
     let values = numeric::values(&inputs.x, "X")?;
     let plan = edges::plan(&values, inputs.edges_or_count, inputs.rest)?;
+    if crate::output_count::current_output_count() == Some(0) {
+        return Ok(Value::OutputList(Vec::new()));
+    }
     let bins = values
         .iter()
         .map(|value| numeric_order::assign(*value, &plan.edges, plan.included_right))
         .collect::<Vec<_>>();
-    let edge_output = Value::Tensor(
-        Tensor::new(
-            plan.edges
-                .iter()
-                .map(|value| value.materialize_f64())
-                .collect(),
-            vec![1, plan.edges.len()],
-        )
-        .map_err(error::internal)?,
-    );
+    let edge_output = if plan.computed && crate::output_count::current_output_count() == Some(2) {
+        Some(Value::Tensor(
+            Tensor::new(
+                plan.edges
+                    .iter()
+                    .map(|value| value.materialize_f64())
+                    .collect(),
+                vec![1, plan.edges.len()],
+            )
+            .map_err(error::internal)?,
+        ))
+    } else {
+        None
+    };
     let output = match plan.labels {
         Some(labels) => labels.materialize(&bins, shape)?,
         None => Value::Tensor(
@@ -40,18 +47,19 @@ pub(super) async fn apply(
             .map_err(error::internal)?,
         ),
     };
-    select_outputs(output, edge_output, plan.computed)
+    select_outputs(output, edge_output)
 }
 
-fn select_outputs(output: Value, edges: Value, computed_edges: bool) -> BuiltinResult<Value> {
+fn select_outputs(output: Value, edges: Option<Value>) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
         None => Ok(output),
         Some(0) => Ok(Value::OutputList(Vec::new())),
         Some(1) => Ok(Value::OutputList(vec![output])),
-        Some(2) if computed_edges => Ok(Value::OutputList(vec![output, edges])),
-        Some(2) => Err(error::invalid(
-            "discretize: the second edge output requires a scalar bin count",
-        )),
+        Some(2) => edges
+            .map(|edges| Value::OutputList(vec![output, edges]))
+            .ok_or_else(|| {
+                error::invalid("discretize: the second edge output requires a scalar bin count")
+            }),
         Some(_) => Err(error::invalid("discretize: too many output arguments")),
     }
 }
