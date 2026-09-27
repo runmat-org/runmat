@@ -154,6 +154,9 @@ impl Drop for RunMatExtensionsGuard {
 mod tests {
     use super::*;
 
+    #[path = "metadata_view.rs"]
+    mod metadata_view;
+
     #[test]
     fn documented_compatibility_version_pin_matches_runtime_queries() {
         let policy = include_str!("../../../docs/getting-started/compatability.md");
@@ -292,6 +295,38 @@ mod tests {
             .chain(catalog_extensions)
             .collect::<std::collections::BTreeSet<_>>();
         let expected = std::collections::BTreeSet::from([
+            // Source-verified cutover expectation repairs; provenance is in
+            // compatibility/tests/README.md. Keep this an exhaustive audit.
+            ("bounds", "bounds-extra-outputs"),
+            ("cellstr", "cellstr-cell-input"),
+            ("cellstr", "cellstr-symbolic-input"),
+            (
+                "decomposition.mrdivide",
+                "decomposition-complex-integer-scale-factor",
+            ),
+            (
+                "decomposition.mrdivide",
+                "decomposition-integer-scale-factor",
+            ),
+            ("dir", "dir-folder-pattern"),
+            ("factorial", "factorial-like-residency"),
+            ("factorial", "factorial-logical-input"),
+            ("fullfile", "fullfile-numeric-character-codes"),
+            ("genpath", "genpath-excludes"),
+            ("genpath", "genpath-numeric-character-codes"),
+            ("ls", "ls-portable-row-layout"),
+            ("path", "path-numeric-character-codes"),
+            ("rmfield", "rmfield-variadic-field-arguments"),
+            ("round", "round-decimal-mode-alias"),
+            ("savepath", "savepath-diagnostic-outputs"),
+            ("savepath", "savepath-directory-target"),
+            ("savepath", "savepath-numeric-character-codes"),
+            ("setenv", "setenv-status-outputs"),
+            ("setfield", "setfield-indexed-resident-field"),
+            ("setfield", "setfield-object-family"),
+            ("setfield", "setfield-textual-index"),
+            ("strjoin", "strjoin-rowwise"),
+            ("unsetenv", "unsetenv-status-output"),
             ("DelaunayTri", "delaunaytri-integer-coordinates"),
             ("DelaunayTri", "delaunaytri-integer-topology"),
             ("DelaunayTri.freeBoundary", "delaunaytri-integer-topology"),
@@ -1877,7 +1912,7 @@ mod tests {
 
     #[test]
     fn integer_capability_metadata_is_complete_and_well_formed_for_settled_apis() {
-        let registered = runmat_builtins::builtin_functions();
+        let registered = metadata_view::integer_metadata();
         for builtin in &registered {
             assert!(
                 builtin.integer_capabilities.is_empty() || builtin.integer_audit.is_none(),
@@ -2154,7 +2189,7 @@ mod tests {
 
     #[test]
     fn integer_audit_dispositions_are_complete_and_well_formed() {
-        let registered = runmat_builtins::builtin_functions();
+        let registered = metadata_view::integer_metadata();
         let mut audited = std::collections::BTreeMap::new();
         for builtin in &registered {
             let Some(audit) = builtin.integer_audit else {
@@ -2198,6 +2233,7 @@ mod tests {
                 "ancestor",
                 "append",
                 "argsort",
+                "calllib",
                 "cancel",
                 "caxis",
                 "cellstr",
@@ -2213,6 +2249,7 @@ mod tests {
                 "data.move",
                 "data.open",
                 "deblank",
+                "dir",
                 "erasePunctuation",
                 "eraseURLs",
                 "exist",
@@ -2263,6 +2300,7 @@ mod tests {
                 "isgraphics",
                 "ishandle",
                 "ishermitian",
+                "isjava",
                 "isletter",
                 "islogical",
                 "ismatrix",
@@ -2283,12 +2321,30 @@ mod tests {
                 "isvalid",
                 "isvarname",
                 "isvector",
+                "javaArray",
+                "javaMethod",
+                "javaMethodEDT",
+                "javaObject",
+                "javaObjectEDT",
+                "javaaddpath",
+                "javaclasspath",
+                "javarmpath",
+                "jenv",
                 "jsondecode",
                 "legend",
+                "libfunctions",
+                "libisloaded",
+                "libpointer",
+                "libstruct",
+                "loadlibrary",
                 "lower",
+                "ls",
                 "matches",
                 "matlab.metadata.DynamicProperty.delete",
                 "memoize",
+                "mex",
+                "mexcuda",
+                "mexext",
                 "mustBeFile",
                 "mustBeFolder",
                 "mustBeNonzeroLengthText",
@@ -2301,6 +2357,10 @@ mod tests {
                 "onCleanup",
                 "openfig",
                 "pattern",
+                "pyargs",
+                "pyenv",
+                "pyrun",
+                "pyrunfile",
                 "readWordEmbedding",
                 "readline",
                 "regexp",
@@ -2317,6 +2377,7 @@ mod tests {
                 "saveobj",
                 "second",
                 "sendmail",
+                "setdatatype",
                 "splitlines",
                 "stats",
                 "str2double",
@@ -2326,7 +2387,6 @@ mod tests {
                 "strcmp",
                 "strcmpi",
                 "strip",
-                "strjoin",
                 "strjust",
                 "strlength",
                 "strrep",
@@ -2336,14 +2396,17 @@ mod tests {
                 "superclasses",
                 "suptitle",
                 "system",
+                "terminate",
                 "tokenDetails",
                 "tokenizedDocument",
                 "uigetfile",
                 "uiputfile",
+                "unloadlibrary",
                 "unsetenv",
                 "upper",
                 "urldecode",
                 "urlencode",
+                "usejava",
                 "userpath",
                 "validateFunctionSignaturesJSON",
                 "vartype",
