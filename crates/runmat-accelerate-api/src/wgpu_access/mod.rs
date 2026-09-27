@@ -130,9 +130,12 @@ impl WgpuDeviceAccess {
         &self,
         operation: impl for<'p> FnOnce(&WgpuEmission<'p>) -> T,
     ) -> Result<T, WgpuAccessError> {
-        self.inner
-            .gate
-            .shared(|| operation(&WgpuEmission { access: self }))
+        self.inner.gate.shared(|| {
+            operation(&WgpuEmission {
+                access: self,
+                mode: WgpuEmissionMode::Shared,
+            })
+        })
     }
 
     /// Capture validation/OOM (and browser Internal) errors for this exclusive
@@ -146,7 +149,10 @@ impl WgpuDeviceAccess {
     ) -> Result<WgpuScopeReceipt<T>, WgpuAccessError> {
         let detached = self.inner.gate.exclusive(|| {
             let scopes = ActiveScopes::push(self.inner.as_ref());
-            let value = operation(&WgpuEmission { access: self });
+            let value = operation(&WgpuEmission {
+                access: self,
+                mode: WgpuEmissionMode::Scoped,
+            });
             scopes.detach(value)
         })?;
         Ok(WgpuScopeReceipt {
@@ -168,6 +174,14 @@ impl WgpuDeviceAccess {
 /// constructor, clone, lock reacquisition or ownership counter exists here.
 pub struct WgpuEmission<'a> {
     access: &'a WgpuDeviceAccess,
+    mode: WgpuEmissionMode,
+}
+
+/// An immutable fact about the owning access transaction, not cache policy.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WgpuEmissionMode {
+    Shared,
+    Scoped,
 }
 
 /// Teardown-only authority. No raw device/queue accessor or allocation/encoding
@@ -181,6 +195,9 @@ impl WgpuCleanup<'_> {
     }
 }
 impl WgpuEmission<'_> {
+    pub fn mode(&self) -> WgpuEmissionMode {
+        self.mode
+    }
     /// Clone the authority, not a raw device, when handing completed resources
     /// or deferred work to their owner. Do not reacquire it inside this emission.
     pub fn access(&self) -> &WgpuDeviceAccess {

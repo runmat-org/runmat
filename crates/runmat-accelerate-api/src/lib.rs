@@ -38,8 +38,8 @@ pub mod reduction;
 mod wgpu_access;
 #[cfg(feature = "wgpu")]
 pub use wgpu_access::{
-    WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission, WgpuScopeErrorKind,
-    WgpuScopeErrors, WgpuScopeReceipt,
+    WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission, WgpuEmissionMode,
+    WgpuScopeErrorKind, WgpuScopeErrors, WgpuScopeReceipt,
 };
 
 pub use fusion_outputs::validate_fused_output_classes;
