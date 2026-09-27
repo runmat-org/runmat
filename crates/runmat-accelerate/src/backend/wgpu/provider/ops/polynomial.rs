@@ -1,4 +1,7 @@
 use anyhow::{anyhow, ensure, Result};
+
+#[cfg(test)]
+mod admission_tests;
 use bytemuck::cast_slice;
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, ProviderConv1dOptions, ProviderConvMode,
@@ -22,6 +25,23 @@ impl WgpuProvider {
         degree: usize,
         weights: Option<&GpuTensorHandle>,
     ) -> Result<ProviderPolyfitResult> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = [Some(x), Some(y), weights]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries
+            .iter()
+            .any(|entry| entry.integer_type().is_some() || entry.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyfit_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let x_host = self.download_exec(x).await?;
         let y_host = self.download_exec(y).await?;
         ensure!(
@@ -51,6 +71,20 @@ impl WgpuProvider {
         points: &GpuTensorHandle,
         options: &ProviderPolyvalOptions,
     ) -> Result<GpuTensorHandle> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = vec![coeffs, points]
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries
+            .iter()
+            .any(|entry| entry.integer_type().is_some() || entry.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyval_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let coeff_entry = self.get_entry(coeffs)?;
         let points_entry = self.get_entry(points)?;
 
@@ -190,6 +224,17 @@ impl WgpuProvider {
         polynomial: &GpuTensorHandle,
         constant: f64,
     ) -> Result<GpuTensorHandle> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = vec![polynomial]
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries.iter().any(|entry| entry.integer_type().is_some()) {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyint_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let entry = self.get_entry(polynomial)?;
         ensure!(
             entry.precision == self.precision,
@@ -340,6 +385,20 @@ impl WgpuProvider {
         &self,
         polynomial: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = vec![polynomial]
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries
+            .iter()
+            .any(|entry| entry.integer_type().is_some() || entry.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyder_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let entry = self.get_entry(polynomial)?;
         ensure!(
             entry.precision == self.precision,
@@ -436,6 +495,20 @@ impl WgpuProvider {
         p: &GpuTensorHandle,
         q: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = vec![p, q]
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries
+            .iter()
+            .any(|entry| entry.integer_type().is_some() || entry.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyder_product_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let p_entry = self.get_entry(p)?;
         let q_entry = self.get_entry(q)?;
         ensure!(
@@ -466,6 +539,20 @@ impl WgpuProvider {
         u: &GpuTensorHandle,
         v: &GpuTensorHandle,
     ) -> Result<ProviderPolyderQuotient> {
+        // Authenticate every borrowed operand before storage eligibility or work.
+        let entries = vec![u, v]
+            .iter()
+            .map(|input| self.get_entry_raw(input))
+            .collect::<Result<Vec<_>>>()?;
+        if entries
+            .iter()
+            .any(|entry| entry.integer_type().is_some() || entry.storage != GpuTensorStorage::Real)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "polyder_quotient_exec: kernel cannot consume this physical storage",
+            ));
+        }
+
         let u_entry = self.get_entry(u)?;
         let v_entry = self.get_entry(v)?;
         ensure!(

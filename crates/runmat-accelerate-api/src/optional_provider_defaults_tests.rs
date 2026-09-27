@@ -19,6 +19,30 @@ struct Provider {
 struct Defaults;
 
 #[test]
+fn polynomial_defaults_are_typed_unsupported() {
+    let input = Provider::new(FillMode::Unsupported).allocation(&[1, 2]);
+    let options = ProviderPolyvalOptions { mu: None };
+    assert!(is_unsupported_provider_operation(
+        &Defaults.polyval(&input, &input, &options).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.polyfit(&input, &input, 1, None)).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.polyder_single(&input)).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.polyder_product(&input, &input)).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &futures::executor::block_on(Defaults.polyder_quotient(&input, &input)).unwrap_err()
+    ));
+    assert!(is_unsupported_provider_operation(
+        &Defaults.polyint(&input, 0.0).unwrap_err()
+    ));
+}
+
+#[test]
 fn structure_defaults_are_typed_unsupported() {
     let input = Provider::new(FillMode::Unsupported).allocation(&[2, 2]);
     assert!(is_unsupported_provider_operation(

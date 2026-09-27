@@ -2153,7 +2153,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _points: &GpuTensorHandle,
         _options: &ProviderPolyvalOptions,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("polyval not supported by provider"))
+        Err(unsupported_provider_operation(
+            "polyval not supported by provider",
+        ))
     }
 
     /// Fit a polynomial of degree `degree` to `(x, y)` samples. Optional weights must match `x`.
@@ -2164,7 +2166,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _degree: usize,
         _weights: Option<&'a GpuTensorHandle>,
     ) -> AccelProviderFuture<'a, ProviderPolyfitResult> {
-        Box::pin(async move { Err(anyhow::anyhow!("polyfit not supported by provider")) })
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "polyfit not supported by provider",
+            ))
+        })
     }
 
     /// Differentiate a polynomial represented as a vector of coefficients.
@@ -2172,7 +2178,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _polynomial: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("polyder_single not supported by provider")) })
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "polyder_single not supported by provider",
+            ))
+        })
     }
 
     /// Apply the product rule to polynomials `p` and `q`.
@@ -2181,7 +2191,11 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _p: &'a GpuTensorHandle,
         _q: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("polyder_product not supported by provider")) })
+        Box::pin(async move {
+            Err(unsupported_provider_operation(
+                "polyder_product not supported by provider",
+            ))
+        })
     }
 
     /// Apply the quotient rule to polynomials `u` and `v`.
@@ -2191,8 +2205,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _v: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, ProviderPolyderQuotient> {
         Box::pin(async move {
-            Err(anyhow::anyhow!(
-                "polyder_quotient not supported by provider"
+            Err(unsupported_provider_operation(
+                "polyder_quotient not supported by provider",
             ))
         })
     }
@@ -2203,7 +2217,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _polynomial: &GpuTensorHandle,
         _constant: f64,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("polyint not supported by provider"))
+        Err(unsupported_provider_operation(
+            "polyint not supported by provider",
+        ))
     }
 
     /// Allocate a tensor filled with random values drawn from U(0, 1).

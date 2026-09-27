@@ -3,6 +3,59 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn polynomial_eligibility_keeps_complex_integration_and_authenticates_both_inputs() {
+    let provider = InProcessProvider::new();
+    let complex = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F64(&[2., 4., 6., 8.]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
+    let integrated = provider.polyint(&complex, 3.).unwrap();
+    assert_eq!(integrated.shape(), &[1, 3]);
+    assert_eq!(
+        integrated.physical().storage(),
+        GpuTensorStorage::ComplexInterleaved
+    );
+    assert_eq!(
+        block_on(provider.download_numeric(&integrated))
+            .unwrap()
+            .data,
+        HostNumericDataOwned::F64(vec![1., 2., 6., 8., 3., 0.])
+    );
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &block_on(provider.polyder_single(&complex)).unwrap_err()
+    ));
+    let single = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1., 2.]),
+            shape: &[1, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &provider.polyint(&single, 0.).unwrap_err()
+    ));
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &block_on(provider.polyder_product(&single, &complex)).unwrap_err()
+    ));
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &block_on(provider.polyder_quotient(&single, &complex)).unwrap_err()
+    ));
+    let foreign = InProcessProvider::new()
+        .upload(&HostTensorView {
+            data: &[1., 2.],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    assert!(!runmat_accelerate_api::is_unsupported_provider_operation(
+        &block_on(provider.polyder_product(&single, &foreign)).unwrap_err()
+    ));
+    assert!(complex.allocation_lease().validate_live().is_ok());
+}
+
+#[test]
 fn structure_hooks_preserve_native_storage_or_request_typed_fallback() {
     let provider = InProcessProvider::new();
     for (data, storage) in [

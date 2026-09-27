@@ -4814,6 +4814,23 @@ impl AccelProvider for InProcessProvider {
         polynomial: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("polyder_single: allocation owner is poisoned"))?;
+                for input in [polynomial] {
+                    ensure!(guard.get(input).is_some(), "polyder_single: unknown buffer");
+                }
+                if [polynomial].iter().any(|input| {
+                    input.physical().element_type() != NumericElementType::F64
+                        || input.physical().storage() != GpuTensorStorage::Real
+                }) {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "polyder_single: kernel cannot consume this physical storage",
+                    ));
+                }
+            }
+
             let (coeffs, orientation) = self.load_polynomial(polynomial)?;
             let raw = poly_raw_derivative(&coeffs);
             let trimmed = poly_trim_slice(&raw);
@@ -4827,6 +4844,26 @@ impl AccelProvider for InProcessProvider {
         q: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("polyder_product: allocation owner is poisoned"))?;
+                for input in [p, q] {
+                    ensure!(
+                        guard.get(input).is_some(),
+                        "polyder_product: unknown buffer"
+                    );
+                }
+                if [p, q].iter().any(|input| {
+                    input.physical().element_type() != NumericElementType::F64
+                        || input.physical().storage() != GpuTensorStorage::Real
+                }) {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "polyder_product: kernel cannot consume this physical storage",
+                    ));
+                }
+            }
+
             let (p_coeffs, orientation) = self.load_polynomial(p)?;
             let (q_coeffs, _) = self.load_polynomial(q)?;
             let dp = poly_raw_derivative(&p_coeffs);
@@ -4845,6 +4882,26 @@ impl AccelProvider for InProcessProvider {
         v: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, ProviderPolyderQuotient> {
         Box::pin(async move {
+            {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("polyder_quotient: allocation owner is poisoned"))?;
+                for input in [u, v] {
+                    ensure!(
+                        guard.get(input).is_some(),
+                        "polyder_quotient: unknown buffer"
+                    );
+                }
+                if [u, v].iter().any(|input| {
+                    input.physical().element_type() != NumericElementType::F64
+                        || input.physical().storage() != GpuTensorStorage::Real
+                }) {
+                    return Err(runmat_accelerate_api::unsupported_provider_operation(
+                        "polyder_quotient: kernel cannot consume this physical storage",
+                    ));
+                }
+            }
+
             let (u_coeffs, orientation_u) = self.load_polynomial(u)?;
             let (v_coeffs, orientation_v) = self.load_polynomial(v)?;
             let du = poly_raw_derivative(&u_coeffs);
@@ -4863,6 +4920,23 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn polyint(&self, polynomial: &GpuTensorHandle, constant: f64) -> Result<GpuTensorHandle> {
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("polyint: allocation owner is poisoned"))?;
+            for input in [polynomial] {
+                ensure!(guard.get(input).is_some(), "polyint: unknown buffer");
+            }
+            if [polynomial]
+                .iter()
+                .any(|input| input.physical().element_type() != NumericElementType::F64)
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "polyint: kernel cannot consume this physical storage",
+                ));
+            }
+        }
+
         let orientation = poly_orientation_from_shape(&polynomial.shape())?;
         let coeffs = {
             let guard = registry(self.device_id).lock().unwrap();
