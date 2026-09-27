@@ -2,6 +2,19 @@ use super::*;
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
+#[test]
+fn cleanup_failure_cannot_report_success_or_erase_the_original_error() {
+    assert_eq!(
+        combine_cleanup(Ok(42), Err("cleanup".into())),
+        Err("cleanup".into())
+    );
+    assert_eq!(
+        combine_cleanup::<()>(Err("decode".into()), Err("cleanup".into())),
+        Err("decode; additionally, cleanup".into())
+    );
+    assert_eq!(combine_cleanup(Ok(42), Ok(())), Ok(42));
+}
+
 fn device_access() -> WgpuDeviceAccess {
     let instance = wgpu::Instance::default();
     let adapter = instance
@@ -40,6 +53,23 @@ fn readback_releases_access_and_mapping_for_reuse() {
             .expect("map, progress outside the permit, and unmap");
         assert_eq!(actual, expected);
     }
+    assert_eq!(
+        readback_f32(&access, &buffer).block_on().unwrap(),
+        expected[0]
+    );
+    let decode_error = readback_mapped::<()>(&access, &buffer, 16, |_| {
+        Err("decoder rejected payload".into())
+    })
+    .block_on()
+    .unwrap_err();
+    assert_eq!(decode_error, "decoder rejected payload");
+    // A decoder error must still end the mapped view and unmap before returning.
+    assert_eq!(
+        readback_f32_buffer(&access, &buffer, expected.len())
+            .block_on()
+            .unwrap(),
+        expected
+    );
     assert!(readback_f32_buffer(&access, &buffer, expected.len() + 1)
         .block_on()
         .is_err());
