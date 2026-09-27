@@ -316,6 +316,10 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
         "Providers may gather to the host and invoke the shared Householder QR solver; WGPU implements this path today.",
 };
 
+#[path = "polyfit/kernel_error.rs"]
+pub mod kernel_error;
+use kernel_error::{PolyfitKernelError, PolyfitKernelResult};
+
 fn polyfit_error_with(
     message: impl Into<String>,
     error: &'static BuiltinErrorDescriptor,
@@ -537,7 +541,7 @@ async fn try_gpu_polyfit(
             return Ok(None)
         }
         Err(error) => {
-            return Err(crate::runtime_error::with_provider_execution_source(
+            return Err(kernel_error::with_provider_source(
                 polyfit_internal_error(format!("polyfit: provider execution failed: {error}")),
                 runmat_accelerate_api::ProviderExecutionError::from(error),
             ))
@@ -788,16 +792,16 @@ async fn parse_weights(rest: &[Value], len: usize) -> BuiltinResult<Option<Vec<f
     }
 }
 
-fn validate_weights(weights: &[f64]) -> BuiltinResult<()> {
+fn validate_weights(weights: &[f64]) -> PolyfitKernelResult<()> {
     for (idx, w) in weights.iter().enumerate() {
         if !w.is_finite() {
-            return Err(polyfit_argument_error(format!(
+            return Err(PolyfitKernelError::argument(format!(
                 "polyfit: weight at position {} must be finite",
                 idx + 1
             )));
         }
         if *w < 0.0 {
-            return Err(polyfit_argument_error(
+            return Err(PolyfitKernelError::argument(
                 "polyfit: weights must be non-negative",
             ));
         }
@@ -810,20 +814,20 @@ fn solve_polyfit(
     y_data: &[Complex64],
     degree: usize,
     weights: Option<&[f64]>,
-) -> BuiltinResult<PolyfitSolution> {
+) -> PolyfitKernelResult<PolyfitSolution> {
     if x_data.len() != y_data.len() {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: X and Y vectors must be the same length",
         ));
     }
     if x_data.is_empty() {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: X and Y must contain at least one sample",
         ));
     }
     if let Some(w) = weights {
         if w.len() != x_data.len() {
-            return Err(polyfit_argument_error(
+            return Err(PolyfitKernelError::argument(
                 "polyfit: weight vector must match the size of X",
             ));
         }
@@ -832,7 +836,9 @@ fn solve_polyfit(
 
     let mean = x_data.iter().sum::<f64>() / x_data.len() as f64;
     if !mean.is_finite() {
-        return Err(polyfit_error("polyfit: mean of X must be finite"));
+        return Err(PolyfitKernelError::input(
+            "polyfit: mean of X must be finite",
+        ));
     }
     let scale = compute_scale(x_data, mean)?;
     let scaled: Vec<f64> = x_data.iter().map(|&v| (v - mean) / scale).collect();
@@ -840,7 +846,7 @@ fn solve_polyfit(
     let mut rhs = y_data.to_vec();
     for (idx, value) in rhs.iter().enumerate() {
         if !value.re.is_finite() || !value.im.is_finite() {
-            return Err(polyfit_error(format!(
+            return Err(PolyfitKernelError::input(format!(
                 "polyfit: Y must contain finite values (encountered NaN/Inf at position {})",
                 idx + 1
             )));
@@ -883,14 +889,16 @@ fn solve_polyfit(
     })
 }
 
-fn compute_scale(data: &[f64], mean: f64) -> BuiltinResult<f64> {
+fn compute_scale(data: &[f64], mean: f64) -> PolyfitKernelResult<f64> {
     if data.len() <= 1 {
         return Ok(1.0);
     }
     let mut acc = 0.0;
     for &value in data {
         if !value.is_finite() {
-            return Err(polyfit_error("polyfit: X must contain finite values"));
+            return Err(PolyfitKernelError::input(
+                "polyfit: X must contain finite values",
+            ));
         }
         let diff = value - mean;
         acc += diff * diff;
@@ -899,7 +907,7 @@ fn compute_scale(data: &[f64], mean: f64) -> BuiltinResult<f64> {
     let std = (acc / denom).sqrt();
     let scale = if std.abs() <= EPS { 1.0 } else { std };
     if !scale.is_finite() {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: failed to compute a stable scaling factor",
         ));
     }
@@ -930,11 +938,11 @@ fn apply_weights_matrix(
     rows: usize,
     cols: usize,
     weights: &[f64],
-) -> BuiltinResult<()> {
+) -> PolyfitKernelResult<()> {
     for (row, weight) in weights.iter().enumerate().take(rows) {
         let sqrt_w = weight.sqrt();
         if !sqrt_w.is_finite() {
-            return Err(polyfit_error(format!(
+            return Err(PolyfitKernelError::input(format!(
                 "polyfit: weight at position {} must be finite",
                 row + 1
             )));
@@ -947,11 +955,11 @@ fn apply_weights_matrix(
     Ok(())
 }
 
-fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> BuiltinResult<()> {
+fn apply_weights_rhs(rhs: &mut [Complex64], weights: &[f64]) -> PolyfitKernelResult<()> {
     for (idx, (value, weight)) in rhs.iter_mut().zip(weights.iter()).enumerate() {
         let sqrt_w = weight.sqrt();
         if !sqrt_w.is_finite() {
-            return Err(polyfit_error(format!(
+            return Err(PolyfitKernelError::input(format!(
                 "polyfit: weight at position {} must be finite",
                 idx + 1
             )));
@@ -979,7 +987,7 @@ fn householder_qr(
     rows: usize,
     cols: usize,
     rhs: &mut [Complex64],
-) -> BuiltinResult<()> {
+) -> PolyfitKernelResult<()> {
     let min_dim = rows.min(cols);
     for k in 0..min_dim {
         let mut norm_sq = 0.0;
@@ -1038,9 +1046,9 @@ fn solve_upper(
     rows: usize,
     cols: usize,
     rhs: &[Complex64],
-) -> BuiltinResult<Vec<Complex64>> {
+) -> PolyfitKernelResult<Vec<Complex64>> {
     if rhs.len() < rows {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit internal error: RHS dimension mismatch",
         ));
     }
@@ -1159,15 +1167,15 @@ pub fn polyfit_host_real_for_provider(
     y: &[f64],
     degree: usize,
     weights: Option<&[f64]>,
-) -> BuiltinResult<PolyfitHostRealResult> {
+) -> PolyfitKernelResult<PolyfitHostRealResult> {
     if x.len() != y.len() {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: X and Y vectors must be the same length",
         ));
     }
     if let Some(w) = weights {
         if w.len() != x.len() {
-            return Err(polyfit_error(
+            return Err(PolyfitKernelError::input(
                 "polyfit: weight vector must match the size of X",
             ));
         }
@@ -1186,7 +1194,7 @@ pub fn polyfit_host_real_for_provider(
         is_complex,
     } = solution;
     if is_complex {
-        return Err(polyfit_error(
+        return Err(PolyfitKernelError::input(
             "polyfit: provider fallback produced complex coefficients for real data",
         ));
     }
