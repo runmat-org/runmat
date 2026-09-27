@@ -7,6 +7,8 @@ use runmat_types::ClassIdentity;
 use runmat_value::Value;
 use std::cell::RefCell;
 
+mod provenance;
+
 #[cfg(test)]
 mod provenance_tests;
 
@@ -576,30 +578,7 @@ fn propagate_gpu_provenance(args: &[Value], result: &mut Value) -> Result<(), Ru
             explicit |= runmat_accelerate_api::handle_is_explicit(handle);
         })?;
     }
-    let mut outcome = Ok(());
-    visit_gpu_handles_mut(result, &mut |handle| {
-        if outcome.is_err() {
-            return;
-        }
-        let provenance = if explicit || runmat_accelerate_api::handle_is_explicit(handle) {
-            runmat_accelerate_api::GpuHandleProvenance::Explicit
-        } else {
-            runmat_accelerate_api::GpuHandleProvenance::Automatic
-        };
-        match handle.with_provenance(provenance) {
-            Ok(projected) => *handle = projected,
-            Err(error) => {
-                outcome = Err(
-                    build_runtime_error(format!("GPU result provenance: {error}"))
-                        .with_identifier("RunMat:Gpu:InvalidResult")
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .with_source(error)
-                        .build(),
-                )
-            }
-        }
-    });
-    outcome
+    provenance::project(result, explicit)
 }
 
 /// Visit resident handles, including nested object/callable payloads, without
@@ -682,35 +661,6 @@ fn visit_gpu_target(
             .build()
     })?;
     visit_gpu_handles_inner(&value, visitor, seen)
-}
-
-fn visit_gpu_handles_mut(value: &mut Value, visitor: &mut impl FnMut(&mut GpuTensorHandle)) {
-    match value {
-        Value::GpuTensor(handle) => visitor(handle),
-        Value::Cell(cell) => cell
-            .data
-            .iter_mut()
-            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
-        Value::Struct(value) => value
-            .fields
-            .values_mut()
-            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
-        Value::StructArray(array) => {
-            array.for_each_value_mut(|value| visit_gpu_handles_mut(value, visitor));
-        }
-        Value::Object(value) => value
-            .properties
-            .values_mut()
-            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
-        Value::Closure(value) => value
-            .captures
-            .iter_mut()
-            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
-        Value::OutputList(values) => values
-            .iter_mut()
-            .for_each(|value| visit_gpu_handles_mut(value, visitor)),
-        _ => {}
-    }
 }
 
 pub(crate) async fn try_call_registered_instance_method(
