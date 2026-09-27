@@ -1,14 +1,22 @@
 //! Compiled joins, not name-based runtime authorization. The six physical
 //! owners scope L05 without maintaining a parallel list of builtin identities.
-use super::*;
+#![cfg(not(target_arch = "wasm32"))]
 use runmat_builtins::{
     builtin_catalog_primary_entry_by_name, builtin_implementation_provenance, BuiltinFusionPolicy,
     BuiltinImplementationAuthority, BuiltinImplementationProvenance,
 };
+use runmat_runtime::builtin::migration_inventory::migration_inventory;
+use runmat_runtime::builtins::common::spec::{builtin_fusion_specs, canonical_fusion_declaration};
 use std::collections::BTreeSet;
 
+// The public inventory removes only the local crate prefix. Apply the same
+// representation normalization to the raw implementation provenance.
+fn canonical_path(path: &str) -> &str {
+    path.strip_prefix("crate::").unwrap_or(path)
+}
+
 fn in_numeric_batch(path: &str) -> bool {
-    let Some(path) = path.strip_prefix("crate::builtins::math::") else {
+    let Some(path) = canonical_path(path).strip_prefix("builtins::math::") else {
         return false;
     };
     matches!(
@@ -32,7 +40,7 @@ fn exact_owner<'a>(
     let mut owners = implementations.iter().copied().filter(|implementation| {
         implementation.authority == BuiltinImplementationAuthority::CanonicalBinding
             && implementation.name == name
-            && implementation.builtin_path == path
+            && canonical_path(implementation.builtin_path) == canonical_path(path)
     });
     let owner = owners.next()?;
     owners.next().is_none().then_some(owner)
@@ -59,17 +67,19 @@ fn numeric_batch_compiled_gpu_and_fusion_declarations_join_exact_owners() {
         names.len(),
         "L05 has one implementation per binding"
     );
-    let gpu = builtin_gpu_spec_registrations().collect::<Vec<_>>();
-    let fusion = builtin_fusion_spec_registrations().collect::<Vec<_>>();
+    let inventory = migration_inventory();
+    let gpu = &inventory.snapshot.observed.gpu_specs;
+    let fusion = &inventory.snapshot.observed.fusion_specs;
+    let compiled_fusion_specs = builtin_fusion_specs().collect::<Vec<_>>();
     // Include both source-owned declarations and declarations naming an owned
     // identity: an incorrect path must not escape the assertion's scope.
     for (kind, name, path) in gpu
         .iter()
-        .map(|spec| ("GPU", spec.spec.name, spec.builtin_path))
+        .map(|spec| ("GPU", spec.key, spec.builtin_path))
         .chain(
             fusion
                 .iter()
-                .map(|spec| ("fusion", spec.spec.name, spec.builtin_path)),
+                .map(|spec| ("fusion", spec.key, spec.builtin_path)),
         )
         .filter(|(_, name, path)| names.contains(name) || in_numeric_batch(path))
     {
@@ -89,7 +99,7 @@ fn numeric_batch_compiled_gpu_and_fusion_declarations_join_exact_owners() {
         assert_eq!(owner.binding_variant, Some(identity.variant));
         let gpu_specs = gpu
             .iter()
-            .filter(|spec| spec.spec.name == owner.name)
+            .filter(|spec| spec.key == owner.name)
             .collect::<Vec<_>>();
         assert!(
             gpu_specs.len() <= 1,
@@ -98,7 +108,7 @@ fn numeric_batch_compiled_gpu_and_fusion_declarations_join_exact_owners() {
         );
         let fusion_specs = fusion
             .iter()
-            .filter(|spec| spec.spec.name == owner.name)
+            .filter(|spec| spec.key == owner.name)
             .collect::<Vec<_>>();
         assert!(
             fusion_specs.len() <= 1,
@@ -114,12 +124,23 @@ fn numeric_batch_compiled_gpu_and_fusion_declarations_join_exact_owners() {
                 )
             });
             assert_eq!(resolved.binding, identity);
-            assert!(std::ptr::eq(resolved.spec, registration.spec));
-            if let Some(semantics) = registration.semantics {
+            let compiled = compiled_fusion_specs
+                .iter()
+                .filter(|spec| spec.name == owner.name)
+                .copied()
+                .collect::<Vec<_>>();
+            assert_eq!(
+                compiled.len(),
+                1,
+                "exactly one compiled fusion spec for {}",
+                owner.name
+            );
+            assert!(std::ptr::eq(resolved.spec, compiled[0]));
+            if let Some(semantics) = resolved.semantics {
                 assert_eq!(semantics.binding, identity);
             }
             registered += 1;
-            if registration.spec.elementwise.is_none() && registration.spec.reduction.is_none() {
+            if registration.elementwise.is_none() && registration.reduction.is_none() {
                 intentional_none += 1;
             }
         } else {

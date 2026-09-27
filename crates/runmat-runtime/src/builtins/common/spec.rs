@@ -1,8 +1,6 @@
 use std::fmt;
 
 mod canonical;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod provenance_tests;
 mod admission;
 pub use admission::*;
 pub use canonical::{
