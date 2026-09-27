@@ -187,6 +187,9 @@ impl AllocationState {
             initialize(pointer)
         });
         result?;
+        // Retain the unpublished record if quarantine was observed after the
+        // context scope completed. Publication does not guarantee future health.
+        self.ensure_available()?;
         registration.publish();
         Ok(GpuTensorHandle {
             shape,

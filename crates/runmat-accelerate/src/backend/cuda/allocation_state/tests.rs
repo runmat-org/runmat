@@ -3,6 +3,7 @@ use runmat_accelerate_api::{GpuTensorStorage, NumericElementType};
 use std::sync::atomic::AtomicBool;
 
 mod driver;
+mod quarantine;
 use driver::FakeDriver;
 
 fn owner() -> (Arc<AllocationState>, Arc<FakeDriver>) {
@@ -46,7 +47,10 @@ fn cuda_state_retains_context_until_last_owner_and_native_guard() {
     assert!(weak.upgrade().is_none());
     assert_eq!(driver.frees(), vec![101]);
     assert_eq!(driver.release_count(), 1);
-    assert_eq!(driver.events.lock().unwrap().last().copied(), Some("release"));
+    assert_eq!(
+        driver.events.lock().unwrap().last().copied(),
+        Some("release")
+    );
 }
 
 #[test]

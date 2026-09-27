@@ -50,7 +50,13 @@ impl AllocationState {
         let result = operation();
         let leave = scope.finish();
         match (result, leave) {
-            (Ok(value), Ok(())) => Ok(value),
+            (Ok(value), Ok(())) => {
+                // A nested operation or another execution lane may have
+                // quarantined this shared owner while the operation ran.
+                // Check at completion; this is not a lease on future health.
+                self.ensure_available()?;
+                Ok(value)
+            }
             (Err(error), _) | (Ok(_), Err(error)) => Err(error),
         }
     }
