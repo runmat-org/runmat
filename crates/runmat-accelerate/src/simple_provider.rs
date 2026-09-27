@@ -1,5 +1,6 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 mod power;
+mod logarithms;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
 use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};

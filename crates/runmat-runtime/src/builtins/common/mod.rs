@@ -27,6 +27,7 @@ pub mod path_state;
 pub(crate) mod provider_restore;
 pub mod random;
 pub mod random_args;
+pub(crate) mod real_unary_preparation;
 pub mod residency;
 pub(crate) mod resident_output;
 pub mod shape;
