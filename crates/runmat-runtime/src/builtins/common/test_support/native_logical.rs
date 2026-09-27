@@ -1,5 +1,6 @@
 //! A genuine Single/U8 fixture. Preferred floating precision does not imply
 //! logical encoding: InProcessProvider deliberately uses F64 logical storage.
+use runmat_accelerate_api::allocation::AllocationIdentity;
 use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use std::sync::Mutex;
