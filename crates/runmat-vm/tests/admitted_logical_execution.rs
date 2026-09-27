@@ -223,7 +223,93 @@ fn canonical_logical_forms_execute_through_vm_with_real_provider_feasibility() {
         }
         assert_invalid_calls_before_preparation();
         assert_direct_call(provider);
+        assert_power_execution(provider);
     });
+}
+
+fn assert_power_execution(provider: &dyn runmat_accelerate_api::AccelProvider) {
+    // Keep the provider/cache lifetime shared with the logical witnesses above.
+    // feval prevents fusion from replacing the admitted runtime boundary.
+    let cases = [
+        (
+            "a = [-4 4]; b = [2 0.5];",
+            vec![1, 2],
+            false,
+            vec![(16.0, 0.0), (2.0, 0.0)],
+        ),
+        (
+            "a = [-4 4]; b = [2; 0.5];",
+            vec![2, 2],
+            true,
+            vec![(16.0, 0.0), (0.0, 2.0), (16.0, 0.0), (2.0, 0.0)],
+        ),
+        (
+            "a = [-1e-300 1 NaN]; b = [0.5 NaN 0];",
+            vec![1, 3],
+            true,
+            vec![(0.0, 1e-150), (f64::NAN, 0.0), (f64::NAN, 0.0)],
+        ),
+    ];
+    for extensions in [false, true] {
+        let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(extensions);
+        for (source, shape, complex, expected) in &cases {
+            let source = format!("{source} result = feval('power', a, b);");
+            let bytecode = support::compile_source(&source).unwrap();
+            for gpu in [false, true] {
+                runmat_accelerate::placement::reset();
+                let kind = if gpu {
+                    ExecutionCandidateKind::ProviderOperation
+                } else {
+                    ExecutionCandidateKind::SharedRuntime
+                };
+                let (context, selection) = context("power", kind);
+                let values = execute(&bytecode, context).unwrap();
+                let result = output(&bytecode, &values);
+                assert_eq!(matches!(result, Value::GpuTensor(_)), gpu);
+                let gathered = block_on(runmat_runtime::gather_if_needed_async(result)).unwrap();
+                let actual = match gathered {
+                    Value::Tensor(tensor) if !complex => {
+                        assert_eq!(&tensor.shape, shape);
+                        tensor
+                            .as_f64_slice()
+                            .unwrap()
+                            .iter()
+                            .map(|&x| (x, 0.0))
+                            .collect::<Vec<_>>()
+                    }
+                    Value::ComplexTensor(tensor) if *complex => {
+                        assert_eq!(&tensor.shape, shape);
+                        tensor.as_f64_slice().unwrap().to_vec()
+                    }
+                    other => panic!("power representation mismatch: {other:?}"),
+                };
+                assert_eq!(actual.len(), expected.len());
+                for ((re, im), &(expected_re, expected_im)) in actual.into_iter().zip(expected) {
+                    assert_power_component(re, expected_re);
+                    assert_power_component(im, expected_im);
+                }
+                assert_execution(&selection, gpu, 2);
+                if let Value::GpuTensor(handle) = result {
+                    provider.free(handle).unwrap();
+                    runmat_accelerate_api::clear_handle_metadata(handle);
+                }
+            }
+        }
+    }
+}
+
+fn assert_power_component(actual: f64, expected: f64) {
+    if expected.is_nan() {
+        assert!(actual.is_nan());
+    } else if expected == 0.0 {
+        // Principal complex powers retain floating trigonometric residuals.
+        assert!(actual.abs() < 1e-14, "{actual} versus {expected}");
+    } else {
+        assert!(
+            (actual / expected - 1.0).abs() < 1e-12,
+            "{actual} versus {expected}"
+        );
+    }
 }
 
 fn assert_invalid_calls_before_preparation() {
@@ -236,6 +322,15 @@ fn assert_invalid_calls_before_preparation() {
         ),
         ("and", "a = [0 1]; result = feval('and', a);"),
         ("eq", "a = [0 1]; b = [1 2 3]; result = feval('eq', a, b);"),
+        ("power", "a = [1 2]; result = feval('power', a);"),
+        (
+            "power",
+            "a = [1 2]; b = [1 2 3]; result = feval('power', a, b);",
+        ),
+        (
+            "power",
+            "a = [1 2]; b = [2 3]; [result, extra] = feval('power', a, b);",
+        ),
     ] {
         runmat_accelerate::placement::reset();
         let bytecode = support::compile_source(source).unwrap();
