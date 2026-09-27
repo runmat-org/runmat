@@ -54,6 +54,7 @@ pub(crate) mod semantic_definition;
 mod config;
 mod dynamic;
 mod executable;
+mod host_services;
 mod init;
 mod project;
 mod run;

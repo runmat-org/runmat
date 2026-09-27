@@ -125,6 +125,31 @@ pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> A
     }
 }
 
+/// Invoke the already-installed execution-scoped input handler without entering
+/// host dispatch again. Application host adapters use this to preserve Core's
+/// stdin recording and error lifecycle. `None` means no handler; an installed
+/// handler's failure is final, not permission to prompt through another route.
+pub fn invoke_installed_async_handler(
+    request: crate::context::HostInteraction,
+) -> Option<crate::context::RuntimeServiceFuture<Result<InteractionResponse, RuntimeError>>> {
+    let handler = current_async_handler()?;
+    let request = match request {
+        crate::context::HostInteraction::Line { prompt, echo } => InteractionPromptOwned {
+            prompt,
+            kind: InteractionKind::Line { echo },
+        },
+        crate::context::HostInteraction::KeyPress { prompt } => InteractionPromptOwned {
+            prompt,
+            kind: InteractionKind::KeyPress,
+        },
+    };
+    Some(Box::pin(async move {
+        handler(request)
+            .await
+            .map_err(|error| interaction_error("RunMat:interaction:AsyncHandlerError", error))
+    }))
+}
+
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = take_queued_response() {
         return match response
