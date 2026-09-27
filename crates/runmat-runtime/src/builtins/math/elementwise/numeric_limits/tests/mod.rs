@@ -1,33 +1,29 @@
 mod floating;
 mod integer;
 mod provider;
+mod provider_rejection;
+mod admission;
 
 use runmat_value::Value;
 
 use crate::BuiltinResult;
 
-use super::operation::LimitOperation;
-
-fn invoke(operation: LimitOperation, arguments: Vec<Value>) -> BuiltinResult<Value> {
-    super::execute::run(arguments, operation)
-}
-
 fn intmax(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke(LimitOperation::INTMAX, arguments)
+    super::intmax::intmax_builtin(arguments)
 }
 
 fn intmin(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke(LimitOperation::INTMIN, arguments)
+    super::intmin::intmin_builtin(arguments)
 }
 
 fn realmax(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke(LimitOperation::REALMAX, arguments)
+    super::realmax::realmax_builtin(arguments)
 }
 
 fn realmin(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke(LimitOperation::REALMIN, arguments)
+    super::realmin::realmin_builtin(arguments)
 }
 
 fn flintmax(arguments: Vec<Value>) -> BuiltinResult<Value> {
-    invoke(LimitOperation::FLINTMAX, arguments)
+    super::flintmax::flintmax_builtin(arguments)
 }

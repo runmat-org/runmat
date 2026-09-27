@@ -15,7 +15,10 @@ pub(super) fn like(
     let Some(element_type) = runmat_accelerate_api::handle_integer_type(prototype) else {
         return Err(super::super::errors::invalid_integer_prototype(builtin));
     };
-    let storage_kind = runmat_accelerate_api::handle_storage(prototype);
+    let storage_kind = prototype
+        .descriptor
+        .storage
+        .ok_or_else(|| super::super::errors::invalid_integer_prototype(builtin))?;
     if !matches!(
         storage_kind,
         GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
@@ -44,7 +47,8 @@ pub(super) fn like(
         GpuTensorStorage::Real => {
             let tensor = Tensor::new_integer(storage, shape.clone())
                 .map_err(|error| super::super::errors::internal(builtin, error))?;
-            gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| error.to_string())
+            gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype])
+                .map_err(|error| error.to_string())
         }
         GpuTensorStorage::ComplexInterleaved => {
             let imaginary = storage.zeros_like(1);
@@ -54,7 +58,7 @@ pub(super) fn like(
                 shape.clone(),
             )
             .map_err(|error| super::super::errors::internal(builtin, error))?;
-            gpu_helpers::upload_complex_tensor(provider, &tensor)
+            gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &[prototype])
                 .map_err(|error| error.message().to_string())
         }
     };
@@ -95,7 +99,7 @@ fn validate(
         && !gpu_helpers::same_gpu_handle(prototype, &output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&output) == expected.storage
+        && output.descriptor.storage == Some(expected.storage)
         && runmat_accelerate_api::handle_integer_type(&output) == Some(expected.element_type)
         && runmat_accelerate_api::handle_precision(&output).is_none()
         && !runmat_accelerate_api::handle_is_logical(&output)
@@ -106,7 +110,7 @@ fn validate(
             false,
         );
     if !valid {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[prototype]);
+        gpu_helpers::free_rejected_provider_output(&output, &[prototype], provider);
         return Err(super::super::errors::class(
             expected.builtin,
             "GPU limit creation returned an invalid provider result",

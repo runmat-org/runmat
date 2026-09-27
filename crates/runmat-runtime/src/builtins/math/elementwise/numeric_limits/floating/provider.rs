@@ -12,7 +12,10 @@ pub(super) fn like(
 ) -> BuiltinResult<Value> {
     let precision = runmat_accelerate_api::handle_precision(prototype)
         .ok_or_else(|| super::super::errors::invalid_floating_prototype(builtin))?;
-    let storage = runmat_accelerate_api::handle_storage(prototype);
+    let storage = prototype
+        .descriptor
+        .storage
+        .ok_or_else(|| super::super::errors::invalid_floating_prototype(builtin))?;
     if !matches!(
         storage,
         GpuTensorStorage::Real | GpuTensorStorage::ComplexInterleaved
@@ -32,30 +35,35 @@ pub(super) fn like(
         )
     })?;
     let shape = vec![1, 1];
+    let metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(prototype);
     let output = match (precision, storage) {
-        (ProviderPrecision::F64, GpuTensorStorage::Real) => gpu_helpers::upload_tensor(
+        (ProviderPrecision::F64, GpuTensorStorage::Real) => gpu_helpers::upload_tensor_protecting(
             provider,
             &Tensor::new(vec![super::host::f64_value(kind)], shape.clone())
                 .map_err(|error| super::super::errors::internal(builtin, error))?,
+            &[prototype],
         ),
-        (ProviderPrecision::F32, GpuTensorStorage::Real) => gpu_helpers::upload_tensor(
+        (ProviderPrecision::F32, GpuTensorStorage::Real) => gpu_helpers::upload_tensor_protecting(
             provider,
             &Tensor::from_f32(vec![super::host::f32_value(kind)], shape.clone())
                 .map_err(|error| super::super::errors::internal(builtin, error))?,
+            &[prototype],
         ),
         (ProviderPrecision::F64, GpuTensorStorage::ComplexInterleaved) => {
-            gpu_helpers::upload_complex_tensor(
+            gpu_helpers::upload_complex_tensor_protecting(
                 provider,
                 &ComplexTensor::new(vec![(super::host::f64_value(kind), 0.0)], shape.clone())
                     .map_err(|error| super::super::errors::internal(builtin, error))?,
+                &[prototype],
             )
             .map_err(|error| error.message().to_string())
         }
         (ProviderPrecision::F32, GpuTensorStorage::ComplexInterleaved) => {
-            gpu_helpers::upload_complex_tensor(
+            gpu_helpers::upload_complex_tensor_protecting(
                 provider,
                 &ComplexTensor::from_f32(vec![(super::host::f32_value(kind), 0.0)], shape.clone())
                     .map_err(|error| super::super::errors::internal(builtin, error))?,
+                &[prototype],
             )
             .map_err(|error| error.message().to_string())
         }
@@ -63,6 +71,7 @@ pub(super) fn like(
     .map_err(|error| {
         super::super::errors::internal(builtin, format!("GPU limit creation failed: {error}"))
     })?;
+    drop(metadata_guard);
     validate(
         provider, prototype, output, &shape, storage, precision, builtin,
     )
@@ -82,11 +91,11 @@ fn validate(
         && !gpu_helpers::same_gpu_handle(prototype, &output)
         && gpu_helpers::exact_provider_for_handle(&output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-        && runmat_accelerate_api::handle_storage(&output) == storage
+        && output.descriptor.storage == Some(storage)
         && runmat_accelerate_api::handle_precision(&output) == Some(precision)
         && gpu_helpers::gpu_class_metadata_matches(&output, Some(precision), None, false);
     if !valid {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[prototype]);
+        gpu_helpers::free_rejected_provider_output(&output, &[prototype], provider);
         return Err(super::super::errors::internal(
             builtin,
             "GPU limit creation returned an invalid provider result",
