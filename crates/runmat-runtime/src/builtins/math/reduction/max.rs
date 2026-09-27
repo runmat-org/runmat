@@ -1088,10 +1088,10 @@ async fn reduction_max(value: Value, args: ReductionArgs) -> BuiltinResult<MaxEv
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|e| max_internal_error(format!("max: {e}")))?;
-            reduction_max_host(Value::Tensor(tensor), &args)
+            let value = super::extrema_provider::ExtremaKind::Max
+                .gather(&handle)
+                .await?;
+            reduction_max_host(value, &args)
         }
         other => reduction_max_host(other, &args),
     }
@@ -1113,17 +1113,6 @@ async fn reduction_max_gpu(
         log::trace!("max: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(&handle) {
-        Some(p) => p,
-        None => {
-            log::trace!(
-                "max: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
-                handle.shape(),
-                handle.device_id()
-            );
-            return Ok(None);
-        }
-    };
     let target_dim = match args.selection {
         DimSelection::Auto => default_dimension_from_shape(handle.shape()),
         DimSelection::Dim(dim) => dim,
@@ -1152,16 +1141,13 @@ async fn reduction_max_gpu(
         handle.shape(),
         handle.device_id()
     );
-    match provider.reduce_max_dim(&handle, zero_based).await {
-        Ok(ReduceDimResult { values, indices }) => Ok(Some(MaxEvaluation {
+    Ok(super::extrema_provider::ExtremaKind::Max
+        .reduce_dim(&handle, zero_based)
+        .await?
+        .map(|ReduceDimResult { values, indices }| MaxEvaluation {
             values: Value::GpuTensor(values),
             indices: Value::GpuTensor(indices),
-        })),
-        Err(err) => {
-            log::trace!("max: reduce_max_dim failed: {err}");
-            Ok(None)
-        }
-    }
+        }))
 }
 
 fn reduction_max_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MaxEvaluation> {

@@ -859,8 +859,10 @@ async fn reduction_min(value: Value, args: ReductionArgs) -> BuiltinResult<MinEv
                 return Ok(eval);
             }
             // Fall back to host if GPU path is unavailable.
-            let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-            reduction_min_host(Value::Tensor(tensor), &args)
+            let value = super::extrema_provider::ExtremaKind::Min
+                .gather(&handle)
+                .await?;
+            reduction_min_host(value, &args)
         }
         other => reduction_min_host(other, &args),
     }
@@ -882,17 +884,6 @@ async fn reduction_min_gpu(
         log::trace!("min: gpu path disabled (linear_index=true)");
         return Ok(None);
     }
-    let provider = match runmat_accelerate_api::provider_for_handle(&handle) {
-        Some(p) => p,
-        None => {
-            log::trace!(
-                "min: gpu path unavailable (provider() is None) handle_shape={:?} device_id={}",
-                handle.shape(),
-                handle.device_id()
-            );
-            return Ok(None);
-        }
-    };
     let target_dim = match args.selection {
         DimSelection::Auto => default_dimension_from_shape(handle.shape()),
         DimSelection::Dim(dim) => dim,
@@ -921,16 +912,13 @@ async fn reduction_min_gpu(
         handle.shape(),
         handle.device_id()
     );
-    match provider.reduce_min_dim(&handle, zero_based).await {
-        Ok(ReduceDimResult { values, indices }) => Ok(Some(MinEvaluation {
+    Ok(super::extrema_provider::ExtremaKind::Min
+        .reduce_dim(&handle, zero_based)
+        .await?
+        .map(|ReduceDimResult { values, indices }| MinEvaluation {
             values: Value::GpuTensor(values),
             indices: Value::GpuTensor(indices),
-        })),
-        Err(err) => {
-            log::trace!("min: reduce_min_dim failed: {err}");
-            Ok(None)
-        }
-    }
+        }))
 }
 
 fn reduction_min_host(value: Value, args: &ReductionArgs) -> BuiltinResult<MinEvaluation> {
