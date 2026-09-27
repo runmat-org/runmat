@@ -116,7 +116,9 @@ impl AccelProvider for Provider {
 }
 
 fn compiled_plan() -> FusionGroupPlan {
-    let bytecode = test_helpers::compile_source("A=rand(2,3); y=sum(A,1);").unwrap();
+    // The compiler requires a genuine multi-operation fusion candidate; rand
+    // is an effectful boundary, not a second numerical signal for bare sum.
+    let bytecode = test_helpers::compile_source("A=rand(2,3); y=sum(A+1,1);").unwrap();
     let groups = bytecode.runtime_fusion_groups();
     let graph = bytecode
         .runtime_accel_graph_for_fusion(&groups)
@@ -348,7 +350,7 @@ fn interpreter_keeps_empty_nd_broadcast_and_dimension_error_semantics() {
             ("A=zeros(0,3); y=sum(A,1);", vec![1, 3], vec![0., 0., 0.]),
             ("A=zeros(3,0); y=sum(A,2);", vec![3, 1], vec![0., 0., 0.]),
             (
-                "A=reshape(1:8,2,2,2); y=sum(A,'all');",
+                "A=reshape(1:8,2,2,2); y=sum(A+0,'all');",
                 vec![1, 1],
                 vec![36.],
             ),
