@@ -501,12 +501,20 @@ impl WgpuProvider {
             } else {
                 GpuTensorStorage::Real
             };
-            return Ok(self.register_existing_buffer_with_storage(
+            let output = self.register_existing_buffer_with_storage(
                 out_buffer,
                 entry.shape,
                 entry.len,
                 storage,
-            ));
+            );
+            if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+                runmat_accelerate_api::record_handle_transpose(
+                    &output,
+                    info.base_rows,
+                    info.base_cols,
+                );
+            }
+            return Ok(output);
         }
         if len > (u32::MAX as usize) {
             return Err(gpu_dispatch_length_limit_error("round_digits", len));
@@ -605,6 +613,9 @@ impl WgpuProvider {
             GpuTensorStorage::Real
         };
         let out = self.register_existing_buffer_with_storage(out_buffer, entry.shape, len, storage);
+        if let Some(info) = runmat_accelerate_api::handle_transpose_info(a) {
+            runmat_accelerate_api::record_handle_transpose(&out, info.base_rows, info.base_cols);
+        }
         self.telemetry
             .record_fused_elementwise_duration(start.elapsed());
         Ok(out)

@@ -28,6 +28,12 @@ pub(super) fn functions(precision: ProviderPrecision) -> String {
     };
     format!(
         r#"
+fn rm_round_divide_{ty}(numerator: {ty}, denominator: {ty}) -> {ty} {{
+    let quotient = numerator / denominator;
+    let residual = fma(-quotient, denominator, numerator);
+    return quotient + residual / denominator;
+}}
+
 fn rm_round_power10_{ty}(exponent: i32) -> {ty} {{
     var count = u32(abs(exponent));
     var base = {ty}(10.0);
@@ -69,16 +75,16 @@ fn rm_round_digits_{ty}(a: {ty}, requested: i32, significant: bool) -> {ty} {{
     let factor = rm_round_power10_{ty}(abs(first));
     let tail = rm_round_power10_{ty}(digits - first);
     var scaled = (magnitude * factor) * tail;
-    if first < 0 {{ scaled = magnitude / factor; }}
+    if first < 0 {{ scaled = rm_round_divide_{ty}(magnitude, factor); }}
     if tiny {{ scaled = scaled / {ty}({normalization}); }}
     // Overflow means the quantum is below the represented input's spacing.
     if {overflow} {{ return a; }}
     let rounded = {name}(scaled);
-    var result = (rounded / factor) / tail;
+    var result = rm_round_divide_{ty}(rm_round_divide_{ty}(rounded, factor), tail);
     if first < 0 {{ result = rounded * factor; }}
     if first > 0 && result < {ty}({minimum}) {{
         // Construct subnormal results from normal arithmetic intermediates.
-        let units = round(((rounded / (factor * {ty}({minimum}))) / tail) * {ty}({normalization}));
+        let units = round(rm_round_divide_{ty}(rm_round_divide_{ty}(rounded, factor * {ty}({minimum})), tail) * {ty}({normalization}));
         {pack}
     }}
     if {negative} {{ return -result; }}

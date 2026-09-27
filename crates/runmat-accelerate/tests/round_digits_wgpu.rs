@@ -30,6 +30,13 @@ async fn round_digits_hardware_preserves_integral_extreme_and_tiny_values() {
         (23.75, i32::MAX, true, 23.75),
         (-23.75, i32::MIN, false, -0.0),
         (1253.0, 2, true, 1300.0),
+        (
+            represented(750_000_000_000.0),
+            -11,
+            false,
+            represented(800_000_000_000.0),
+        ),
+        (150_000.0, -5, false, 200_000.0),
         (2.05, 1, false, represented(2.1)),
         (-0.0, 0, false, -0.0),
         (f64::INFINITY, 1, false, f64::INFINITY),
@@ -87,4 +94,79 @@ async fn round_digits_hardware_preserves_integral_extreme_and_tiny_values() {
     assert!((actual[1] + quantum).abs() <= 4.0 * ulp);
     provider.free(&output).unwrap();
     provider.free(&input).unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires an actual compatible WGPU adapter"]
+async fn round_digits_preserves_lazy_transpose_for_real_and_complex_components() {
+    use runmat_accelerate_api::{
+        upload_numeric_protecting, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+        HostNumericTensorView,
+    };
+    let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+    )
+    .expect("digit-rounding qualification requires a compatible WGPU adapter");
+    for complex in [false, true] {
+        let original = [1.25, 2.75, 3.25, 4.75, 5.25, 6.75];
+        let values: Vec<f64> = original
+            .iter()
+            .flat_map(|&value| {
+                if complex {
+                    vec![value, -value]
+                } else {
+                    vec![value]
+                }
+            })
+            .collect();
+        let singles: Vec<f32> = values.iter().map(|value| *value as f32).collect();
+        let data = if provider.precision() == ProviderPrecision::F32 {
+            HostNumericDataView::F32(&singles)
+        } else {
+            HostNumericDataView::F64(&values)
+        };
+        let storage = if complex {
+            GpuTensorStorage::ComplexInterleaved
+        } else {
+            GpuTensorStorage::Real
+        };
+        let input = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data,
+                shape: &[2, 3],
+                storage,
+            },
+            &[],
+        )
+        .unwrap();
+        let transposed = provider.transpose(&input).unwrap();
+        let output = provider.round_digits(&transposed, 0, false).await.unwrap();
+        assert_eq!(
+            runmat_accelerate_api::handle_transpose_info(&output),
+            runmat_accelerate_api::handle_transpose_info(&transposed)
+        );
+        let host = provider.download_numeric(&output).await.unwrap();
+        assert_eq!(host.shape, vec![3, 2]);
+        assert_eq!(host.storage, storage);
+        let actual: Vec<f64> = match host.data {
+            HostNumericDataOwned::F64(values) => values,
+            HostNumericDataOwned::F32(values) => values.into_iter().map(f64::from).collect(),
+            _ => panic!("floating output"),
+        };
+        let expected: Vec<f64> = [1.0, 3.0, 5.0, 3.0, 5.0, 7.0]
+            .into_iter()
+            .flat_map(|value| {
+                if complex {
+                    vec![value, -value]
+                } else {
+                    vec![value]
+                }
+            })
+            .collect();
+        assert_eq!(actual, expected);
+        provider.free(&output).unwrap();
+        provider.free(&transposed).unwrap();
+        provider.free(&input).unwrap();
+    }
 }

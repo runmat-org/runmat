@@ -43,15 +43,23 @@ macro_rules! floating_digits {
             // This retains subnormal values without constructing 10^324.
             let first = digits.min($maximum) as i32;
             let second = (digits - i64::from(first)) as i32;
-            let factor = (10.0 as $ty).powi(first);
+            let factor = (10.0 as $ty).powi(first.abs());
             let tail = (10.0 as $ty).powi(second);
-            let scaled = (value * factor) * tail;
+            let scaled = if first < 0 {
+                value / factor
+            } else {
+                (value * factor) * tail
+            };
             if !scaled.is_finite() {
                 // At this magnitude the requested fractional decimal quantum
                 // is below the represented value's spacing; it cannot change it.
                 return value;
             }
-            (scaled.round() / factor) / tail
+            if first < 0 {
+                scaled.round() * factor
+            } else {
+                (scaled.round() / factor) / tail
+            }
         }
     };
 }
@@ -88,6 +96,8 @@ mod tests {
 
     #[test]
     fn subnormal_scaling_and_ordinary_decimal_rounding_remain_useful() {
+        assert_eq!(decimal_f64(750_000_000_000.0, -11), 800_000_000_000.0);
+        assert_eq!(decimal_f64(150_000.0, -5), 200_000.0);
         assert!((decimal_f64(1.234e-310, 310) / 1e-310 - 1.0).abs() < 1e-12);
         assert!((decimal_f32(1.234e-40, 40) / 1e-40 - 1.0).abs() < 1e-4);
         assert_eq!(decimal_f64(863178137.0, -2), 863178100.0);
