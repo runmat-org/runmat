@@ -89,6 +89,8 @@ impl FusionAllocations {
             && handle.device_id == provider.device_id()
             && handle.descriptor.storage == Some(GpuTensorStorage::Real)
             && handle.descriptor.element_type == Some(element)
+            && !runmat_accelerate_api::handle_is_logical(&handle)
+            && !runmat_accelerate_api::handle_is_transposed(&handle)
             && owner.is_some_and(|owner| std::ptr::eq(owner, provider))
             && gpu_class_metadata_matches(&handle, Some(precision), None, false)
             && !self

@@ -75,11 +75,18 @@ impl AccelProvider for Recorder {
         match self.mode.load(Ordering::SeqCst) {
             3 => return Err(unsupported_provider_operation("multi unavailable")),
             4 => anyhow::bail!("multi execution failed"),
+            7 => return Ok(vec![inputs[0].clone(), self.fresh(NumericElementType::F64)]),
             _ => {}
         }
-        Ok((0..count)
+        let outputs: Vec<_> = (0..count)
             .map(|_| self.fresh(NumericElementType::F64))
-            .collect())
+            .collect();
+        match self.mode.load(Ordering::SeqCst) {
+            5 => set_handle_logical(&outputs[0], true),
+            6 => record_handle_transpose(&outputs[0], 2, 1),
+            _ => {}
+        }
+        Ok(outputs)
     }
     fn fused_elementwise(
         &self,
@@ -274,4 +281,35 @@ fn provider_default_multi_declares_unsupported_not_execution_failure() {
         .fused_elementwise_multi("", &[], &[1, 2], 2, 2)
         .unwrap_err();
     assert!(is_unsupported_provider_operation(&error));
+}
+
+#[test]
+fn malformed_fresh_annotations_are_rejected_and_borrowed_aliases_are_never_freed() {
+    let _serial = SERIAL.lock().unwrap();
+    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    for mode in [5, 6, 7] {
+        OWNER.mode.store(mode, Ordering::SeqCst);
+        OWNER.casts.store(0, Ordering::SeqCst);
+        OWNER.next.store(10, Ordering::SeqCst);
+        OWNER.freed.lock().unwrap().clear();
+        let input = OWNER.make(1, NumericElementType::F64);
+        let before = snapshot_handle_metadata(&input);
+        let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
+        plan.materialized_stores.push(FusionStoreMaterialization {
+            value_id: 2,
+            binding: VarBinding {
+                kind: VarKind::Global,
+                index: 0,
+            },
+        });
+        assert!(
+            futures::executor::block_on(execute_elementwise(request(&plan, input.clone())))
+                .is_err()
+        );
+        assert_eq!(snapshot_handle_metadata(&input), before);
+        assert_eq!(OWNER.casts.load(Ordering::SeqCst), 0);
+        let mut freed = OWNER.freed.lock().unwrap().clone();
+        freed.sort_unstable();
+        assert_eq!(freed, if mode == 7 { vec![10] } else { vec![10, 11] });
+    }
 }
