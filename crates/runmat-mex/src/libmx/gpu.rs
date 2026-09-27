@@ -1,7 +1,7 @@
 use runmat_accelerate_api::{
-    GpuTensorStorage, HostNumericDataOwned, HostNumericDataView, HostNumericTensorOwned,
-    HostNumericTensorView, NativeDeviceAccess, NativeDeviceApi, NativeDeviceComponent,
-    NativeDeviceInitialization, NumericElementType,
+    GpuTensorStorage, HostLogicalTensorView, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostNumericTensorView, NativeDeviceAccess, NativeDeviceApi,
+    NativeDeviceClass, NativeDeviceComponent, NativeDeviceInitialization, NumericElementType,
 };
 use runmat_value::{ComplexElement, HostNumericBuffer, IntegerStorage, NumericStorage};
 
@@ -30,11 +30,23 @@ impl MxApi {
             }
             let downloaded = pollster::block_on(owner.download_numeric(gpu.lease.handle()))
                 .map_err(|error| format!("could not transfer GPU array to CUDA: {error}"))?;
-            let handle = runmat_accelerate_api::upload_numeric_protecting(
-                target,
-                &downloaded.as_view(),
-                &[gpu.lease.handle()],
-            )
+            let handle = if gpu.class_id == MxClassId::Logical {
+                let logical = host_array_from_download(MxClassId::Logical, downloaded)?;
+                let (_, UploadSource::Logical(view)) = host_upload(&logical)? else {
+                    unreachable!("logical host array has a logical upload view")
+                };
+                runmat_accelerate_api::upload_logical_protecting(
+                    target,
+                    &view,
+                    &[gpu.lease.handle()],
+                )
+            } else {
+                runmat_accelerate_api::upload_numeric_protecting(
+                    target,
+                    &downloaded.as_view(),
+                    &[gpu.lease.handle()],
+                )
+            }
             .map_err(|error| format!("could not upload GPU array to CUDA: {error}"))?;
             let value = MxArray::gpu_owned(gpu.class_id, MxGpuLease::owned(handle))?;
             return Ok(self.arena.allocate(value));
@@ -49,6 +61,9 @@ impl MxApi {
             UploadSource::Owned(owned) => {
                 runmat_accelerate_api::upload_numeric_protecting(provider, &owned.as_view(), &[])
             }
+            UploadSource::Logical(view) => {
+                runmat_accelerate_api::upload_logical_protecting(provider, view, &[])
+            }
         }
         .map_err(|error| format!("could not upload array to CUDA: {error}"))?;
         let value = MxArray::gpu_owned(class_id, MxGpuLease::owned(handle))?;
@@ -62,7 +77,7 @@ impl MxApi {
         complex: bool,
         initialize: bool,
     ) -> Result<*mut MxArray, String> {
-        let element_type = class_element_type(class_id)?;
+        let class = native_class(class_id)?;
         let storage = if complex {
             GpuTensorStorage::ComplexInterleaved
         } else {
@@ -73,9 +88,23 @@ impl MxApi {
         } else {
             NativeDeviceInitialization::Uninitialized
         };
-        let handle = cuda_provider()?
-            .allocate_native_device_buffer(&shape, element_type, storage, initialization)
+        class
+            .validate_storage(storage)
+            .map_err(|error| error.to_string())?;
+        runmat_accelerate_api::native_buffer_byte_length(&shape, class.element_type(), storage)
+            .map_err(|error| error.to_string())?;
+        let provider = cuda_provider()?;
+        let handle = provider
+            .allocate_native_device_buffer(&shape, class, storage, initialization)
             .map_err(|error| format!("could not allocate CUDA array: {error}"))?;
+        runmat_accelerate_api::validate_native_device_result(
+            &handle,
+            provider.device_id(),
+            &shape,
+            class,
+            storage,
+        )
+        .map_err(|error| error.to_string())?;
         let value = MxArray::gpu_owned(class_id, MxGpuLease::owned(handle))?;
         Ok(self.arena.allocate(value))
     }
@@ -136,7 +165,10 @@ impl MxApi {
         };
         let left = gpu(left)?;
         let right = gpu(right)?;
-        Ok(left.lease.handle() == right.lease.handle())
+        Ok(left
+            .lease
+            .handle()
+            .shares_allocation_with(right.lease.handle()))
     }
 
     pub fn gpu_copy_component(
@@ -151,7 +183,7 @@ impl MxApi {
         let storage = gpu
             .lease
             .handle()
-            .descriptor
+            .descriptor()
             .storage
             .ok_or_else(|| "GPU array has no storage descriptor".to_string())?;
         let lease = match (storage, component) {
@@ -162,7 +194,7 @@ impl MxApi {
                 let handle = cuda_provider()?
                     .allocate_native_device_buffer(
                         source.shape(),
-                        class_element_type(gpu.class_id)?,
+                        native_class(gpu.class_id)?,
                         GpuTensorStorage::Real,
                         NativeDeviceInitialization::Zeroed,
                     )
@@ -188,7 +220,7 @@ impl MxApi {
             let MxArrayData::Gpu(gpu) = value.data() else {
                 return Err("mxGPUArray does not refer to GPU storage".to_string());
             };
-            if gpu.lease.handle().descriptor.storage != Some(GpuTensorStorage::Real) {
+            if gpu.lease.handle().descriptor().storage != Some(GpuTensorStorage::Real) {
                 return Err("complex GPU components must be real arrays".to_string());
             }
             Ok((value.shape().to_vec(), gpu.class_id, gpu.lease.clone()))
@@ -198,6 +230,9 @@ impl MxApi {
         if real_shape != imag_shape || real_class != imag_class {
             return Err("complex GPU components must have matching shape and class".into());
         }
+        native_class(real_class)?
+            .validate_storage(GpuTensorStorage::ComplexInterleaved)
+            .map_err(|error| error.to_string())?;
         let lease =
             MxGpuLease::combine(&real_lease, &imag_lease).map_err(|error| error.to_string())?;
         let value = MxArray::gpu_owned(real_class, lease)?;
@@ -215,6 +250,7 @@ fn cuda_provider() -> Result<&'static dyn runmat_accelerate_api::AccelProvider, 
 enum UploadSource<'a> {
     Borrowed(HostNumericTensorView<'a>),
     Owned(HostNumericTensorOwned),
+    Logical(HostLogicalTensorView<'a>),
 }
 
 fn host_upload(source: &MxArray) -> Result<(MxClassId, UploadSource<'_>), String> {
@@ -256,10 +292,9 @@ fn host_upload(source: &MxArray) -> Result<(MxClassId, UploadSource<'_>), String
         )),
         MxArrayData::Logical(values) => Ok((
             MxClassId::Logical,
-            UploadSource::Borrowed(HostNumericTensorView {
-                data: HostNumericDataView::U8(values.as_slice()),
+            UploadSource::Logical(HostLogicalTensorView {
+                data: values.as_slice(),
                 shape: source.shape(),
-                storage: GpuTensorStorage::Real,
             }),
         )),
         MxArrayData::Sparse(_) => {
@@ -382,13 +417,33 @@ fn class_element_type(class_id: MxClassId) -> Result<NumericElementType, String>
     })
 }
 
+fn native_class(class_id: MxClassId) -> Result<NativeDeviceClass, String> {
+    if class_id == MxClassId::Logical {
+        Ok(NativeDeviceClass::Logical)
+    } else {
+        class_element_type(class_id).map(NativeDeviceClass::Numeric)
+    }
+}
+
 fn host_array_from_download(
     class_id: MxClassId,
     downloaded: HostNumericTensorOwned,
 ) -> Result<MxArray, String> {
     if class_id == MxClassId::Logical {
-        let HostNumericDataOwned::U8(values) = downloaded.data else {
-            return Err("logical GPU storage is not byte-addressable".into());
+        if downloaded.storage != GpuTensorStorage::Real {
+            return Err("logical GPU storage must be real".into());
+        }
+        let values = match downloaded.data {
+            HostNumericDataOwned::U8(values) => values,
+            HostNumericDataOwned::F32(values) => values
+                .into_iter()
+                .map(|value| u8::from(value != 0.0))
+                .collect(),
+            HostNumericDataOwned::F64(values) => values
+                .into_iter()
+                .map(|value| u8::from(value != 0.0))
+                .collect(),
+            _ => return Err("logical GPU storage must use U8, F32, or F64 encoding".into()),
         };
         return MxArray::logical(values, downloaded.shape);
     }
@@ -460,6 +515,10 @@ fn integer_pairs<T: Copy>(
             .collect(),
     )
 }
+
+#[cfg(test)]
+#[path = "gpu/typed_inputs_tests.rs"]
+mod typed_inputs_tests;
 
 #[cfg(test)]
 mod tests {
