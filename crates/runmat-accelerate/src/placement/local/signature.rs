@@ -78,6 +78,7 @@ mod tests {
                 inputs: vec![],
                 outputs: vec![],
                 workload: ProviderWorkload {
+                    preparation_route: None,
                     matmul: None,
                     elements: Some(4),
                     flops: Some(8),

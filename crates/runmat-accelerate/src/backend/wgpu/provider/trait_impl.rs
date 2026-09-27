@@ -131,6 +131,9 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderCostQuery,
     ) -> Option<runmat_accelerate_api::ProviderCostEstimate> {
+        if crate::placement::floating_cast_unresolved_adaptation(&query.operation) {
+            return None;
+        }
         Some(crate::placement::wgpu_cost_estimate(self, query))
     }
 

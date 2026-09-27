@@ -20,6 +20,26 @@ pub enum ProviderPreparationProgram<'a> {
     },
 }
 
+/// Resolved physical route, distinct from an operation's numerical capability.
+/// A direct hook caller may declare this only when no output-template adaptation
+/// follows the hook. Missing evidence does not mean an identity/zero-work route.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ProviderPreparationRoute {
+    FloatingCast { target: crate::ProviderPrecision },
+}
+
+impl ProviderPreparationProgram<'_> {
+    pub fn route(self) -> Option<ProviderPreparationRoute> {
+        match self {
+            Self::FloatingCast { target } => {
+                Some(ProviderPreparationRoute::FloatingCast { target })
+            }
+            // Elementwise already carries its complete expression workload.
+            Self::Elementwise { .. } => None,
+        }
+    }
+}
+
 /// A point-in-time cache observation. None means unavailable/contended, not
 /// warm. The identity includes the exact selected recipes and geometry.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

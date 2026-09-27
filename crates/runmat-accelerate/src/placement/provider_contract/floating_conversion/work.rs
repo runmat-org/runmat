@@ -99,6 +99,9 @@ pub(crate) fn physical_work(
     query: &ProviderFeasibilityQuery,
 ) -> Option<FloatingCastWork> {
     let target = super::target(query)?;
+    if !super::has_exact_route(query, target) {
+        return None;
+    }
     if !super::validate_target(provider, true, query, target)?.is_supported() {
         return None;
     }

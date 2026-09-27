@@ -38,6 +38,29 @@ fn target(query: &ProviderFeasibilityQuery) -> Option<ProviderElementType> {
     }
 }
 
+fn has_exact_route(query: &ProviderFeasibilityQuery, target: ProviderElementType) -> bool {
+    use runmat_accelerate_api::ProviderPreparationRoute;
+    matches!(
+        (query.workload.preparation_route, target),
+        (
+            Some(ProviderPreparationRoute::FloatingCast {
+                target: ProviderPrecision::F32
+            }),
+            ProviderElementType::F32
+        ) | (
+            Some(ProviderPreparationRoute::FloatingCast {
+                target: ProviderPrecision::F64
+            }),
+            ProviderElementType::F64
+        )
+    )
+}
+
+#[cfg(feature = "wgpu")]
+pub(crate) fn unresolved_adaptation(query: &ProviderFeasibilityQuery) -> bool {
+    target(query).is_some_and(|target| !has_exact_route(query, target))
+}
+
 fn validate_target(
     provider: &(impl AccelProvider + ?Sized),
     wgpu: bool,
@@ -132,6 +155,13 @@ fn validate_target(
         // InProcess executes synchronously on CPU; WGPU same-type casts only
         // register a fresh handle sharing the original allocation.
         if wgpu {
+            // Numerical hook support does not describe subsequent host/device
+            // template adaptation. Keep direct execution available, but do not
+            // authorize automatic profitability with invented resource costs.
+            if !has_exact_route(query, target) {
+                *resources = ProviderResourceEstimate::default();
+                return Some(feasibility);
+            }
             let Some(work) = work::build(provider, query, target) else {
                 return reject(
                     ProviderRejectionCode::UnknownResourceEstimate,

@@ -96,6 +96,12 @@ pub(crate) fn plan_local(
             .download_ns
             .saturating_add(transfer_prior_ns(provider_resident_bytes));
     }
+    let mut workload = request.workload;
+    // Physical route evidence comes from the admitted program, never the
+    // operation name or an unresolved legacy/template workload.
+    workload.preparation_route = request
+        .preparation_program
+        .and_then(|program| program.route());
     let query = ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new(request.operation),
         family: request.family,
@@ -105,7 +111,7 @@ pub(crate) fn plan_local(
             .filter_map(|value| tensor_representation(value, provider.precision()))
             .collect(),
         outputs: request.outputs,
-        workload: request.workload,
+        workload,
     };
     let estimate = match provider.query_feasibility(&query) {
         ProviderFeasibility::Supported { estimate } => estimate,

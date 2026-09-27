@@ -5,6 +5,10 @@ use runmat_accelerate_api::{
     GpuTensorStorage, HostNumericDataView, HostNumericTensorView, ProviderWorkload,
 };
 
+#[cfg(feature = "wgpu")]
+#[path = "route_tests.rs"]
+mod route_tests;
+
 fn query(name: &str, element_type: ProviderElementType, shape: &[u64]) -> ProviderFeasibilityQuery {
     ProviderFeasibilityQuery {
         operation: ProviderOperationIdentity::new(name),

@@ -24,6 +24,9 @@ impl ProviderOperationIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWorkload {
+    /// Exact admitted physical route; None leaves adaptation work unresolved.
+    #[serde(default)]
+    pub preparation_route: Option<super::ProviderPreparationRoute>,
     /// Exact admitted matrix/epilogue route. None is unknown, not a bare GEMM.
     #[serde(default)]
     pub matmul: Option<super::MatmulWorkload>,

@@ -18,7 +18,13 @@ fn single_query(source: ProviderElementType, shape: &[u64]) -> ProviderFeasibili
             shape: shape.to_vec(),
         }],
         outputs: vec![],
-        workload: Default::default(),
+        workload: runmat_accelerate_api::ProviderWorkload {
+            preparation_route: ProviderPreparationProgram::FloatingCast {
+                target: runmat_accelerate_api::ProviderPrecision::F32,
+            }
+            .route(),
+            ..Default::default()
+        },
     }
 }
 
@@ -29,6 +35,26 @@ fn actual_single_alias_and_empty_inventory_are_ready_even_when_cache_is_locked()
     let lock = provider.fused_pipeline_cache.lock().unwrap();
     for shape in [&[1, 8][..], &[0, 2, 3][..]] {
         let query = single_query(ProviderElementType::F32, shape);
+        let mut unresolved = query.clone();
+        unresolved.workload.preparation_route = None;
+        let program = ProviderPreparationProgram::FloatingCast {
+            target: runmat_accelerate_api::ProviderPrecision::F32,
+        };
+        assert!(provider
+            .preparation_snapshot(&unresolved, program)
+            .is_none());
+        let cost_query = runmat_accelerate_api::ProviderCostQuery {
+            operation: unresolved,
+            context: Default::default(),
+            preparation: CandidatePreparationState::Ready,
+            required_upload_bytes: 0,
+            required_download_bytes: 0,
+            downstream_materialization: false,
+        };
+        assert!(
+            provider.estimate_cost(&cost_query).is_none(),
+            "unknown adaptation is not a zero-cost alias"
+        );
         let snapshot = provider
             .preparation_snapshot(
                 &query,

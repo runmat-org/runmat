@@ -23,7 +23,14 @@ fn query(source: ProviderElementType, elements: u64, host: bool) -> ProviderCost
                 },
             }],
             outputs: vec![],
-            workload: Default::default(),
+            workload: runmat_accelerate_api::ProviderWorkload {
+                preparation_route:
+                    runmat_accelerate_api::ProviderPreparationProgram::FloatingCast {
+                        target: runmat_accelerate_api::ProviderPrecision::F32,
+                    }
+                    .route(),
+                ..Default::default()
+            },
         },
         preparation: CandidatePreparationState::Cold,
         context: Default::default(),

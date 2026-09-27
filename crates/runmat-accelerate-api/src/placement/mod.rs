@@ -14,7 +14,8 @@ pub use matmul::{MatmulScaleWork, MatmulWorkload, ProviderMatmulGeometry};
 mod representation;
 mod preparation;
 pub use preparation::{
-    ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationSnapshot,
+    ProviderElementwiseGeometry, ProviderPreparationProgram, ProviderPreparationRoute,
+    ProviderPreparationSnapshot,
 };
 
 pub use capability::{
