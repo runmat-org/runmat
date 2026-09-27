@@ -9,6 +9,9 @@ use runmat_execution::{
 
 use super::local::transfer_prior_ns;
 
+#[cfg(all(test, feature = "wgpu"))]
+mod digit_tests;
+
 pub(crate) fn wgpu_cost_estimate(
     provider: &dyn AccelProvider,
     query: &ProviderCostQuery,
