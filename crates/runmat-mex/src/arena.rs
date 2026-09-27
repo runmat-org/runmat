@@ -161,6 +161,9 @@ impl MxArena {
         drop(self.detach_nonpersistent());
     }
 
+    // The boxes keep exported mxArray addresses stable until retired allocations
+    // are dropped after the host-state lock has been released.
+    #[expect(clippy::vec_box, reason = "FFI mxArray addresses must remain stable")]
     pub(crate) fn detach_nonpersistent(&mut self) -> Vec<Box<MxArray>> {
         self.call_active = false;
         let arrays = std::mem::take(&mut self.arrays);

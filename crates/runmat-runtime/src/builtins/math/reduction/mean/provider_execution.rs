@@ -8,7 +8,7 @@ mod result_tests;
 #[derive(Debug)]
 pub(super) enum MeanProviderFailure {
     Unsupported,
-    Execution(RuntimeError),
+    Execution(Box<RuntimeError>),
 }
 
 fn mean_provider_error(source: anyhow::Error) -> MeanProviderFailure {
@@ -18,7 +18,7 @@ fn mean_provider_error(source: anyhow::Error) -> MeanProviderFailure {
     let mut failure = mean_internal_error(format!("mean: provider execution failed: {source}"));
     failure = crate::runtime_error::with_provider_execution_source(failure, source.into());
     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
-    MeanProviderFailure::Execution(failure)
+    MeanProviderFailure::Execution(Box::new(failure))
 }
 
 pub(super) async fn execute(
@@ -39,7 +39,7 @@ pub(super) async fn execute(
     match result {
         Ok(output) => admit_result(provider, input, output, axes, &dims).map(Some),
         Err(MeanProviderFailure::Unsupported) => Ok(None),
-        Err(MeanProviderFailure::Execution(error)) => Err(error),
+        Err(MeanProviderFailure::Execution(error)) => Err(*error),
     }
 }
 

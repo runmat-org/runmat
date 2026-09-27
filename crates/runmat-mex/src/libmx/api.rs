@@ -50,6 +50,9 @@ impl MxApi {
         drop(self.detach_finished_call());
     }
 
+    // Preserve the stable boxed allocations while the host moves the retired
+    // batch outside its state lock for destruction.
+    #[expect(clippy::vec_box, reason = "FFI mxArray addresses must remain stable")]
     pub(crate) fn detach_finished_call(&mut self) -> Vec<Box<MxArray>> {
         let retired = self.arena.detach_nonpersistent();
         self.memory.finish_call();
