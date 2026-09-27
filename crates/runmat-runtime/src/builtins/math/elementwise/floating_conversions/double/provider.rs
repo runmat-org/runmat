@@ -21,6 +21,7 @@ pub(super) async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
         })?;
 
     let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     let direct_eligible = provider.precision() == ProviderPrecision::F64
@@ -36,7 +37,7 @@ pub(super) async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
                 return Ok(gpu_helpers::resident_gpu_value(output));
             }
             Ok(output) => {
-                gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+                gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
                 return Err(double_error_with_detail(
                     &DOUBLE_ERROR_INTERNAL,
                     "provider unary_double returned malformed output",
@@ -63,9 +64,13 @@ pub(super) async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
     }
 
     let mut output = match &converted {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, tensor)
-            .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?,
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, tensor)?,
+        Value::Tensor(tensor) => {
+            gpu_helpers::upload_tensor_protecting(provider, tensor, &[&handle])
+                .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
+        }
+        Value::ComplexTensor(tensor) => {
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[&handle])?
+        }
         other => {
             return Err(double_error_with_detail(
                 &DOUBLE_ERROR_INTERNAL,
@@ -74,7 +79,7 @@ pub(super) async fn double_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
         }
     };
     if !valid_output(&output, &handle, provider) {
-        gpu_helpers::free_unprotected_exact_owner(&output, &[&handle]);
+        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
         return Err(double_error_with_detail(
             &DOUBLE_ERROR_INTERNAL,
             "provider upload returned malformed double fallback output",

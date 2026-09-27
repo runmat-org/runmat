@@ -13,6 +13,7 @@ pub(super) enum HookBehavior {
     Unsupported,
     Failure,
     Malformed,
+    PendingMetadataMutation,
 }
 
 pub(super) struct ConversionHookProvider {
@@ -45,6 +46,14 @@ impl ConversionHookProvider {
                     ))
                 }
                 HookBehavior::Failure => anyhow::bail!("injected conversion kernel failure"),
+                HookBehavior::PendingMetadataMutation => {
+                    runmat_accelerate_api::set_handle_logical(input, true);
+                    runmat_accelerate_api::set_handle_class_identity(
+                        input,
+                        runmat_types::standard::LOGICAL.owned(),
+                    );
+                    futures::future::pending().await
+                }
                 HookBehavior::Malformed => {
                     let output = self.inner.upload(&HostTensorView {
                         data: &[1.0],

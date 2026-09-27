@@ -6,6 +6,24 @@ use runmat_accelerate_api::{
     AccelProvider, HostIntegerDataView, HostIntegerTensorView, HostTensorView, NumericElementType,
 };
 
+#[test]
+fn abandoned_direct_hook_restores_borrowed_metadata() {
+    use std::future::Future;
+    use std::task::{Context, Poll};
+    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+        let input = upload_input(provider);
+        let original = gpu_helpers::snapshot_handle_metadata(&input);
+        let mut call = Box::pin(super::super::provider::single_from_gpu(input.clone()));
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+        assert!(runmat_accelerate_api::handle_is_logical(&input));
+        drop(call);
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), original);
+        assert!(block_on(provider.download(&input)).is_ok());
+        provider.free(&input).unwrap();
+    });
+}
+
 fn upload_input(provider: &dyn AccelProvider) -> runmat_accelerate_api::GpuTensorHandle {
     provider
         .upload(&HostTensorView {
@@ -13,6 +31,27 @@ fn upload_input(provider: &dyn AccelProvider) -> runmat_accelerate_api::GpuTenso
             shape: &[2, 1],
         })
         .expect("input upload")
+}
+
+#[test]
+fn fixed_outputs_admit_discard_and_reject_multiple_before_provider_work() {
+    for count in [None, Some(0), Some(1)] {
+        let _outputs = crate::output_count::push_output_count(count);
+        single_builtin(Value::Num(1.25), vec![]).expect("valid output count");
+    }
+    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+        let input = upload_input(provider);
+        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        // This would never complete if output admission reached the hook.
+        let error = single_builtin(Value::GpuTensor(input.clone()), vec![]).unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SINGLE_ERROR_INVALID_ARGUMENT.identifier
+        );
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
+        provider.free(&input).unwrap();
+    });
 }
 
 #[test]

@@ -34,6 +34,11 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     builtin_path = "crate::builtins::math::elementwise::floating_conversions::single"
 )]
 async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        runmat_builtins::SINGLE_CATALOG_ENTRY.descriptor,
+        &runmat_builtins::SINGLE_ERROR_INVALID_ARGUMENT,
+        CONVERSION.name(),
+    )?;
     let template = parse_output_template(&rest)?;
     if !rest.is_empty() {
         crate::compatibility::ensure_builtin_extension_enabled(

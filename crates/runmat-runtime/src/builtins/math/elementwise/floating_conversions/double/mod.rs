@@ -32,6 +32,11 @@ fn conversion_error(type_name: &str) -> RuntimeError {
     builtin_path = "crate::builtins::math::elementwise::floating_conversions::double"
 )]
 async fn double_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        runmat_builtins::DOUBLE_CATALOG_ENTRY.descriptor,
+        &runmat_builtins::DOUBLE_ERROR_INVALID_ARGUMENT,
+        CONVERSION.name(),
+    )?;
     let template = parse_output_template(&rest)?;
     if matches!(template, OutputTemplate::Like(_)) {
         crate::compatibility::ensure_builtin_extension_enabled(
