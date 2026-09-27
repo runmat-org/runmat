@@ -487,11 +487,11 @@ pub(crate) mod tests {
             let input =
                 Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("integer upload");
-            let buffer_id = handle.buffer_id;
+            let buffer_id = handle.buffer_id();
             let Value::GpuTensor(output) = block_on(super::floor_gpu(handle)).unwrap() else {
                 panic!("expected resident integer output");
             };
-            assert_eq!(output.buffer_id, buffer_id);
+            assert_eq!(output.buffer_id(), buffer_id);
             assert_eq!(
                 test_support::gather(Value::GpuTensor(output)).unwrap(),
                 input
@@ -519,8 +519,13 @@ pub(crate) mod tests {
                 vec![1.25]
             );
 
-            let logical = gpu_helpers::upload_tensor(provider, &tensor).expect("logical upload");
-            runmat_accelerate_api::set_handle_logical(&logical, true);
+            let logical = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
+                })
+                .expect("logical upload");
+            let logical_physical = logical.allocation_lease().downgrade();
             assert!(unary::validate_provider_output(
                 provider,
                 &input,
@@ -530,9 +535,13 @@ pub(crate) mod tests {
             )
             .is_err());
 
-            let mut integer =
-                gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U8);
+            assert!(logical_physical.acquire().is_none());
+
+            let integer_tensor =
+                Tensor::new_integer(IntegerStorage::U8(vec![1]), vec![1, 1]).unwrap();
+            let integer =
+                gpu_helpers::upload_tensor(provider, &integer_tensor).expect("integer upload");
+            let integer_physical = integer.allocation_lease().downgrade();
             assert!(unary::validate_provider_output(
                 provider,
                 &input,
@@ -541,7 +550,11 @@ pub(crate) mod tests {
                 &FLOOR_ERROR_INTERNAL,
             )
             .is_err());
-            let _ = provider.free(&input);
+            assert!(integer_physical.acquire().is_none());
+            input.allocation_lease().validate_live().unwrap();
+            let physical = input.allocation_lease().downgrade();
+            input.release().expect("release input");
+            assert!(physical.acquire().is_none());
         });
     }
 

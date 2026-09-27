@@ -819,7 +819,9 @@ pub(crate) mod tests {
                 panic!("expected complex input to remain intact")
             };
             assert_eq!(gathered, complex);
-            let _ = provider.free(&input);
+            let physical = input.allocation_lease().downgrade();
+            input.release().expect("release input");
+            assert!(physical.acquire().is_none());
         });
     }
 
@@ -873,12 +875,12 @@ pub(crate) mod tests {
         )
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &integer).expect("integer upload");
-        let expected_buffer = handle.buffer_id;
+        let expected_buffer = handle.buffer_id();
         let output = block_on(round_gpu(handle, RoundStrategy::Integer)).expect("integer round");
         let Value::GpuTensor(output_handle) = &output else {
             panic!("expected resident integer tensor")
         };
-        assert_eq!(output_handle.buffer_id, expected_buffer);
+        assert_eq!(output_handle.buffer_id(), expected_buffer);
         let gathered = test_support::gather(output).expect("integer gather");
         assert_eq!(
             gathered.integer_storage(),

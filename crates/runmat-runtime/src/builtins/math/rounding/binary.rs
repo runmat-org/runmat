@@ -178,7 +178,7 @@ mod tests {
                 })
                 .expect("upload valid output");
             let contract = crate::builtins::common::gpu_helpers::BinaryGpuOutputContract {
-                shape: left.shape.clone(),
+                shape: left.shape().to_vec(),
                 storage: runmat_accelerate_api::GpuTensorStorage::Real,
                 precision: None,
                 integer: runmat_accelerate_api::handle_integer_type(&left),
@@ -193,38 +193,45 @@ mod tests {
             else {
                 panic!("validated output must remain resident")
             };
-            assert_eq!(validated.shape, vec![2, 1]);
+            assert_eq!(validated.shape(), &[2, 1]);
 
-            let mut malformed = provider
+            let malformed = provider
                 .upload_integer(&HostIntegerTensorView {
                     data: HostIntegerDataView::I64(&[-3, 3]),
-                    shape: &[2, 1],
+                    shape: &[1, 2],
                 })
                 .expect("upload malformed output");
-            malformed.shape = vec![1, 2];
-            let rejected = malformed.clone();
+            let rejected = malformed.allocation_lease().downgrade();
+            let error = crate::builtins::common::binary::validate_resident_output(
+                provider, &left, &right, malformed, &contract,
+            )
+            .unwrap_err();
             assert_eq!(
-                crate::builtins::common::binary::validate_resident_output(
-                    provider, &left, &right, malformed, &contract,
-                ),
-                Err("provider returned a malformed binary output".to_string())
+                error.message(),
+                "provider returned a malformed binary output"
             );
-            assert!(block_on(provider.download_integer(&rejected)).is_err());
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
+            assert!(rejected.acquire().is_none());
 
+            let error = crate::builtins::common::binary::validate_resident_output(
+                provider,
+                &left,
+                &right,
+                left.clone(),
+                &contract,
+            )
+            .unwrap_err();
             assert_eq!(
-                crate::builtins::common::binary::validate_resident_output(
-                    provider,
-                    &left,
-                    &right,
-                    left.clone(),
-                    &contract,
-                ),
-                Err("provider returned a malformed binary output".to_string())
+                error.message(),
+                "provider returned a malformed binary output"
             );
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
             assert!(block_on(provider.download_integer(&left)).is_ok());
 
-            for handle in [&left, &right, &validated] {
-                provider.free(handle).expect("free binary test handle");
+            for handle in [left, right, validated] {
+                let physical = handle.allocation_lease().downgrade();
+                handle.release().expect("release binary test handle");
+                assert!(physical.acquire().is_none());
             }
         });
     }
