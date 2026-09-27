@@ -5,40 +5,85 @@ use fixture::{cast, plan};
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::graph::{VarBinding, VarKind};
+use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocation, TestAllocationOwner};
 use runmat_accelerate_api::*;
 use runmat_value::Value;
 use std::future::Future;
 use std::sync::{
-    atomic::{AtomicU64, AtomicUsize, Ordering},
-    Mutex,
+    atomic::{AtomicUsize, Ordering},
+    LazyLock, Mutex,
 };
 use std::task::{Context, Poll};
 
 struct Recorder {
-    next: AtomicU64,
+    owner: TestAllocationOwner,
     casts: AtomicUsize,
     mode: AtomicUsize,
-    freed: Mutex<Vec<u64>>,
+    allocations: Mutex<Vec<(RetirementProbe, WeakGpuTensorHandle)>>,
 }
-static OWNER: Recorder = Recorder {
-    next: AtomicU64::new(10),
+static OWNER: LazyLock<Recorder> = LazyLock::new(|| Recorder {
+    owner: TestAllocationOwner::new(),
     casts: AtomicUsize::new(0),
     mode: AtomicUsize::new(0),
-    freed: Mutex::new(Vec::new()),
-};
+    allocations: Mutex::new(Vec::new()),
+});
 static SERIAL: Mutex<()> = Mutex::new(());
 impl Recorder {
-    fn make(&self, id: u64, element: NumericElementType) -> GpuTensorHandle {
-        GpuTensorHandle::new(vec![1, 2], self.device_id(), id)
-            .with_numeric_descriptor(element, GpuTensorStorage::Real)
+    fn input(&self, element: NumericElementType) -> TestAllocation {
+        self.owner
+            .allocate_zeroed(vec![1, 2], element, GpuTensorStorage::Real)
+            .unwrap()
     }
     fn fresh(&self, element: NumericElementType) -> GpuTensorHandle {
-        self.make(self.next.fetch_add(1, Ordering::SeqCst), element)
+        self.track(self.input(element))
     }
+    fn track(&self, allocation: TestAllocation) -> GpuTensorHandle {
+        self.allocations
+            .lock()
+            .unwrap()
+            .push((allocation.probe, allocation.handle.downgrade()));
+        allocation.handle
+    }
+    fn reset(&self, mode: usize) {
+        self.mode.store(mode, Ordering::SeqCst);
+        self.casts.store(0, Ordering::SeqCst);
+        let mut allocations = self.allocations.lock().unwrap();
+        assert!(allocations
+            .iter()
+            .all(|(probe, _)| probe.retirements() == 1));
+        allocations.clear();
+    }
+    fn assert_retirements(&self, expected: &[usize]) {
+        let allocations = self.allocations.lock().unwrap();
+        assert_eq!(allocations.len(), expected.len());
+        for ((probe, weak), &count) in allocations.iter().zip(expected) {
+            assert_eq!(probe.retirements(), count);
+            if count == 1 {
+                assert!(weak.acquire().is_err());
+            }
+        }
+    }
+}
+fn transposed(handle: GpuTensorHandle) -> GpuTensorHandle {
+    handle
+        .with_view(
+            handle
+                .view()
+                .clone()
+                .with_layout(GpuTensorLayout::Transpose(TransposeInfo {
+                    base_rows: 2,
+                    base_cols: 1,
+                })),
+        )
+        .unwrap()
+}
+
+fn facts(handle: &GpuTensorHandle) -> (GpuPhysicalDescriptor, GpuTensorView) {
+    (*handle.physical(), handle.view().clone())
 }
 impl AccelProvider for Recorder {
     fn device_id(&self) -> u32 {
-        u32::MAX - 284
+        self.owner.device_id()
     }
     fn precision(&self) -> ProviderPrecision {
         ProviderPrecision::F64
@@ -52,10 +97,6 @@ impl AccelProvider for Recorder {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         unreachable!()
     }
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.lock().unwrap().push(handle.buffer_id);
-        Ok(())
-    }
     fn query_feasibility(&self, _: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         ProviderFeasibility::supported(ProviderResourceEstimate {
             transient_bytes: None,
@@ -64,7 +105,6 @@ impl AccelProvider for Recorder {
         })
     }
     fn reshape(&self, input: &GpuTensorHandle, shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-        clear_handle_transpose(input);
         match self.mode.load(Ordering::SeqCst) {
             8 => {
                 return Err(unsupported_provider_operation(
@@ -75,9 +115,8 @@ impl AccelProvider for Recorder {
             10 => return Ok(input.clone()),
             _ => {}
         }
-        let mut output = self.fresh(input.descriptor.element_type.unwrap());
-        output.shape = shape.to_vec();
-        Ok(output)
+        let output = self.fresh(input.physical().element_type());
+        Ok(output.with_view(GpuTensorView::contiguous(shape.to_vec()))?)
     }
     fn fused_elementwise_multi(
         &self,
@@ -85,23 +124,37 @@ impl AccelProvider for Recorder {
         inputs: &[GpuTensorHandle],
         _: &[usize],
         _: usize,
-        count: usize,
+        output_classes: &[ProviderElementType],
     ) -> anyhow::Result<Vec<GpuTensorHandle>> {
-        set_handle_logical(&inputs[0], true);
+        validate_fused_output_classes(self.precision(), output_classes)?;
         match self.mode.load(Ordering::SeqCst) {
             3 => return Err(unsupported_provider_operation("multi unavailable")),
             4 => anyhow::bail!("multi execution failed"),
             7 => return Ok(vec![inputs[0].clone(), self.fresh(NumericElementType::F64)]),
             _ => {}
         }
-        let outputs: Vec<_> = (0..count)
-            .map(|_| self.fresh(NumericElementType::F64))
+        let outputs: Vec<_> = output_classes
+            .iter()
+            .enumerate()
+            .map(|(index, class)| {
+                let output = if *class == ProviderElementType::Logical
+                    || (index == 0 && self.mode.load(Ordering::SeqCst) == 5)
+                {
+                    self.track(
+                        self.owner
+                            .allocate_logical_zeroed(vec![1, 2], self.precision())
+                            .unwrap(),
+                    )
+                } else {
+                    self.fresh(NumericElementType::F64)
+                };
+                if index == 0 && self.mode.load(Ordering::SeqCst) == 6 {
+                    transposed(output)
+                } else {
+                    output
+                }
+            })
             .collect();
-        match self.mode.load(Ordering::SeqCst) {
-            5 => set_handle_logical(&outputs[0], true),
-            6 => record_handle_transpose(&outputs[0], 2, 1),
-            _ => {}
-        }
         Ok(outputs)
     }
     fn fused_elementwise(
@@ -110,17 +163,25 @@ impl AccelProvider for Recorder {
         _: &[GpuTensorHandle],
         _: &[usize],
         _: usize,
+        output_class: ProviderElementType,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Ok(self.fresh(NumericElementType::F64))
+        validate_fused_output_classes(self.precision(), &[output_class])?;
+        Ok(if output_class == ProviderElementType::Logical {
+            self.track(
+                self.owner
+                    .allocate_logical_zeroed(vec![1, 2], self.precision())?,
+            )
+        } else {
+            self.fresh(NumericElementType::F64)
+        })
     }
     fn unary_single<'a>(
         &'a self,
-        input: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let ordinal = self.casts.fetch_add(1, Ordering::SeqCst);
             if ordinal == 1 {
-                clear_handle_metadata(input);
                 match self.mode.load(Ordering::SeqCst) {
                     0 => futures::future::pending::<()>().await,
                     1 => anyhow::bail!("second output adapter failed"),
@@ -153,14 +214,14 @@ fn request<'a>(
 #[test]
 fn second_adapter_suspend_or_error_releases_every_fresh_allocation_without_publishing() {
     let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
     for mode in [0, 1] {
-        OWNER.mode.store(mode, Ordering::SeqCst);
-        OWNER.casts.store(0, Ordering::SeqCst);
-        OWNER.next.store(10, Ordering::SeqCst);
-        OWNER.freed.lock().unwrap().clear();
-        let input = OWNER.make(1, NumericElementType::F64);
-        let before = snapshot_handle_metadata(&input);
+        OWNER.reset(mode);
+        let TestAllocation {
+            handle: input,
+            probe,
+        } = OWNER.input(NumericElementType::F64);
+        let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
             value_id: 2,
@@ -183,26 +244,19 @@ fn second_adapter_suspend_or_error_releases_every_fresh_allocation_without_publi
             }
         }
         drop(future);
-        assert_eq!(snapshot_handle_metadata(&input), before);
-        let mut freed = OWNER.freed.lock().unwrap().clone();
-        freed.sort_unstable();
-        assert_eq!(freed, vec![10, 11, 12]);
-        for id in [10, 11, 12] {
-            assert!(!runmat_accelerate::fusion_residency::is_resident(
-                &OWNER.make(id, NumericElementType::F64)
-            ));
-        }
+        assert_eq!(facts(&input), before);
+        OWNER.assert_retirements(&[1, 1, 1]);
+        assert_eq!(probe.retirements(), 0);
+        drop(input);
+        assert_eq!(probe.retirements(), 1);
     }
 }
 
 #[test]
 fn duplicate_materialized_bindings_adopt_one_completed_result() {
     let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&OWNER));
-    OWNER.mode.store(2, Ordering::SeqCst);
-    OWNER.casts.store(0, Ordering::SeqCst);
-    OWNER.next.store(10, Ordering::SeqCst);
-    OWNER.freed.lock().unwrap().clear();
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
+    OWNER.reset(2);
     let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
     for index in [0, 1] {
         plan.materialized_stores.push(FusionStoreMaterialization {
@@ -213,40 +267,40 @@ fn duplicate_materialized_bindings_adopt_one_completed_result() {
             },
         });
     }
-    let result = futures::executor::block_on(execute_elementwise(request(
-        &plan,
-        OWNER.make(1, NumericElementType::F64),
-    )))
-    .unwrap();
+    let TestAllocation {
+        handle: input,
+        probe,
+    } = OWNER.input(NumericElementType::F64);
+    let result = futures::executor::block_on(execute_elementwise(request(&plan, input))).unwrap();
     let Value::GpuTensor(first) = &result.materialized_stores[0].1 else {
         panic!("resident output")
     };
     let Value::GpuTensor(second) = &result.materialized_stores[1].1 else {
         panic!("resident output")
     };
-    assert_eq!(first.buffer_id, second.buffer_id);
-    assert_eq!(first.descriptor.element_type, Some(NumericElementType::F32));
-    let mut freed = OWNER.freed.lock().unwrap().clone();
-    freed.sort_unstable();
-    assert_eq!(freed, vec![10, 11]);
-    let Value::GpuTensor(final_output) = result.final_value else {
-        panic!("resident output")
-    };
-    OWNER.free(first).unwrap();
-    OWNER.free(&final_output).unwrap();
+    assert!(first.shares_allocation_with(second));
+    assert_eq!(first.view_identity(), second.view_identity());
+    assert_eq!(first.physical().element_type(), NumericElementType::F32);
+    OWNER.assert_retirements(&[1, 1, 0, 0]);
+    let retained = first.clone();
+    drop(result);
+    OWNER.assert_retirements(&[1, 1, 1, 0]);
+    drop(retained);
+    OWNER.assert_retirements(&[1, 1, 1, 1]);
+    assert_eq!(probe.retirements(), 1);
 }
 
 #[test]
 fn only_typed_unsupported_multi_falls_back_to_single_dispatches() {
     let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
     for mode in [3, 4] {
-        OWNER.mode.store(mode, Ordering::SeqCst);
-        OWNER.casts.store(0, Ordering::SeqCst);
-        OWNER.next.store(10, Ordering::SeqCst);
-        OWNER.freed.lock().unwrap().clear();
-        let input = OWNER.make(1, NumericElementType::F64);
-        let before = snapshot_handle_metadata(&input);
+        OWNER.reset(mode);
+        let TestAllocation {
+            handle: input,
+            probe,
+        } = OWNER.input(NumericElementType::F64);
+        let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
             value_id: 2,
@@ -257,27 +311,29 @@ fn only_typed_unsupported_multi_falls_back_to_single_dispatches() {
         });
         let result =
             futures::executor::block_on(execute_elementwise(request(&plan, input.clone())));
-        assert_eq!(snapshot_handle_metadata(&input), before);
+        assert_eq!(facts(&input), before);
         if mode == 4 {
             assert!(result
                 .err()
                 .unwrap()
                 .to_string()
                 .contains("multi execution failed"));
-            assert_eq!(OWNER.next.load(Ordering::SeqCst), 10);
+            OWNER.assert_retirements(&[]);
             assert_eq!(OWNER.casts.load(Ordering::SeqCst), 0);
         } else {
             let result = result.unwrap();
-            assert_eq!(OWNER.next.load(Ordering::SeqCst), 14);
-            let Value::GpuTensor(final_output) = result.final_value else {
+            let Value::GpuTensor(_) = &result.final_value else {
                 panic!("resident")
             };
-            let Value::GpuTensor(stored) = &result.materialized_stores[0].1 else {
+            let Value::GpuTensor(_) = &result.materialized_stores[0].1 else {
                 panic!("resident")
             };
-            OWNER.free(&final_output).unwrap();
-            OWNER.free(stored).unwrap();
+            drop(result);
+            OWNER.assert_retirements(&[1, 1, 1, 1]);
         }
+        assert_eq!(probe.retirements(), 0);
+        drop(input);
+        assert_eq!(probe.retirements(), 1);
     }
 }
 
@@ -292,30 +348,27 @@ impl AccelProvider for DefaultMulti {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         unreachable!()
     }
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        unreachable!()
-    }
 }
 
 #[test]
 fn provider_default_multi_declares_unsupported_not_execution_failure() {
     let error = DefaultMulti
-        .fused_elementwise_multi("", &[], &[1, 2], 2, 2)
+        .fused_elementwise_multi("", &[], &[1, 2], 2, &[ProviderElementType::F64; 2])
         .unwrap_err();
     assert!(is_unsupported_provider_operation(&error));
 }
 
 #[test]
-fn malformed_fresh_annotations_are_rejected_and_borrowed_aliases_are_never_freed() {
+fn mismatched_fresh_producer_facts_are_rejected_and_borrowed_aliases_stay_live() {
     let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
     for mode in [5, 6, 7] {
-        OWNER.mode.store(mode, Ordering::SeqCst);
-        OWNER.casts.store(0, Ordering::SeqCst);
-        OWNER.next.store(10, Ordering::SeqCst);
-        OWNER.freed.lock().unwrap().clear();
-        let input = OWNER.make(1, NumericElementType::F64);
-        let before = snapshot_handle_metadata(&input);
+        OWNER.reset(mode);
+        let TestAllocation {
+            handle: input,
+            probe,
+        } = OWNER.input(NumericElementType::F64);
+        let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
             value_id: 2,
@@ -328,11 +381,12 @@ fn malformed_fresh_annotations_are_rejected_and_borrowed_aliases_are_never_freed
             futures::executor::block_on(execute_elementwise(request(&plan, input.clone())))
                 .is_err()
         );
-        assert_eq!(snapshot_handle_metadata(&input), before);
+        assert_eq!(facts(&input), before);
         assert_eq!(OWNER.casts.load(Ordering::SeqCst), 0);
-        let mut freed = OWNER.freed.lock().unwrap().clone();
-        freed.sort_unstable();
-        assert_eq!(freed, if mode == 7 { vec![10] } else { vec![10, 11] });
+        OWNER.assert_retirements(if mode == 7 { &[1] } else { &[1, 1] });
+        assert_eq!(probe.retirements(), 0);
+        drop(input);
+        assert_eq!(probe.retirements(), 1);
     }
 }
 
@@ -340,15 +394,15 @@ fn malformed_fresh_annotations_are_rejected_and_borrowed_aliases_are_never_freed
 fn materialized_input_is_owned_through_later_suspension_and_layout_failures_preserve_source() {
     use runmat_accelerate::fusion_exec::{execute_elementwise_placed, FusionExecutionOutcome};
     let _serial = SERIAL.lock().unwrap();
-    let _provider = ThreadProviderGuard::set(Some(&OWNER));
+    let _provider = ThreadProviderGuard::set(Some(&*OWNER));
     for mode in [0, 8, 9, 10] {
-        OWNER.mode.store(mode, Ordering::SeqCst);
-        OWNER.casts.store(0, Ordering::SeqCst);
-        OWNER.next.store(10, Ordering::SeqCst);
-        OWNER.freed.lock().unwrap().clear();
-        let input = OWNER.make(1, NumericElementType::F32);
-        record_handle_transpose(&input, 2, 1);
-        let before = snapshot_handle_metadata(&input);
+        OWNER.reset(mode);
+        let TestAllocation {
+            handle: input,
+            probe,
+        } = OWNER.input(NumericElementType::F32);
+        let input = transposed(input);
+        let before = facts(&input);
         let mut plan = plan(vec![cast("single", 0, 2), cast("single", 0, 3)], 3);
         plan.materialized_stores.push(FusionStoreMaterialization {
             value_id: 2,
@@ -371,17 +425,10 @@ fn materialized_input_is_owned_through_later_suspension_and_layout_failures_pres
             _ => panic!("unexpected completed provider result"),
         }
         drop(future);
-        assert_eq!(snapshot_handle_metadata(&input), before);
-        let mut freed = OWNER.freed.lock().unwrap().clone();
-        freed.sort_unstable();
-        assert_eq!(
-            freed,
-            if mode == 0 {
-                vec![10, 11, 12, 13, 14]
-            } else {
-                vec![]
-            }
-        );
-        clear_handle_metadata(&input);
+        assert_eq!(facts(&input), before);
+        OWNER.assert_retirements(if mode == 0 { &[1, 1, 1, 1, 1] } else { &[] });
+        assert_eq!(probe.retirements(), 0);
+        drop(input);
+        assert_eq!(probe.retirements(), 1);
     }
 }
