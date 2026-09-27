@@ -146,7 +146,7 @@ pub(super) async fn try_resident_denominator(
             valid_real_binary_output(
                 output,
                 denominator,
-                Some(&uploaded),
+                Some(uploaded),
                 provider,
                 &denominator.shape,
             )

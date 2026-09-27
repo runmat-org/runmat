@@ -137,7 +137,7 @@ pub(crate) fn plan_local(
         .unwrap_or_else(|| residency.required_upload_bytes(provider.device_id()));
     let context = runmat_accelerate_api::ProviderCostContext {
             preparation: request.preparation_program.and_then(|program| provider.preparation_snapshot(&query, program)),
-            observation: request.preparation_program.filter(|_| request.compare_profitability).and_then(|_| request.runtime)
+            observation: request.preparation_program.filter(|_| request.compare_profitability).and(request.runtime)
                 .and_then(|runtime| runtime.service_ports().placement())
                 .and_then(|_| match provider.operation_observation_capability(&query) {
                     runmat_accelerate_api::observation::ProviderObservationCapability::Supported(overhead) => Some(overhead),

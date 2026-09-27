@@ -83,8 +83,7 @@ fn run_mutation(completion: Completion, initially_logical: bool) {
         .freed
         .lock()
         .unwrap()
-        .iter()
-        .any(|&id| id == (borrowed.device_id, borrowed.buffer_id)));
+        .contains(&(borrowed.device_id, borrowed.buffer_id)));
     clear_handle_metadata(&borrowed);
 }
 

@@ -71,7 +71,7 @@ pub(super) async fn try_pol2cart_gpu(
             }))
         }
         Err(AttemptError::Unsupported) => Ok(None),
-        Err(AttemptError::Failure(error)) => Err(error),
+        Err(AttemptError::Failure(error)) => Err(*error),
     }
 }
 
@@ -100,7 +100,7 @@ fn same_float_class(
 
 enum AttemptError {
     Unsupported,
-    Failure(RuntimeError),
+    Failure(Box<RuntimeError>),
 }
 
 impl From<anyhow::Error> for AttemptError {
@@ -108,13 +108,13 @@ impl From<anyhow::Error> for AttemptError {
         if gpu_helpers::provider_hook_is_unsupported(&error) {
             Self::Unsupported
         } else {
-            Self::Failure(pol2cart_error(&ERROR_INTERNAL, error))
+            Self::Failure(Box::new(pol2cart_error(&ERROR_INTERNAL, error)))
         }
     }
 }
 impl From<RuntimeError> for AttemptError {
     fn from(error: RuntimeError) -> Self {
-        Self::Failure(error)
+        Self::Failure(Box::new(error))
     }
 }
 

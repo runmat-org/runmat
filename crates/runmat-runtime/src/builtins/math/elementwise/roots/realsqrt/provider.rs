@@ -19,23 +19,26 @@ pub(super) async fn evaluate(input: GpuTensorHandle) -> BuiltinResult<Value> {
             &REALSQRT_ERROR_DOMAIN,
             "gpuArray contains negative values",
         )),
-        Ok(GpuLowerBoundResult::AtOrAbove) => match {
-            let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&input);
-            provider.unary_sqrt(&input).await
-        } {
-            Ok(output) => super::super::super::unary_provider::validate_real_unary_output(
-                provider,
-                &input,
-                output,
-                BUILTIN_NAME,
-            ),
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
-                fallback(&input, provider).await
+        Ok(GpuLowerBoundResult::AtOrAbove) => {
+            let result = {
+                let _metadata = gpu_helpers::HandleMetadataRestoreGuard::new(&input);
+                provider.unary_sqrt(&input).await
+            };
+            match result {
+                Ok(output) => super::super::super::unary_provider::validate_real_unary_output(
+                    provider,
+                    &input,
+                    output,
+                    BUILTIN_NAME,
+                ),
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                    fallback(&input, provider).await
+                }
+                Err(error) => Err(errors::internal(format!(
+                    "provider unary_sqrt failed: {error}"
+                ))),
             }
-            Err(error) => Err(errors::internal(format!(
-                "provider unary_sqrt failed: {error}"
-            ))),
-        },
+        }
         Ok(GpuLowerBoundResult::Unknown) => fallback(&input, provider).await,
         Err(error) => Err(errors::internal(error)),
     }

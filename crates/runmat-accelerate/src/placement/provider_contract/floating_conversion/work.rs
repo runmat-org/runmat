@@ -27,9 +27,7 @@ pub(super) fn build(
     let input = query.inputs.first()?;
     let elements = input.checked_element_count()?;
     let workgroup = provider.elementwise_geometry()?.workgroup_size;
-    let capacity = u64::from(crate::backend::wgpu_geometry::elementwise_chunk_capacity(
-        workgroup,
-    )?);
+    let capacity = crate::backend::wgpu_geometry::elementwise_chunk_capacity(workgroup)?;
     let same = input.element_type == target;
     let dispatches = if same || elements == 0 {
         0

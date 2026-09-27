@@ -1,4 +1,5 @@
 use super::op_common::current_axes_target;
+use super::op_common::AxesTarget;
 use super::state::{set_view_for_axes, FigureError};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
@@ -36,12 +37,7 @@ fn map_view_figure_error(err: FigureError) -> RuntimeError {
     }
 }
 
-fn parse_view_target(
-    args: &[Value],
-) -> crate::BuiltinResult<(
-    Option<(crate::builtins::plotting::state::FigureHandle, usize)>,
-    &[Value],
-)> {
+fn parse_view_target(args: &[Value]) -> crate::BuiltinResult<(AxesTarget, &[Value])> {
     if let Some(first) = args.first() {
         if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(fig, axes)) =
             crate::builtins::plotting::properties::resolve_plot_handle(first, "view")

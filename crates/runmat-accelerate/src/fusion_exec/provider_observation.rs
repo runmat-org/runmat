@@ -20,7 +20,7 @@ impl FusionPlacementSelection {
     ) -> Self {
         // This boundary precedes selected-route staging, not just kernel enqueue.
         let started = Instant::now();
-        let receipt = feedback.as_ref().and_then(|_| query).and_then(|query| {
+        let receipt = feedback.as_ref().and(query).and_then(|query| {
             match provider.begin_operation_observation(query) {
                 ProviderObservationSupport::Observed(receipt) => Some(receipt),
                 ProviderObservationSupport::Unsupported => None,
