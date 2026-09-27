@@ -7,6 +7,10 @@ use runmat_accelerate_api::WgpuDeviceAccess;
 #[path = "util/tests.rs"]
 mod tests;
 
+#[cfg(all(test, target_arch = "wasm32"))]
+#[path = "util/browser_tests.rs"]
+mod browser_tests;
+
 /// The mapping belongs to the waiting future, not the callback. Cancellation
 /// unmaps through the same device authority after registration has returned.
 struct Mapping<'a> {
@@ -105,6 +109,11 @@ fn combine_cleanup<T>(result: Result<T, String>, cleanup: Result<(), String>) ->
     }
 }
 
+/// Read a scalar from a same-device, MAP_READ staging buffer.
+///
+/// The caller must supply the buffer's actual device authority; raw buffers do
+/// not authenticate that association. Do not poll or drop this future while an
+/// emission permit is active: progress and mapping cleanup need that authority.
 pub async fn readback_u32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> Result<u32, String> {
     readback_mapped(access, buffer, 4, |bytes| {
         Ok(u32::from_le_bytes(
@@ -116,10 +125,15 @@ pub async fn readback_u32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> R
     .await
 }
 
+/// Read one float under the same raw staging-buffer and future-lifetime
+/// requirements as [`readback_u32`].
 pub async fn readback_f32(access: &WgpuDeviceAccess, buffer: &wgpu::Buffer) -> Result<f32, String> {
     Ok(f32::from_bits(readback_u32(access, buffer).await?))
 }
 
+/// Read floats from a same-device MAP_READ staging buffer. The raw association
+/// is caller-established, not authenticated here. As with [`readback_u32`], do
+/// not poll or drop the future under an active emission permit.
 pub async fn readback_f32_buffer(
     access: &WgpuDeviceAccess,
     buffer: &wgpu::Buffer,
@@ -137,6 +151,9 @@ pub async fn readback_f32_buffer(
     .await
 }
 
+/// Copy and read bytes using the buffer's actual device authority. Exported
+/// buffers authenticate that authority; raw renderer buffers rely on the caller.
+/// Do not poll or drop this future under an active emission permit.
 pub async fn copy_readback_bytes(
     access: &WgpuDeviceAccess,
     buffer: &GpuInputBuffer,
@@ -177,6 +194,8 @@ async fn copy_readback_mapped<T>(
     readback_mapped(access, &staging, byte_len, decode).await
 }
 
+/// Copy and decode scalar data, with the same authority and future-lifetime
+/// requirements as [`copy_readback_bytes`].
 pub async fn readback_scalar_buffer_f64(
     access: &WgpuDeviceAccess,
     buffer: &GpuInputBuffer,

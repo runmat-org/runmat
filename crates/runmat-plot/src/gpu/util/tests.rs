@@ -63,7 +63,17 @@ fn readback_releases_access_and_mapping_for_reuse() {
     .block_on()
     .unwrap_err();
     assert_eq!(decode_error, "decoder rejected payload");
-    // A decoder error must still end the mapped view and unmap before returning.
+    #[cfg(panic = "unwind")]
+    {
+        // Exercise the actual async readback owner, not a standalone Mapping.
+        // The BufferView and read permit must unwind before its cleanup runs.
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            readback_mapped::<()>(&access, &buffer, 16, |_| panic!("decoder panic witness"))
+                .block_on()
+        }));
+        assert!(panic.is_err(), "decoder panic must remain observable");
+    }
+    // Decoder error/panic must end the mapped view and unmap before remapping.
     assert_eq!(
         readback_f32_buffer(&access, &buffer, expected.len())
             .block_on()
