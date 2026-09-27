@@ -35,6 +35,7 @@ use provider_observation::FusionPlacementSelection;
 mod admission;
 use admission::AdmittedBindings;
 mod outputs;
+mod explained_input;
 #[cfg(test)]
 mod ownership_tests;
 mod elementwise;
@@ -928,18 +929,20 @@ pub async fn execute_power_step_normalize_placed(
 
 /// Direct provider execution retaining the established value-returning API.
 /// Executors that can run shared bytecode use the placement-aware entrypoint.
-pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> Result<Value> {
+pub async fn execute_explained_variance(
+    request: FusionExecutionRequest<'_>,
+) -> runmat_accelerate_api::ProviderExecutionResult<Value> {
     match execute_explained_variance_placed(request).await? {
         FusionExecutionOutcome::Executed(value) => Ok(value),
         FusionExecutionOutcome::SharedRuntime(_) => {
-            Err(anyhow!("direct fusion request selected shared runtime"))
+            Err(anyhow!("direct fusion request selected shared runtime").into())
         }
     }
 }
 
 pub async fn execute_explained_variance_placed(
     request: FusionExecutionRequest<'_>,
-) -> Result<FusionExecutionOutcome<Value>> {
+) -> runmat_accelerate_api::ProviderExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -948,7 +951,7 @@ pub async fn execute_explained_variance_placed(
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ExplainedVariance {
-        return Err(anyhow!("unsupported fusion kind"));
+        return Err(anyhow!("unsupported fusion kind").into());
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
@@ -961,7 +964,7 @@ pub async fn execute_explained_variance_placed(
     let observer = selection.observer;
     let (q_vid, g_vid) = match request.plan.pattern.as_ref() {
         Some(FusionPattern::ExplainedVariance { q, g }) => (*q, *g),
-        _ => return Err(anyhow!("explained variance: missing pattern metadata")),
+        _ => return Err(anyhow!("explained variance: missing pattern metadata").into()),
     };
 
     let find_value = |vid: ValueId| -> Result<&Value> {
@@ -982,8 +985,26 @@ pub async fn execute_explained_variance_placed(
     let q_value = find_value(q_vid)?;
     let g_value = find_value(g_vid)?;
 
-    let q_handle = ensure_gpu_tensor(provider, q_value, observer)?;
-    let g_handle = ensure_gpu_tensor(provider, g_value, observer)?;
+    let mut protected: Vec<_> = request
+        .inputs
+        .iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
+    let started = Instant::now();
+    let q_handle = explained_input::prepare(provider, q_value, &protected)?;
+    if matches!(q_value, Value::Tensor(_)) {
+        observer.upload(started, Some(q_handle.physical().payload_bytes()));
+    }
+    protected.push(&q_handle);
+    let started = Instant::now();
+    let g_handle = explained_input::prepare(provider, g_value, &protected)?;
+    if matches!(g_value, Value::Tensor(_)) {
+        observer.upload(started, Some(g_handle.physical().payload_bytes()));
+    }
+    drop(protected);
 
     let debug_explained = std::env::var("RUNMAT_DEBUG_EXPLAINED").is_ok();
     if debug_explained {
@@ -1005,32 +1026,32 @@ pub async fn execute_explained_variance_placed(
 
     let q_shape = q_handle.shape().to_vec();
     if q_shape.len() != 2 {
-        return Err(anyhow!("explained variance: Q must be 2-D"));
+        return Err(anyhow!("explained variance: Q must be 2-D").into());
     }
     let q_rows = q_shape[0];
     let q_cols = q_shape[1];
     if q_rows == 0 || q_cols == 0 {
-        return Err(anyhow!("explained variance: zero-sized Q"));
+        return Err(anyhow!("explained variance: zero-sized Q").into());
     }
 
     let g_shape = g_handle.shape().to_vec();
     if g_shape.len() != 2 {
-        return Err(anyhow!("explained variance: G must be 2-D"));
+        return Err(anyhow!("explained variance: G must be 2-D").into());
     }
     if g_shape[0] != q_rows || g_shape[1] != q_rows {
-        return Err(anyhow!("explained variance: G shape mismatch"));
+        return Err(anyhow!("explained variance: G shape mismatch").into());
     }
 
     let q_transposed_view = provider.transpose(&q_handle)?;
     if q_transposed_view.shape() != [q_cols, q_rows] {
-        return Err(anyhow!("explained variance: invalid transpose shape"));
+        return Err(anyhow!("explained variance: invalid transpose shape").into());
     }
 
     observer.queue_unmeasured();
     let tmp = provider.matmul(&q_transposed_view, &g_handle).await?;
     observer.kernel_unmeasured();
     if tmp.shape() != [q_cols, q_rows] {
-        return Err(anyhow!("explained variance: invalid first product shape"));
+        return Err(anyhow!("explained variance: invalid first product shape").into());
     }
 
     if debug_explained {
@@ -1044,7 +1065,7 @@ pub async fn execute_explained_variance_placed(
     let product = provider.matmul(&tmp, &q_handle).await?;
     observer.kernel_unmeasured();
     if product.shape() != [q_cols, q_cols] {
-        return Err(anyhow!("explained variance: invalid second product shape"));
+        return Err(anyhow!("explained variance: invalid second product shape").into());
     }
 
     if debug_explained {
@@ -1058,7 +1079,7 @@ pub async fn execute_explained_variance_placed(
     let mut diag = match diag.shape() {
         [len] if *len == q_cols => provider.reshape(&diag, &[*len, 1])?,
         [len, 1] if *len == q_cols => diag,
-        _ => return Err(anyhow!("explained variance: invalid diagonal shape")),
+        _ => return Err(anyhow!("explained variance: invalid diagonal shape").into()),
     };
 
     if debug_explained {
@@ -1251,7 +1272,15 @@ mod tests {
                     require_local_future(execute_centered_gram(request));
                 }
                 1 => require_value_future(execute_power_step_normalize(request)),
-                2 => require_value_future(execute_explained_variance(request)),
+                2 => {
+                    fn require_local_future(
+                        _: impl std::future::Future<
+                            Output = runmat_accelerate_api::ProviderExecutionResult<Value>,
+                        >,
+                    ) {
+                    }
+                    require_local_future(execute_explained_variance(request));
+                }
                 3 => require_value_future(execute_image_normalize(request)),
                 _ => require_value_future(execute_matmul_epilogue(request)),
             }

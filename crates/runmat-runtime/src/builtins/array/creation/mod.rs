@@ -23,5 +23,6 @@ pub(crate) mod randi;
 pub(crate) mod randn;
 pub(crate) mod randperm;
 pub(crate) mod range;
+pub(crate) mod resident_constant;
 pub(crate) mod sparse;
 pub(crate) mod zeros;

@@ -543,7 +543,9 @@ pub async fn execute_fusion_special_kind(
                 }
                 Err(err) => {
                     log::debug!("explained variance fusion fallback: {}", err);
-                    Err(mex("FusionExecutionFailed", &err.to_string()))
+                    let mut error = mex("FusionExecutionFailed", &err.to_string());
+                    error.source = Some(Box::new(err));
+                    Err(error)
                 }
             }
         }
