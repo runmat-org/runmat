@@ -5462,10 +5462,22 @@ impl AccelProvider for InProcessProvider {
         &self,
         matrix: &GpuTensorHandle,
     ) -> Result<ProviderCovarianceToCorrelationResult> {
-        ensure!(
-            runmat_accelerate_api::handle_storage(matrix) != GpuTensorStorage::ComplexInterleaved,
-            "covariance_to_correlation: complex covariance matrices are not supported"
-        );
+        {
+            let guard = numeric_registry()
+                .lock_for(self.device_id)
+                .map_err(|_| anyhow!("covariance_to_correlation: allocation owner is poisoned"))?;
+            ensure!(
+                guard.get(matrix).is_some(),
+                "covariance_to_correlation: unknown buffer"
+            );
+            if matrix.physical().storage() != GpuTensorStorage::Real
+                || matrix.physical().element_type() != NumericElementType::F64
+            {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "covariance_to_correlation: kernel requires real F64 storage",
+                ));
+            }
+        }
         let (data, shape) = {
             let guard = registry(self.device_id)
                 .lock()

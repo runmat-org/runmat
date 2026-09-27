@@ -974,10 +974,11 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
     ) -> Result<ProviderCovarianceToCorrelationResult> {
         let entry = self.get_entry(matrix)?;
-        ensure!(
-            entry.storage != GpuTensorStorage::ComplexInterleaved,
-            "covariance_to_correlation: complex covariance matrices are not supported"
-        );
+        if entry.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "covariance_to_correlation: complex covariance matrices are not supported",
+            ));
+        }
         let shape = entry.shape.clone();
         let (rows, cols) = match shape.len() {
             0 => (1usize, 1usize),

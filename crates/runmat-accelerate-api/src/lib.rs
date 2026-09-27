@@ -2236,7 +2236,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _sigma: f64,
         _shape: &[usize],
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("random_normrnd not supported by provider"))
+        Err(unsupported_provider_operation(
+            "random_normrnd not supported by provider",
+        ))
     }
 
     /// Uniform random values on the interval `[a, b)`.
@@ -2353,8 +2355,8 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &self,
         _matrix: &GpuTensorHandle,
     ) -> anyhow::Result<ProviderCovarianceToCorrelationResult> {
-        Err(anyhow::anyhow!(
-            "covariance_to_correlation not supported by provider"
+        Err(unsupported_provider_operation(
+            "covariance_to_correlation not supported by provider",
         ))
     }
 
