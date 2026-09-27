@@ -7398,6 +7398,26 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            if a.descriptor.element_type == Some(NumericElementType::F32) {
+                anyhow::ensure!(
+                    a.descriptor.storage == Some(GpuTensorStorage::Real),
+                    "single requires real floating storage"
+                );
+                let mut numeric = numeric_registry()
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                let data = match numeric.get(&a.buffer_id) {
+                    Some(InProcessNumericData::F32(data)) => data.clone(),
+                    _ => anyhow::bail!("single input is missing authoritative F32 storage"),
+                };
+                let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+                numeric.insert(id, InProcessNumericData::F32(data));
+                return Ok(self.f32_handle_for_existing_buffer(
+                    id,
+                    a.shape.clone(),
+                    GpuTensorStorage::Real,
+                ));
+            }
             let guard = registry().lock().unwrap();
             let abuf = guard
                 .get(&a.buffer_id)

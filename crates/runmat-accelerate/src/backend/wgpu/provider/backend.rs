@@ -71,6 +71,8 @@ mod core;
 mod deep_learning;
 #[path = "ops/elementwise.rs"]
 mod elementwise;
+#[path = "ops/floating_cast.rs"]
+mod floating_cast;
 #[path = "ops/fft/mod.rs"]
 mod fft;
 #[path = "ops/finance.rs"]

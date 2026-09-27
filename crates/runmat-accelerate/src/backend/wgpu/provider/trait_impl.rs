@@ -919,16 +919,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { self.unary_double_exec(a) })
+        Box::pin(async move { self.floating_cast_exec(a, NumericPrecision::F64) })
     }
 
     fn unary_single<'a>(
         &'a self,
         a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(
-            async move { self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::Single, a) },
-        )
+        Box::pin(async move { self.floating_cast_exec(a, NumericPrecision::F32) })
     }
 
     fn unary_pow2<'a>(

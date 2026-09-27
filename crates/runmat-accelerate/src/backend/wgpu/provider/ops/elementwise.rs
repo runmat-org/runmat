@@ -222,16 +222,6 @@ impl WgpuProvider {
             != runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
     }
 
-    pub(crate) fn unary_double_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        if self.precision != NumericPrecision::F64 {
-            return Err(anyhow!(
-                "wgpu provider: shader-f64 unavailable; cannot materialise double precision"
-            ));
-        }
-        let entry = self.get_entry(a)?;
-        Ok(self.register_existing_buffer(entry.buffer, entry.shape, entry.len))
-    }
-
     pub(crate) fn complex_from_real_exec(&self, real: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(real)?;
         ensure!(
