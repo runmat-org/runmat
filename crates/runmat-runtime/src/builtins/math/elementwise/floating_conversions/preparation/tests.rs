@@ -148,3 +148,28 @@ fn deliberate_service_replacement_is_revalidated_by_conversion_body() {
         events.borrow_mut().clear();
     }
 }
+
+#[test]
+fn string_conversion_inference_matches_distinct_runtime_double_and_single_policies() {
+    let input = Value::from("1.25");
+    for (name, target) in [
+        ("double", runmat_types::NumericClass::Double),
+        ("single", runmat_types::NumericClass::Single),
+    ] {
+        let inferred =
+            runmat_types::infer_numeric_conversion(&crate::value_fact::value_fact(&input), target);
+        let actual = block_on(crate::dispatcher::call_builtin_async(
+            name,
+            std::slice::from_ref(&input),
+        ));
+        match actual {
+            Ok(value) => {
+                assert!(inferred.diagnostics.is_empty());
+                let actual = crate::value_fact::value_fact(&value);
+                assert_eq!(inferred.fact.kind, actual.kind);
+                assert_eq!(inferred.fact.storage, actual.storage);
+            }
+            Err(_) => assert!(!inferred.diagnostics.is_empty()),
+        }
+    }
+}
