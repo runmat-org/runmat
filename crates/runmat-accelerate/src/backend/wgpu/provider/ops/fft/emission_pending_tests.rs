@@ -145,13 +145,16 @@ async fn submit_while_receipt_is_outstanding() {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-#[ignore = "requires actual WGPU adapter; execute explicitly with --ignored"]
+#[ignore = "requires actual WGPU adapter; run this filter alone in a dedicated test process with --ignored"]
 fn native_submission_progresses_with_detached_receipt_outstanding() {
     let (finished, completion) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         futures::executor::block_on(submit_while_receipt_is_outstanding());
         finished.send(()).unwrap();
     });
+    // This watchdog detects failure; it cannot cancel a driver call or reclaim
+    // a blocked worker. Run only this filtered test in its dedicated process,
+    // so process termination supplies containment after a watchdog failure.
     completion
         .recv_timeout(std::time::Duration::from_secs(45))
         .expect("real-device witness must complete; a gate deadlock is a failure");
@@ -180,8 +183,13 @@ async fn browser_submission_progresses_with_scope_promise_pending() {
     )
     .await;
     clear_deadline(timer);
-    assert!(
-        matches!(result, Either::Left(_)),
-        "real browser submissions/readback must finish before deadline"
-    );
+    match result {
+        Either::Left(((), remaining_timeout)) => drop(remaining_timeout),
+        Either::Right((_, unfinished_witness)) => {
+            // A WASM panic may abort rather than unwind. Explicitly cancel the
+            // witness first so its pending receipt/readback owners are dropped.
+            drop(unfinished_witness);
+            panic!("real browser submissions/readback must finish before deadline");
+        }
+    }
 }
