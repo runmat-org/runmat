@@ -303,6 +303,12 @@ mod tests {
             assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
             query.inputs[0].shape = vec![1, 3];
             query.inputs[0].layout = ProviderLayout::ColumnMajorContiguous;
+            query.inputs[0].element_type = ProviderElementType::F32;
+            query.inputs[1].element_type = ProviderElementType::F32;
+            // A typed classification probe is not full standalone execution.
+            assert!(wgpu_work(ProviderPrecision::F64, &query).is_none());
+            query.inputs[0].element_type = ProviderElementType::F64;
+            query.inputs[1].element_type = ProviderElementType::F64;
             for input in &mut query.inputs {
                 input.shape = vec![0, 3];
             }

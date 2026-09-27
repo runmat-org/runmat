@@ -284,15 +284,43 @@ fn actual_f64_adapter_materializes_single_transpose_without_reinterpreting_bytes
 
 #[test]
 fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
-    use runmat_accelerate_api::{snapshot_handle_metadata, PowerResultDomain};
     let provider = register_wgpu_provider(WgpuProviderOptions::default())
         .expect("actual WGPU adapter required");
-    let source = provider
-        .upload(&HostTensorView {
-            data: &[4., -9., 16., 25., 36., 49.],
-            shape: &[2, 3],
-        })
-        .unwrap();
+    transposed_power(provider, false);
+}
+
+#[test]
+#[ignore = "requires an actual F64 WGPU adapter; run explicitly during F64 qualification"]
+fn actual_f64_adapter_classifies_typed_f32_views_without_widening_inputs() {
+    let provider = register_wgpu_provider(WgpuProviderOptions::default())
+        .expect("actual F64 WGPU adapter required");
+    assert_eq!(provider.precision(), ProviderPrecision::F64);
+    transposed_power(provider, true);
+}
+
+fn transposed_power(
+    provider: &'static runmat_accelerate::backend::wgpu::provider::WgpuProvider,
+    physical_single: bool,
+) {
+    use runmat_accelerate_api::{snapshot_handle_metadata, PowerResultDomain};
+    let upload = |data: &[f64], shape: &[usize]| {
+        if physical_single {
+            let data: Vec<f32> = data.iter().map(|value| *value as f32).collect();
+            runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F32(&data),
+                    shape,
+                    storage: GpuTensorStorage::Real,
+                },
+                &[],
+            )
+            .unwrap()
+        } else {
+            provider.upload(&HostTensorView { data, shape }).unwrap()
+        }
+    };
+    let source = upload(&[4., -9., 16., 25., 36., 49.], &[2, 3]);
     let base = provider.transpose(&source).unwrap();
     let before = snapshot_handle_metadata(&base);
     // Logical column-major values are [4,16,36,-9,25,49], not the original bytes.
@@ -316,17 +344,31 @@ fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
             vec![2., 4., 6., 81., 625., 2401.],
         ),
     ] {
-        let exponent = provider
-            .upload(&HostTensorView {
-                data: &exponents,
-                shape: &shape,
-            })
-            .unwrap();
+        let exponent = upload(&exponents, &shape);
         assert_eq!(
             block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
             domain
         );
         assert_eq!(snapshot_handle_metadata(&base), before);
+        if physical_single {
+            let error = block_on(provider.real_power_in_domain(&base, &exponent, domain))
+                .expect_err("classifier support does not widen standalone power execution");
+            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+                &error
+            ));
+            let native_exponent = provider
+                .upload(&HostTensorView {
+                    data: &exponents,
+                    shape: &shape,
+                })
+                .unwrap();
+            let error = block_on(provider.classify_real_power(&base, &native_exponent))
+                .expect_err("mixed operand precision is not an admitted pair");
+            assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+                &error
+            ));
+            provider.free(&native_exponent).unwrap();
+        }
         if domain == PowerResultDomain::Real {
             let mut plan = plan(
                 vec![FusionOp::Primitive {
@@ -352,6 +394,12 @@ fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
             let Value::GpuTensor(output) = result.final_value else {
                 panic!("resident exact power")
             };
+            if physical_single {
+                assert_eq!(
+                    output.descriptor.element_type,
+                    Some(NumericElementType::F32)
+                );
+            }
             let actual = block_on(provider.download(&output)).unwrap();
             assert_eq!(actual.shape, vec![3, 2]);
             assert_eq!(actual.data.len(), expected.len());
@@ -374,4 +422,27 @@ fn actual_adapter_power_classifies_exact_transposed_pairs_and_broadcasts() {
     provider.free(&source).unwrap();
     assert_eq!(snapshot_handle_metadata(&base), before);
     provider.free(&base).unwrap();
+    for (bases, exponents, domain) in [
+        (
+            vec![-1e-30, -0.0, f64::NAN],
+            vec![0.5, 3.0, 0.0],
+            PowerResultDomain::Complex,
+        ),
+        (
+            vec![-1.0, f64::NAN, 1.0],
+            vec![16_777_217.0, 0.0, f64::NAN],
+            PowerResultDomain::Real,
+        ),
+        (vec![], vec![], PowerResultDomain::Real),
+    ] {
+        let shape = [1, bases.len()];
+        let base = upload(&bases, &shape);
+        let exponent = upload(&exponents, &shape);
+        assert_eq!(
+            block_on(provider.classify_real_power(&base, &exponent)).unwrap(),
+            domain
+        );
+        provider.free(&base).unwrap();
+        provider.free(&exponent).unwrap();
+    }
 }

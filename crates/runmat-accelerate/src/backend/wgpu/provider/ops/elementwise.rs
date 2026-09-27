@@ -25,6 +25,13 @@ use crate::backend::wgpu::shaders::logical::{
 };
 use crate::backend::wgpu::types::NumericPrecision;
 
+/// Internal shader ABI: input words can differ from the native output words.
+/// The owning shader must declare both precisions explicitly.
+pub(super) struct FusedElementwiseRepresentation {
+    pub(super) input_precision: NumericPrecision,
+    pub(super) output_storage: GpuTensorStorage,
+}
+
 impl WgpuProvider {
     fn integer_comparison_exec(
         &self,
@@ -1633,6 +1640,27 @@ impl WgpuProvider {
         len: usize,
         output_storage: GpuTensorStorage,
     ) -> Result<GpuTensorHandle> {
+        self.fused_elementwise_typed_exec(
+            shader,
+            inputs,
+            output_shape,
+            len,
+            FusedElementwiseRepresentation {
+                input_precision: self.precision,
+                output_storage,
+            },
+        )
+    }
+
+    pub(super) fn fused_elementwise_typed_exec(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        representation: FusedElementwiseRepresentation,
+    ) -> Result<GpuTensorHandle> {
+        let output_storage = representation.output_storage;
         if inputs.is_empty() {
             return Err(anyhow!("fused_elementwise: no inputs"));
         }
@@ -1649,7 +1677,27 @@ impl WgpuProvider {
         )?;
         let entries = inputs
             .iter()
-            .map(|h| self.get_entry(h))
+            .map(|handle| {
+                if representation.input_precision == self.precision {
+                    return self.get_entry(handle);
+                }
+                ensure!(
+                    representation.input_precision == NumericPrecision::F32
+                        && self.precision == NumericPrecision::F64,
+                    "fused input precision cannot be represented exactly"
+                );
+                let entry = self.get_entry_raw(handle)?;
+                ensure!(
+                    entry.element_type == runmat_accelerate_api::NumericElementType::F32
+                        && entry.precision == NumericPrecision::F32
+                        && entry.storage == GpuTensorStorage::Real
+                        && handle.descriptor.element_type == Some(entry.element_type)
+                        && handle.descriptor.storage == Some(GpuTensorStorage::Real)
+                        && !runmat_accelerate_api::handle_is_logical(handle),
+                    "fused typed input does not match its shader ABI"
+                );
+                Ok(entry)
+            })
             .collect::<Result<Vec<_>>>()?;
         let broadcast_mode = shader.contains("out_shape") || shader.contains("a_shape");
         let layouts = if broadcast_mode {

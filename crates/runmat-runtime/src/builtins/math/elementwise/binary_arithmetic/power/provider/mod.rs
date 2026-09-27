@@ -1,6 +1,7 @@
 //! Provider-resident dispatch for element-wise power.
 
 mod conversion;
+pub(super) mod admission;
 mod pair;
 mod resident;
 

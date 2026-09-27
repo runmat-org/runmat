@@ -12,7 +12,7 @@ pub(super) const SEMANTICS: FusionSemanticDeclaration = FusionSemanticDeclaratio
         builtin: POWER_CATALOG_ENTRY.identity,
         variant: "default",
     },
-    revision: 2,
+    revision: 3,
     admit: Some(admit),
     helpers: &[FusionMathHelper::RealPower],
 };
@@ -56,25 +56,10 @@ fn admit(context: FusionAdmissionContext<'_>) -> FusionAdmissionFuture<'_> {
             *context.work = FusionAdmissionWork::ProviderProbe {
                 binding: SEMANTICS.binding,
                 precision,
+                provider_precision: provider.precision(),
                 inputs: [left, right]
                     .into_iter()
-                    .map(|handle| {
-                        Ok::<_, anyhow::Error>(runmat_accelerate_api::ProviderRepresentation {
-                            element_type: precision.into(),
-                            storage: runmat_accelerate_api::ProviderStorage::DenseReal,
-                            layout: if runmat_accelerate_api::handle_is_transposed(handle) {
-                                runmat_accelerate_api::ProviderLayout::Strided
-                            } else {
-                                runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
-                            },
-                            shape: handle
-                                .shape
-                                .iter()
-                                .map(|extent| u64::try_from(*extent))
-                                .collect::<Result<Vec<_>, _>>()?,
-                            residency: runmat_accelerate_api::ProviderResidency::Device,
-                        })
-                    })
+                    .map(super::provider::admission::representation)
                     .collect::<Result<Vec<_>, _>>()?,
             };
             let left_metadata = gpu_helpers::HandleMetadataRestoreGuard::new(left);

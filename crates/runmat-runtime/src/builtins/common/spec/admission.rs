@@ -22,7 +22,9 @@ pub enum FusionAdmissionWork {
     },
     ProviderProbe {
         binding: BuiltinBindingIdentity,
+        /// Exact operand precision; not a promise about provider temporaries.
         precision: runmat_accelerate_api::ProviderPrecision,
+        provider_precision: runmat_accelerate_api::ProviderPrecision,
         inputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     },
 }

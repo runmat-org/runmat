@@ -14,7 +14,7 @@ fn nested_specification_module_joins_the_implementation_binding() {
 
 #[test]
 fn selected_binding_cannot_borrow_another_variants_expression() {
-    for (name, revision) in [("single", 1), ("double", 1), ("power", 2)] {
+    for (name, revision) in [("single", 1), ("double", 1), ("power", 3)] {
         let entry = builtin_catalog_entry_by_name(name).expect("canonical entry");
         let identity = entry.binding_identity(&entry.bindings[0]);
         let declaration = canonical_fusion_declaration(identity).expect("selected declaration");
@@ -28,4 +28,22 @@ fn selected_binding_cannot_borrow_another_variants_expression() {
         })
         .is_none());
     }
+}
+
+#[test]
+fn admission_work_identity_distinguishes_operand_and_provider_precision() {
+    use runmat_accelerate_api::ProviderPrecision;
+    use runmat_runtime::builtins::common::spec::FusionAdmissionWork;
+    let entry = builtin_catalog_entry_by_name("power").unwrap();
+    let work = |provider_precision| FusionAdmissionWork::ProviderProbe {
+        binding: entry.binding_identity(&entry.bindings[0]),
+        precision: ProviderPrecision::F32,
+        provider_precision,
+        inputs: Vec::new(),
+    };
+    assert_ne!(work(ProviderPrecision::F32), work(ProviderPrecision::F64));
+    assert_ne!(
+        serde_json::to_vec(&work(ProviderPrecision::F32)).unwrap(),
+        serde_json::to_vec(&work(ProviderPrecision::F64)).unwrap()
+    );
 }

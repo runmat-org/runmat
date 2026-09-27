@@ -1,6 +1,7 @@
 //! Resident paired power classification; only its scalar domain flag downloads.
 use super::backend_types::WgpuProvider;
-use crate::backend::wgpu::shaders::power::{shader, PowerShader};
+use crate::backend::wgpu::shaders::power::{classification_shader, shader, PowerShader};
+use crate::backend::wgpu::types::NumericPrecision;
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, PowerResultDomain};
 
@@ -19,17 +20,23 @@ impl WgpuProvider {
         &self,
         base: &GpuTensorHandle,
         exponent: &GpuTensorHandle,
+        input_precision: NumericPrecision,
     ) -> Result<(Vec<usize>, usize)> {
         for handle in [base, exponent] {
-            let entry = self.get_entry(handle)?;
+            let entry = self.get_entry_raw(handle)?;
             ensure!(
                 handle.descriptor.element_type == Some(entry.element_type)
                     && runmat_accelerate_api::handle_class_identity(handle)
                         .is_none_or(|class| class == entry.element_type.class_identity()),
                 "real power class metadata mismatch"
             );
+            if entry.integer_type().is_some() || entry.precision != input_precision {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "real power requires matching floating operand precision",
+                ));
+            }
             ensure!(
-                entry.integer_type().is_none() && !runmat_accelerate_api::handle_is_logical(handle),
+                !runmat_accelerate_api::handle_is_logical(handle),
                 "real power requires floating operands"
             );
             ensure!(
@@ -39,7 +46,7 @@ impl WgpuProvider {
             );
             ensure!(
                 runmat_accelerate_api::handle_precision(handle)
-                    == Some(match self.precision {
+                    == Some(match input_precision {
                         crate::backend::wgpu::types::NumericPrecision::F32 =>
                             runmat_accelerate_api::ProviderPrecision::F32,
                         crate::backend::wgpu::types::NumericPrecision::F64 =>
@@ -77,7 +84,11 @@ impl WgpuProvider {
             "power output exceeds GPU index limits"
         );
         for handle in [base, exponent] {
-            super::backend_shared::fusion_operand_layout(handle, &self.get_entry(handle)?, &shape)?;
+            super::backend_shared::fusion_operand_layout(
+                handle,
+                &self.get_entry_raw(handle)?,
+                &shape,
+            )?;
         }
         Ok((shape, len))
     }
@@ -87,17 +98,34 @@ impl WgpuProvider {
         base: &GpuTensorHandle,
         exponent: &GpuTensorHandle,
     ) -> Result<PowerResultDomain> {
-        let (shape, len) = self.admitted_power_shape(base, exponent)?;
+        let input_precision = self.get_entry_raw(base)?.precision;
+        if input_precision != self.precision
+            && !(input_precision == NumericPrecision::F32
+                && self.precision == NumericPrecision::F64)
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "power classification requires exact floating input conversion",
+            ));
+        }
+        let (shape, len) = self.admitted_power_shape(base, exponent, input_precision)?;
         if len == 0 {
             return Ok(PowerResultDomain::Real);
         }
+        // Input buffers remain borrowed, including F32 on an F64 provider.
+        // Exact widening occurs in registers. Flags and the existing scalar
+        // reductions retain native precision, so probe allocations/readback
+        // geometry is unchanged: no input staging or hidden layout dispatch.
         let flags = Temporary {
             provider: self,
-            handle: self.fused_elementwise_with_telemetry_exec(
-                &shader(self.precision, PowerShader::Classify),
+            handle: self.fused_elementwise_with_representation_telemetry_exec(
+                &classification_shader(input_precision, self.precision),
                 &[base.clone(), exponent.clone()],
                 &shape,
                 len,
+                super::elementwise::FusedElementwiseRepresentation {
+                    input_precision,
+                    output_storage: GpuTensorStorage::Real,
+                },
             )?,
         };
         // This buffer is owned here, so reshaping it cannot change an input's
@@ -125,7 +153,11 @@ impl WgpuProvider {
         exponent: &GpuTensorHandle,
         domain: PowerResultDomain,
     ) -> Result<GpuTensorHandle> {
-        let (shape, len) = self.admitted_power_shape(base, exponent)?;
+        // Execution still owns a native-precision output contract. Supporting
+        // a typed classification probe does not authorize a widened result.
+        self.get_entry(base)?;
+        self.get_entry(exponent)?;
+        let (shape, len) = self.admitted_power_shape(base, exponent, self.precision)?;
         let (width, storage) = match domain {
             PowerResultDomain::Real => (1, GpuTensorStorage::Real),
             PowerResultDomain::Complex => (2, GpuTensorStorage::ComplexInterleaved),

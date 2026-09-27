@@ -33,6 +33,11 @@ pub(super) async fn try_real_pair(
             .map_err(builtin_error)?;
     let source =
         gpu_helpers::select_resident_output_source([lhs.clone(), rhs.clone()], BUILTIN_NAME)?;
+    if !super::admission::may_execute(provider, lhs, rhs)
+        .map_err(|error| builtin_error(format!("power: {error}")))?
+    {
+        return Ok(None);
+    }
     let domain = {
         let _left = gpu_helpers::HandleMetadataRestoreGuard::new(lhs);
         let _right = gpu_helpers::HandleMetadataRestoreGuard::new(rhs);
