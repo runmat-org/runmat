@@ -873,7 +873,9 @@ impl WgpuProvider {
     pub(crate) fn transpose_exec(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_for_bitwise_move(a, "transpose")?;
         if entry.shape.len() != 2 {
-            return Err(anyhow!("transpose: only 2D tensors supported"));
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "transpose: only 2D tensors supported",
+            ));
         }
         let rows = entry.shape[0];
         let cols = entry.shape[1];
