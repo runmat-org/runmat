@@ -1795,15 +1795,22 @@ mod tests {
 
     #[test]
     fn writecell_explicit_gpu_input_is_gated_before_filesystem_access() {
-        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
                 vec![1, 1],
                 runmat_accelerate_api::NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
             )
-            .unwrap()
-            .handle;
-        let handle = handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+            .unwrap();
+        let original = allocation.handle.wire_descriptor();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let handle = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit immutable view");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let data = cell(vec![Value::GpuTensor(handle)], 1, 1);
 
@@ -1813,6 +1820,15 @@ mod tests {
             error.identifier(),
             WRITECELL_EXPLICIT_GPU_EXTENSION.error_identifier
         );
+        assert_eq!(allocation.handle.wire_descriptor(), original);
+        assert_eq!(
+            allocation.probe.retirements(),
+            0,
+            "caller alias survives nested preflight"
+        );
+        // The managed cell owns its own reference until GC; dropping the
+        // caller alias must not force-retire that still-owned allocation.
+        drop(allocation.handle);
     }
 
     #[test]

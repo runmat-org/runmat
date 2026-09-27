@@ -911,18 +911,29 @@ mod tests {
 
     #[test]
     fn importdata_rejects_resident_controls_before_provider_or_file_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 98,
-            buffer_id: 419_001,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation");
+        let original = allocation.handle.wire_descriptor();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(importdata_builtin(resident, Vec::new()))
             .expect_err("resident filename must reject");
         assert_eq!(
             error.identifier(),
             Some("RunMat:importdata:InvalidArgument")
         );
+        assert_eq!(allocation.handle.wire_descriptor(), original);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

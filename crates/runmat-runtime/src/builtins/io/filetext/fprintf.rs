@@ -1085,25 +1085,33 @@ pub(crate) mod tests {
 
     #[test]
     fn fprintf_resident_integer_format_is_gated_before_gathering() {
-        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
-            .allocate_zeroed(
-                vec![1, 2],
-                runmat_accelerate_api::NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            )
-            .unwrap()
-            .handle
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::U16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-        let args = [Value::Num(1.0), Value::GpuTensor(handle.clone())];
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::U16(vec![
+                    b'%' as u16,
+                    b'd' as u16,
+                ]),
+                shape: vec![1, 2],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+            .expect("native uint16 format allocation");
+        let original = allocation.handle.wire_descriptor();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let args = [Value::Num(1.0), Value::GpuTensor(allocation.handle.clone())];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = preflight_special_roles(&args).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:FprintfResidentFormatExtension")
         );
+        drop(args);
+        assert_eq!(allocation.handle.wire_descriptor(), original);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]

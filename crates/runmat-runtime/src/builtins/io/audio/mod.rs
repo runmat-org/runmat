@@ -2108,18 +2108,29 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn audioread_rejects_resident_inputs_before_provider_access() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 0,
-            buffer_id: 9_359_001,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered allocation");
+        let original = allocation.handle.wire_descriptor();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(audioread_builtin(Value::from("unused.wav"), vec![resident]))
             .expect_err("resident sample range must reject");
         assert_eq!(error.identifier(), Some("RunMat:audioread:InvalidArgument"));
         assert!(error
             .message()
             .contains("gpuArray inputs are not supported"));
+        assert_eq!(allocation.handle.wire_descriptor(), original);
+        assert_eq!(allocation.probe.retirements(), 0);
+        drop(allocation.handle);
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
