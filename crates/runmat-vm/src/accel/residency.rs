@@ -16,14 +16,6 @@ pub fn clear_value(_value: &Value) -> Result<(), String> {
 }
 
 #[cfg(feature = "native-accel")]
-pub fn clear_value_excluding(current: &Value, incoming: &Value) -> Result<(), String> {
-    runmat_accelerate::ensure_residency_hooks();
-    let mut keep_handles = HashSet::new();
-    collect_gpu_handle_identities(incoming, &mut keep_handles)?;
-    clear_handles_in_value_excluding(current, &keep_handles)
-}
-
-#[cfg(feature = "native-accel")]
 pub fn clear_value_excluding_values(current: &Value, live: &[Value]) -> Result<(), String> {
     runmat_accelerate::ensure_residency_hooks();
     let mut keep_handles = HashSet::new();
@@ -290,7 +282,7 @@ fn collect_gpu_handle_identities_with_visited(
 
 #[cfg(all(test, feature = "native-accel"))]
 mod tests {
-    use super::{clear_value, clear_value_excluding, collect_gpu_handle_identities};
+    use super::{clear_value, clear_value_excluding_values, collect_gpu_handle_identities};
     use futures::executor::block_on;
     use once_cell::sync::Lazy;
     use runmat_accelerate::fusion_residency;
@@ -399,7 +391,8 @@ mod tests {
             Value::GpuTensor(old_only.clone()),
         ]);
         let incoming = Value::GpuTensor(shared.clone());
-        clear_value_excluding(&current, &incoming).expect("clear excluding shared handles");
+        clear_value_excluding_values(&current, std::slice::from_ref(&incoming))
+            .expect("clear excluding shared handles");
 
         assert!(
             fusion_residency::is_resident(&shared),
@@ -496,7 +489,7 @@ mod tests {
             valid: true,
         });
 
-        clear_value_excluding(&current, &incoming)
+        clear_value_excluding_values(&current, std::slice::from_ref(&incoming))
             .expect("clear excluding handle-object target handles");
 
         assert!(
