@@ -653,8 +653,17 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn better(current: f64, candidate: f64, op: u32) -> bool {
+    // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
+    if extrema_is_nan(current) { return false; }
+    if extrema_is_nan(candidate) { return true; }
     if op == 0u { return candidate < current; }
     return candidate > current;
+}
+
+fn extrema_is_nan(value: f64) -> bool {
+    let bits = bitcast<vec2<u32>>(value);
+    let magnitude = bits.y & 0x7fffffffu;
+    return magnitude > 0x7ff00000u || (magnitude == 0x7ff00000u && bits.x != 0u);
 }
 
 fn pos_inf_f64() -> f64 {
@@ -716,8 +725,15 @@ struct Params {
 @group(0) @binding(3) var<uniform> params: Params;
 
 fn better(current: f32, candidate: f32, op: u32) -> bool {
+    // Fixed Include-NaN: first NaN wins; strict ordering retains first ties.
+    if extrema_is_nan(current) { return false; }
+    if extrema_is_nan(candidate) { return true; }
     if op == 0u { return candidate < current; }
     return candidate > current;
+}
+
+fn extrema_is_nan(value: f32) -> bool {
+    return (bitcast<u32>(value) & 0x7fffffffu) > 0x7f800000u;
 }
 
 fn pos_inf_f32() -> f32 {

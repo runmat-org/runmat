@@ -1203,7 +1203,8 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => REDUCE_DIM_MINMAX_SHADER_F64,
                 NumericPrecision::F32 => REDUCE_DIM_MINMAX_SHADER_F32,
-            },
+            }
+            .replace("@WG@", &scalar_workgroup.to_string()),
         );
 
         let eye = create_pipeline(

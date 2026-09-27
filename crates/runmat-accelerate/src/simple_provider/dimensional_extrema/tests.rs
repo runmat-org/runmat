@@ -1,6 +1,83 @@
 use super::*;
 use futures::executor::block_on;
 
+#[test]
+fn native_include_contract_matches_actual_host_domains() {
+    runmat_gc::gc_test_context(|| {
+        let provider = InProcessProvider::new();
+        for single in [true, false] {
+            for (shape, values) in [
+                (
+                    vec![3, 2],
+                    vec![f64::INFINITY, f64::NAN, 2.0, -0.0, 0.0, -0.0],
+                ),
+                (vec![2, 2], vec![f64::NAN; 4]),
+                (vec![0, 3], vec![]),
+                (vec![3, 0], vec![]),
+            ] {
+                let data = if single {
+                    InProcessNumericData::F32(values.iter().map(|&x| x as f32).collect())
+                } else {
+                    InProcessNumericData::F64(values.clone())
+                };
+                let host_data = if single {
+                    runmat_value::NumericStorage::F32(values.iter().map(|&x| x as f32).collect())
+                } else {
+                    runmat_value::NumericStorage::F64(values)
+                };
+                let host =
+                    runmat_value::Tensor::from_numeric_storage(host_data, shape.clone()).unwrap();
+                let input = provider
+                    .allocate_numeric_data(data, shape, GpuTensorStorage::Real)
+                    .unwrap();
+                for (name, minimum) in [("min", true), ("max", false)] {
+                    for dim in [0, 1] {
+                        let host_result =
+                            block_on(runmat_runtime::call_builtin_async_with_outputs(
+                                name,
+                                &[
+                                    Value::Tensor(host.clone()),
+                                    Value::Tensor(
+                                        runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap(),
+                                    ),
+                                    Value::Num((dim + 1) as f64),
+                                    Value::from("includenan"),
+                                ],
+                                2,
+                            ))
+                            .unwrap();
+                        let Value::OutputList(expected) = host_result else {
+                            panic!("two host outputs required")
+                        };
+                        let actual = result(&provider, &input, dim, minimum).unwrap();
+                        for (actual, expected) in
+                            [&actual.values, &actual.indices].into_iter().zip(expected)
+                        {
+                            let expected = match expected {
+                                Value::Tensor(t) => t,
+                                Value::Num(x) => {
+                                    runmat_value::Tensor::new(vec![x], vec![1, 1]).unwrap()
+                                }
+                                _ => panic!("real host extrema expected"),
+                            };
+                            assert_eq!(actual.shape(), expected.shape);
+                            let downloaded = block_on(provider.download(actual)).unwrap();
+                            let values =
+                                runmat_runtime::builtins::common::tensor::tensor_values_f64_cow(
+                                    &expected,
+                                );
+                            assert_eq!(downloaded.data.len(), values.len());
+                            for (a, e) in downloaded.data.iter().zip(values.iter()) {
+                                assert!(a.to_bits() == e.to_bits() || a.is_nan() && e.is_nan());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 fn result(
     provider: &InProcessProvider,
     input: &GpuTensorHandle,

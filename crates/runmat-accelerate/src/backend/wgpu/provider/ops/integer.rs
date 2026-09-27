@@ -888,15 +888,13 @@ impl WgpuProvider {
         );
         let rows = entry.shape[0];
         let cols = entry.shape[1];
-        let (out_len, mut out_shape) = match dim {
+        let (out_len, out_shape) = match dim {
             0 => (cols, vec![1, cols]),
             1 => (rows, vec![rows, 1]),
             _ => return Err(anyhow!("{operation_name}: only dims 0 or 1 are supported")),
         };
         if rows == 0 || cols == 0 {
-            if dim == 0 && rows == 0 {
-                out_shape[0] = 0;
-            }
+            let out_shape = entry.shape.clone();
             // Keep empty extrema device-resident rather than routing through
             // the f64 host gather fallback, which cannot reconstruct wide
             // integers.
@@ -930,7 +928,7 @@ impl WgpuProvider {
             crate::backend::wgpu::types::NumericPrecision::F64 => "f64",
             crate::backend::wgpu::types::NumericPrecision::F32 => "f32",
         };
-        let workgroup_size = crate::backend::wgpu::config::effective_workgroup_size();
+        let workgroup_size = self.workgroup_config.scalar;
         let shader =
             crate::backend::wgpu::shaders::integer::extrema_dim_shader(scalar_type, workgroup_size);
         let layout = self
@@ -1759,7 +1757,7 @@ mod tests {
         let min = block_on(provider.reduce_min_dim(&input, 0)).expect("public empty min hook");
         let max = block_on(provider.reduce_max_dim(&input, 1)).expect("public empty max hook");
 
-        for (result, expected_shape) in [(&min, vec![0, 2]), (&max, vec![0, 1])] {
+        for (result, expected_shape) in [(&min, vec![0, 2]), (&max, vec![0, 2])] {
             assert_eq!(result.values.shape(), expected_shape);
             assert_eq!(result.indices.shape(), expected_shape);
             assert_eq!(

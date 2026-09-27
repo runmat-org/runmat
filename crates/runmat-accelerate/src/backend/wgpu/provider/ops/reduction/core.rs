@@ -535,7 +535,27 @@ impl WgpuProvider {
         dim: usize,
         op: crate::backend::wgpu::types::DimReduceExtrema,
     ) -> Result<ReduceDimResult> {
-        if self.get_entry_raw(a)?.integer_type().is_some() {
+        let original = self.get_entry_raw(a)?;
+        if original.storage != GpuTensorStorage::Real || a.view().is_logical() {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "dimensional extrema requires a real numeric input",
+            ));
+        }
+        let geometry = super::extrema_geometry::geometry(
+            &original.shape,
+            dim,
+            self.precision,
+            self.workgroup_config.scalar,
+            self.adapter_limits.max_compute_workgroups_per_dimension,
+        )?;
+        if original.integer_type().is_none() {
+            self.get_entry(a)?; // Authenticate physical precision before materialization.
+        }
+        // The shader consumes contiguous logical order; preserve the owning
+        // adapter until all submissions referencing its physical buffer exist.
+        let contiguous = self.reshape_exec(a, a.shape())?;
+        let a = &contiguous;
+        if original.integer_type().is_some() {
             return self.integer_reduce_extrema_dim_exec(
                 matches!(op, crate::backend::wgpu::types::DimReduceExtrema::Min),
                 dim,
@@ -547,22 +567,11 @@ impl WgpuProvider {
             );
         }
         let entry = self.get_entry(a)?;
-        if entry.shape.len() != 2 {
-            return Err(anyhow!("reduce: only 2D tensors supported"));
-        }
-        let rows = entry.shape[0];
-        let cols = entry.shape[1];
-        let reduce_dim = match dim {
-            0 => 1,
-            1 => 2,
-            _ => return Err(anyhow!("reduce_dim: only dims 0 or 1 supported")),
-        };
-        let out_len = if reduce_dim == 1 { cols } else { rows };
-        let out_shape = if reduce_dim == 1 {
-            vec![1, cols]
-        } else {
-            vec![rows, 1]
-        };
+        let rows = geometry.rows;
+        let cols = geometry.cols;
+        let reduce_dim = dim + 1;
+        let out_len = geometry.length;
+        let out_shape = geometry.shape;
         let mut values_buffer =
             self.create_storage_buffer_checked(out_len, "runmat-reduce-dim-ext-values")?;
         let mut indices_buffer =
@@ -615,8 +624,8 @@ impl WgpuProvider {
             });
         }
         let params = crate::backend::wgpu::params::ReduceDimParams {
-            rows: rows as u32,
-            cols: cols as u32,
+            rows,
+            cols,
             dim: reduce_dim as u32,
             op: op as u32,
         };
@@ -645,16 +654,12 @@ impl WgpuProvider {
                     },
                 ],
             });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            out_len as u32,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
         crate::backend::wgpu::dispatch::reduction::run_single_pass(
             self.device_ref(),
             self.queue_ref(),
             &self.pipelines.reduce_dim_minmax.pipeline,
             &bind_group,
-            groups,
+            geometry.groups,
         );
         let values_handle =
             self.register_existing_buffer(values_buffer, out_shape.clone(), out_len)?;
