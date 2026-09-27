@@ -53,7 +53,7 @@ impl RuntimeAccelerationService for Service {
         assert_eq!(request.admission().binding.variant, "default");
         assert_eq!(
             request.form().operation,
-            runmat_builtins::BuiltinPreparationOperation::Binary
+            runmat_builtins::BuiltinPreparationOperation::ElementwiseBinary
         );
         assert_eq!(request.form().data_arguments, &[0, 1]);
         assert_eq!(request.admission().input_count, 2);

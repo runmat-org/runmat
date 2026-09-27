@@ -169,7 +169,7 @@ pub const ATAN2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             binding_variant: "default",
             signatures: &[0],
             data_arguments: &[0, 1],
-            operation: crate::BuiltinPreparationOperation::Binary,
+            operation: crate::BuiltinPreparationOperation::ElementwiseBinary,
             provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
         }]),
         portability: BuiltinPortability::NativeAndWasm,
