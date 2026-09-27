@@ -3,13 +3,13 @@ mod input;
 mod output;
 mod query;
 mod record;
-pub(crate) mod specification;
 
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 #[runtime_builtin(
     name = "dir",
+    binding_variant = "default",
     category = "io/repl_fs",
     summary = "Return file and folder metadata.",
     keywords = "dir,list files,folder contents,metadata,wildcard,struct array",
