@@ -1368,6 +1368,11 @@ mod tests {
             assert_eq!(probe.retirements(), 0);
         }
         drop((explicit_input, automatic_output, explicit_output));
+        // with_provenance publishes an owned view; the original input view
+        // remains live until its own reference is dropped.
+        assert_eq!(input.probe.retirements(), 0);
+        input.handle.allocation_lease().validate_live().unwrap();
+        drop(input.handle);
         for probe in [&input.probe, &automatic.probe, &explicit.probe] {
             assert_eq!(probe.retirements(), 1);
         }

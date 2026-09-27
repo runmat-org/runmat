@@ -78,6 +78,32 @@ mod tests {
     };
 
     #[test]
+    fn remainder_requires_helpers_but_has_an_admitted_typed_expression() {
+        let expressions = HashMap::from([(0, "left".to_owned()), (1, "right".to_owned())]);
+        for (name, modulo) in [("mod", true), ("rem", false)] {
+            let entry = runmat_builtins::builtin_catalog_entry_by_name(name).unwrap();
+            let [binding] = entry.bindings else {
+                panic!("expected a single canonical remainder binding");
+            };
+            let declaration =
+                canonical_fusion_declaration(entry.binding_identity(binding)).unwrap();
+            let helper =
+                runmat_runtime::builtins::common::spec::FusionMathHelper::FloatingRemainder;
+            assert!(declaration.semantics.unwrap().helpers.contains(&helper));
+            for precision in [ScalarType::F32, ScalarType::F64] {
+                assert!(canonical_expression(entry, &[0, 1], &expressions, precision).is_none());
+                assert_eq!(
+                    admitted_expression(declaration, &[0, 1], &expressions, precision),
+                    Some(format!(
+                        "{}(left, right, {modulo})",
+                        helper.entrypoint(precision).unwrap()
+                    ))
+                );
+            }
+        }
+    }
+
+    #[test]
     fn canonical_single_rounds_even_inside_a_double_kernel() {
         let entry = runmat_builtins::builtin_catalog_entry_by_name("single").unwrap();
         let expressions = HashMap::from([(0, "source".to_owned())]);

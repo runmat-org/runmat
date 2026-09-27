@@ -4002,14 +4002,12 @@ mod tests {
         assert_eq!(fix.unwrap(), "select(trunc(v0), 0.0, trunc(v0) == 0.0)");
 
         let modulo = super::builtin_expr("mod", &[0, 1], &exprs, "f32");
-        let modulo = modulo.unwrap();
-        assert!(modulo.contains("floor"));
-        assert!(modulo.contains("select"));
+        // Remainder declarations require shared numerical helpers. This
+        // legacy emitter cannot publish them; typed shader emission owns that.
+        assert!(modulo.is_none());
 
         let rem = super::builtin_expr("rem", &[0, 1], &exprs, "f32");
-        let rem = rem.unwrap();
-        assert!(rem.contains("trunc"));
-        assert!(rem.contains("v0 / v1"));
+        assert!(rem.is_none());
 
         let pow2 = super::builtin_expr("pow2", &[0], &exprs, "f32");
         assert_eq!(pow2.unwrap(), "exp(v0 * 0.69314718055994529)");
