@@ -296,7 +296,7 @@ fn ensure_square_matrix_shape(shape: &[usize]) -> StructureKernelResult<usize> {
     let (rows, cols) = super::bandwidth::ensure_matrix_shape(shape)?;
     if rows != cols {
         return Err(StructureKernelError::detail(
-            NAME,
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "input matrix must be square",
         ));
@@ -319,14 +319,14 @@ where
 
     let expected = rows.checked_mul(cols).ok_or_else(|| {
         StructureKernelError::detail(
-            NAME,
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if data.len() < expected {
         return Err(StructureKernelError::detail(
-            NAME,
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
@@ -369,14 +369,14 @@ fn build_adjacency_from_integer_storage(
     }
     let expected = rows.checked_mul(rows).ok_or_else(|| {
         StructureKernelError::detail(
-            NAME,
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INTERNAL,
             "matrix dimensions overflow when computing adjacency",
         )
     })?;
     if storage.len() < expected {
         return Err(StructureKernelError::detail(
-            NAME,
+            BUILTIN_NAME,
             &SYMRCM_ERROR_INVALID_INPUT,
             "data does not match matrix dimensions",
         ));
