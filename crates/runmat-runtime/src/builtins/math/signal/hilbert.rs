@@ -325,12 +325,14 @@ async fn hilbert_gpu_tensor(
     handle: GpuTensorHandle,
     length: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let provider = runmat_accelerate_api::provider_for_handle(&handle).ok_or_else(|| {
+    let provider = super::resident_output::owner(
+        &handle,
         hilbert_terminal_error(
             &HILBERT_ERROR_INTERNAL,
             "GPU provider unavailable for input",
-        )
-    })?;
+        ),
+    )?;
+    let _residency = runmat_accelerate_api::ResidencyRestoreGuard::new(&handle);
     let complex_input =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
     let integer_input = runmat_accelerate_api::handle_integer_type(&handle).is_some();
@@ -347,8 +349,6 @@ async fn hilbert_gpu_tensor(
     let current_len = shape.get(dim_index).copied().unwrap_or(1);
     let target_len = length.unwrap_or(current_len);
     if target_len != 0 && !complex_input && !integer_input && !logical_input {
-        let input_metadata = hilbert_input_metadata(&handle);
-        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
         match provider
             .signal_hilbert(&ProviderHilbertRequest {
                 input: &handle,
@@ -357,29 +357,26 @@ async fn hilbert_gpu_tensor(
             })
             .await
         {
-            Ok(out)
-                if valid_hilbert_gpu_output(
-                    &out,
+            Ok(out) => {
+                let out = super::resident_output::admit(
+                    out,
                     &handle,
                     provider,
-                    &logical_shape_for_hilbert(&shape, dim_index, target_len),
-                    runmat_accelerate_api::handle_precision(&handle)
-                        .unwrap_or_else(|| provider.precision()),
-                ) =>
-            {
-                return gpu_helpers::complex_gpu_value(out);
-            }
-            Ok(out) => {
-                if hilbert_gpu_handles_alias(&out, &handle) {
-                    restore_hilbert_input_metadata(&handle, input_metadata);
-                }
-                return Err(gpu_helpers::reject_gpu_output(
-                    out,
+                    &gpu_helpers::BinaryGpuOutputContract {
+                        shape: logical_shape_for_hilbert(&shape, dim_index, target_len),
+                        storage: GpuTensorStorage::ComplexInterleaved,
+                        precision: runmat_accelerate_api::handle_precision(&handle),
+                        integer: None,
+                        logical: false,
+                        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                    },
+                    &[],
                     hilbert_terminal_error(
                         &HILBERT_ERROR_INTERNAL,
                         "provider signal_hilbert returned malformed output",
                     ),
-                ));
+                )?;
+                return gpu_helpers::complex_gpu_value(out);
             }
             Err(err) => {
                 if !err.is_unsupported() {
@@ -405,9 +402,7 @@ async fn hilbert_gpu_tensor(
         BUILTIN_NAME,
     )?;
     let host = match gathered {
-        Value::ComplexTensor(tensor) => {
-            hilbert_tensor(real_part_tensor_with_precision(tensor, &handle)?, length)?
-        }
+        Value::ComplexTensor(tensor) => hilbert_tensor(real_part_tensor(tensor)?, length)?,
         Value::Complex(re, _) => hilbert_tensor(
             Tensor::new(vec![re], shape.clone())
                 .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, &source))?,
@@ -420,7 +415,7 @@ async fn hilbert_gpu_tensor(
             hilbert_tensor(tensor, length)?
         }
     };
-    restore_hilbert_gpu_output(provider, &handle, host)
+    super::resident_output::restore(&handle, host, BUILTIN_NAME, &[])
 }
 
 fn ensure_hilbert_extensions(value: &Value, args: &[Value]) -> BuiltinResult<()> {
@@ -521,25 +516,6 @@ fn real_part_tensor(tensor: ComplexTensor) -> BuiltinResult<Tensor> {
         .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, &source))
 }
 
-fn real_part_tensor_with_precision(
-    tensor: ComplexTensor,
-    input: &GpuTensorHandle,
-) -> BuiltinResult<Tensor> {
-    if runmat_accelerate_api::handle_precision(input)
-        != Some(runmat_accelerate_api::ProviderPrecision::F32)
-    {
-        return real_part_tensor(tensor);
-    }
-    let shape = tensor.shape.clone();
-    let values = tensor
-        .materialize_f64()
-        .iter()
-        .map(|(real, _)| *real as f32)
-        .collect();
-    Tensor::from_f32(values, shape)
-        .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, &source))
-}
-
 fn logical_shape_for_hilbert(shape: &[usize], dim: usize, length: usize) -> Vec<usize> {
     let mut output = shape.to_vec();
     while output.len() <= dim {
@@ -549,100 +525,19 @@ fn logical_shape_for_hilbert(shape: &[usize], dim: usize, length: usize) -> Vec<
     output
 }
 
-fn restore_hilbert_gpu_output(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    input: &GpuTensorHandle,
-    value: Value,
-) -> BuiltinResult<Value> {
-    let tensor = match value {
-        Value::ComplexTensor(tensor) => tensor,
-        Value::Complex(real, imag) => ComplexTensor::new(vec![(real, imag)], vec![1, 1])
-            .map_err(|source| hilbert_error_with_detail(&HILBERT_ERROR_INTERNAL, &source))?,
-        other => {
-            return Err(hilbert_terminal_error(
-                &HILBERT_ERROR_INTERNAL,
-                format!("unexpected host fallback result {other:?}"),
-            ));
-        }
-    };
-    let expected_precision = match tensor.numeric_dtype() {
-        runmat_value::NumericDType::F32 => runmat_accelerate_api::ProviderPrecision::F32,
-        _ => runmat_accelerate_api::ProviderPrecision::F64,
-    };
-    if provider.precision() != expected_precision {
-        return Ok(Value::ComplexTensor(tensor));
-    }
-    let expected_shape = tensor.shape.clone();
-    let input_metadata = hilbert_input_metadata(input);
-    let output = gpu_helpers::upload_complex_tensor(provider, &tensor).map_err(|source| {
-        hilbert_terminal_error(
-            &HILBERT_ERROR_INTERNAL,
-            format!("failed to restore fallback result to input provider: {source}"),
-        )
-    })?;
-    if !valid_hilbert_gpu_output(
-        &output,
-        input,
-        provider,
-        &expected_shape,
-        expected_precision,
-    ) {
-        if hilbert_gpu_handles_alias(&output, input) {
-            restore_hilbert_input_metadata(input, input_metadata);
-        }
-        return Err(gpu_helpers::reject_gpu_output(
-            output,
-            hilbert_terminal_error(
-                &HILBERT_ERROR_INTERNAL,
-                "provider upload returned malformed fallback output",
-            ),
-        ));
-    }
-    gpu_helpers::complex_gpu_value(output)
-}
-
-fn valid_hilbert_gpu_output(
-    output: &GpuTensorHandle,
-    input: &GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    expected_shape: &[usize],
-    expected_precision: runmat_accelerate_api::ProviderPrecision,
-) -> bool {
-    output.shape() == expected_shape
-        && output.device_id() == input.device_id()
-        && !hilbert_gpu_handles_alias(output, input)
-        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::ComplexInterleaved
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && runmat_accelerate_api::handle_precision(output) == Some(expected_precision)
-        && runmat_accelerate_api::provider_for_handle(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-}
-
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct HilbertGpuMetadata {
     descriptor: runmat_accelerate_api::GpuTensorDescriptor,
     logical: bool,
 }
 
+#[cfg(test)]
 fn hilbert_input_metadata(handle: &GpuTensorHandle) -> HilbertGpuMetadata {
     HilbertGpuMetadata {
         descriptor: handle.descriptor(),
         logical: runmat_accelerate_api::handle_is_logical(handle),
     }
-}
-
-fn restore_hilbert_input_metadata(handle: &GpuTensorHandle, metadata: HilbertGpuMetadata) {
-    debug_assert_eq!(handle.descriptor(), metadata.descriptor);
-    debug_assert_eq!(
-        runmat_accelerate_api::handle_is_logical(handle),
-        metadata.logical
-    );
-    runmat_accelerate_api::mark_residency(handle);
-}
-
-fn hilbert_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
-    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
 }
 
 fn parse_arguments(args: &[Value]) -> BuiltinResult<Option<usize>> {

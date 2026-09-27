@@ -339,6 +339,34 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         )?;
     }
     let options = parse_options(&rest)?;
+    if crate::output_count::current_output_count().is_some_and(|count| count > 2) {
+        return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
+    }
+    let source = if let Value::GpuTensor(handle) = &x {
+        super::resident_output::owner(handle, envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
+        Some(handle.clone())
+    } else {
+        None
+    };
+    let _source_residency = source
+        .as_ref()
+        .map(runmat_accelerate_api::ResidencyRestoreGuard::new);
+    let restore = |value| {
+        let Some(source) = source.as_ref() else {
+            return Ok(value);
+        };
+        let protected = rest
+            .iter()
+            .filter_map(|value| {
+                if let Value::GpuTensor(handle) = value {
+                    Some(handle)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        super::resident_output::restore(source, value, BUILTIN_NAME, &protected)
+    };
 
     if crate::output_context::requested_output_count() == Some(0)
         && crate::output_count::current_output_count().is_none()
@@ -356,9 +384,6 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             render_envelope_plot(&eval).await?;
             return Ok(Value::OutputList(Vec::new()));
         }
-        if out_count > 2 {
-            return Err(envelope_error(&ENVELOPE_ERROR_TOO_MANY_OUTPUTS));
-        }
         if let Value::GpuTensor(handle) = &x {
             if let Some(value) = try_gpu_envelope(handle, &options, Some(out_count)).await? {
                 return Ok(value);
@@ -367,9 +392,9 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         let input = value_to_signal_input(x).await?;
         let eval = evaluate(input, &options)?;
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.upper_value()?]));
+            return restore(Value::OutputList(vec![eval.upper_value()?]));
         }
-        return Ok(crate::output_count::output_list_with_padding(
+        return restore(crate::output_count::output_list_with_padding(
             out_count,
             vec![eval.upper_value()?, eval.lower_value()?],
         ));
@@ -382,7 +407,7 @@ async fn envelope_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     let input = value_to_signal_input(x).await?;
     let eval = evaluate(input, &options)?;
-    eval.upper_value()
+    restore(eval.upper_value()?)
 }
 
 async fn try_gpu_envelope(
@@ -397,9 +422,7 @@ async fn try_gpu_envelope(
     {
         return Ok(None);
     }
-    let Some(provider) = resolved_actual_envelope_owner(handle) else {
-        return Ok(None);
-    };
+    let provider = super::resident_output::owner(handle, envelope_error(&ENVELOPE_ERROR_INTERNAL))?;
     let Some(method) = provider_envelope_method(options) else {
         return Ok(None);
     };
@@ -426,52 +449,40 @@ async fn try_gpu_envelope(
             ))
         }
     };
-    if !valid_gpu_envelope_result(&result, handle, provider, &output_shape) {
-        drop(result);
-        let mut error = envelope_error_with_detail(
+    let contract = gpu_helpers::BinaryGpuOutputContract {
+        shape: output_shape,
+        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+        precision: runmat_accelerate_api::handle_precision(handle),
+        integer: None,
+        logical: false,
+        alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+    };
+    let error = || {
+        envelope_error_with_detail(
             &ENVELOPE_ERROR_INTERNAL,
             "provider envelope returned malformed output",
-        );
-        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        return Err(error);
-    }
-    Ok(Some(gpu_envelope_value(result, out_count)?))
-}
-
-fn resolved_actual_envelope_owner(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-) -> Option<&'static dyn runmat_accelerate_api::AccelProvider> {
-    runmat_accelerate_api::provider_for_handle(handle)
-        .filter(|owner| owner.device_id() == handle.device_id())
-}
-
-fn gpu_handles_alias(
-    lhs: &runmat_accelerate_api::GpuTensorHandle,
-    rhs: &runmat_accelerate_api::GpuTensorHandle,
-) -> bool {
-    lhs.shares_allocation_with(rhs)
-}
-
-fn valid_gpu_envelope_result(
-    result: &ProviderEnvelopeResult,
-    input: &runmat_accelerate_api::GpuTensorHandle,
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    output_shape: &[usize],
-) -> bool {
-    let valid = |output: &runmat_accelerate_api::GpuTensorHandle| {
-        output.shape() == output_shape
-            && output.device_id() == input.device_id()
-            && !gpu_handles_alias(output, input)
-            && runmat_accelerate_api::handle_storage(output)
-                == runmat_accelerate_api::GpuTensorStorage::Real
-            && runmat_accelerate_api::handle_precision(output)
-                == runmat_accelerate_api::handle_precision(input)
-            && runmat_accelerate_api::handle_integer_type(output).is_none()
-            && !runmat_accelerate_api::handle_is_logical(output)
-            && resolved_actual_envelope_owner(output)
-                .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        )
     };
-    valid(&result.upper) && valid(&result.lower) && !gpu_handles_alias(&result.upper, &result.lower)
+    let upper = super::resident_output::admit(
+        result.upper,
+        handle,
+        provider,
+        &contract,
+        &[&result.lower],
+        error(),
+    )?;
+    let lower = super::resident_output::admit(
+        result.lower,
+        handle,
+        provider,
+        &contract,
+        &[&upper],
+        error(),
+    )?;
+    Ok(Some(gpu_envelope_value(
+        ProviderEnvelopeResult { upper, lower },
+        out_count,
+    )?))
 }
 
 fn provider_envelope_method(options: &EnvelopeOptions) -> Option<ProviderEnvelopeMethod> {
@@ -554,7 +565,11 @@ async fn value_to_signal_input(value: Value) -> BuiltinResult<SignalInput> {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
                 .map_err(|err| {
-                    envelope_error_with_detail(&ENVELOPE_ERROR_INVALID_SIGNAL, err.message())
+                    let mut error =
+                        envelope_error_with_detail(&ENVELOPE_ERROR_INVALID_SIGNAL, err.message());
+                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    error.source = Some(Box::new(err));
+                    error
                 })?;
             tensor_to_signal_input(tensor)
         }
