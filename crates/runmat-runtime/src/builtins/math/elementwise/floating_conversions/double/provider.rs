@@ -8,6 +8,14 @@ use runmat_accelerate_api::{
 use runmat_builtins::DOUBLE_ERROR_INTERNAL;
 use runmat_value::Value;
 
+#[cfg(test)]
+use double_from_gpu as cast_from_gpu;
+#[cfg(test)]
+const CAST_PRECISION: ProviderPrecision = ProviderPrecision::F64;
+#[cfg(test)]
+#[path = "../cast_owner_tests.rs"]
+mod owner_tests;
+
 pub(super) async fn double_from_gpu(
     handle: GpuTensorHandle,
     borrowed: &[&GpuTensorHandle],
@@ -25,8 +33,7 @@ pub(super) async fn double_from_gpu(
             )
         })?;
 
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-    if handle.descriptor.storage.is_none() {
+    if handle.descriptor().storage.is_none() {
         return Err(double_error_with_detail(
             &runmat_builtins::DOUBLE_ERROR_INVALID_INPUT,
             "GPU input requires explicit storage",
@@ -41,22 +48,32 @@ pub(super) async fn double_from_gpu(
         && runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::Real;
     if direct_eligible {
         let direct = provider.unary_double(&handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        _metadata_guard.restore();
         match direct {
             Ok(mut output)
                 if valid_output(&output, &handle, provider)
-                    && !protected
-                        .iter()
-                        .any(|input| gpu_helpers::same_gpu_handle(&output, input)) =>
+                    && !borrowed.iter().any(|input| {
+                        !input.shares_allocation_with(&handle)
+                            && output.shares_allocation_with(input)
+                    }) =>
             {
-                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
-                return Ok(gpu_helpers::resident_gpu_value(output));
+                output = output.with_provenance(input_provenance).map_err(|error| {
+                    crate::build_runtime_error(format!(
+                        "double: cannot preserve input intent: {error}"
+                    ))
+                    .with_builtin("double")
+                    .with_source(error)
+                    .build()
+                })?;
+                return gpu_helpers::resident_gpu_value(output);
             }
             Ok(output) => {
-                gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-                return Err(double_error_with_detail(
-                    &DOUBLE_ERROR_INTERNAL,
-                    "provider unary_double returned malformed output",
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        "provider unary_double returned malformed output",
+                    ),
                 ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
@@ -71,9 +88,8 @@ pub(super) async fn double_from_gpu(
 
     let gathered_result =
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-    let gathered = gathered_result
-        .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error.message()))?;
+    _metadata_guard.restore();
+    let gathered = gathered_result.map_err(contextual_upload_error)?;
     let converted = double_from_gathered(gathered)?;
     if provider.precision() != ProviderPrecision::F64 {
         return Ok(converted);
@@ -82,7 +98,7 @@ pub(super) async fn double_from_gpu(
     let mut output = match &converted {
         Value::Tensor(tensor) => {
             gpu_helpers::upload_tensor_protecting(provider, tensor, &protected)
-                .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?
+                .map_err(contextual_upload_error)?
         }
         Value::ComplexTensor(tensor) => {
             gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &protected)?
@@ -95,17 +111,24 @@ pub(super) async fn double_from_gpu(
         }
     };
     if !valid_output(&output, &handle, provider) {
-        gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-        return Err(double_error_with_detail(
-            &DOUBLE_ERROR_INTERNAL,
-            "provider upload returned malformed double fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            double_error_with_detail(
+                &DOUBLE_ERROR_INTERNAL,
+                "provider upload returned malformed double fallback output",
+            ),
         ));
     }
-    runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+    output = output.with_provenance(input_provenance).map_err(|error| {
+        crate::build_runtime_error(format!("double: cannot preserve input intent: {error}"))
+            .with_builtin("double")
+            .with_source(error)
+            .build()
+    })?;
     if runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::ComplexInterleaved {
-        Ok(gpu_helpers::complex_gpu_value(output))
+        gpu_helpers::complex_gpu_value(output)
     } else {
-        Ok(gpu_helpers::resident_gpu_value(output))
+        gpu_helpers::resident_gpu_value(output)
     }
 }
 
@@ -129,7 +152,9 @@ pub(super) fn valid_double_gpu_output(
             precision: Some(ProviderPrecision::F64),
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            // Immutable same-type casts may return the exact input view. Uploads
+            // independently require a distinct physical allocation at their boundary.
+            alias: gpu_helpers::GpuOutputAliasPolicy::AllowInput,
         },
     )
 }
@@ -145,4 +170,10 @@ fn valid_output(
         provider,
         runmat_accelerate_api::handle_storage(input) == GpuTensorStorage::ComplexInterleaved,
     )
+}
+
+fn contextual_upload_error(error: runmat_async::RuntimeError) -> runmat_async::RuntimeError {
+    let mut contextual = double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error.message());
+    contextual.source = Some(Box::new(error));
+    contextual
 }

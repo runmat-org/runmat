@@ -8,6 +8,14 @@ use runmat_accelerate_api::{
 use runmat_builtins::SINGLE_ERROR_INTERNAL;
 use runmat_value::Value;
 
+#[cfg(test)]
+use single_from_gpu as cast_from_gpu;
+#[cfg(test)]
+const CAST_PRECISION: ProviderPrecision = ProviderPrecision::F32;
+#[cfg(test)]
+#[path = "../cast_owner_tests.rs"]
+mod owner_tests;
+
 pub(super) async fn single_from_gpu(
     handle: GpuTensorHandle,
     borrowed: &[&GpuTensorHandle],
@@ -25,8 +33,7 @@ pub(super) async fn single_from_gpu(
             )
         })?;
 
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
-    if handle.descriptor.storage.is_none() {
+    if handle.descriptor().storage.is_none() {
         return Err(single_error_with_detail(
             &runmat_builtins::SINGLE_ERROR_INVALID_INPUT,
             "GPU input requires explicit storage",
@@ -42,15 +49,24 @@ pub(super) async fn single_from_gpu(
         && runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::Real;
     if direct_eligible {
         let direct = provider.unary_single(&handle).await;
-        gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
+        _metadata_guard.restore();
         match direct {
             Ok(mut output)
                 if valid_output(&output, &handle, provider)
-                    && !protected
-                        .iter()
-                        .any(|input| gpu_helpers::same_gpu_handle(&output, input)) =>
+                    && !borrowed.iter().any(|input| {
+                        !input.shares_allocation_with(&handle)
+                            && output.shares_allocation_with(input)
+                    }) =>
             {
-                runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+                output = output.with_provenance(input_provenance).map_err(|error| {
+                    crate::build_runtime_error(format!(
+                        "single: cannot preserve input intent: {error}"
+                    ))
+                    .with_builtin("single")
+                    .with_source(error)
+                    .build()
+                })?;
+                let output = gpu_helpers::resident_gpu_value(output)?;
                 if let Some(recorder) =
                     runmat_accelerate_api::observation::current_provider_observation()
                 {
@@ -61,13 +77,15 @@ pub(super) async fn single_from_gpu(
                         ),
                     );
                 }
-                return Ok(gpu_helpers::resident_gpu_value(output));
+                return Ok(output);
             }
             Ok(output) => {
-                gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-                return Err(single_error_with_detail(
-                    &SINGLE_ERROR_INTERNAL,
-                    "provider unary_single returned malformed output",
+                return Err(gpu_helpers::reject_gpu_output(
+                    output,
+                    single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "provider unary_single returned malformed output",
+                    ),
                 ));
             }
             Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
@@ -87,14 +105,13 @@ pub(super) async fn single_from_gpu(
     }
     let gathered_result =
         gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-    let gathered = gathered_result
-        .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error.message()))?;
+    _metadata_guard.restore();
+    let gathered = gathered_result.map_err(contextual_upload_error)?;
     let converted = single_from_gathered(gathered)?;
     let upload = match &converted {
         Value::Tensor(tensor) => {
             gpu_helpers::upload_tensor_protecting(provider, tensor, &protected)
-                .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
+                .map_err(contextual_upload_error)
         }
         Value::ComplexTensor(tensor) => {
             gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &protected)
@@ -108,17 +125,24 @@ pub(super) async fn single_from_gpu(
     };
     let mut output = upload?;
     if !valid_output(&output, &handle, provider) {
-        gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
-        return Err(single_error_with_detail(
-            &SINGLE_ERROR_INTERNAL,
-            "provider upload returned malformed single fallback output",
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            single_error_with_detail(
+                &SINGLE_ERROR_INTERNAL,
+                "provider upload returned malformed single fallback output",
+            ),
         ));
     }
-    runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
+    output = output.with_provenance(input_provenance).map_err(|error| {
+        crate::build_runtime_error(format!("single: cannot preserve input intent: {error}"))
+            .with_builtin("single")
+            .with_source(error)
+            .build()
+    })?;
     if runmat_accelerate_api::handle_storage(&output) == GpuTensorStorage::ComplexInterleaved {
-        Ok(gpu_helpers::complex_gpu_value(output))
+        gpu_helpers::complex_gpu_value(output)
     } else {
-        Ok(gpu_helpers::resident_gpu_value(output))
+        gpu_helpers::resident_gpu_value(output)
     }
 }
 
@@ -137,7 +161,15 @@ fn valid_output(
             precision: Some(ProviderPrecision::F32),
             integer: None,
             logical: false,
-            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinct,
+            // Immutable same-type casts may return the exact input view. Uploads
+            // independently require a distinct physical allocation at their boundary.
+            alias: gpu_helpers::GpuOutputAliasPolicy::AllowInput,
         },
     )
+}
+
+fn contextual_upload_error(error: runmat_async::RuntimeError) -> runmat_async::RuntimeError {
+    let mut contextual = single_error_with_detail(&SINGLE_ERROR_INTERNAL, error.message());
+    contextual.source = Some(Box::new(error));
+    contextual
 }
