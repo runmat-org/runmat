@@ -661,7 +661,7 @@ pub(crate) mod tests {
                 assert!(!at_end);
             }
 
-            provider.free(&handle).expect("free");
+            handle.release().expect("free");
         });
 
         run_fclose(&[Value::Num(fid)]).unwrap();

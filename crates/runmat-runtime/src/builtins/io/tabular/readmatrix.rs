@@ -1316,13 +1316,55 @@ fn tensor_to_gpu(
             "readmatrix: no acceleration provider owns the Like prototype",
         )
     })?;
-    let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
-    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
-    let expected_precision = if expected_integer.is_some() {
+    let expected_logical = prototype.view().is_logical();
+    let expected_integer = if expected_logical {
         None
     } else {
-        runmat_accelerate_api::handle_precision(prototype)
+        runmat_accelerate_api::handle_integer_type(prototype)
     };
+    let expected_precision = runmat_accelerate_api::handle_precision(prototype);
+    if expected_logical {
+        let bits = (0..tensor.len())
+            .map(|index| {
+                u8::from(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated tensor index")
+                        .materialize_f64()
+                        != 0.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let output = runmat_accelerate_api::upload_logical_protecting(
+            owner,
+            &runmat_accelerate_api::HostLogicalTensorView {
+                data: &bits,
+                shape: &tensor.shape,
+            },
+            &[prototype],
+        )
+        .map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!("readmatrix: logical Like upload failed: {error}"),
+                ),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+        return output
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .map(Value::GpuTensor)
+            .map_err(|error| {
+                crate::runtime_error::with_provider_execution_source(
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_OUTPUT_TYPE,
+                        "readmatrix: Like output publication failed",
+                    ),
+                    runmat_accelerate_api::ProviderExecutionError::from_source(error),
+                )
+            });
+    }
     let target_dtype = if let Some(integer) = expected_integer {
         integer_element_dtype(integer)
     } else {
@@ -1343,22 +1385,32 @@ fn tensor_to_gpu(
         tensor::coerce_tensor_dtype(tensor, target_dtype)
     };
     let expected_shape = tensor.shape.clone();
-    let mut uploaded = gpu_helpers::upload_tensor(owner, &tensor).map_err(|error| {
-        readmatrix_error_with(
-            &READMATRIX_ERROR_OUTPUT_TYPE,
-            format!("readmatrix: failed to restore Like output to its owning provider: {error}"),
-        )
-    })?;
-    if expected_logical {
-        runmat_accelerate_api::set_handle_logical(&uploaded, true);
-    }
-    runmat_accelerate_api::set_handle_provenance(
-        &mut uploaded,
-        runmat_accelerate_api::GpuHandleProvenance::Explicit,
-    );
-    let valid = uploaded.buffer_id != prototype.buffer_id
-        && uploaded.device_id == prototype.device_id
-        && uploaded.shape == expected_shape
+    let mut uploaded = gpu_helpers::upload_tensor_protecting(owner, &tensor, &[prototype])
+        .map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!(
+                        "readmatrix: failed to restore Like output to its owning provider: {error}"
+                    ),
+                ),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+    uploaded = uploaded
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    "readmatrix: Like output publication failed",
+                ),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+    let valid = !uploaded.shares_allocation_with(prototype)
+        && uploaded.device_id() == prototype.device_id()
+        && uploaded.shape() == expected_shape
         && gpu_helpers::exact_provider_for_handle(&uploaded)
             .is_some_and(|uploaded_owner| std::ptr::eq(uploaded_owner, owner))
         && runmat_accelerate_api::handle_storage(&uploaded) == GpuTensorStorage::Real
@@ -1366,11 +1418,10 @@ fn tensor_to_gpu(
         && runmat_accelerate_api::handle_precision(&uploaded) == expected_precision
         && runmat_accelerate_api::handle_is_logical(&uploaded) == expected_logical;
     if !valid {
-        let _ = owner.free(&uploaded);
-        return Err(readmatrix_error_with(
+        return Err(gpu_helpers::reject_gpu_output(uploaded, readmatrix_error_with(
             &READMATRIX_ERROR_OUTPUT_TYPE,
             "readmatrix: the Like provider returned an invalid class, shape, owner, or storage representation",
-        ));
+        )));
     }
     Ok(Value::GpuTensor(uploaded))
 }
@@ -2017,6 +2068,42 @@ pub(crate) mod tests {
     use std::fs;
 
     use crate::builtins::common::test_support;
+
+    #[test]
+    fn resident_like_logical_upload_is_owned_and_preserves_nd_empty_shapes() {
+        test_support::with_test_provider(|provider| {
+            let prototype = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            for (data, shape) in [
+                (vec![0.0, -2.0, 3.0, 0.0], vec![2, 1, 2]),
+                (vec![], vec![0, 3, 2]),
+            ] {
+                let expected = data
+                    .iter()
+                    .map(|value| if *value == 0.0 { 0.0 } else { 1.0 })
+                    .collect::<Vec<_>>();
+                let Value::GpuTensor(output) =
+                    tensor_to_gpu(Tensor::new(data, shape.clone()).unwrap(), &prototype).unwrap()
+                else {
+                    panic!("resident Like result");
+                };
+                assert!(output.view().is_logical());
+                assert!(!output.shares_allocation_with(&prototype));
+                assert_eq!(output.shape(), shape);
+                assert_eq!(
+                    futures::executor::block_on(provider.download(&output))
+                        .unwrap()
+                        .data,
+                    expected
+                );
+            }
+            assert!(futures::executor::block_on(provider.download(&prototype)).is_ok());
+        });
+    }
     use runmat_value::{CharArray, IntValue, LogicalArray, StringArray, Tensor};
 
     fn unique_path(prefix: &str) -> PathBuf {

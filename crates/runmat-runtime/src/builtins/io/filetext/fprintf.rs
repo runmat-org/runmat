@@ -503,7 +503,7 @@ fn is_format_value(value: &Value) -> bool {
         value,
         Value::String(_) | Value::CharArray(_) | Value::StringArray(_)
     ) || matches!(value, Value::Tensor(tensor) if tensor.len() >= 2)
-        || matches!(value, Value::GpuTensor(handle) if handle.shape.iter().product::<usize>() >= 2)
+        || matches!(value, Value::GpuTensor(handle) if handle.shape().iter().product::<usize>() >= 2)
 }
 
 fn preflight_fid(value: &Value) -> BuiltinResult<()> {
@@ -1085,16 +1085,18 @@ pub(crate) mod tests {
 
     #[test]
     fn fprintf_resident_integer_format_is_gated_before_gathering() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 2],
-            device_id: 904,
-            buffer_id: 904,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U16,
-            runmat_accelerate_api::GpuTensorStorage::Real,
-        );
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 2],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle
+            .with_numeric_descriptor(
+                runmat_accelerate_api::NumericElementType::U16,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            );
         let args = [Value::Num(1.0), Value::GpuTensor(handle.clone())];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = preflight_special_roles(&args).unwrap_err();

@@ -1648,7 +1648,7 @@ pub(crate) mod tests {
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             assert!(!path.exists());
-            provider.free(&handle).expect("free resident delimiter");
+            handle.release().expect("free resident delimiter");
         });
     }
 

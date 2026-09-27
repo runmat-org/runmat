@@ -611,7 +611,7 @@ impl FreadEval {
         &mut self,
         like_proto: Option<&Value>,
         precision: PrecisionSpec,
-    ) -> Result<(), String> {
+    ) -> BuiltinResult<()> {
         if let Some(proto) = like_proto {
             let adjusted = adjust_output_for_like(self.data.clone(), proto, precision)?;
             self.data = adjusted;
@@ -740,10 +740,7 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FreadE
     if encountered_eof {
         registry::mark_eof_encountered(fid);
     }
-    map_string_result(
-        eval.apply_like(like_arg, precision),
-        &FREAD_ERROR_INVALID_OPTION,
-    )?;
+    eval.apply_like(like_arg, precision)?;
     Ok(eval)
 }
 
@@ -751,7 +748,7 @@ fn validate_like_prototype(prototype: &Value) -> Result<(), String> {
     match prototype {
         Value::GpuTensor(handle) => {
             if runmat_accelerate_api::provider_for_handle(handle)
-                .is_none_or(|owner| owner.device_id() != handle.device_id)
+                .is_none_or(|owner| owner.device_id() != handle.device_id())
             {
                 return Err(
                     "fread: resident 'like' prototype has no registered owning provider"
@@ -767,12 +764,6 @@ fn validate_like_prototype(prototype: &Value) -> Result<(), String> {
             }
             let integer = runmat_accelerate_api::handle_integer_type(handle).is_some();
             let logical = runmat_accelerate_api::handle_is_logical(handle);
-            if integer && logical {
-                return Err(
-                    "fread: resident 'like' prototype has conflicting integer and logical metadata"
-                        .to_string(),
-                );
-            }
             if !integer && !logical && runmat_accelerate_api::handle_precision(handle).is_none() {
                 return Err(
                     "fread: resident 'like' prototype is missing precision metadata".to_string(),
@@ -1584,40 +1575,44 @@ fn adjust_output_for_like(
     data: Value,
     prototype: &Value,
     precision: PrecisionSpec,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     if let Value::GpuTensor(prototype) = prototype {
         return match data {
             Value::Tensor(tensor) => tensor_to_gpu_value(tensor, prototype),
-            Value::CharArray(_) => {
-                Err("fread: character output cannot be returned on the GPU via 'like'".to_string())
-            }
+            Value::CharArray(_) => Err(fread_error_with_detail(
+                &FREAD_ERROR_INVALID_OPTION,
+                "character output cannot be returned on the GPU via 'like'",
+            )),
             other => Ok(other),
         };
     }
 
-    match prototype {
-        Value::LogicalArray(_) | Value::Bool(_) => convert_to_logical_value(data),
-        Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            if !matches!(precision.output, OutputKind::Char) {
-                return Err(
-                    "fread: character prototypes require a character precision such as '*char'"
-                        .to_string(),
-                );
+    let result = (|| -> Result<Value, String> {
+        match prototype {
+            Value::LogicalArray(_) | Value::Bool(_) => convert_to_logical_value(data),
+            Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
+                if !matches!(precision.output, OutputKind::Char) {
+                    return Err(
+                        "fread: character prototypes require a character precision such as '*char'"
+                            .to_string(),
+                    );
+                }
+                ensure_char_result(data)
             }
-            ensure_char_result(data)
+            Value::Tensor(tensor) => tensor_to_numeric_like(data, tensor.numeric_dtype()),
+            Value::Int(value) => tensor_to_numeric_like(
+                data,
+                IntegerStorage::from_scalar(value.clone()).numeric_dtype(),
+            ),
+            Value::Num(_) => tensor_to_numeric_like(data, NumericDType::F64),
+            Value::ComplexTensor(_) | Value::Complex(_, _) => {
+                Err("fread: complex prototypes are not supported yet".to_string())
+            }
+            Value::Cell(_) => Err("fread: cell prototypes are not supported".to_string()),
+            _ => Ok(data),
         }
-        Value::Tensor(tensor) => tensor_to_numeric_like(data, tensor.numeric_dtype()),
-        Value::Int(value) => tensor_to_numeric_like(
-            data,
-            IntegerStorage::from_scalar(value.clone()).numeric_dtype(),
-        ),
-        Value::Num(_) => tensor_to_numeric_like(data, NumericDType::F64),
-        Value::ComplexTensor(_) | Value::Complex(_, _) => {
-            Err("fread: complex prototypes are not supported yet".to_string())
-        }
-        Value::Cell(_) => Err("fread: cell prototypes are not supported".to_string()),
-        _ => Ok(data),
-    }
+    })();
+    map_string_result(result, &FREAD_ERROR_INVALID_OPTION)
 }
 
 fn tensor_to_numeric_like(data: Value, dtype: NumericDType) -> Result<Value, String> {
@@ -1640,23 +1635,45 @@ fn ensure_char_result(data: Value) -> Result<Value, String> {
 fn tensor_to_gpu_value(
     tensor: Tensor,
     prototype: &runmat_accelerate_api::GpuTensorHandle,
-) -> Result<Value, String> {
+) -> BuiltinResult<Value> {
     use runmat_accelerate_api::{GpuTensorStorage, IntegerElementType, ProviderPrecision};
 
-    if runmat_accelerate_api::handle_storage(prototype) != GpuTensorStorage::Real {
-        return Err("fread: complex resident 'like' prototypes are not supported".to_string());
+    let fail = |message: &str| fread_error_with_detail(&FREAD_ERROR_INVALID_OPTION, message);
+    if prototype.physical().storage() != GpuTensorStorage::Real {
+        return Err(fail("complex resident 'like' prototypes are not supported"));
     }
-    let provider = runmat_accelerate_api::provider_for_handle(prototype).ok_or_else(|| {
-        "fread: resident 'like' prototype has no registered owning provider".to_string()
-    })?;
+    let provider = gpu_helpers::exact_provider_for_handle(prototype)
+        .ok_or_else(|| fail("resident 'like' prototype has no registered owning provider"))?;
+    if prototype.view().is_logical() {
+        let bits = (0..tensor.len())
+            .map(|index| {
+                u8::from(
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated tensor index")
+                        .materialize_f64()
+                        != 0.0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let output = runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &runmat_accelerate_api::HostLogicalTensorView {
+                data: &bits,
+                shape: &tensor.shape,
+            },
+            &[prototype],
+        )
+        .map_err(|error| {
+            crate::runtime_error::with_provider_execution_source(
+                fail("logical Like upload failed"),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        })?;
+        return Ok(Value::GpuTensor(output));
+    }
     let expected_integer = runmat_accelerate_api::handle_integer_type(prototype);
-    let expected_logical = runmat_accelerate_api::handle_is_logical(prototype);
-    if expected_integer.is_some() && expected_logical {
-        return Err(
-            "fread: resident 'like' prototype has conflicting integer and logical metadata"
-                .to_string(),
-        );
-    }
+    let expected_logical = false;
     let expected_precision = runmat_accelerate_api::handle_precision(prototype);
     let tensor = if let Some(integer) = expected_integer {
         let dtype = match integer {
@@ -1670,41 +1687,28 @@ fn tensor_to_gpu_value(
             IntegerElementType::U64 => NumericDType::U64,
         };
         tensor::coerce_tensor_dtype(tensor, dtype)
-    } else if expected_logical {
-        let values = (0..tensor.len())
-            .map(|index| {
-                if tensor
-                    .numeric_value_at(index)
-                    .expect("validated fread numeric tensor index")
-                    .materialize_f64()
-                    == 0.0
-                {
-                    0.0
-                } else {
-                    1.0
-                }
-            })
-            .collect();
-        Tensor::new(values, tensor.shape.clone()).map_err(|error| format!("fread: {error}"))?
     } else {
         let dtype = match expected_precision {
             Some(ProviderPrecision::F32) => NumericDType::F32,
             Some(ProviderPrecision::F64) => NumericDType::F64,
             None => {
-                return Err(
-                    "fread: resident 'like' prototype is missing precision metadata".to_string(),
-                )
+                return Err(fail(
+                    "resident 'like' prototype is missing precision metadata",
+                ))
             }
         };
         tensor::coerce_tensor_dtype(tensor, dtype)
     };
     let expected_shape = tensor.shape.clone();
-    let output = gpu_helpers::upload_tensor(provider, &tensor)
-        .map_err(|error| format!("fread: prototype owner upload failed: {error}"))?;
-    if expected_logical {
-        runmat_accelerate_api::set_handle_logical(&output, true);
-    }
-    validate_resident_like_output(
+    let output = gpu_helpers::upload_tensor_protecting(provider, &tensor, &[prototype]).map_err(
+        |error| {
+            crate::runtime_error::with_provider_execution_source(
+                fail("prototype owner upload failed"),
+                runmat_accelerate_api::ProviderExecutionError::from_source(error),
+            )
+        },
+    )?;
+    if let Err(message) = validate_resident_like_output(
         prototype,
         &output,
         &expected_shape,
@@ -1712,7 +1716,9 @@ fn tensor_to_gpu_value(
         expected_precision,
         expected_integer,
         expected_logical,
-    )?;
+    ) {
+        return Err(gpu_helpers::reject_gpu_output(output, fail(&message)));
+    }
     Ok(Value::GpuTensor(output))
 }
 
@@ -1725,10 +1731,10 @@ fn validate_resident_like_output(
     expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
     expected_logical: bool,
 ) -> Result<(), String> {
-    let aliases_prototype = output.buffer_id == prototype.buffer_id;
+    let aliases_prototype = output.shares_allocation_with(prototype);
     let valid = !aliases_prototype
-        && output.device_id == prototype.device_id
-        && output.shape == expected_shape
+        && output.device_id() == prototype.device_id()
+        && output.shape() == expected_shape
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output)
@@ -1738,12 +1744,6 @@ fn validate_resident_like_output(
         && runmat_accelerate_api::handle_is_logical(output) == expected_logical;
     if valid {
         return Ok(());
-    }
-    if !aliases_prototype {
-        let output_owner = runmat_accelerate_api::provider_for_handle(output)
-            .filter(|owner| owner.device_id() == output.device_id)
-            .unwrap_or(provider);
-        let _ = output_owner.free(output);
     }
     Err("fread: resident 'like' upload returned an invalid or aliased handle".to_string())
 }
@@ -2130,6 +2130,43 @@ fn column_to_row_major(data: &[char], rows: usize, cols: usize) -> Vec<char> {
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+
+    #[test]
+    fn resident_like_logical_upload_is_owned_and_preserves_nd_empty_shapes() {
+        test_support::with_test_provider(|provider| {
+            let prototype = provider
+                .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                    data: &[1],
+                    shape: &[1, 1],
+                })
+                .unwrap();
+            for (data, shape) in [
+                (vec![0.0, -2.0, 3.0, 0.0], vec![2, 1, 2]),
+                (vec![], vec![0, 3, 2]),
+            ] {
+                let expected = data
+                    .iter()
+                    .map(|value| if *value == 0.0 { 0.0 } else { 1.0 })
+                    .collect::<Vec<_>>();
+                let Value::GpuTensor(output) =
+                    tensor_to_gpu_value(Tensor::new(data, shape.clone()).unwrap(), &prototype)
+                        .unwrap()
+                else {
+                    panic!("resident Like result");
+                };
+                assert!(output.view().is_logical());
+                assert!(!output.shares_allocation_with(&prototype));
+                assert_eq!(output.shape(), shape);
+                assert_eq!(
+                    futures::executor::block_on(provider.download(&output))
+                        .unwrap()
+                        .data,
+                    expected
+                );
+            }
+            assert!(futures::executor::block_on(provider.download(&prototype)).is_ok());
+        });
+    }
     use crate::builtins::io::filetext::registry;
     use crate::builtins::io::filetext::{fclose, fopen};
     use crate::RuntimeError;
@@ -2138,13 +2175,11 @@ pub(crate) mod tests {
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::UNIX_EPOCH;
 
     struct FreadOwnerProvider {
         inner: runmat_accelerate::simple_provider::InProcessProvider,
         precision: runmat_accelerate_api::ProviderPrecision,
-        free_count: AtomicUsize,
     }
 
     impl FreadOwnerProvider {
@@ -2152,7 +2187,6 @@ pub(crate) mod tests {
             Self {
                 inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
                 precision,
-                free_count: AtomicUsize::new(0),
             }
         }
     }
@@ -2176,7 +2210,7 @@ pub(crate) mod tests {
             &self,
             host: &runmat_accelerate_api::HostNumericTensorView,
         ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            self.inner.upload_numeric(host)
+            self.inner.upload_numeric_raw(host)
         }
 
         fn download_numeric<'a>(
@@ -2198,11 +2232,6 @@ pub(crate) mod tests {
             handle: &'a runmat_accelerate_api::GpuTensorHandle,
         ) -> runmat_accelerate_api::AccelIntegerDownloadFuture<'a> {
             self.inner.download_integer(handle)
-        }
-
-        fn free(&self, handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-            self.free_count.fetch_add(1, Ordering::SeqCst);
-            self.inner.free(handle)
         }
 
         fn device_info(&self) -> String {
@@ -2318,8 +2347,8 @@ pub(crate) mod tests {
                 runmat_accelerate_api::handle_integer_type(&output),
                 Some(expected_type)
             );
-            assert_eq!(output.device_id, prototype.device_id);
-            assert_ne!(output.buffer_id, prototype.buffer_id);
+            assert_eq!(output.device_id(), prototype.device_id());
+            assert_ne!(output.buffer_id(), prototype.buffer_id());
         }
     }
 
@@ -2353,10 +2382,10 @@ pub(crate) mod tests {
         let Value::GpuTensor(output) = output else {
             panic!("expected resident output");
         };
-        assert_eq!(output.device_id, owner.device_id());
-        assert_ne!(output.device_id, ambient.device_id());
-        assert_ne!(output.buffer_id, prototype.buffer_id);
-        assert_eq!(output.shape, vec![2, 1]);
+        assert_eq!(output.device_id(), owner.device_id());
+        assert_ne!(output.device_id(), ambient.device_id());
+        assert_ne!(output.buffer_id(), prototype.buffer_id());
+        assert_eq!(output.shape(), vec![2, 1]);
         assert_eq!(
             runmat_accelerate_api::handle_precision(&output),
             Some(runmat_accelerate_api::ProviderPrecision::F32)
@@ -2366,25 +2395,25 @@ pub(crate) mod tests {
     #[test]
     fn fread_resident_like_rejects_and_cleans_malformed_outputs_without_freeing_prototype() {
         let _guard = test_support::accel_test_lock();
-        let owner: &'static FreadOwnerProvider = Box::leak(Box::new(FreadOwnerProvider::new(
+        let owner = Box::leak(Box::new(FreadOwnerProvider::new(
             runmat_accelerate_api::ProviderPrecision::F64,
         )));
-        unsafe { runmat_accelerate_api::register_provider(owner) };
+        let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(owner));
         let prototype = owner
             .upload(&HostTensorView {
                 data: &[0.0],
                 shape: &[1, 1],
             })
-            .expect("prototype upload");
-        let mut malformed = owner
-            .upload(&HostTensorView {
-                data: &[1.0],
+            .unwrap();
+        let malformed = owner
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F64(&[1.0, 2.0]),
                 shape: &[1, 1],
+                storage: runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
             })
-            .expect("malformed upload");
-        malformed.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        let error = validate_resident_like_output(
+            .unwrap();
+        let wire = malformed.wire_descriptor();
+        let message = validate_resident_like_output(
             &prototype,
             &malformed,
             &[1, 1],
@@ -2394,10 +2423,13 @@ pub(crate) mod tests {
             false,
         )
         .unwrap_err();
-        assert!(error.contains("invalid or aliased"));
-        assert_eq!(owner.free_count.load(Ordering::SeqCst), 1);
-
-        let alias_error = validate_resident_like_output(
+        assert!(message.contains("invalid or aliased"));
+        drop(gpu_helpers::reject_gpu_output(
+            malformed,
+            fread_error_with_detail(&FREAD_ERROR_INVALID_OPTION, &message),
+        ));
+        assert!(owner.inner.acquire_live(&wire).is_err());
+        let message = validate_resident_like_output(
             &prototype,
             &prototype,
             &[1, 1],
@@ -2407,8 +2439,14 @@ pub(crate) mod tests {
             false,
         )
         .unwrap_err();
-        assert!(alias_error.contains("invalid or aliased"));
-        assert_eq!(owner.free_count.load(Ordering::SeqCst), 1);
+        drop(gpu_helpers::reject_gpu_output(
+            prototype.clone(),
+            fread_error_with_detail(&FREAD_ERROR_INVALID_OPTION, &message),
+        ));
+        assert!(owner
+            .inner
+            .acquire_live(&prototype.wire_descriptor())
+            .is_ok());
     }
 
     #[cfg(feature = "wgpu")]
@@ -2459,12 +2497,16 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_classifies_resident_size_and_skip_before_gathering() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 901,
-            buffer_id: 901,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let precision = Value::from("uint8");
         let args = [&resident, &precision, &resident];
         let (size, _, skip, _, _) = classify_arguments(&args).expect("classified controls");
@@ -2480,12 +2522,16 @@ pub(crate) mod tests {
 
     #[test]
     fn fread_like_gate_precedes_resident_fid_gather_and_effects() {
-        let fid = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 902,
-            buffer_id: 902,
-            descriptor: Default::default(),
-        });
+        let fid = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let args = [Value::from("like"), Value::Num(0.0)];
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = run_evaluate(&fid, &args).unwrap_err();

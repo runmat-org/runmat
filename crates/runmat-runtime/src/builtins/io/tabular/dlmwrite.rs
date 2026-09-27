@@ -1921,7 +1921,7 @@ pub(crate) mod tests {
             );
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
             assert!(!path.exists());
-            provider.free(&handle).expect("free resident data");
+            handle.release().expect("free resident data");
         });
     }
 

@@ -702,7 +702,7 @@ fn is_numeric_like(value: &Value) -> bool {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => true,
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
-        Value::GpuTensor(handle) => handle.shape.iter().product::<usize>() == 1,
+        Value::GpuTensor(handle) => handle.shape().iter().product::<usize>() == 1,
         _ => false,
     }
 }
@@ -1358,12 +1358,16 @@ pub(crate) mod tests {
 
     #[test]
     fn fwrite_classifies_resident_skip_before_gathering() {
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 903,
-            buffer_id: 903,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let args = vec![Value::from("uint8"), resident];
         let (_, skip, _) = classify_arguments(&args).expect("classified controls");
         let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);

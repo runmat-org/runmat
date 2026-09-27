@@ -1067,12 +1067,16 @@ pub(crate) mod tests {
         assert!(!path.exists(), "output gate must precede file creation");
         drop(outputs);
 
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 396,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = csvwrite_builtin(filename.clone(), resident, Vec::new()).unwrap_err();
         assert_eq!(
             error.identifier(),

@@ -1495,12 +1495,16 @@ pub(crate) mod tests {
     #[test]
     fn csvread_resident_control_gate_precedes_provider_and_file_access() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 396,
-            descriptor: Default::default(),
-        });
+        let resident = Value::GpuTensor(
+            runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        );
         let error = csvread_builtin(Value::from("does-not-exist.csv"), vec![resident]).unwrap_err();
         assert_eq!(
             error.identifier(),

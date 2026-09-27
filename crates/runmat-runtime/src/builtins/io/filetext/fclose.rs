@@ -475,7 +475,7 @@ fn preflight_fclose_value(value: &Value) -> BuiltinResult<()> {
                 &FCLOSE_RESIDENT_ID_EXTENSION,
                 BUILTIN_NAME,
             )?;
-            if tensor::element_count(&handle.shape) != 1 {
+            if tensor::element_count(handle.shape()) != 1 {
                 crate::compatibility::ensure_builtin_extension_enabled(
                     &FCLOSE_VECTOR_ID_EXTENSION,
                     BUILTIN_NAME,
