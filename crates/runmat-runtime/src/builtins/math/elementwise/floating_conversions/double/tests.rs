@@ -1,7 +1,5 @@
 use super::provider::valid_double_gpu_output;
-use super::residency::{
-    free_rejected_double_handle, resolved_actual_double_owner, valid_double_like_output,
-};
+use super::residency::{resolved_actual_double_owner, valid_double_like_output};
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::test_support;
 use crate::BuiltinResult;

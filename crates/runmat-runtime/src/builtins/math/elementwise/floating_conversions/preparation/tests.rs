@@ -193,7 +193,7 @@ fn pending_provider_abandonment_aborts_the_shared_observation_once() {
     let events = Events::default();
     let _context = enter(&events, false);
     for name in ["double", "single"] {
-        with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+        with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
             let input = provider
                 .upload(&HostTensorView {
                     data: &[1.25],
@@ -208,7 +208,10 @@ fn pending_provider_abandonment_aborts_the_shared_observation_once() {
             drop(call);
             assert_eq!(&*events.borrow(), &["prepare", "begin", "abort"]);
             assert!(!runmat_accelerate_api::handle_is_logical(&input));
-            provider.free(&input).unwrap();
+            let physical = input.allocation_lease().downgrade();
+            drop(args);
+            input.release().expect("release caller");
+            assert!(physical.acquire().is_none());
         });
         events.borrow_mut().clear();
     }

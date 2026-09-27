@@ -1,8 +1,6 @@
 use super::double_error_with_detail;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::BuiltinResult;
-#[cfg(test)]
-use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
     DOUBLE_ERROR_GPU_UNSUPPORTED, DOUBLE_ERROR_INTERNAL, DOUBLE_ERROR_INVALID_INPUT,
@@ -163,27 +161,6 @@ pub(super) fn resolved_actual_double_owner(
 
 pub(super) fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
     lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
-}
-
-#[cfg(test)]
-pub(super) fn free_rejected_double_handle(
-    handle: &GpuTensorHandle,
-    protected: &[&GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|protected| gpu_handles_alias(handle, protected))
-    {
-        trace!("double: rejected handle aliases a caller-owned input; not freeing it");
-        return;
-    }
-    if let Some(owner) = resolved_actual_double_owner(handle) {
-        if let Err(error) = owner.free(handle) {
-            trace!("double: failed to free rejected handle through its owner ({error})");
-        }
-    } else {
-        trace!("double: rejected handle has no resolvable owner; leaving cleanup to its producer");
-    }
 }
 
 pub(super) async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {

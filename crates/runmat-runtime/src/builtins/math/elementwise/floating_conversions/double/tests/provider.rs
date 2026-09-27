@@ -86,126 +86,97 @@ fn double_like_gpu_prototype_keeps_residency() {
 }
 
 #[test]
-fn double_like_rejects_hostile_upload_metadata_and_frees_only_resolved_owner() {
+fn double_like_rejects_genuine_wrong_outputs_without_consuming_prototype() {
     test_support::with_test_provider(|provider| {
         let prototype = provider
             .upload(&HostTensorView {
                 data: &[0.0],
                 shape: &[1, 1],
             })
-            .expect("prototype upload");
-
-        let make_output = || {
-            provider
-                .upload(&HostTensorView {
-                    data: &[1.0, 2.0],
-                    shape: &[2, 1],
-                })
-                .expect("result upload")
-        };
-
-        let wrong_shape = {
-            let mut handle = make_output();
-            handle.shape = vec![1, 2];
-            handle
-        };
-        assert!(!valid_double_like_output(
-            &wrong_shape,
-            &prototype,
+            .unwrap();
+        let wrong_shape =
+            gpu_helpers::upload_tensor(provider, &Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap())
+                .unwrap();
+        let wrong_storage = gpu_helpers::upload_complex_tensor(
             provider,
-            &[2, 1],
-            false,
-        ));
-        provider
-            .free(&wrong_shape)
-            .expect("free wrong-shape result");
-
-        let mut wrong_storage = make_output();
-        wrong_storage.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        assert!(!valid_double_like_output(
-            &wrong_storage,
-            &prototype,
+            &ComplexTensor::new(vec![(1.0, 0.0), (2.0, 0.0)], vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        let wrong_precision = gpu_helpers::upload_tensor(
             provider,
-            &[2, 1],
-            false,
-        ));
-        provider
-            .free(&wrong_storage)
-            .expect("free wrong-storage result");
-
-        let mut wrong_precision = make_output();
-        wrong_precision.descriptor.element_type =
-            Some(runmat_accelerate_api::NumericElementType::F32);
-        assert!(!valid_double_like_output(
-            &wrong_precision,
-            &prototype,
+            &Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        let integer = gpu_helpers::upload_tensor(
             provider,
-            &[2, 1],
-            false,
-        ));
-        provider
-            .free(&wrong_precision)
-            .expect("free wrong-precision result");
-
-        let mut integer = make_output();
-        integer.descriptor.element_type = Some(runmat_accelerate_api::NumericElementType::U8);
-        assert!(!valid_double_like_output(
-            &integer,
-            &prototype,
-            provider,
-            &[2, 1],
-            false,
-        ));
-        provider.free(&integer).expect("free integer result");
-
-        let logical = make_output();
-        runmat_accelerate_api::set_handle_logical(&logical, true);
-        assert!(!valid_double_like_output(
-            &logical,
-            &prototype,
-            provider,
-            &[2, 1],
-            false,
-        ));
-        provider.free(&logical).expect("free logical result");
-
-        let mut owned_rejection = make_output();
-        owned_rejection.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        free_rejected_double_handle(&owned_rejection, &[]);
-        assert!(block_on(provider.download(&owned_rejection)).is_err());
-
+            &Tensor::new_integer(runmat_value::IntegerStorage::U8(vec![1, 2]), vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        let logical = provider
+            .upload_logical(&runmat_accelerate_api::HostLogicalTensorView {
+                data: &[1, 0],
+                shape: &[2, 1],
+            })
+            .unwrap();
+        for output in [
+            wrong_shape,
+            wrong_storage,
+            wrong_precision,
+            integer,
+            logical,
+        ] {
+            assert!(!valid_double_like_output(
+                &output,
+                &prototype,
+                provider,
+                &[2, 1],
+                false
+            ));
+            let physical = output.allocation_lease().downgrade();
+            output.release().expect("release owned rejected result");
+            assert!(physical.acquire().is_none());
+            prototype
+                .allocation_lease()
+                .validate_live()
+                .expect("prototype survives");
+        }
         assert!(!valid_double_like_output(
             &prototype,
             &prototype,
             provider,
             &[1, 1],
-            false,
+            false
         ));
-        assert!(!valid_double_gpu_output(
-            &prototype, &prototype, provider, false,
+        // A plain immutable same-type cast may adopt the input, unlike a
+        // newly uploaded result aliasing an unrelated like-prototype.
+        assert!(valid_double_gpu_output(
+            &prototype, &prototype, provider, false
         ));
-        free_rejected_double_handle(&prototype, &[&prototype]);
+        prototype.clone().release().expect("release owned alias");
         assert!(block_on(provider.download(&prototype)).is_ok());
 
-        let unowned_rejection = runmat_accelerate_api::GpuTensorHandle {
-            device_id: prototype.device_id.wrapping_add(10_000),
-            buffer_id: prototype.buffer_id,
-            shape: vec![2, 1],
-            descriptor: Default::default(),
-        };
+        let foreign_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let foreign = foreign_owner
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
         assert!(!valid_double_like_output(
-            &unowned_rejection,
+            &foreign.handle,
             &prototype,
             provider,
             &[2, 1],
-            false,
+            false
         ));
-        assert!(resolved_actual_double_owner(&unowned_rejection).is_none());
-        free_rejected_double_handle(&unowned_rejection, &[]);
+        assert!(resolved_actual_double_owner(&foreign.handle).is_none());
+        drop(foreign.handle);
+        assert_eq!(foreign.probe.retirements(), 1);
         assert!(block_on(provider.download(&prototype)).is_ok());
-        provider.free(&prototype).expect("free prototype");
+        let physical = prototype.allocation_lease().downgrade();
+        prototype.release().expect("release prototype");
+        assert!(physical.acquire().is_none());
     });
 }
 

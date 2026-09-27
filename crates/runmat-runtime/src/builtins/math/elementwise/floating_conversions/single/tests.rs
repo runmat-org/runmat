@@ -1,4 +1,4 @@
-use super::residency::{free_rejected_single_handle, valid_single_like_output};
+use super::residency::valid_single_like_output;
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::test_support;
 use crate::BuiltinResult;

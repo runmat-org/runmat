@@ -1,11 +1,15 @@
 use crate::builtins::common::test_support;
 use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelIntegerDownloadFuture, AccelNumericDownloadFuture, AccelProvider,
-    AccelProviderFuture, GpuTensorHandle, HostIntegerTensorView, HostNumericTensorView,
-    HostTensorView, ProviderPrecision, ThreadProviderGuard,
+    allocation::WeakAllocationLease, AccelDownloadFuture, AccelIntegerDownloadFuture,
+    AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle,
+    HostIntegerTensorView, HostNumericTensorView, HostTensorView, ProviderPrecision,
+    ThreadProviderGuard,
 };
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
 
 #[derive(Clone, Copy)]
 pub(super) enum HookBehavior {
@@ -13,16 +17,17 @@ pub(super) enum HookBehavior {
     Unsupported,
     Failure,
     Malformed,
-    PendingMetadataMutation,
+    PendingDirectHook,
     PendingTemplateDownload,
 }
 
 pub(super) struct ConversionHookProvider {
     inner: InProcessProvider,
     behavior: HookBehavior,
-    malformed_output: Mutex<Option<GpuTensorHandle>>,
-    created_output: Mutex<Option<GpuTensorHandle>>,
-    freed: Mutex<Vec<GpuTensorHandle>>,
+    malformed_output: Mutex<Option<WeakAllocationLease>>,
+    created_output: Mutex<Option<WeakAllocationLease>>,
+    hook_calls: AtomicUsize,
+    numeric_download_calls: AtomicUsize,
 }
 
 impl ConversionHookProvider {
@@ -32,7 +37,8 @@ impl ConversionHookProvider {
             behavior,
             malformed_output: Mutex::new(None),
             created_output: Mutex::new(None),
-            freed: Mutex::new(Vec::new()),
+            hook_calls: AtomicUsize::new(0),
+            numeric_download_calls: AtomicUsize::new(0),
         }
     }
 
@@ -42,16 +48,31 @@ impl ConversionHookProvider {
         single: bool,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            self.hook_calls.fetch_add(1, Ordering::SeqCst);
             match self.behavior {
                 HookBehavior::Success if single => self.inner.unary_single(input).await,
                 HookBehavior::Success => self.inner.unary_double(input).await,
                 HookBehavior::PendingTemplateDownload => {
-                    let output = if single {
-                        self.inner.unary_single(input).await?
+                    // A valid same-class hook may return an input alias. This
+                    // fixture deliberately produces a genuinely distinct
+                    // allocation so abandonment must retire an intermediate.
+                    let source = self.inner.download(input).await?;
+                    let data = if single {
+                        runmat_accelerate_api::HostNumericDataOwned::F32(
+                            source.data.iter().map(|x| *x as f32).collect(),
+                        )
                     } else {
-                        self.inner.unary_double(input).await?
+                        runmat_accelerate_api::HostNumericDataOwned::F64(source.data)
                     };
-                    *self.created_output.lock().unwrap() = Some(output.clone());
+                    let host = runmat_accelerate_api::HostNumericTensorOwned {
+                        data,
+                        shape: source.shape,
+                        storage: source.storage,
+                    };
+                    let output = self.inner.upload_numeric_raw(&host.as_view())?;
+                    assert!(!output.shares_allocation_with(input));
+                    *self.created_output.lock().unwrap() =
+                        Some(output.allocation_lease().downgrade());
                     Ok(output)
                 }
                 HookBehavior::Unsupported => {
@@ -60,28 +81,21 @@ impl ConversionHookProvider {
                     ))
                 }
                 HookBehavior::Failure => anyhow::bail!("injected conversion kernel failure"),
-                HookBehavior::PendingMetadataMutation => {
-                    runmat_accelerate_api::set_handle_logical(input, true);
-                    runmat_accelerate_api::set_handle_class_identity(
-                        input,
-                        runmat_types::standard::LOGICAL.owned(),
-                    );
-                    futures::future::pending().await
-                }
+                HookBehavior::PendingDirectHook => futures::future::pending().await,
                 HookBehavior::Malformed => {
                     let output = self.inner.upload(&HostTensorView {
                         data: &[1.0],
                         shape: &[1, 1],
                     })?;
                     *self.malformed_output.lock().expect("malformed output lock") =
-                        Some(output.clone());
+                        Some(output.allocation_lease().downgrade());
                     Ok(output)
                 }
             }
         })
     }
 
-    pub(super) fn take_malformed_output(&self) -> GpuTensorHandle {
+    pub(super) fn take_malformed_output(&self) -> WeakAllocationLease {
         self.malformed_output
             .lock()
             .expect("malformed output lock")
@@ -89,21 +103,16 @@ impl ConversionHookProvider {
             .expect("provider recorded malformed output")
     }
 
-    pub(super) fn created_output(&self) -> GpuTensorHandle {
-        self.created_output
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .clone()
+    pub(super) fn take_created_output(&self) -> WeakAllocationLease {
+        self.created_output.lock().unwrap().take().unwrap()
     }
 
-    pub(super) fn was_freed(&self, handle: &GpuTensorHandle) -> bool {
-        self.freed
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|freed| crate::builtins::common::gpu_helpers::same_gpu_handle(freed, handle))
+    pub(super) fn hook_calls(&self) -> usize {
+        self.hook_calls.load(Ordering::SeqCst)
+    }
+
+    pub(super) fn numeric_download_calls(&self) -> usize {
+        self.numeric_download_calls.load(Ordering::SeqCst)
     }
 }
 
@@ -125,13 +134,14 @@ impl AccelProvider for ConversionHookProvider {
     }
 
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
-        self.inner.upload_numeric(host)
+        self.inner.upload_numeric_raw(host)
     }
 
     fn download_numeric<'a>(
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
+        self.numeric_download_calls.fetch_add(1, Ordering::SeqCst);
         if matches!(self.behavior, HookBehavior::PendingTemplateDownload) {
             return Box::pin(futures::future::pending());
         }
@@ -153,11 +163,6 @@ impl AccelProvider for ConversionHookProvider {
         self.inner.download(handle)
     }
 
-    fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.freed.lock().unwrap().push(handle.clone());
-        self.inner.free(handle)
-    }
-
     fn unary_double<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -170,6 +175,25 @@ impl AccelProvider for ConversionHookProvider {
         input: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         self.invoke(input, true)
+    }
+}
+
+/// Release all caller-owned aliases together, then check the physical lease,
+/// not just a view identity. The observer never retains an allocation.
+pub(super) fn release_final_handles(handles: impl IntoIterator<Item = GpuTensorHandle>) {
+    let handles: Vec<_> = handles.into_iter().collect();
+    let physical: Vec<_> = handles
+        .iter()
+        .map(|handle| handle.allocation_lease().downgrade())
+        .collect();
+    for handle in handles {
+        handle.release().expect("release owned fixture handle");
+    }
+    for weak in physical {
+        assert!(
+            weak.acquire().is_none(),
+            "physical lease retained after all fixture owners left"
+        );
     }
 }
 

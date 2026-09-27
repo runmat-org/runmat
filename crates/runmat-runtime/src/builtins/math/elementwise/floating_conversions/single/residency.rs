@@ -2,8 +2,6 @@ use super::single_error_with_detail;
 use super::storage::{int_value_to_f32, single_tensor_to_host};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::BuiltinResult;
-#[cfg(test)]
-use log::trace;
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{
     SINGLE_ERROR_GPU_UNSUPPORTED, SINGLE_ERROR_INTERNAL, SINGLE_ERROR_INVALID_INPUT,
@@ -127,27 +125,6 @@ fn valid_single_resident_value(
 
 fn single_gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) -> bool {
     lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
-}
-
-#[cfg(test)]
-pub(super) fn free_rejected_single_handle(
-    handle: &GpuTensorHandle,
-    protected: &[&GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|protected| single_gpu_handles_alias(handle, protected))
-    {
-        trace!("single: rejected handle aliases a caller-owned prototype; not freeing it");
-        return;
-    }
-    if let Some(owner) = gpu_helpers::exact_provider_for_handle(handle) {
-        if let Err(error) = owner.free(handle) {
-            trace!("single: failed to free rejected handle through its owner ({error})");
-        }
-    } else {
-        trace!("single: rejected handle has no resolvable owner; leaving cleanup to its producer");
-    }
 }
 
 pub(super) async fn convert_to_host_like(value: Value) -> BuiltinResult<Value> {

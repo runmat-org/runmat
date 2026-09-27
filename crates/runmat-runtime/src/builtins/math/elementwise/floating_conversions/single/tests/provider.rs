@@ -99,67 +99,59 @@ fn single_like_gpu_prototype() {
 #[test]
 fn single_like_validates_physical_output_and_protects_the_prototype() {
     test_support::with_test_provider(|provider| {
-        let make_output = || {
-            let tensor = Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).expect("single tensor");
-            gpu_helpers::upload_tensor(provider, &tensor).expect("single upload")
-        };
-        let prototype = {
-            let tensor = Tensor::from_f32(vec![0.0], vec![1, 1]).expect("prototype tensor");
-            gpu_helpers::upload_tensor(provider, &tensor).expect("prototype upload")
-        };
-
-        let valid = make_output();
+        let prototype =
+            gpu_helpers::upload_tensor(provider, &Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap())
+                .unwrap();
+        let valid = gpu_helpers::upload_tensor(
+            provider,
+            &Tensor::from_f32(vec![1.0, 2.0], vec![2, 1]).unwrap(),
+        )
+        .unwrap();
         assert!(valid_single_like_output(
             &valid,
             &prototype,
             provider,
-            &[2, 1],
+            &[2, 1]
         ));
-        provider.free(&valid).expect("free valid output");
+        let valid_physical = valid.allocation_lease().downgrade();
+        valid.release().expect("release valid output");
+        assert!(valid_physical.acquire().is_none());
 
-        let mut wrong_shape = make_output();
-        wrong_shape.shape = vec![1, 2];
-        assert!(!valid_single_like_output(
-            &wrong_shape,
-            &prototype,
+        let wrong_shape = gpu_helpers::upload_tensor(
             provider,
-            &[2, 1],
-        ));
-        provider.free(&wrong_shape).expect("free wrong shape");
-
-        let mut wrong_precision = make_output();
-        wrong_precision.descriptor.element_type =
-            Some(runmat_accelerate_api::NumericElementType::F64);
-        assert!(!valid_single_like_output(
-            &wrong_precision,
-            &prototype,
+            &Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+        )
+        .unwrap();
+        let wrong_precision =
+            gpu_helpers::upload_tensor(provider, &Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap())
+                .unwrap();
+        let wrong_storage = gpu_helpers::upload_complex_tensor(
             provider,
-            &[2, 1],
-        ));
-        provider
-            .free(&wrong_precision)
-            .expect("free wrong precision");
-
-        let mut wrong_storage = make_output();
-        wrong_storage.descriptor.storage =
-            Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-        assert!(!valid_single_like_output(
-            &wrong_storage,
-            &prototype,
-            provider,
-            &[2, 1],
-        ));
-        provider.free(&wrong_storage).expect("free wrong storage");
-
+            &ComplexTensor::from_f32(vec![(1.0, 0.0), (2.0, 0.0)], vec![2, 1]).unwrap(),
+        )
+        .unwrap();
+        for output in [wrong_shape, wrong_precision, wrong_storage] {
+            assert!(!valid_single_like_output(
+                &output,
+                &prototype,
+                provider,
+                &[2, 1]
+            ));
+            let physical = output.allocation_lease().downgrade();
+            output.release().expect("release owned rejected result");
+            assert!(physical.acquire().is_none());
+        }
         assert!(!valid_single_like_output(
             &prototype,
             &prototype,
             provider,
-            &[1, 1],
+            &[1, 1]
         ));
-        free_rejected_single_handle(&prototype, &[&prototype]);
+        prototype.clone().release().expect("release owned alias");
         assert!(block_on(provider.download_numeric(&prototype)).is_ok());
-        provider.free(&prototype).expect("free prototype");
+        let physical = prototype.allocation_lease().downgrade();
+        prototype.release().expect("release prototype");
+        assert!(physical.acquire().is_none());
     });
 }
 

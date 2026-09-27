@@ -1,24 +1,27 @@
 use super::*;
 use crate::builtins::math::elementwise::floating_conversions::test_support::{
-    with_conversion_hook_provider, HookBehavior,
+    release_final_handles, with_conversion_hook_provider, HookBehavior,
 };
 use runmat_accelerate_api::{AccelProvider, HostTensorView};
 
 #[test]
-fn abandoned_direct_hook_restores_borrowed_metadata() {
+fn abandoned_direct_hook_preserves_immutable_input_and_owner() {
     use std::future::Future;
     use std::task::{Context, Poll};
-    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+    with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
         let input = upload_input(provider);
-        let original = gpu_helpers::snapshot_handle_metadata(&input);
+        let original = input.wire_descriptor();
         let mut call = Box::pin(super::super::provider::double_from_gpu(input.clone(), &[]));
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
-        assert!(runmat_accelerate_api::handle_is_logical(&input));
+        assert_eq!(provider.hook_calls(), 1);
+        assert!(!runmat_accelerate_api::handle_is_logical(&input));
+        assert_eq!(input.wire_descriptor(), original);
+        assert_eq!(provider.numeric_download_calls(), 0);
         drop(call);
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), original);
+        assert_eq!(input.wire_descriptor(), original);
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).unwrap();
+        release_final_handles([input]);
     });
 }
 
@@ -38,30 +41,35 @@ fn dropping_template_download_releases_only_the_owned_conversion_result() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     with_conversion_hook_provider(HookBehavior::PendingTemplateDownload, |provider| {
         let input = upload_input(provider);
-        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let before = input.wire_descriptor();
         let mut call = Box::pin(super::super::double_builtin(
             Value::GpuTensor(input.clone()),
             vec![Value::from("like"), Value::Num(0.0)],
         ));
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
-        let intermediate = provider.created_output();
-        assert!(!provider.was_freed(&intermediate));
+        assert_eq!(provider.numeric_download_calls(), 1);
+        assert_eq!(provider.hook_calls(), 1);
+        let intermediate = provider.take_created_output();
+        assert!(intermediate.acquire().is_some());
         drop(call);
-        assert!(provider.was_freed(&intermediate));
-        assert!(!provider.was_freed(&input));
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
+        assert!(intermediate.acquire().is_none());
+        input
+            .allocation_lease()
+            .validate_live()
+            .expect("caller input remains live");
+        assert_eq!(input.wire_descriptor(), before);
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).unwrap();
+        release_final_handles([input]);
     });
 }
 
 #[test]
 fn invalid_like_prototype_rejects_before_a_pending_conversion_hook() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+    with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
         let input = upload_input(provider);
-        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let before = input.wire_descriptor();
         let error = double_builtin(
             Value::GpuTensor(input.clone()),
             vec![Value::from("like"), Value::from("not a prototype")],
@@ -71,8 +79,10 @@ fn invalid_like_prototype_rejects_before_a_pending_conversion_hook() {
             error.identifier(),
             runmat_builtins::DOUBLE_ERROR_INVALID_INPUT.identifier
         );
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
-        provider.free(&input).unwrap();
+        assert_eq!(provider.hook_calls(), 0);
+        assert_eq!(provider.numeric_download_calls(), 0);
+        assert_eq!(input.wire_descriptor(), before);
+        release_final_handles([input]);
     });
 }
 
@@ -82,9 +92,9 @@ fn fixed_outputs_admit_discard_and_reject_multiple_before_provider_work() {
         let _outputs = crate::output_count::push_output_count(count);
         double_builtin(Value::Num(1.25), vec![]).expect("valid output count");
     }
-    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+    with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
         let input = upload_input(provider);
-        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let before = input.wire_descriptor();
         let _outputs = crate::output_count::push_output_count(Some(2));
         // This would never complete if output admission reached the hook.
         let error = double_builtin(Value::GpuTensor(input.clone()), vec![]).unwrap_err();
@@ -92,19 +102,19 @@ fn fixed_outputs_admit_discard_and_reject_multiple_before_provider_work() {
             error.identifier(),
             runmat_builtins::DOUBLE_ERROR_INVALID_ARGUMENT.identifier
         );
-        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
-        provider.free(&input).unwrap();
+        assert_eq!(provider.hook_calls(), 0);
+        assert_eq!(provider.numeric_download_calls(), 0);
+        assert_eq!(input.wire_descriptor(), before);
+        release_final_handles([input]);
     });
 }
 
 #[test]
 fn direct_double_conversion_preserves_input_and_provenance() {
     with_conversion_hook_provider(HookBehavior::Success, |provider| {
-        let mut input = upload_input(provider);
-        runmat_accelerate_api::set_handle_provenance(
-            &mut input,
-            runmat_accelerate_api::GpuHandleProvenance::Explicit,
-        );
+        let input = upload_input(provider)
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit view");
 
         let Value::GpuTensor(output) = double_builtin(Value::GpuTensor(input.clone()), Vec::new())
             .expect("direct double conversion")
@@ -116,8 +126,7 @@ fn direct_double_conversion_preserves_input_and_provenance() {
             Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).expect("free input");
-        provider.free(&output).expect("free output");
+        release_final_handles([input, output]);
     });
 }
 
@@ -134,7 +143,7 @@ fn double_conversion_falls_back_only_for_typed_unsupported_hooks() {
             vec![1.25, -2.5]
         );
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).expect("free input");
+        release_final_handles([input]);
     });
 
     with_conversion_hook_provider(HookBehavior::Failure, |provider| {
@@ -145,7 +154,7 @@ fn double_conversion_falls_back_only_for_typed_unsupported_hooks() {
             .message()
             .contains("injected conversion kernel failure"));
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).expect("free input");
+        release_final_handles([input]);
     });
 }
 
@@ -157,9 +166,10 @@ fn malformed_double_output_is_freed_without_consuming_input() {
             .expect_err("malformed output must be rejected");
         assert!(error.message().contains("malformed output"));
         let malformed = provider.take_malformed_output();
-        assert!(block_on(provider.download(&malformed)).is_err());
+        drop(error);
+        assert!(malformed.acquire().is_none());
         assert!(block_on(provider.download(&input)).is_ok());
-        provider.free(&input).expect("free input");
+        release_final_handles([input]);
     });
 }
 
@@ -174,7 +184,7 @@ fn single_and_complex_inputs_use_typed_preserving_fallbacks() {
         assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
         assert_eq!(gathered.materialize_f64(), vec![1.25, -2.5]);
         assert!(block_on(provider.download_numeric(&single_input)).is_ok());
-        provider.free(&single_input).expect("free single input");
+        release_final_handles([single_input]);
 
         let complex = ComplexTensor::new(vec![(1.25, -2.5), (3.75, 4.5)], vec![2, 1])
             .expect("complex tensor");
@@ -189,9 +199,10 @@ fn single_and_complex_inputs_use_typed_preserving_fallbacks() {
         assert_eq!(gathered.numeric_dtype(), NumericDType::F64);
         assert_eq!(gathered.materialize_f64(), vec![(1.25, -2.5), (3.75, 4.5)]);
         assert!(block_on(provider.download_numeric(&complex_input)).is_ok());
-        provider.free(&complex_input).expect("free complex input");
+        let mut owned = vec![complex_input];
         if let Value::GpuTensor(output) = result {
-            provider.free(&output).expect("free complex output");
+            owned.push(output);
         }
+        release_final_handles(owned);
     });
 }
