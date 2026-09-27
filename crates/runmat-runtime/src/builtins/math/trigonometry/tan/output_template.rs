@@ -197,10 +197,13 @@ async fn convert_to_gpu_complex(
                     }
                     Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                     Err(error) => {
-                        return Err(tan_error_with_detail(
+                        let mut failure = tan_error_with_detail(
                             &TAN_ERROR_INTERNAL,
                             format!("provider complex conversion failed: {error}"),
-                        ));
+                        );
+                        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        failure.source = Some(error.into_boxed_dyn_error());
+                        return Err(failure);
                     }
                 }
             }

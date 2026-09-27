@@ -216,10 +216,13 @@ async fn tan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                 }
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                 Err(error) => {
-                    return Err(tan_error_with_detail(
+                    let mut failure = tan_error_with_detail(
                         &TAN_ERROR_INTERNAL,
                         format!("provider unary tangent failed: {error}"),
-                    ));
+                    );
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    return Err(failure);
                 }
             }
         }
@@ -236,10 +239,7 @@ async fn tan_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
         Value::ComplexTensor(ct) => tan_complex_tensor(ct),
         Value::Tensor(tensor) => tan_tensor(tensor).map(tensor::tensor_into_value),
         Value::Num(n) => Ok(Value::Num(n.tan())),
-        other => Err(tan_error_with_detail(
-            &TAN_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
+        other => tan_real(other),
     }?;
     let protected: Vec<_> = protected.iter().collect();
     gpu_helpers::restore_class_preserving_value_protecting(&source, host, BUILTIN_NAME, &protected)

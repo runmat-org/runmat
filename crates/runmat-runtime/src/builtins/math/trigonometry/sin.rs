@@ -215,10 +215,13 @@ async fn sin_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                 }
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                 Err(error) => {
-                    return Err(sin_error_with_detail(
+                    let mut failure = sin_error_with_detail(
                         &SIN_ERROR_INTERNAL,
                         format!("provider unary sine failed: {error}"),
-                    ));
+                    );
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    return Err(failure);
                 }
             }
         }
@@ -235,10 +238,7 @@ async fn sin_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
         Value::ComplexTensor(ct) => sin_complex_tensor(ct),
         Value::Tensor(tensor) => sin_tensor(tensor).map(tensor::tensor_into_value),
         Value::Num(n) => Ok(Value::Num(n.sin())),
-        other => Err(sin_error_with_detail(
-            &SIN_ERROR_INVALID_INPUT,
-            format!("unsupported gathered gpuArray value {other:?}"),
-        )),
+        other => sin_real(other),
     }?;
     let protected: Vec<_> = protected.iter().collect();
     gpu_helpers::restore_class_preserving_value_protecting(&source, host, BUILTIN_NAME, &protected)
@@ -326,6 +326,10 @@ mod output_template;
 #[cfg(test)]
 use output_template::convert_to_host_complex;
 use output_template::{admit_output_template, apply_output_template, parse_output_template};
+
+#[cfg(test)]
+#[path = "sin/logical_tests.rs"]
+mod logical_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {

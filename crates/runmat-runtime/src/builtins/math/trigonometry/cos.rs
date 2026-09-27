@@ -213,10 +213,13 @@ async fn cos_gpu(handle: GpuTensorHandle, protected: &[GpuTensorHandle]) -> Buil
                 }
                 Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
                 Err(error) => {
-                    return Err(cos_error_with_detail(
+                    let mut failure = cos_error_with_detail(
                         &COS_ERROR_INTERNAL,
                         format!("provider unary cosine failed: {error}"),
-                    ));
+                    );
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    failure.source = Some(error.into_boxed_dyn_error());
+                    return Err(failure);
                 }
             }
         }
