@@ -217,11 +217,9 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             &INV_ERROR_INTERNAL,
         )
     })?;
-    let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let expected_storage = runmat_accelerate_api::handle_storage(&handle);
     let expected_precision = runmat_accelerate_api::handle_precision(&handle);
-    let provenance = runmat_accelerate_api::handle_provenance(&handle)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     if runmat_accelerate_api::handle_integer_type(&handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(&handle)
     {
@@ -248,39 +246,35 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     expected_precision,
                 ) =>
             {
-                gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-                runmat_accelerate_api::set_handle_provenance(&mut result, provenance);
+                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
                 return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {
-                gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-                gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
-                return Err(inv_error_with_message(
+                let mut error = inv_error_with_message(
                     "inv: provider returned an invalid inverse result",
                     &INV_ERROR_INTERNAL,
-                ));
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(result, error));
             }
-            Err(error) if provider_inv_is_unsupported(&error) => {
-                gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-            }
+            Err(error) if provider_inv_is_unsupported(&error) => {}
             Err(error) => {
-                gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
-                return Err(build_runtime_error(format!(
-                    "inv: provider execution failed: {error}"
-                ))
-                .with_builtin(NAME)
-                .with_identifier(
-                    INV_ERROR_INTERNAL
-                        .identifier
-                        .expect("inv internal descriptor identifier"),
-                )
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build());
+                let mut failure =
+                    build_runtime_error(format!("inv: provider execution failed: {error}"))
+                        .with_builtin(NAME)
+                        .with_identifier(
+                            INV_ERROR_INTERNAL
+                                .identifier
+                                .expect("inv internal descriptor identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build();
+                failure.source = Some(error.into_boxed_dyn_error());
+                return Err(failure);
             }
         }
     }
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
     let gathered = gathered.map_err(map_control_flow)?;
     let tensor = tensor::value_into_tensor_for(NAME, gathered).map_err(builtin_error)?;
     let inv = inv_real_tensor(&tensor)?;
@@ -288,7 +282,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
 }
 
 fn provider_inv_is_unsupported(error: &anyhow::Error) -> bool {
-    error.to_string() == PROVIDER_UNSUPPORTED
+    gpu_helpers::provider_hook_is_unsupported(error) || error.to_string() == PROVIDER_UNSUPPORTED
 }
 
 fn valid_inv_gpu_output(
@@ -300,7 +294,7 @@ fn valid_inv_gpu_output(
 ) -> bool {
     output.shape() == input.shape()
         && output.device_id() == input.device_id()
-        && !gpu_helpers::same_gpu_handle(input, output)
+        && !input.shares_allocation_with(output)
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == expected_storage

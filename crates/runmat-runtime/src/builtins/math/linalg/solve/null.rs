@@ -383,9 +383,8 @@ async fn null_gpu(handle: GpuTensorHandle, mode: NullMode) -> BuiltinResult<Valu
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
         .build()
     })?;
-    let source_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
     let gathered_result = gpu_helpers::gather_tensor_async(&handle).await;
-    gpu_helpers::restore_handle_metadata(&handle, &source_metadata);
     let gathered = gathered_result.map_err(map_control_flow)?;
     let basis = null_real_tensor(&gathered, mode)?;
     if gpu_helpers::exact_provider_for_handle(&handle)

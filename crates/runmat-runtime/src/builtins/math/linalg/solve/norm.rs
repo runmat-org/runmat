@@ -366,40 +366,38 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
 
     if let Some(provider) = maybe_provider.filter(|_| !is_nonfloating) {
         let provider_order = ProviderNormOrder::from(order);
-        let source_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+        let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let provider_result = provider.norm(&handle, provider_order).await;
-        gpu_helpers::restore_handle_metadata(&handle, &source_metadata);
         match provider_result {
             Ok(mut result) if valid_provider_norm_result(provider, &handle, &result) => {
-                runmat_accelerate_api::set_handle_provenance(
-                    &mut result,
-                    runmat_accelerate_api::handle_provenance(&handle)
-                        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic),
-                );
+                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
                 return gpu_helpers::resident_gpu_value(result);
             }
             Ok(result) => {
-                gpu_helpers::free_unprotected_exact_owner(&result, &[&handle]);
-                return Err(internal_error(format!(
+                let mut error = internal_error(format!(
                     "{NAME}: provider returned a malformed, aliased, or foreign norm result"
-                )));
+                ));
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(result, error));
             }
             Err(error)
-                if error
-                    .chain()
-                    .any(|cause| cause.to_string() == "norm not supported by provider") => {}
+                if gpu_helpers::provider_hook_is_unsupported(&error)
+                    || error
+                        .chain()
+                        .any(|cause| cause.to_string() == "norm not supported by provider") => {}
             Err(error) => {
-                return Err(build_runtime_error(format!(
-                    "{NAME}: provider norm execution failed: {error}"
-                ))
-                .with_builtin(NAME)
-                .with_identifier(
-                    NORM_ERROR_INTERNAL
-                        .identifier
-                        .expect("norm internal descriptor identifier"),
-                )
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build())
+                let mut failure =
+                    build_runtime_error(format!("{NAME}: provider norm execution failed: {error}"))
+                        .with_builtin(NAME)
+                        .with_identifier(
+                            NORM_ERROR_INTERNAL
+                                .identifier
+                                .expect("norm internal descriptor identifier"),
+                        )
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .build();
+                failure.source = Some(error.into_boxed_dyn_error());
+                return Err(failure);
             }
         }
     }
@@ -449,7 +447,7 @@ fn valid_provider_norm_result(
     source: &GpuTensorHandle,
     result: &GpuTensorHandle,
 ) -> bool {
-    !gpu_helpers::same_gpu_handle(source, result)
+    !source.shares_allocation_with(result)
         && result.shape() == [1, 1]
         && result.device_id() == provider.device_id()
         && gpu_helpers::exact_provider_for_handle(result)
