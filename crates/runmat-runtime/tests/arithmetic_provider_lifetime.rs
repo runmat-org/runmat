@@ -39,6 +39,9 @@ impl AccelProvider for Provider {
         self.freed.lock().unwrap().push(handle.buffer_id);
         self.inner.free(handle)
     }
+    fn fill_like(&self, handle: &GpuTensorHandle, value: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.fill_like(handle, value)
+    }
     fn repmat(
         &self,
         handle: &GpuTensorHandle,
@@ -144,6 +147,42 @@ fn cancelled_broadcast_and_failed_alias_expansions_release_only_owned_temporarie
             assert!(!runmat_accelerate_api::handle_is_logical(handle));
             assert!(block_on(provider.inner.download(handle)).is_ok());
             provider.inner.free(handle).unwrap();
+        }
+    }
+    // A mixed resident power call owns either a scalar fill or uploaded host
+    // tensor until its asynchronous operation finishes, in both operand orders.
+    for resident_first in [false, true] {
+        for host in [
+            Value::Num(2.0),
+            Value::Tensor(runmat_value::Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap()),
+        ] {
+            provider.freed.lock().unwrap().clear();
+            let resident = provider
+                .inner
+                .upload(&HostTensorView {
+                    data: &[4.0, 9.0],
+                    shape: &[1, 2],
+                })
+                .unwrap();
+            let args = if resident_first {
+                vec![Value::GpuTensor(resident.clone()), host]
+            } else {
+                vec![host, Value::GpuTensor(resident.clone())]
+            };
+            let mut execution = Box::pin(runmat_runtime::call_builtin_async_with_outputs(
+                "power", &args, 1,
+            ));
+            assert!(execution.as_mut().now_or_never().is_none());
+            drop(execution);
+            let freed = provider.freed.lock().unwrap().clone();
+            assert_eq!(freed.len(), 1);
+            assert!(!freed.contains(&resident.buffer_id));
+            assert!(!runmat_accelerate_api::handle_is_logical(&resident));
+            assert_eq!(
+                block_on(provider.inner.download(&resident)).unwrap().data,
+                vec![4.0, 9.0]
+            );
+            provider.inner.free(&resident).unwrap();
         }
     }
     // Exact integer-scalar temporaries cross the same asynchronous provider
