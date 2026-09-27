@@ -3,7 +3,7 @@ mod restore;
 #[cfg(test)]
 mod owning_tests;
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_value::Value;
 
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
@@ -27,20 +27,21 @@ pub(super) async fn evaluate(
     })?;
     let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
 
-    if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let gathered = gpu_helpers::gather_tensor_async(&handle).await;
-        let tensor =
-            gathered.map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
+    if runmat_accelerate_api::handle_integer_type(&handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        // The logical/integer language class resolves to Double independently
+        // of the provider's physical encoding or preferred floating precision.
+        let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
+            .await
+            .map_err(|flow| map_control_flow_with_builtin(flow, operation.name()))?;
+        let tensor = tensor::value_into_tensor_for(operation.name(), gathered)
+            .map_err(|error| super::errors::invalid(operation, error))?;
         let output = super::host::evaluate_tensor(operation, tensor)?;
-        if provider.precision() != ProviderPrecision::F64 {
-            return Ok(tensor::tensor_into_value(output));
-        }
-        return restore::real(
-            operation,
-            provider,
+        return gpu_helpers::restore_class_preserving_value(
             &handle,
-            output,
-            Some(ProviderPrecision::F64),
+            Value::Tensor(output),
+            operation.name(),
         );
     }
 
