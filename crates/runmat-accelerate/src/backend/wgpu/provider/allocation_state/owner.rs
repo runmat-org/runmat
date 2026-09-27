@@ -7,7 +7,10 @@ use runmat_accelerate_api::allocation::{
 };
 
 impl AllocationState {
-    pub(super) fn entry_for_handle(&self, handle: &GpuTensorHandle) -> Result<BufferEntry> {
+    pub(in super::super) fn entry_for_handle(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<BufferEntry> {
         self.check_identity(handle.allocation_identity())?;
         let (mut entry, weak) = {
             let records = self.lock_records()?;
@@ -38,7 +41,10 @@ impl AllocationState {
         Ok(entry)
     }
 
-    pub(super) fn requires_logical_encoding(&self, handle: &GpuTensorHandle) -> Result<bool> {
+    pub(in super::super) fn requires_logical_encoding(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<bool> {
         self.entry_for_handle(handle)?;
         let records = self.lock_records()?;
         Ok(records
@@ -64,7 +70,7 @@ impl AllocationState {
         Ok(())
     }
 
-    pub(super) fn acquire_tensor(
+    pub(in super::super) fn acquire_tensor(
         &self,
         wire: &GpuTensorWireDescriptor,
     ) -> Result<GpuTensorHandle, AllocationAcquisitionError> {
