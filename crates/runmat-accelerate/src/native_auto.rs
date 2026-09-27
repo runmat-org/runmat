@@ -1695,12 +1695,14 @@ mod upload_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_accelerate_api::test_support::TestAllocationOwner;
     use runmat_accelerate_api::{
         GpuTensorHandle, HostNumericDataOwned, NumericElementType, ProviderCostEstimate,
         ProviderCostQuery, ProviderFeasibility, ProviderFeasibilityQuery, ProviderResourceEstimate,
     };
     use std::cell::RefCell;
-    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::OnceLock;
 
     thread_local! {
         // These promotion APIs execute synchronously. Capture only the caller's
@@ -1756,10 +1758,6 @@ mod tests {
             Box::pin(async { Err(anyhow!("unused")) })
         }
 
-        fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "rejecting-test-provider".to_string()
         }
@@ -1771,21 +1769,26 @@ mod tests {
 
     struct CostedProvider {
         uploads: AtomicUsize,
-        next_buffer: AtomicU64,
+        owner: OnceLock<TestAllocationOwner>,
+    }
+
+    impl CostedProvider {
+        fn owner(&self) -> &TestAllocationOwner {
+            self.owner.get_or_init(TestAllocationOwner::new)
+        }
     }
 
     impl AccelProvider for CostedProvider {
         fn upload(&self, host: &HostTensorView<'_>) -> Result<GpuTensorHandle> {
             self.uploads.fetch_add(1, Ordering::Relaxed);
-            Ok(GpuTensorHandle::new(
-                host.shape.to_vec(),
-                self.device_id(),
-                self.next_buffer.fetch_add(1, Ordering::Relaxed),
-            )
-            .with_numeric_descriptor(
-                NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            ))
+            Ok(self
+                .owner()
+                .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                    data: HostNumericDataOwned::F64(host.data.to_vec()),
+                    shape: host.shape.to_vec(),
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                })?
+                .handle)
         }
 
         fn download<'a>(
@@ -1795,16 +1798,12 @@ mod tests {
             Box::pin(async { Err(anyhow!("unused")) })
         }
 
-        fn free(&self, _handle: &GpuTensorHandle) -> Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
             "costed-test-provider".to_string()
         }
 
         fn device_id(&self) -> u32 {
-            71
+            self.owner().device_id()
         }
 
         fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
@@ -1839,7 +1838,7 @@ mod tests {
 
     static COSTED_PROVIDER: CostedProvider = CostedProvider {
         uploads: AtomicUsize::new(0),
-        next_buffer: AtomicU64::new(1),
+        owner: OnceLock::new(),
     };
 
     #[test]
@@ -1882,7 +1881,7 @@ mod tests {
                 .data,
             HostNumericDataOwned::U64(vec![1_u64 << 63, u64::MAX])
         );
-        provider.free(&handle).expect("free integer handle");
+        drop(handle);
 
         let single = Tensor::from_f32(vec![1.25, -2.5], vec![1, 2]).expect("single tensor");
         let promoted = auto
@@ -1895,7 +1894,7 @@ mod tests {
             .expect("native single download");
         assert_eq!(downloaded.data.element_type(), NumericElementType::F32);
         assert_eq!(downloaded.data, HostNumericDataOwned::F32(vec![1.25, -2.5]));
-        provider.free(&handle).expect("free single handle");
+        drop(handle);
     }
 
     #[test]
@@ -1927,31 +1926,50 @@ mod tests {
 
     #[test]
     fn complete_cost_keeps_a_profitable_resident_chain_on_provider() {
-        let left = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_001)
-            .with_numeric_descriptor(
+        let left = COSTED_PROVIDER
+            .owner()
+            .allocate_zeroed(
+                vec![1, 128],
                 NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-            );
-        let right = GpuTensorHandle::new(vec![1, 128], COSTED_PROVIDER.device_id(), 10_002)
-            .with_numeric_descriptor(
+            )
+            .unwrap();
+        let right = COSTED_PROVIDER
+            .owner()
+            .allocate_zeroed(
+                vec![1, 128],
                 NumericElementType::F64,
                 runmat_accelerate_api::GpuTensorStorage::Real,
-            );
+            )
+            .unwrap();
+        let left_weak = left.handle.downgrade();
+        let right_weak = right.handle.downgrade();
+        let left_probe = left.probe;
+        let right_probe = right.probe;
         let auto = NativeAutoOffload::new(&COSTED_PROVIDER, ThresholdConfig::default());
         let ((left, right), decisions) = capture_promotion(|| {
             auto.promote_binary(
                 BinaryOp::Elementwise,
-                &Value::GpuTensor(left),
-                &Value::GpuTensor(right),
+                &Value::GpuTensor(left.handle),
+                &Value::GpuTensor(right.handle),
             )
             .unwrap()
         });
-        assert!(matches!(left, Value::GpuTensor(ref handle) if handle.buffer_id == 10_001));
-        assert!(matches!(right, Value::GpuTensor(ref handle) if handle.buffer_id == 10_002));
+        assert!(
+            matches!(left, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&left_weak.acquire().unwrap()))
+        );
+        assert!(
+            matches!(right, Value::GpuTensor(ref handle) if handle.shares_allocation_with(&right_weak.acquire().unwrap()))
+        );
         assert_eq!(decisions.len(), 1);
         assert_eq!(decisions[0].operation, "elementwise");
         assert_eq!(decisions[0].decision, AutoOffloadDisposition::Gpu);
         assert_eq!(decisions[0].reason, DecisionReason::CostModel);
+        assert_eq!(left_probe.retirements(), 0);
+        assert_eq!(right_probe.retirements(), 0);
+        drop((left, right));
+        assert_eq!(left_probe.retirements(), 1);
+        assert_eq!(right_probe.retirements(), 1);
     }
 
     #[test]
