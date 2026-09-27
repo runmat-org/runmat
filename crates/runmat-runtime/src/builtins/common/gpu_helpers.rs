@@ -462,7 +462,7 @@ pub async fn download_value_preserving_residency_async(
             .build()
     })?;
     if host.shape != handle.shape
-        || Some(host.storage) != source_guard.snapshot.descriptor.storage
+        || Some(host.storage) != source_guard.original_descriptor().storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -473,11 +473,11 @@ pub async fn download_value_preserving_residency_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.snapshot.descriptor.storage
+                source_guard.original_descriptor().storage
             ),
         ));
     }
-    value_from_numeric_download(host, source_guard.snapshot.logical).map_err(|error| {
+    value_from_numeric_download(host, source_guard.was_logical()).map_err(|error| {
         build_runtime_error(format!("gpu download: {error}"))
             .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -604,7 +604,7 @@ pub async fn download_floating_projection_async(
             .build()
     })?;
     if host.shape != handle.shape
-        || Some(host.storage) != source_guard.snapshot.descriptor.storage
+        || Some(host.storage) != source_guard.original_descriptor().storage
         || host.data.element_type() != expected_element
     {
         return Err(provider_payload_mismatch(
@@ -615,7 +615,7 @@ pub async fn download_floating_projection_async(
                 host.data.element_type(),
                 host.storage,
                 expected_element,
-                source_guard.snapshot.descriptor.storage
+                source_guard.original_descriptor().storage
             ),
         ));
     }

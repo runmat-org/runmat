@@ -57,6 +57,14 @@ pub struct HandleMetadataRestoreGuard<'a> {
     snapshot: GpuHandleMetadataSnapshot,
 }
 impl<'a> HandleMetadataRestoreGuard<'a> {
+    pub fn original_descriptor(&self) -> &GpuTensorDescriptor {
+        &self.snapshot.descriptor
+    }
+
+    pub fn was_logical(&self) -> bool {
+        self.snapshot.logical
+    }
+
     pub fn new(handle: &'a GpuTensorHandle) -> Self {
         Self {
             handle,

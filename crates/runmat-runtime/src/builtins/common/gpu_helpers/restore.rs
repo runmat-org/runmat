@@ -255,7 +255,7 @@ pub fn restore_class_preserving_value_protecting(
         runmat_accelerate_api::GpuHandleProvenance::Explicit
     } else {
         source_guard
-            .snapshot
+            .original_descriptor()
             .provenance
             .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic)
     };
