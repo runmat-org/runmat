@@ -3,7 +3,7 @@ use crate::{BuiltinErrorDescriptor, BuiltinExtensionDescriptor, BuiltinExtension
 pub const BITWISE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BITWISE.INVALID_INPUT",
     identifier: Some("RunMat:bitwise:InvalidInput"),
-    when: "An input is not a supported finite integer-valued numeric, logical, or gatherable resident value.",
+    when: "An input is not a supported finite integer-valued numeric, logical, or gatherable resident value, an option is invalid, or more than one output is requested.",
     message: "bitwise operation: invalid input",
 };
 

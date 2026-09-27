@@ -1,12 +1,42 @@
 use super::*;
 
+fn validate_position(name: &'static str, width: u32, position: i128) -> BuiltinResult<()> {
+    if !(1..=i128::from(width)).contains(&position) {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            format!("bit position {position} must be between 1 and {width}"),
+        ));
+    }
+    Ok(())
+}
+
+fn admit_host_positions(
+    name: &'static str,
+    input: &AdmittedBuffer<BitBuffer>,
+    positions: &AdmittedBuffer<ShiftBuffer>,
+    assumed: Option<IntegerClass>,
+    output_len: usize,
+) -> BuiltinResult<()> {
+    // Existing empty-output calls do not inspect unused position contents.
+    if output_len != 0 {
+        if let Some(positions) = positions.host() {
+            for &position in &positions.data {
+                validate_position(name, input.bit_width(assumed), position)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn evaluate_bitcmp(args: Vec<Value>) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(&args);
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     });
-    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Complement, &args)?;
     let (value, assumed) = unary_args(BITCMP_NAME, args)?;
+    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Complement, &value, &[], assumed)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitcmp(sparse, assumed);
     }
@@ -19,20 +49,14 @@ pub(crate) async fn evaluate_bitcmp(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITCMP_NAME,
     )?;
-    restore_binary_bitwise_gpu_result(BITCMP_NAME, result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(BITCMP_NAME, result, output_source.as_ref(), &protected)
 }
 
 fn sparse_bitcmp(
     sparse: runmat_value::SparseTensor,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() {
-        return Err(error_with_detail(
-            BITCMP_NAME,
-            &ERROR_INVALID_INPUT,
-            "typed sparse integer storage is a RunMat extension and is not supported by bitcmp",
-        ));
-    }
+    admit_sparse(BITCMP_NAME, &sparse)?;
     let class = assumed;
     let mask = class.map_or(u64::MAX, IntegerClass::bit_mask);
     map_sparse_real_values(&sparse, BITCMP_NAME, |value| {
@@ -46,30 +70,37 @@ fn sparse_bitcmp(
 }
 
 pub(crate) async fn evaluate_bitget(args: Vec<Value>) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(&args);
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     });
-    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Get, &args)?;
     let (value, bit, assumed) = value_bit_args(BITGET_NAME, args)?;
+    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Get, &value, &[&bit], assumed)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitget(sparse, bit, assumed).await;
     }
-    let input = bit_buffer_from(BITGET_NAME, value, assumed).await?;
-    let positions = shift_buffer_from(bit).await?;
-    let plan = scalar_or_exact_size_plan(&input.shape, &positions.shape)
-        .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let input = admit_bit_buffer(BITGET_NAME, value, assumed)?;
+    let positions = admit_shift_buffer(bit)?;
+    let plan = scalar_or_exact_size_plan(
+        input.shape(|value| &value.shape),
+        positions.shape(|value| &value.shape),
+    )
+    .map_err(|err| error_with_detail(BITGET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    admit_host_positions(BITGET_NAME, &input, &positions, assumed, plan.len())?;
+    let input = input
+        .materialize(BITGET_NAME, |value| {
+            tensor_to_bit_buffer(BITGET_NAME, value, assumed)
+        })
+        .await?;
+    let positions = positions
+        .materialize(BITGET_NAME, tensor_to_shift_buffer)
+        .await?;
     let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
     for (_, input_index, bit_index) in plan.iter() {
         let position = positions.data[bit_index];
-        if !(1..=i128::from(width)).contains(&position) {
-            return Err(error_with_detail(
-                BITGET_NAME,
-                &ERROR_INVALID_INPUT,
-                format!("bit position {position} must be between 1 and {width}"),
-            ));
-        }
+        validate_position(BITGET_NAME, width, position)?;
         data.push((input.data[input_index] >> (position as u32 - 1)) & 1);
     }
     let result = value_from_bits_with_classes(
@@ -79,7 +110,7 @@ pub(crate) async fn evaluate_bitget(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITGET_NAME,
     )?;
-    restore_binary_bitwise_gpu_result(BITGET_NAME, result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(BITGET_NAME, result, output_source.as_ref(), &protected)
 }
 
 async fn sparse_bitget(
@@ -87,13 +118,7 @@ async fn sparse_bitget(
     bit: Value,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() {
-        return Err(error_with_detail(
-            BITGET_NAME,
-            &ERROR_INVALID_INPUT,
-            "typed sparse integer storage is a RunMat extension and is not supported by bitget",
-        ));
-    }
+    admit_sparse(BITGET_NAME, &sparse)?;
     let positions = shift_buffer_from(bit).await?;
     let class = assumed;
     let width = class.map_or(64, IntegerClass::bit_width);
@@ -105,13 +130,7 @@ async fn sparse_bitget(
     let mut data = Vec::with_capacity(plan.len());
     for (_, sparse_index, bit_index) in plan.iter() {
         let position = positions.data[bit_index];
-        if !(1..=i128::from(width)).contains(&position) {
-            return Err(error_with_detail(
-                BITGET_NAME,
-                &ERROR_INVALID_INPUT,
-                format!("bit position {position} must be between 1 and {width}"),
-            ));
-        }
+        validate_position(BITGET_NAME, width, position)?;
         let row = sparse_index % sparse.rows;
         let col = sparse_index / sparse.rows;
         let bits = sparse
@@ -132,44 +151,59 @@ async fn sparse_bitget(
 }
 
 pub(crate) async fn evaluate_bitset(args: Vec<Value>) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(&args);
     let output_source = args.first().and_then(|value| match value {
         Value::GpuTensor(handle) => Some(handle.clone()),
         _ => None,
     });
-    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Set, &args)?;
     let (value, bit, value_to_set, assumed) = bitset_args(args)?;
+    let mut controls = vec![&bit];
+    controls.extend(value_to_set.as_ref());
+    enforce_direct_bit_gpu_compatibility(DirectBitOperation::Set, &value, &controls, assumed)?;
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitset(sparse, bit, value_to_set, assumed).await;
     }
-    let input = bit_buffer_from(BITSET_NAME, value, assumed).await?;
-    let positions = shift_buffer_from(bit).await?;
+    let input = admit_bit_buffer(BITSET_NAME, value, assumed)?;
+    let positions = admit_shift_buffer(bit)?;
     let values = match value_to_set {
-        Some(value) => bit_value_buffer_from(value).await?,
-        None => BitValueBuffer {
+        Some(value) => admit_bit_value_buffer(value)?,
+        None => AdmittedBuffer::Host(BitValueBuffer {
             data: vec![true],
             shape: vec![1, 1],
-        },
+        }),
     };
-    let input_positions = scalar_or_exact_size_plan(&input.shape, &positions.shape)
-        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let input_positions = scalar_or_exact_size_plan(
+        input.shape(|value| &value.shape),
+        positions.shape(|value| &value.shape),
+    )
+    .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
     let input_position_indices = input_positions
         .iter()
         .map(|(_, input_index, position_index)| (input_index, position_index))
         .collect::<Vec<_>>();
-    let plan = scalar_or_exact_size_plan(input_positions.output_shape(), &values.shape)
-        .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let plan = scalar_or_exact_size_plan(
+        input_positions.output_shape(),
+        values.shape(|value| &value.shape),
+    )
+    .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    admit_host_positions(BITSET_NAME, &input, &positions, assumed, plan.len())?;
+    let input = input
+        .materialize(BITSET_NAME, |value| {
+            tensor_to_bit_buffer(BITSET_NAME, value, assumed)
+        })
+        .await?;
+    let positions = positions
+        .materialize(BITSET_NAME, tensor_to_shift_buffer)
+        .await?;
+    let values = values
+        .materialize(BITSET_NAME, tensor_to_bit_value_buffer)
+        .await?;
     let width = input.compute_class.map_or(64, IntegerClass::bit_width);
     let mut data = Vec::with_capacity(plan.len());
     for (_, input_position_index, value_index) in plan.iter() {
         let (input_index, position_index) = input_position_indices[input_position_index];
         let position = positions.data[position_index];
-        if !(1..=i128::from(width)).contains(&position) {
-            return Err(error_with_detail(
-                BITSET_NAME,
-                &ERROR_INVALID_INPUT,
-                format!("bit position {position} must be between 1 and {width}"),
-            ));
-        }
+        validate_position(BITSET_NAME, width, position)?;
         let mask = 1_u64 << (position as u32 - 1);
         let current = input.data[input_index];
         data.push(if values.data[value_index] {
@@ -185,7 +219,7 @@ pub(crate) async fn evaluate_bitset(args: Vec<Value>) -> BuiltinResult<Value> {
         input.output_class,
         BITSET_NAME,
     )?;
-    restore_binary_bitwise_gpu_result(BITSET_NAME, result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(BITSET_NAME, result, output_source.as_ref(), &protected)
 }
 
 async fn sparse_bitset(
@@ -194,13 +228,7 @@ async fn sparse_bitset(
     value_to_set: Option<Value>,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() {
-        return Err(error_with_detail(
-            BITSET_NAME,
-            &ERROR_INVALID_INPUT,
-            "typed sparse integer storage is a RunMat extension and is not supported by bitset",
-        ));
-    }
+    admit_sparse(BITSET_NAME, &sparse)?;
     let positions = shift_buffer_from(bit).await?;
     let values = match value_to_set {
         Some(value) => bit_value_buffer_from(value).await?,
@@ -228,13 +256,7 @@ async fn sparse_bitset(
     for (_, input_position_index, value_index) in plan.iter() {
         let (sparse_index, position_index) = input_position_indices[input_position_index];
         let position = positions.data[position_index];
-        if !(1..=i128::from(width)).contains(&position) {
-            return Err(error_with_detail(
-                BITSET_NAME,
-                &ERROR_INVALID_INPUT,
-                format!("bit position {position} must be between 1 and {width}"),
-            ));
-        }
+        validate_position(BITSET_NAME, width, position)?;
         let row = sparse_index % sparse.rows;
         let col = sparse_index / sparse.rows;
         let stored = sparse.get(row, col);
@@ -277,13 +299,6 @@ impl DirectBitOperation {
         }
     }
 
-    const fn assumed_type_arity(self) -> usize {
-        match self {
-            Self::Complement => 2,
-            Self::Get | Self::Set => 3,
-        }
-    }
-
     const fn restricts_integer_classes(self) -> bool {
         matches!(self, Self::Complement)
     }
@@ -291,14 +306,15 @@ impl DirectBitOperation {
 
 fn enforce_direct_bit_gpu_compatibility(
     operation: DirectBitOperation,
-    args: &[Value],
+    value: &Value,
+    controls: &[&Value],
+    assumed: Option<IntegerClass>,
 ) -> BuiltinResult<()> {
     let name = operation.name();
-    let Some(Value::GpuTensor(source)) = args.first() else {
+    let Value::GpuTensor(source) = value else {
         return Ok(());
     };
-    if args.len() == operation.assumed_type_arity() && matches!(args.last(), Some(Value::String(_)))
-    {
+    if assumed.is_some() {
         crate::compatibility::ensure_builtin_extension_enabled(
             &runmat_builtins::DIRECT_BIT_GPU_ASSUMED_TYPE_EXTENSION,
             name,
@@ -316,9 +332,8 @@ fn enforce_direct_bit_gpu_compatibility(
         )
     } else {
         source_class.is_none()
-            && !args
+            && !controls
                 .iter()
-                .skip(1)
                 .any(|value| bitwise_integer_class(value).is_some())
     };
     if outside_domain {

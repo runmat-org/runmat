@@ -8,5 +8,10 @@ use runmat_value::Value;
     builtin_path = "crate::builtins::math::bitwise::bitshift"
 )]
 pub(crate) async fn bitshift_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BITSHIFT_DESCRIPTOR,
+        &runmat_builtins::BITWISE_ERROR_INVALID_INPUT,
+        "bitshift",
+    )?;
     super::engine::evaluate_bitshift(args).await
 }

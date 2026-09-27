@@ -10,6 +10,11 @@ use crate::BuiltinResult;
     builtin_path = "crate::builtins::math::bitwise::binary::bitand"
 )]
 pub(crate) async fn bitand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BITAND_DESCRIPTOR,
+        &runmat_builtins::BITWISE_ERROR_INVALID_INPUT,
+        "bitand",
+    )?;
     super::evaluate(
         "bitand",
         args,

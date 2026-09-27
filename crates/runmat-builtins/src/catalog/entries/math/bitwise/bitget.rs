@@ -7,7 +7,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Selected zero-or-one bit values in the class of A.",
+    description: "Selected zero-or-one bit values preserving native integer class.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 2] = [
     BuiltinParamDescriptor {
@@ -99,7 +99,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "`B = bitget(A, bit)` returns the selected one-based bit from each element of `A`. The result contains zero or one, retains the class of `A`, and uses scalar expansion or exactly matching nonscalar sizes.",
+            "`B = bitget(A, bit)` returns the selected one-based bit from each element of `A`. The result contains zero or one, preserves native integer class, and uses scalar expansion or exactly matching nonscalar sizes. Dense single and logical data produce double results. Complex sparse input and requests for more than one output are rejected.",
             "`B = bitget(A, bit, assumedtype)` selects the signed or unsigned width used for integer-valued `double` input. Each bit position must be a finite positive integer within that width.",
             "All eight fixed-width integer classes are accepted for both data and bit-position inputs. The bit-position class does not affect output class.",
         ],

@@ -1,4 +1,5 @@
 mod assumed_type;
+mod admission;
 mod binary_storage;
 mod bitand;
 mod bitor;

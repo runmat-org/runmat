@@ -1,6 +1,7 @@
 use super::*;
 
 pub(crate) async fn evaluate_bitshift(args: Vec<Value>) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(&args);
     enforce_bitshift_compatibility(&args)?;
     let output_source = args.iter().find_map(|value| {
         let Value::GpuTensor(handle) = value else {
@@ -12,10 +13,21 @@ pub(crate) async fn evaluate_bitshift(args: Vec<Value>) -> BuiltinResult<Value> 
     if let Value::SparseTensor(sparse) = value {
         return sparse_bitshift(sparse, shift, assumed).await;
     }
-    let left = bit_buffer_from(BITSHIFT_NAME, value, assumed).await?;
-    let shifts = shift_buffer_from(shift).await?;
-    let plan = scalar_or_exact_size_plan(&left.shape, &shifts.shape)
-        .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let left = admit_bit_buffer(BITSHIFT_NAME, value, assumed)?;
+    let shifts = admit_shift_buffer(shift)?;
+    let plan = scalar_or_exact_size_plan(
+        left.shape(|value| &value.shape),
+        shifts.shape(|value| &value.shape),
+    )
+    .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_SIZE_MISMATCH, err))?;
+    let left = left
+        .materialize(BITSHIFT_NAME, |value| {
+            tensor_to_bit_buffer(BITSHIFT_NAME, value, assumed)
+        })
+        .await?;
+    let shifts = shifts
+        .materialize(BITSHIFT_NAME, tensor_to_shift_buffer)
+        .await?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
         data.push(apply_shift(
@@ -31,7 +43,7 @@ pub(crate) async fn evaluate_bitshift(args: Vec<Value>) -> BuiltinResult<Value> 
         left.output_class,
         BITSHIFT_NAME,
     )?;
-    restore_binary_bitwise_gpu_result(BITSHIFT_NAME, result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(BITSHIFT_NAME, result, output_source.as_ref(), &protected)
 }
 
 fn enforce_bitshift_compatibility(args: &[Value]) -> BuiltinResult<()> {
@@ -100,13 +112,7 @@ async fn sparse_bitshift(
     shift: Value,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<Value> {
-    if sparse.integer_storage().is_some() {
-        return Err(error_with_detail(
-            BITSHIFT_NAME,
-            &ERROR_INVALID_INPUT,
-            "typed sparse integer storage is a RunMat extension and is not supported by bitshift",
-        ));
-    }
+    admit_sparse(BITSHIFT_NAME, &sparse)?;
     let shifts = shift_buffer_from(shift).await?;
     let class = assumed;
     let sparse_shape = sparse.shape();

@@ -1,5 +1,19 @@
 use super::*;
 
+pub(super) fn admit_sparse(
+    name: &'static str,
+    sparse: &runmat_value::SparseTensor,
+) -> BuiltinResult<()> {
+    if sparse.is_complex() || sparse.integer_storage().is_some() {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "bitwise sparse operands require real floating or logical storage",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) async fn binary_bitwise(
     name: &'static str,
     lhs: Value,
@@ -7,15 +21,29 @@ pub(super) async fn binary_bitwise(
     assumed: Option<IntegerClass>,
     operator: BinaryBitwiseOperator,
 ) -> BuiltinResult<Value> {
+    for value in [&lhs, &rhs] {
+        if let Value::SparseTensor(sparse) = value {
+            admit_sparse(name, sparse)?;
+        }
+    }
     if matches!(&lhs, Value::SparseTensor(_)) || matches!(&rhs, Value::SparseTensor(_)) {
         return sparse_binary_bitwise(name, lhs, rhs, assumed, operator).await;
     }
-    let left = bit_buffer_from(name, lhs, assumed).await?;
-    let right = bit_buffer_from(name, rhs, assumed).await?;
+    let left = admit_bit_buffer(name, lhs, assumed)?;
+    let right = admit_bit_buffer(name, rhs, assumed)?;
+    let plan = BroadcastPlan::new(
+        left.shape(|value| &value.shape),
+        right.shape(|value| &value.shape),
+    )
+    .map_err(|err| error_with_detail(name, &ERROR_SIZE_MISMATCH, err))?;
+    let left = left
+        .materialize(name, |value| tensor_to_bit_buffer(name, value, assumed))
+        .await?;
+    let right = right
+        .materialize(name, |value| tensor_to_bit_buffer(name, value, assumed))
+        .await?;
     let output_class = binary_output_class(name, &left, &right)?;
     let compute_class = assumed.or(output_class);
-    let plan = BroadcastPlan::new(&left.shape, &right.shape)
-        .map_err(|err| error_with_detail(name, &ERROR_SIZE_MISMATCH, err))?;
     let mut data = Vec::with_capacity(plan.len());
     for (_, idx_a, idx_b) in plan.iter() {
         data.push(apply_binary_operator(
@@ -85,13 +113,7 @@ async fn sparse_bitwise_operand_from(
 ) -> BuiltinResult<SparseBitwiseOperand> {
     match value {
         Value::SparseTensor(sparse) => {
-            if sparse.integer_storage().is_some() {
-                return Err(error_with_detail(
-                    name,
-                    &ERROR_INVALID_INPUT,
-                    "typed sparse integer storage is a RunMat extension and is not supported by bitwise operations",
-                ));
-            }
+            admit_sparse(name, &sparse)?;
             Ok(SparseBitwiseOperand::Sparse(sparse))
         }
         value => bit_buffer_from(name, value, assumed)

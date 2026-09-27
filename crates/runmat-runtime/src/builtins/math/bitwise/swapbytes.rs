@@ -15,11 +15,29 @@ const NAME: &str = "swapbytes";
     builtin_path = "crate::builtins::math::bitwise::swapbytes"
 )]
 async fn swapbytes_builtin(value: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SWAPBYTES_DESCRIPTOR,
+        &SWAPBYTES_ERROR_INVALID_INPUT,
+        NAME,
+    )?;
     if crate::builtins::common::validation::value_contains_explicit_gpu(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
             &SWAPBYTES_EXPLICIT_GPU_EXTENSION,
             NAME,
         )?;
+    }
+    if let Value::GpuTensor(handle) = &value {
+        let element_type =
+            gpu_helpers::expected_handle_numeric_element_type(handle).map_err(invalid)?;
+        if runmat_accelerate_api::handle_is_logical(handle)
+            || !gpu_helpers::numeric_descriptor_matches(
+                handle,
+                element_type,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+        {
+            return Err(invalid("resident input must have real numeric storage"));
+        }
     }
     let gathered = gpu_helpers::gather_value_async(&value)
         .await

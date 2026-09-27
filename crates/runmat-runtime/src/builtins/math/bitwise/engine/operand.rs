@@ -1,5 +1,79 @@
 use super::*;
 
+pub(super) enum AdmittedBuffer<T> {
+    Host(T),
+    Resident(runmat_accelerate_api::GpuTensorHandle),
+}
+
+impl<T> AdmittedBuffer<T> {
+    pub(super) fn host(&self) -> Option<&T> {
+        match self {
+            Self::Host(value) => Some(value),
+            Self::Resident(_) => None,
+        }
+    }
+    pub(super) fn shape(&self, host: fn(&T) -> &[usize]) -> &[usize] {
+        match self {
+            Self::Host(value) => host(value),
+            Self::Resident(handle) => &handle.shape,
+        }
+    }
+    pub(super) async fn materialize(
+        self,
+        name: &'static str,
+        convert: impl FnOnce(Tensor) -> BuiltinResult<T>,
+    ) -> BuiltinResult<T> {
+        match self {
+            Self::Host(value) => Ok(value),
+            Self::Resident(handle) => {
+                let value = gpu_helpers::gather_tensor_async(&handle)
+                    .await
+                    .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?;
+                convert(value)
+            }
+        }
+    }
+}
+
+impl AdmittedBuffer<BitBuffer> {
+    pub(super) fn bit_width(&self, assumed: Option<IntegerClass>) -> u32 {
+        match self {
+            Self::Host(value) => value.compute_class,
+            Self::Resident(handle) => {
+                runmat_accelerate_api::handle_integer_class(handle).or(assumed)
+            }
+        }
+        .map_or(64, IntegerClass::bit_width)
+    }
+}
+
+fn admit_resident(
+    name: &'static str,
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+) -> BuiltinResult<()> {
+    let element_type = gpu_helpers::expected_handle_numeric_element_type(handle)
+        .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))?;
+    if !gpu_helpers::numeric_descriptor_matches(
+        handle,
+        element_type,
+        runmat_accelerate_api::GpuTensorStorage::Real,
+    ) {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "resident bitwise operands require explicit real storage",
+        ));
+    }
+    if gpu_helpers::exact_provider_for_handle(handle).is_none() {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "no provider owns the resident operand",
+        ));
+    }
+    Ok(())
+}
+
 pub(super) struct BitBuffer {
     pub(super) data: Vec<u64>,
     pub(super) shape: Vec<usize>,
@@ -50,6 +124,23 @@ pub(super) async fn bit_buffer_from(
     value: Value,
     assumed: Option<IntegerClass>,
 ) -> BuiltinResult<BitBuffer> {
+    admit_bit_buffer(name, value, assumed)?
+        .materialize(name, |value| tensor_to_bit_buffer(name, value, assumed))
+        .await
+}
+
+pub(super) fn admit_bit_buffer(
+    name: &'static str,
+    value: Value,
+    assumed: Option<IntegerClass>,
+) -> BuiltinResult<AdmittedBuffer<BitBuffer>> {
+    if let Value::GpuTensor(handle) = value {
+        admit_resident(name, &handle)?;
+        if let Some(class) = runmat_accelerate_api::handle_integer_class(&handle) {
+            require_assumed_class(name, class, assumed)?;
+        }
+        return Ok(AdmittedBuffer::Resident(handle));
+    }
     match value {
         Value::Num(value) => Ok(BitBuffer {
             data: vec![double_to_bits(name, value, assumed)?],
@@ -80,21 +171,26 @@ pub(super) async fn bit_buffer_from(
             output_class: None,
             is_scalar: false,
         }),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| error_with_detail(name, &ERROR_INVALID_INPUT, err))?;
-            tensor_to_bit_buffer(name, tensor, assumed)
-        }
         other => Err(error_with_detail(
             name,
             &ERROR_INVALID_INPUT,
             format!("{name}: unsupported input {other:?}"),
         )),
     }
+    .map(AdmittedBuffer::Host)
 }
 
 pub(super) async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer> {
+    admit_shift_buffer(value)?
+        .materialize(BITSHIFT_NAME, tensor_to_shift_buffer)
+        .await
+}
+
+pub(super) fn admit_shift_buffer(value: Value) -> BuiltinResult<AdmittedBuffer<ShiftBuffer>> {
+    if let Value::GpuTensor(handle) = value {
+        admit_resident(BITSHIFT_NAME, &handle)?;
+        return Ok(AdmittedBuffer::Resident(handle));
+    }
     match value {
         Value::Bool(value) => Ok(ShiftBuffer {
             data: vec![i128::from(value)],
@@ -113,21 +209,28 @@ pub(super) async fn shift_buffer_from(value: Value) -> BuiltinResult<ShiftBuffer
             data: array.data.into_iter().map(|v| i128::from(v != 0)).collect(),
             shape: array.shape,
         }),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| error_with_detail(BITSHIFT_NAME, &ERROR_INVALID_INPUT, err))?;
-            tensor_to_shift_buffer(tensor)
-        }
         other => Err(error_with_detail(
             BITSHIFT_NAME,
             &ERROR_INVALID_INPUT,
             format!("bitshift: unsupported shift input {other:?}"),
         )),
     }
+    .map(AdmittedBuffer::Host)
 }
 
 pub(super) async fn bit_value_buffer_from(value: Value) -> BuiltinResult<BitValueBuffer> {
+    admit_bit_value_buffer(value)?
+        .materialize(BITSET_NAME, tensor_to_bit_value_buffer)
+        .await
+}
+
+pub(super) fn admit_bit_value_buffer(
+    value: Value,
+) -> BuiltinResult<AdmittedBuffer<BitValueBuffer>> {
+    if let Value::GpuTensor(handle) = value {
+        admit_resident(BITSET_NAME, &handle)?;
+        return Ok(AdmittedBuffer::Resident(handle));
+    }
     match value {
         Value::Bool(value) => Ok(BitValueBuffer {
             data: vec![value],
@@ -146,18 +249,13 @@ pub(super) async fn bit_value_buffer_from(value: Value) -> BuiltinResult<BitValu
             data: array.data.into_iter().map(|value| value != 0).collect(),
             shape: array.shape,
         }),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(|err| error_with_detail(BITSET_NAME, &ERROR_INVALID_INPUT, err))?;
-            tensor_to_bit_value_buffer(tensor)
-        }
         other => Err(error_with_detail(
             BITSET_NAME,
             &ERROR_INVALID_INPUT,
             format!("bitset: unsupported bit value {other:?}"),
         )),
     }
+    .map(AdmittedBuffer::Host)
 }
 
 pub(super) fn tensor_to_bit_value_buffer(tensor: Tensor) -> BuiltinResult<BitValueBuffer> {

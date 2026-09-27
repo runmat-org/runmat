@@ -5,18 +5,36 @@ use runmat_value::{IntegerStorage, Tensor, Value};
 
 use super::{gpu_helpers, tensor};
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) fn restore_to_source_provider(
     value: Value,
     source: Option<&GpuTensorHandle>,
 ) -> Result<Value, String> {
+    let protected = source.into_iter().collect::<Vec<_>>();
+    restore_to_source_provider_protecting(value, source, &protected)
+}
+
+/// The domain supplies every borrowed resident operand, including controls.
+/// A rejected upload must never free an alias of any of those inputs.
+pub(crate) fn restore_to_source_provider_protecting(
+    value: Value,
+    source: Option<&GpuTensorHandle>,
+    protected: &[&GpuTensorHandle],
+) -> Result<Value, String> {
     let Some(source) = source else {
         return Ok(value);
     };
-    let provider = runmat_accelerate_api::provider_for_handle(source)
-        .or_else(runmat_accelerate_api::provider)
+    let provider = gpu_helpers::exact_provider_for_handle(source)
         .ok_or_else(|| "no acceleration provider is registered for resident output".to_string())?;
     let (tensor, logical) = value_as_tensor(value)?;
-    let handle = gpu_helpers::upload_tensor(provider, &tensor)?;
+    let mut borrowed = protected.to_vec();
+    borrowed.push(source);
+    let mut handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, &borrowed)?;
+    if let Some(provenance) = runmat_accelerate_api::handle_provenance(source) {
+        runmat_accelerate_api::set_handle_provenance(&mut handle, provenance);
+    }
     Ok(if logical {
         gpu_helpers::logical_gpu_value(handle)
     } else {

@@ -7,7 +7,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Bitwise complement with the input class and shape.",
+    description: "Bitwise complement preserving native integer class and array shape.",
 }];
 const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "A",
@@ -76,6 +76,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "`bitcmp(A)` complements every bit of each integer element and preserves class and shape. For `double` input, the default interpretation uses 64 unsigned bits.",
             "`bitcmp(A, assumedtype)` uses the named signed or unsigned integer width for integer-valued `double` input. Native integer input already supplies its class and must agree with an explicit assumed type.",
+            "Dense single and logical inputs produce double results. Real sparse input materializes dense output when implicit zeros become nonzero; complex sparse input is rejected. The call accepts zero or one requested output; excess outputs fail before provider access.",
             "Bit positions beyond the selected width do not participate. Unsupported, fractional, out-of-range, complex, or incompatible inputs produce structured errors.",
         ],
     },

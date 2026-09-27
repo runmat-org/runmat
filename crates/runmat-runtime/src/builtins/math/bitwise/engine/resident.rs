@@ -1,5 +1,14 @@
 use super::*;
 
+pub(super) fn borrowed_gpu_inputs(args: &[Value]) -> Vec<runmat_accelerate_api::GpuTensorHandle> {
+    args.iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 pub(super) fn is_single_bitwise_value(value: &Value) -> bool {
     match value {
         Value::Tensor(tensor) => tensor.numeric_dtype() == NumericDType::F32,
@@ -54,7 +63,11 @@ pub(super) fn restore_binary_bitwise_gpu_result(
     name: &'static str,
     value: Value,
     source: Option<&runmat_accelerate_api::GpuTensorHandle>,
+    protected: &[runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    crate::builtins::common::resident_output::restore_to_source_provider(value, source)
-        .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))
+    let protected = protected.iter().collect::<Vec<_>>();
+    crate::builtins::common::resident_output::restore_to_source_provider_protecting(
+        value, source, &protected,
+    )
+    .map_err(|error| error_with_detail(name, &ERROR_INVALID_INPUT, error))
 }

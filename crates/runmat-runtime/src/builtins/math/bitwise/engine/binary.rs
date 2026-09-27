@@ -8,6 +8,7 @@ pub(crate) async fn evaluate_binary_bitwise(
     gpu_undocumented_input_extension: &BuiltinExtensionDescriptor,
     gpu_assumed_type_extension: &BuiltinExtensionDescriptor,
 ) -> BuiltinResult<Value> {
+    let protected = borrowed_gpu_inputs(&args);
     enforce_public_binary_bitwise_compatibility(
         name,
         &args,
@@ -28,7 +29,7 @@ pub(crate) async fn evaluate_binary_bitwise(
     } else {
         result
     };
-    restore_binary_bitwise_gpu_result(name, result, output_source.as_ref())
+    restore_binary_bitwise_gpu_result(name, result, output_source.as_ref(), &protected)
 }
 
 fn enforce_public_binary_bitwise_compatibility(

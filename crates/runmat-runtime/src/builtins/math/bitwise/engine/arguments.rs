@@ -113,6 +113,14 @@ pub(super) fn is_text_value(value: &Value) -> bool {
 }
 
 pub(super) fn parse_assumed_type(name: &'static str, value: Value) -> BuiltinResult<IntegerClass> {
+    if matches!(&value, Value::CharArray(chars) if chars.rows != 1 || crate::builtins::common::shape::effective_rank(&chars.shape) > 2)
+    {
+        return Err(error_with_detail(
+            name,
+            &ERROR_INVALID_INPUT,
+            "assumedtype must be a character row or scalar string",
+        ));
+    }
     let Some(keyword) = keyword_of(&value) else {
         return Err(error_with_detail(
             name,

@@ -8,5 +8,10 @@ use runmat_value::Value;
     builtin_path = "crate::builtins::math::bitwise::bitset"
 )]
 pub(crate) async fn bitset_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::BITSET_DESCRIPTOR,
+        &runmat_builtins::BITWISE_ERROR_INVALID_INPUT,
+        "bitset",
+    )?;
     super::engine::evaluate_bitset(args).await
 }

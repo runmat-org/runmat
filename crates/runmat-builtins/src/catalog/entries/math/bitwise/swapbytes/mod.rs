@@ -40,7 +40,7 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
 pub const SWAPBYTES_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.BITWISE.INVALID_INPUT",
     identifier: Some("RunMat:bitwise:InvalidInput"),
-    when: "The input is not a real numeric scalar or dense numeric array, or provider gathering fails.",
+    when: "The input is not a real numeric scalar or dense numeric array, more than one output is requested, or provider gathering fails.",
     message: "bitwise operation: invalid input",
 };
 const ERRORS: [BuiltinErrorDescriptor; 1] = [SWAPBYTES_ERROR_INVALID_INPUT];

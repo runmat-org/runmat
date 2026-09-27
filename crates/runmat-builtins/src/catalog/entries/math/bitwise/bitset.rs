@@ -7,7 +7,7 @@ const OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Updated values in the class of A.",
+    description: "Updated values preserving native integer class.",
 }];
 const A: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "A",
@@ -110,7 +110,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "`C = bitset(A, bit)` sets the selected one-based bit in every element of `A`. `C = bitset(A, bit, V)` sets it when `V` is nonzero and clears it when `V` is zero.",
-            "A, bit, and V use scalar expansion or exactly matching nonscalar sizes. The result retains A's class. All eight fixed-width integer classes are accepted for data and controls.",
+            "A, bit, and V use scalar expansion or exactly matching nonscalar sizes. The result preserves native integer class; dense single and logical data produce double results. All eight fixed-width integer classes are accepted for data and controls. Complex sparse input and requests for more than one output are rejected.",
             "An optional `assumedtype` selects the signed or unsigned width for integer-valued `double` input. Positions must be finite positive integers within that width; V must be finite.",
         ],
     },
