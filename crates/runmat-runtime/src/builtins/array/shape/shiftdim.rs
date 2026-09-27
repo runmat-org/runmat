@@ -431,7 +431,7 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
         Value::CharArray(array) => Ok(array.shape.clone()),
         Value::Cell(array) => Ok(array.shape.clone()),
         Value::StructArray(array) => Ok(array.shape().to_vec()),
-        Value::GpuTensor(handle) => Ok(handle.shape.clone()),
+        Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)
@@ -570,7 +570,7 @@ fn reshape_char(array: CharArray, shape: &[usize]) -> crate::BuiltinResult<CharA
         .map_err(|error| shiftdim_error(&ERROR_UNSUPPORTED_INPUT, error))
 }
 
-fn wrap_gpu(handle: GpuTensorHandle, complex: bool, logical: bool) -> Value {
+fn wrap_gpu(handle: GpuTensorHandle, complex: bool, logical: bool) -> crate::BuiltinResult<Value> {
     if complex {
         gpu_helpers::complex_gpu_value(handle)
     } else if logical {
@@ -610,33 +610,15 @@ async fn permute_gpu(handle: GpuTensorHandle, order: &[usize]) -> crate::Builtin
             format!("shiftdim: GPU permutation failed: {error}"),
         )
     })?;
-    Ok(wrap_gpu(output, complex, logical))
+    wrap_gpu(output, complex, logical)
 }
 
 fn reshape_gpu(handle: GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
     let complex =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
     let logical = runmat_accelerate_api::handle_is_logical(&handle);
-    if complex && runmat_accelerate_api::handle_integer_type(&handle).is_some() {
-        let mut output = handle;
-        output.shape = shape.to_vec();
-        return Ok(wrap_gpu(output, true, false));
-    }
-    let output = if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
-    {
-        provider.reshape(&handle, shape).map_err(|error| {
-            shiftdim_error(
-                &ERROR_UNSUPPORTED_INPUT,
-                format!("shiftdim: GPU reshape failed: {error}"),
-            )
-        })?
-    } else {
-        let mut handle = handle;
-        handle.shape = shape.to_vec();
-        handle
-    };
-    Ok(wrap_gpu(output, complex, logical))
+    let output = super::gpu_reshape::reshape(handle, shape, NAME)?;
+    wrap_gpu(output, complex, logical)
 }
 
 #[cfg(test)]
@@ -966,7 +948,7 @@ mod tests {
         else {
             panic!("expected GPU tensor")
         };
-        assert_eq!(output.shape, vec![2, 3]);
+        assert_eq!(output.shape(), vec![2, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -980,7 +962,7 @@ mod tests {
         else {
             panic!("expected GPU tensor")
         };
-        assert_eq!(output.shape, vec![1, 1, 2, 3]);
+        assert_eq!(output.shape(), vec![1, 1, 2, 3]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -1004,7 +986,7 @@ mod tests {
         else {
             panic!("expected GPU tensor")
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&output),
             GpuTensorStorage::ComplexInterleaved
@@ -1041,7 +1023,7 @@ mod tests {
         else {
             panic!("expected resident paired output")
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&output),
             GpuTensorStorage::ComplexInterleaved
@@ -1058,8 +1040,8 @@ mod tests {
             panic!("expected paired complex tensor")
         };
         assert_eq!(gathered.integer_storage(), tensor.integer_storage());
-        provider.free(&handle).expect("free input");
-        provider.free(&output).expect("free output");
+        drop(handle);
+        drop(output);
     }
 
     #[cfg(feature = "wgpu")]
@@ -1078,7 +1060,7 @@ mod tests {
         else {
             panic!("expected GPU tensor")
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::I32)
@@ -1088,7 +1070,7 @@ mod tests {
         else {
             panic!("expected GPU tensor")
         };
-        assert_eq!(output.shape, vec![1, 2, 2]);
+        assert_eq!(output.shape(), vec![1, 2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&output),
             Some(runmat_accelerate_api::IntegerElementType::I32)
@@ -1119,7 +1101,7 @@ mod tests {
         else {
             panic!("expected resident paired output")
         };
-        assert_eq!(output.shape, vec![2, 2]);
+        assert_eq!(output.shape(), vec![2, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&output),
             GpuTensorStorage::ComplexInterleaved
@@ -1136,7 +1118,7 @@ mod tests {
             panic!("expected paired tensor")
         };
         assert_eq!(gathered.integer_storage(), tensor.integer_storage());
-        provider.free(&handle).expect("free input");
-        provider.free(&output).expect("free output");
+        drop(handle);
+        drop(output);
     }
 }

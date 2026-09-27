@@ -7,6 +7,7 @@ pub(crate) mod diag;
 pub(crate) mod flip;
 pub(crate) mod fliplr;
 pub(crate) mod flipud;
+mod gpu_reshape;
 pub(crate) mod horzcat;
 pub(crate) mod ipermute;
 pub(crate) mod kron;

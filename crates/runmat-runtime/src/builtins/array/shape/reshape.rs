@@ -434,31 +434,8 @@ fn reshape_gpu_tensor(
     handle: runmat_accelerate_api::GpuTensorHandle,
     dims: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    let complex_storage = runmat_accelerate_api::handle_storage(&handle)
-        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved;
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(&handle).or_else(runmat_accelerate_api::provider)
-    {
-        let reshaped = provider
-            .reshape(&handle, dims)
-            .map_err(|e| reshape_error(format!("reshape: {e}")))?;
-        if complex_storage
-            || runmat_accelerate_api::handle_storage(&reshaped)
-                == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        {
-            gpu_helpers::complex_gpu_value(reshaped)
-        } else {
-            gpu_helpers::resident_gpu_value(reshaped)
-        }
-    } else {
-        let mut updated = handle;
-        updated.shape = dims.to_vec();
-        if complex_storage {
-            gpu_helpers::complex_gpu_value(updated)
-        } else {
-            Ok(Value::GpuTensor(updated))
-        }
-    }
+    let output = super::gpu_reshape::reshape(handle, dims, "reshape")?;
+    gpu_helpers::resident_gpu_value(output)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -886,8 +863,8 @@ pub(crate) mod tests {
             .expect("reshape");
             match result {
                 Value::GpuTensor(out) => {
-                    assert_eq!(out.shape, vec![2, 6]);
-                    assert_eq!(out.buffer_id, handle.buffer_id);
+                    assert_eq!(out.shape(), &[2, 6]);
+                    assert_eq!(out.allocation_identity(), handle.allocation_identity());
                 }
                 other => panic!("expected gpu tensor, got {other:?}"),
             }
@@ -918,8 +895,8 @@ pub(crate) mod tests {
             let Value::GpuTensor(reshaped) = result else {
                 panic!("expected gpu tensor");
             };
-            assert_eq!(reshaped.buffer_id, handle.buffer_id);
-            assert_eq!(reshaped.shape, vec![3, 2]);
+            assert_eq!(reshaped.allocation_identity(), handle.allocation_identity());
+            assert_eq!(reshaped.shape(), vec![3, 2]);
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&reshaped),
                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -959,11 +936,11 @@ pub(crate) mod tests {
         let Value::GpuTensor(reshaped) = result else {
             panic!("expected gpu tensor");
         };
-        assert_eq!(reshaped.shape, vec![2, 6]);
+        assert_eq!(reshaped.shape(), vec![2, 6]);
         let host = test_support::gather(Value::GpuTensor(reshaped.clone())).expect("gather");
         assert_eq!(host.shape, vec![2, 6]);
         assert_eq!(host.materialize_f64(), tensor.materialize_f64());
-        provider.free(&reshaped).expect("free reshaped tensor");
+        drop(reshaped);
     }
 
     #[test]
@@ -997,8 +974,8 @@ pub(crate) mod tests {
         let Value::GpuTensor(reshaped) = result else {
             panic!("expected gpu tensor");
         };
-        assert_eq!(reshaped.buffer_id, handle.buffer_id);
-        assert_eq!(reshaped.shape, vec![3, 2]);
+        assert_eq!(reshaped.allocation_identity(), handle.allocation_identity());
+        assert_eq!(reshaped.shape(), vec![3, 2]);
         assert_eq!(
             runmat_accelerate_api::handle_storage(&reshaped),
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
@@ -1009,7 +986,7 @@ pub(crate) mod tests {
         .expect("gather complex reshape");
         assert_eq!(host.shape, vec![3, 2]);
         assert_eq!(host.materialize_f64(), complex.materialize_f64());
-        provider.free(&reshaped).expect("free complex reshape");
+        drop(reshaped);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

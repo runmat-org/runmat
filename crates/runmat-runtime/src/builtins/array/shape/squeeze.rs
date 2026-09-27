@@ -289,27 +289,8 @@ fn squeeze_cell_array(
 }
 
 async fn squeeze_gpu(handle: GpuTensorHandle) -> crate::BuiltinResult<Value> {
-    let shape_source = if handle.shape.is_empty() {
-        let gathered = gpu_helpers::gather_tensor_async(&handle).await?;
-        gathered.shape
-    } else {
-        handle.shape.clone()
-    };
-
-    let squeezed = squeeze_shape(&shape_source);
-    if squeezed == handle.shape {
-        return Ok(Value::GpuTensor(handle));
-    }
-
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Ok(updated) = provider.reshape(&handle, &squeezed) {
-            return Ok(Value::GpuTensor(updated));
-        }
-    }
-
-    let mut updated = handle;
-    updated.shape = squeezed;
-    Ok(Value::GpuTensor(updated))
+    let squeezed = squeeze_shape(handle.shape());
+    super::gpu_reshape::reshape(handle, &squeezed, "squeeze").map(Value::GpuTensor)
 }
 
 fn squeeze_shape(shape: &[usize]) -> Vec<usize> {
@@ -515,7 +496,7 @@ pub(crate) mod tests {
             Value::GpuTensor(h) => h,
             other => panic!("expected gpu tensor, got {other:?}"),
         };
-        assert_eq!(gpu_handle.shape, vec![3, 4]);
+        assert_eq!(gpu_handle.shape(), vec![3, 4]);
 
         let downloaded = test_support::gather(Value::GpuTensor(gpu_handle.clone()))
             .expect("gather squeezed tensor");
@@ -524,6 +505,6 @@ pub(crate) mod tests {
             downloaded.materialize_f64().as_slice(),
             tensor.materialize_f64().as_slice()
         );
-        provider.free(&gpu_handle).expect("free squeezed tensor");
+        drop(gpu_handle);
     }
 }
