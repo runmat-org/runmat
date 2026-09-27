@@ -299,9 +299,13 @@ fn public_extrema_dispatch_gathers_only_after_typed_unsupported() {
             let calls = provider.calls.load(Ordering::SeqCst);
             let downloads = provider.downloads.load(Ordering::SeqCst);
             let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
+            // Scalar max first tries fill_like, then scalar_max when the
+            // provider explicitly rejects the fill capability. Operational
+            // failures still stop at the first hook (covered separately).
+            let expected_calls = if name == "max" && form >= 2 { 2 } else { 1 };
             assert_eq!(
                 provider.calls.load(Ordering::SeqCst),
-                calls + 1,
+                calls + expected_calls,
                 "{name} form {form}"
             );
             assert_eq!(
