@@ -1,6 +1,7 @@
 use super::double_error_with_detail;
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::BuiltinResult;
+#[cfg(test)]
 use log::trace;
 use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_builtins::{
@@ -11,6 +12,7 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 pub(super) async fn convert_to_gpu(
     value: Value,
     prototype: &GpuTensorHandle,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let provider = resolved_actual_double_owner(prototype).ok_or_else(|| {
         double_error_with_detail(
@@ -41,32 +43,34 @@ pub(super) async fn convert_to_gpu(
         other => other,
     };
     match value {
-        Value::Tensor(tensor) => upload_double_like_real(provider, prototype, &tensor),
+        Value::Tensor(tensor) => upload_double_like_real(provider, prototype, &tensor, protected),
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
                 .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
-            upload_double_like_real(provider, prototype, &tensor)
+            upload_double_like_real(provider, prototype, &tensor, protected)
         }
         Value::Int(i) => {
             let tensor = Tensor::new(vec![i.to_f64()], vec![1, 1])
                 .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
-            upload_double_like_real(provider, prototype, &tensor)
+            upload_double_like_real(provider, prototype, &tensor, protected)
         }
         Value::Bool(b) => {
             let tensor = Tensor::new(vec![if b { 1.0 } else { 0.0 }], vec![1, 1])
                 .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
-            upload_double_like_real(provider, prototype, &tensor)
+            upload_double_like_real(provider, prototype, &tensor, protected)
         }
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(&logical)?;
-            upload_double_like_real(provider, prototype, &tensor)
+            upload_double_like_real(provider, prototype, &tensor, protected)
         }
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|e| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, e))?;
-            upload_double_like_complex(provider, prototype, &tensor)
+            upload_double_like_complex(provider, prototype, &tensor, protected)
         }
-        Value::ComplexTensor(tensor) => upload_double_like_complex(provider, prototype, &tensor),
+        Value::ComplexTensor(tensor) => {
+            upload_double_like_complex(provider, prototype, &tensor, protected)
+        }
         other => Err(double_error_with_detail(
             &DOUBLE_ERROR_INVALID_INPUT,
             format!("unsupported result type for GPU output via 'like' ({other:?})"),
@@ -78,13 +82,14 @@ fn upload_double_like_real(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     prototype: &GpuTensorHandle,
     tensor: &Tensor,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_tensor(provider, tensor)
+    let handle = gpu_helpers::upload_tensor_protecting(provider, tensor, protected)
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?;
     if valid_double_like_output(&handle, prototype, provider, &tensor.shape, false) {
         Ok(Value::GpuTensor(handle))
     } else {
-        free_rejected_double_handle(&handle, &[prototype]);
+        gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
         Err(double_error_with_detail(
             &DOUBLE_ERROR_INTERNAL,
             "provider returned malformed GPU output for 'like'",
@@ -96,13 +101,14 @@ fn upload_double_like_complex(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     prototype: &GpuTensorHandle,
     tensor: &ComplexTensor,
+    protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let handle = gpu_helpers::upload_complex_tensor(provider, tensor)
+    let handle = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, protected)
         .map_err(|error| double_error_with_detail(&DOUBLE_ERROR_INTERNAL, error))?;
     if valid_double_like_output(&handle, prototype, provider, &tensor.shape, true) {
         Ok(gpu_helpers::complex_gpu_value(handle))
     } else {
-        free_rejected_double_handle(&handle, &[prototype]);
+        gpu_helpers::free_rejected_provider_output(&handle, protected, provider);
         Err(double_error_with_detail(
             &DOUBLE_ERROR_INTERNAL,
             "provider returned malformed complex GPU output for 'like'",
@@ -126,7 +132,11 @@ pub(super) fn valid_double_like_output(
         && output.device_id == prototype.device_id
         && !gpu_handles_alias(output, prototype)
         && runmat_accelerate_api::handle_precision(output) == Some(ProviderPrecision::F64)
-        && runmat_accelerate_api::handle_storage(output) == expected_storage
+        && gpu_helpers::numeric_descriptor_matches(
+            output,
+            runmat_accelerate_api::NumericElementType::F64,
+            expected_storage,
+        )
         && runmat_accelerate_api::handle_integer_type(output).is_none()
         && !runmat_accelerate_api::handle_is_logical(output)
         && resolved_actual_double_owner(output).is_some_and(|owner| std::ptr::eq(owner, provider))
@@ -143,6 +153,7 @@ pub(super) fn gpu_handles_alias(lhs: &GpuTensorHandle, rhs: &GpuTensorHandle) ->
     lhs.device_id == rhs.device_id && lhs.buffer_id == rhs.buffer_id
 }
 
+#[cfg(test)]
 pub(super) fn free_rejected_double_handle(
     handle: &GpuTensorHandle,
     protected: &[&GpuTensorHandle],

@@ -14,12 +14,15 @@ pub(super) enum HookBehavior {
     Failure,
     Malformed,
     PendingMetadataMutation,
+    PendingTemplateDownload,
 }
 
 pub(super) struct ConversionHookProvider {
     inner: InProcessProvider,
     behavior: HookBehavior,
     malformed_output: Mutex<Option<GpuTensorHandle>>,
+    created_output: Mutex<Option<GpuTensorHandle>>,
+    freed: Mutex<Vec<GpuTensorHandle>>,
 }
 
 impl ConversionHookProvider {
@@ -28,6 +31,8 @@ impl ConversionHookProvider {
             inner: InProcessProvider::new(),
             behavior,
             malformed_output: Mutex::new(None),
+            created_output: Mutex::new(None),
+            freed: Mutex::new(Vec::new()),
         }
     }
 
@@ -40,6 +45,15 @@ impl ConversionHookProvider {
             match self.behavior {
                 HookBehavior::Success if single => self.inner.unary_single(input).await,
                 HookBehavior::Success => self.inner.unary_double(input).await,
+                HookBehavior::PendingTemplateDownload => {
+                    let output = if single {
+                        self.inner.unary_single(input).await?
+                    } else {
+                        self.inner.unary_double(input).await?
+                    };
+                    *self.created_output.lock().unwrap() = Some(output.clone());
+                    Ok(output)
+                }
                 HookBehavior::Unsupported => {
                     Err(runmat_accelerate_api::unsupported_provider_operation(
                         "conversion hook unavailable",
@@ -74,6 +88,23 @@ impl ConversionHookProvider {
             .take()
             .expect("provider recorded malformed output")
     }
+
+    pub(super) fn created_output(&self) -> GpuTensorHandle {
+        self.created_output
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .clone()
+    }
+
+    pub(super) fn was_freed(&self, handle: &GpuTensorHandle) -> bool {
+        self.freed
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|freed| crate::builtins::common::gpu_helpers::same_gpu_handle(freed, handle))
+    }
 }
 
 impl AccelProvider for ConversionHookProvider {
@@ -101,6 +132,9 @@ impl AccelProvider for ConversionHookProvider {
         &'a self,
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
+        if matches!(self.behavior, HookBehavior::PendingTemplateDownload) {
+            return Box::pin(futures::future::pending());
+        }
         self.inner.download_numeric(handle)
     }
 
@@ -120,6 +154,7 @@ impl AccelProvider for ConversionHookProvider {
     }
 
     fn free(&self, handle: &GpuTensorHandle) -> anyhow::Result<()> {
+        self.freed.lock().unwrap().push(handle.clone());
         self.inner.free(handle)
     }
 

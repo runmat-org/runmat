@@ -8,7 +8,12 @@ use runmat_accelerate_api::{
 use runmat_builtins::SINGLE_ERROR_INTERNAL;
 use runmat_value::Value;
 
-pub(super) async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
+pub(super) async fn single_from_gpu(
+    handle: GpuTensorHandle,
+    borrowed: &[&GpuTensorHandle],
+) -> BuiltinResult<Value> {
+    let mut protected = borrowed.to_vec();
+    protected.push(&handle);
     let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
         single_error_with_detail(&SINGLE_ERROR_INTERNAL, "GPU provider unavailable for input")
     })?;
@@ -21,6 +26,12 @@ pub(super) async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
         })?;
 
     let input_metadata = gpu_helpers::snapshot_handle_metadata(&handle);
+    if handle.descriptor.storage.is_none() {
+        return Err(single_error_with_detail(
+            &runmat_builtins::SINGLE_ERROR_INVALID_INPUT,
+            "GPU input requires explicit storage",
+        ));
+    }
     let _metadata_guard = gpu_helpers::HandleMetadataRestoreGuard::new(&handle);
     let input_provenance = runmat_accelerate_api::handle_provenance(&handle)
         .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
@@ -31,12 +42,17 @@ pub(super) async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
         let direct = provider.unary_single(&handle).await;
         gpu_helpers::restore_handle_metadata(&handle, &input_metadata);
         match direct {
-            Ok(mut output) if valid_output(&output, &handle, provider) => {
+            Ok(mut output)
+                if valid_output(&output, &handle, provider)
+                    && !protected
+                        .iter()
+                        .any(|input| gpu_helpers::same_gpu_handle(&output, input)) =>
+            {
                 runmat_accelerate_api::set_handle_provenance(&mut output, input_provenance);
                 return Ok(gpu_helpers::resident_gpu_value(output));
             }
             Ok(output) => {
-                gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+                gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
                 return Err(single_error_with_detail(
                     &SINGLE_ERROR_INTERNAL,
                     "provider unary_single returned malformed output",
@@ -60,11 +76,11 @@ pub(super) async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
     let converted = single_from_gathered(gathered)?;
     let upload = match &converted {
         Value::Tensor(tensor) => {
-            gpu_helpers::upload_tensor_protecting(provider, tensor, &[&handle])
+            gpu_helpers::upload_tensor_protecting(provider, tensor, &protected)
                 .map_err(|error| single_error_with_detail(&SINGLE_ERROR_INTERNAL, error))
         }
         Value::ComplexTensor(tensor) => {
-            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[&handle])
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &protected)
         }
         other => {
             return Err(single_error_with_detail(
@@ -75,7 +91,7 @@ pub(super) async fn single_from_gpu(handle: GpuTensorHandle) -> BuiltinResult<Va
     };
     let mut output = upload?;
     if !valid_output(&output, &handle, provider) {
-        gpu_helpers::free_rejected_provider_output(&output, &[&handle], provider);
+        gpu_helpers::free_rejected_provider_output(&output, &protected, provider);
         return Err(single_error_with_detail(
             &SINGLE_ERROR_INTERNAL,
             "provider upload returned malformed single fallback output",

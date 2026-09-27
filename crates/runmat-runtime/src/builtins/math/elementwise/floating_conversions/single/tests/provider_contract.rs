@@ -13,7 +13,7 @@ fn abandoned_direct_hook_restores_borrowed_metadata() {
     with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
         let input = upload_input(provider);
         let original = gpu_helpers::snapshot_handle_metadata(&input);
-        let mut call = Box::pin(super::super::provider::single_from_gpu(input.clone()));
+        let mut call = Box::pin(super::super::provider::single_from_gpu(input.clone(), &[]));
         let mut context = Context::from_waker(futures::task::noop_waker_ref());
         assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
         assert!(runmat_accelerate_api::handle_is_logical(&input));
@@ -31,6 +31,51 @@ fn upload_input(provider: &dyn AccelProvider) -> runmat_accelerate_api::GpuTenso
             shape: &[2, 1],
         })
         .expect("input upload")
+}
+
+#[test]
+fn dropping_template_download_releases_only_the_owned_conversion_result() {
+    use std::future::Future;
+    use std::task::{Context, Poll};
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    with_conversion_hook_provider(HookBehavior::PendingTemplateDownload, |provider| {
+        let input = upload_input(provider);
+        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let mut call = Box::pin(super::super::single_builtin(
+            Value::GpuTensor(input.clone()),
+            vec![Value::from("like"), Value::Num(0.0)],
+        ));
+        let mut context = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(matches!(call.as_mut().poll(&mut context), Poll::Pending));
+        let intermediate = provider.created_output();
+        assert!(!provider.was_freed(&intermediate));
+        drop(call);
+        assert!(provider.was_freed(&intermediate));
+        assert!(!provider.was_freed(&input));
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
+        assert!(block_on(provider.download(&input)).is_ok());
+        provider.free(&input).unwrap();
+    });
+}
+
+#[test]
+fn invalid_like_prototype_rejects_before_a_pending_conversion_hook() {
+    let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+    with_conversion_hook_provider(HookBehavior::PendingMetadataMutation, |provider| {
+        let input = upload_input(provider);
+        let before = gpu_helpers::snapshot_handle_metadata(&input);
+        let error = single_builtin(
+            Value::GpuTensor(input.clone()),
+            vec![Value::from("like"), Value::from("not a prototype")],
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.identifier(),
+            runmat_builtins::SINGLE_ERROR_INVALID_INPUT.identifier
+        );
+        assert_eq!(gpu_helpers::snapshot_handle_metadata(&input), before);
+        provider.free(&input).unwrap();
+    });
 }
 
 #[test]

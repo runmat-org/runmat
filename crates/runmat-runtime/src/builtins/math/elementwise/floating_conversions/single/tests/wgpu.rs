@@ -20,7 +20,7 @@ fn single_wgpu_matches_cpu() {
         shape: &tensor.shape,
     };
     let handle = provider.upload(&view).expect("upload");
-    let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
+    let gpu_value = block_on(single_from_gpu(handle, &[])).expect("gpu single");
     let gathered = test_support::gather(gpu_value).expect("gather");
     assert_eq!(gathered.shape, cpu.shape);
     assert_eq!(gathered.materialize_f64(), cpu.materialize_f64());
@@ -43,7 +43,7 @@ fn single_wgpu_large_ones_all_ones() {
         shape: &tensor.shape,
     };
     let handle = provider.upload(&view).expect("upload");
-    let gpu_value = block_on(single_from_gpu(handle)).expect("gpu single");
+    let gpu_value = block_on(single_from_gpu(handle, &[])).expect("gpu single");
     let gathered = test_support::gather(gpu_value).expect("gather");
     assert_eq!(gathered.shape, tensor.shape);
     let sum: f64 = gathered.materialize_f64().iter().copied().sum();
