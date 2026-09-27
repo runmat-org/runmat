@@ -1217,21 +1217,21 @@ impl FindResult {
                     ComplexTensor::new(values.clone(), vec![values.len(), 1]).map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(complex_tensor_to_value(tensor, output_provider))
+                complex_tensor_to_value(tensor, output_provider)
             }
             FindValues::ComplexF32(values) => {
                 let tensor = ComplexTensor::from_f32(values.clone(), vec![values.len(), 1])
                     .map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(complex_tensor_to_value(tensor, output_provider))
+                complex_tensor_to_value(tensor, output_provider)
             }
             FindValues::IntegerComplex(storage) => {
                 let tensor = ComplexTensor::new_integer(storage.clone(), vec![storage.len(), 1])
                     .map_err(|e| {
                         find_error_with_message(format!("find: {e}"), &FIND_ERROR_INTERNAL)
                     })?;
-                Ok(complex_tensor_to_value(tensor, output_provider))
+                complex_tensor_to_value(tensor, output_provider)
             }
         }
     }
@@ -1361,13 +1361,13 @@ fn tensor_to_value(
 fn complex_tensor_to_value(
     tensor: ComplexTensor,
     output_provider: Option<&'static dyn runmat_accelerate_api::AccelProvider>,
-) -> Value {
+) -> BuiltinResult<Value> {
     if let Some(provider) = output_provider {
         if let Ok(handle) = gpu_helpers::upload_complex_tensor(provider, &tensor) {
             return gpu_helpers::complex_gpu_value(handle);
         }
     }
-    complex_tensor_into_value(tensor)
+    Ok(complex_tensor_into_value(tensor))
 }
 
 #[cfg(test)]

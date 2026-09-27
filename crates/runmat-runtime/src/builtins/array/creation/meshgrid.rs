@@ -1452,7 +1452,12 @@ fn to_gpu_tensor_value(tensor: Tensor, device_id: u32) -> crate::BuiltinResult<V
         .ok_or_else(|| builtin_error("meshgrid: no acceleration provider owns the GPU output"))?;
     gpu_helpers::upload_tensor(provider, &tensor)
         .map(Value::GpuTensor)
-        .map_err(|error| builtin_error(format!("meshgrid: GPU output upload failed: {error}")))
+        .map_err(|error| {
+            build_runtime_error(format!("meshgrid: GPU output upload failed: {error}"))
+                .with_builtin("meshgrid")
+                .with_source(error)
+                .build()
+        })
 }
 
 fn to_complex_gpu_tensor_value(
@@ -1462,8 +1467,13 @@ fn to_complex_gpu_tensor_value(
     let provider = runmat_accelerate_api::provider_for_device(device_id)
         .ok_or_else(|| builtin_error("meshgrid: no acceleration provider owns the GPU output"))?;
     gpu_helpers::upload_complex_tensor(provider, &tensor)
-        .map(gpu_helpers::complex_gpu_value)
-        .map_err(|error| builtin_error(format!("meshgrid: GPU output upload failed: {error}")))
+        .and_then(gpu_helpers::complex_gpu_value)
+        .map_err(|error| {
+            build_runtime_error(format!("meshgrid: GPU output upload failed: {error}"))
+                .with_builtin("meshgrid")
+                .with_source(error)
+                .build()
+        })
 }
 
 fn tensor_to_complex_tensor(tensor: Tensor) -> crate::BuiltinResult<ComplexTensor> {
@@ -1535,7 +1545,7 @@ impl MeshgridOutput {
                     if runmat_accelerate_api::handle_storage(handle)
                         == GpuTensorStorage::ComplexInterleaved
                     {
-                        Ok(gpu_helpers::complex_gpu_value(handle.clone()))
+                        gpu_helpers::complex_gpu_value(handle.clone())
                     } else {
                         let tensor = gpu_helpers::gather_tensor_async(handle).await?;
                         to_complex_gpu_tensor_value(tensor_to_complex_tensor(tensor)?, device_id)

@@ -3,6 +3,7 @@
 //! `blkdiag` constructs a block diagonal matrix by placing each input on the
 //! diagonal and filling off-block entries with the class-appropriate zero.
 
+#[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
@@ -1338,42 +1339,35 @@ fn upload_gpu_result(
 ) -> BuiltinResult<Value> {
     match value {
         Value::Tensor(tensor) => {
-            let handle = gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
-            runmat_accelerate_api::set_handle_logical(&handle, false);
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)?;
             gpu_helpers::resident_gpu_value(handle)
         }
         Value::Num(value) => {
-            let data = [value];
-            let shape = [1usize, 1usize];
-            let view = HostTensorView {
-                data: &data,
-                shape: &shape,
-            };
-            let handle = provider
-                .upload(&view)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))?;
-            runmat_accelerate_api::set_handle_logical(&handle, false);
+            let tensor = Tensor::new(vec![value], vec![1, 1])
+                .map_err(|cause| error_with_detail(&ERROR_GPU, cause))?;
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)?;
             gpu_helpers::resident_gpu_value(handle)
         }
         Value::LogicalArray(array) => {
-            let data: Vec<f64> = array.data.iter().map(|&value| f64::from(value)).collect();
-            let view = HostTensorView {
-                data: &data,
+            let view = runmat_accelerate_api::HostLogicalTensorView {
+                data: &array.data,
                 shape: &array.shape,
             };
-            provider
-                .upload(&view)
-                .map(gpu_helpers::logical_gpu_value)
-                .map_err(|err| error_with_detail(&ERROR_GPU, err))
+            let output = provider.upload_logical(&view).map_err(|cause| {
+                build_runtime_error(format!("blkdiag: logical upload failed: {cause}"))
+                    .with_builtin(BUILTIN_NAME)
+                    .with_source(cause)
+                    .build()
+            })?;
+            gpu_helpers::logical_gpu_value(output)
         }
         Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)
-            .map(gpu_helpers::complex_gpu_value),
+            .and_then(gpu_helpers::complex_gpu_value),
         Value::Complex(re, im) => {
             let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1])
                 .map_err(|detail| error_with_detail(&ERROR_GPU, detail))?;
             gpu_helpers::upload_complex_tensor(provider, &tensor)
-                .map(gpu_helpers::complex_gpu_value)
+                .and_then(gpu_helpers::complex_gpu_value)
         }
         Value::SparseTensor(sparse) => Ok(Value::SparseTensor(sparse)),
         other => Err(error_with_detail(
@@ -1422,6 +1416,26 @@ mod tests {
 
     fn call(args: Vec<Value>) -> BuiltinResult<Value> {
         block_on(blkdiag_builtin(args))
+    }
+
+    #[test]
+    fn logical_result_upload_preserves_producer_intent_and_column_order() {
+        test_support::with_test_provider(|provider| {
+            let logical =
+                runmat_value::LogicalArray::new(vec![1, 0, 0, 1, 1, 0], vec![2, 3]).unwrap();
+            let output = upload_gpu_result(provider, Value::LogicalArray(logical)).unwrap();
+            let Value::GpuTensor(handle) = &output else {
+                panic!("resident output")
+            };
+            assert!(handle.view().is_logical());
+            assert_eq!(handle.shape(), &[2, 3]);
+            assert_eq!(
+                handle.physical().storage(),
+                runmat_accelerate_api::GpuTensorStorage::Real
+            );
+            let host = test_support::gather(output).unwrap();
+            assert_eq!(host.materialize_f64(), vec![1.0, 0.0, 0.0, 1.0, 1.0, 0.0]);
+        });
     }
 
     #[test]
