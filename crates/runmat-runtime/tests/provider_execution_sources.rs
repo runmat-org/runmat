@@ -68,6 +68,43 @@ impl AccelProvider for Provider {
     dimension_hook!(reduce_sum_dim);
     dimension_hook!(reduce_mean_dim);
     dimension_hook!(reduce_integer_mean_native_dim);
+    fn reduce_min_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.fail() })
+    }
+    fn reduce_max_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.fail() })
+    }
+    fn elem_min<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail() })
+    }
+    fn elem_max<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fail() })
+    }
+    fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.fail()
+    }
+    fn scalar_max(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.fail()
+    }
+    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.fail()
+    }
     fn unary_cos<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.fail() })
     }
@@ -95,6 +132,208 @@ impl AccelProvider for Provider {
         _: ProviderTrapezoidSpacing<'_>,
     ) -> anyhow::Result<GpuTensorHandle> {
         self.fail()
+    }
+}
+
+fn extrema_args(form: usize, left: &GpuTensorHandle, right: &GpuTensorHandle) -> Vec<Value> {
+    match form {
+        0 => vec![Value::GpuTensor(left.clone())],
+        1 => vec![
+            Value::GpuTensor(left.clone()),
+            Value::GpuTensor(right.clone()),
+        ],
+        2 => vec![Value::GpuTensor(left.clone()), Value::Num(2.0)],
+        3 => vec![Value::Num(2.0), Value::GpuTensor(right.clone())],
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn public_extrema_dispatch_keeps_terminal_typed_failures_without_second_execution() {
+    for nested in [false, true] {
+        let provider = Box::leak(Box::new(Provider {
+            owner: TestAllocationOwner::new(),
+            calls: AtomicUsize::new(0),
+            nested,
+        }));
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        for name in ["min", "max"] {
+            for form in 0..4 {
+                let left = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let right = provider
+                    .owner
+                    .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
+                    .unwrap();
+                let args = extrema_args(form, &left.handle, &right.handle);
+                let before = provider.calls.load(Ordering::SeqCst);
+                let error = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap_err();
+                assert_eq!(
+                    provider.calls.load(Ordering::SeqCst),
+                    before + 1,
+                    "{name} form {form}"
+                );
+                assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+                let mut source: &(dyn std::error::Error + 'static) = &error;
+                while !source.is::<DeviceFailure>() {
+                    source = source.source().expect("typed extrema cause retained");
+                }
+                if nested {
+                    assert_eq!(error.identifier(), Some("RunMat:test:ProviderContract"));
+                    assert_eq!(error.context.builtin.as_deref(), Some("provider-origin"));
+                    assert_eq!(error.message(), "authoritative provider contract");
+                }
+                assert_eq!(left.probe.retirements(), 0);
+                assert_eq!(right.probe.retirements(), 0);
+                left.handle.allocation_lease().validate_live().unwrap();
+                right.handle.allocation_lease().validate_live().unwrap();
+                drop(error);
+                drop(args);
+                left.handle.release().unwrap();
+                right.handle.release().unwrap();
+                assert_eq!(left.probe.retirements(), 1);
+                assert_eq!(right.probe.retirements(), 1);
+            }
+        }
+    }
+}
+
+struct UnsupportedExtrema {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    calls: AtomicUsize,
+    downloads: AtomicUsize,
+}
+impl UnsupportedExtrema {
+    fn reject<T>(&self) -> anyhow::Result<T> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Err(unsupported_provider_operation(
+            "fixture extrema capability unavailable",
+        ))
+    }
+}
+impl AccelProvider for UnsupportedExtrema {
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+    fn device_info(&self) -> String {
+        "public unsupported extrema fixture".into()
+    }
+    fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+    fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download(handle)
+    }
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.downloads.fetch_add(1, Ordering::SeqCst);
+        self.inner.download_numeric(handle)
+    }
+    fn reduce_min_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject() })
+    }
+    fn reduce_max_dim<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: usize,
+    ) -> AccelProviderFuture<'a, ReduceDimResult> {
+        Box::pin(async move { self.reject() })
+    }
+    fn elem_min<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject() })
+    }
+    fn elem_max<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.reject() })
+    }
+    fn scalar_min(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
+    }
+    fn scalar_max(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
+    }
+    fn fill_like(&self, _: &GpuTensorHandle, _: f64) -> anyhow::Result<GpuTensorHandle> {
+        self.reject()
+    }
+}
+
+#[test]
+fn public_extrema_dispatch_gathers_only_after_typed_unsupported() {
+    let provider = Box::leak(Box::new(UnsupportedExtrema {
+        inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+        calls: AtomicUsize::new(0),
+        downloads: AtomicUsize::new(0),
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    for name in ["min", "max"] {
+        for form in 0..4 {
+            let left = provider
+                .upload(&HostTensorView {
+                    data: &[3.0, -1.0],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let right = provider
+                .upload(&HostTensorView {
+                    data: &[4.0, -2.0],
+                    shape: &[2, 1],
+                })
+                .unwrap();
+            let args = extrema_args(form, &left, &right);
+            let calls = provider.calls.load(Ordering::SeqCst);
+            let downloads = provider.downloads.load(Ordering::SeqCst);
+            let result = block_on(runmat_runtime::call_builtin_async(name, &args)).unwrap();
+            assert_eq!(
+                provider.calls.load(Ordering::SeqCst),
+                calls + 1,
+                "{name} form {form}"
+            );
+            assert_eq!(
+                provider.downloads.load(Ordering::SeqCst),
+                downloads + if form == 1 { 2 } else { 1 }
+            );
+            if form == 0 {
+                assert_eq!(result, Value::Num(if name == "min" { -1.0 } else { 3.0 }));
+            } else {
+                let expected = match (name, form) {
+                    ("min", 1) => vec![3.0, -2.0],
+                    ("max", 1) => vec![4.0, -1.0],
+                    ("min", 2) => vec![2.0, -1.0],
+                    ("max", 2) => vec![3.0, 2.0],
+                    ("min", 3) => vec![2.0, -2.0],
+                    ("max", 3) => vec![4.0, 2.0],
+                    _ => unreachable!(),
+                };
+                let Value::Tensor(output) = result else {
+                    panic!("capability fallback returns host tensor")
+                };
+                assert_eq!(output.shape, vec![2, 1]);
+                assert_eq!(output.materialize_f64(), expected);
+            }
+            drop(args);
+            for input in [left, right] {
+                input.allocation_lease().validate_live().unwrap();
+                let physical = input.allocation_lease().downgrade();
+                input.release().unwrap();
+                assert!(physical.acquire().is_none());
+            }
+        }
     }
 }
 

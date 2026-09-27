@@ -174,7 +174,7 @@ fn dimensional_extrema_only_gather_after_typed_unsupported() {
                 .owner
                 .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)
                 .unwrap();
-            let result = futures::executor::block_on(crate::call_builtin_async(
+            let result = futures::executor::block_on(call_extrema_owner(
                 name,
                 &[Value::GpuTensor(input.handle.clone())],
             ));
@@ -271,7 +271,7 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                     1 => vec![Value::GpuTensor(left.handle.clone()), Value::Num(2.0)],
                     _ => vec![Value::Num(2.0), Value::GpuTensor(right.handle.clone())],
                 };
-                let result = futures::executor::block_on(crate::call_builtin_async(name, &args));
+                let result = futures::executor::block_on(call_extrema_owner(name, &args));
                 if matches!(fault, Fault::Execution) {
                     let error = result.unwrap_err();
                     assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
@@ -310,5 +310,22 @@ fn elementwise_extrema_propagate_execution_failure_and_keep_capability_fallback(
                 }
             }
         }
+    }
+}
+
+// Runtime unit tests also link the normal runtime through the acceleration
+// dev-dependency, so legacy inventory contains both copies. Test these domain
+// owners directly; provider_execution_sources separately checks public dispatch
+// in a standalone executable with a single runtime inventory.
+async fn call_extrema_owner(name: &str, args: &[Value]) -> crate::BuiltinResult<Value> {
+    let (value, rest) = args.split_first().expect("extrema data operand");
+    match name {
+        "min" => {
+            crate::builtins::math::reduction::min::min_builtin(value.clone(), rest.to_vec()).await
+        }
+        "max" => {
+            crate::builtins::math::reduction::max::max_builtin(value.clone(), rest.to_vec()).await
+        }
+        _ => unreachable!("fixture covers min and max"),
     }
 }
