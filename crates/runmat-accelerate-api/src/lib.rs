@@ -608,12 +608,12 @@ pub struct WgpuContextHandle {
     pub features: wgpu::Features,
 }
 
-/// Retained WGPU storage in the tensor's logical column-major contiguous order.
+/// Owning WGPU export in the tensor's logical column-major contiguous order.
 /// Contiguous inputs share their original Arc without copying. Providers must
 /// materialize lazy views on-device before export; shape never describes a
 /// transpose while the buffer silently retains its original physical order.
-/// The Arc owns the exported backing, which can differ from the source tensor's
-/// allocation. Consumers may retain it without retaining a source handle.
+/// The carrier retains the authenticated allocation view for its backing;
+/// materialized exports retain their own allocation, not the source lease.
 ///
 /// Providers that expose this handle must ensure the buffer was created with
 /// `wgpu::BufferUsages::COPY_SRC`, so zero-copy consumers can export or inspect
@@ -621,11 +621,73 @@ pub struct WgpuContextHandle {
 #[cfg(feature = "wgpu")]
 #[derive(Clone)]
 pub struct WgpuBufferRef {
+    // Retains allocation accounting as well as the backend buffer. The backend
+    // must associate this exact buffer with this handle before construction.
+    owner: GpuTensorHandle,
     pub buffer: Arc<wgpu::Buffer>,
     pub len: usize,
     pub shape: Vec<usize>,
     pub element_size: usize,
     pub precision: ProviderPrecision,
+}
+
+#[cfg(feature = "wgpu")]
+impl WgpuBufferRef {
+    /// Publish an export after the backend has authenticated the buffer against
+    /// its existing allocation record. Materialized exports must pass their own
+    /// newly admitted allocation, never the source allocation's lease.
+    pub fn from_owned_buffer(
+        buffer: Arc<wgpu::Buffer>,
+        handle: GpuTensorHandle,
+    ) -> anyhow::Result<Self> {
+        handle.allocation_lease().validate_live()?;
+        anyhow::ensure!(
+            matches!(
+                handle.view().layout(),
+                allocation::GpuTensorLayout::Contiguous
+            ),
+            "WGPU export requires a contiguous logical view"
+        );
+        anyhow::ensure!(
+            handle.physical().storage() == GpuTensorStorage::Real,
+            "WGPU floating export requires real storage"
+        );
+        let precision = handle_precision(&handle)
+            .ok_or_else(|| anyhow::anyhow!("WGPU export requires floating storage"))?;
+        let element_size = match precision {
+            ProviderPrecision::F32 => 4,
+            ProviderPrecision::F64 => 8,
+        };
+        let len = if handle.shape().contains(&0) {
+            0
+        } else {
+            handle
+                .shape()
+                .iter()
+                .try_fold(1usize, |n, d| n.checked_mul(*d))
+                .ok_or_else(|| anyhow::anyhow!("WGPU export shape overflow"))?
+        };
+        anyhow::ensure!(
+            buffer.size() >= handle.physical().requested_bytes(),
+            "WGPU export buffer is smaller than its admitted allocation"
+        );
+        anyhow::ensure!(
+            buffer.usage().contains(wgpu::BufferUsages::COPY_SRC),
+            "WGPU export buffer lacks COPY_SRC usage"
+        );
+        Ok(Self {
+            shape: handle.shape().to_vec(),
+            owner: handle,
+            buffer,
+            len,
+            element_size,
+            precision,
+        })
+    }
+
+    pub fn owning_handle(&self) -> &GpuTensorHandle {
+        &self.owner
+    }
 }
 
 pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
