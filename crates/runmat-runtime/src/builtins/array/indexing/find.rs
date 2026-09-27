@@ -1592,7 +1592,7 @@ pub(crate) mod tests {
         else {
             panic!("expected native resident indices");
         };
-        assert_eq!(native_indices.device_id, owner.device_id());
+        assert_eq!(native_indices.device_id(), owner.device_id());
 
         let fallback_input = owner
             .upload(&HostTensorView {
@@ -1605,7 +1605,7 @@ pub(crate) mod tests {
         else {
             panic!("expected fallback resident indices");
         };
-        assert_eq!(fallback_indices.device_id, owner.device_id());
+        assert_eq!(fallback_indices.device_id(), owner.device_id());
         assert_eq!(
             test_support::gather(Value::GpuTensor(fallback_indices))
                 .expect("gather fallback indices")
@@ -1624,7 +1624,7 @@ pub(crate) mod tests {
         else {
             panic!("expected resident integer values");
         };
-        assert_eq!(integer_values.device_id, owner.device_id());
+        assert_eq!(integer_values.device_id(), owner.device_id());
         assert_eq!(
             runmat_accelerate_api::handle_integer_type(&integer_values),
             Some(runmat_accelerate_api::IntegerElementType::U64)
@@ -1648,7 +1648,7 @@ pub(crate) mod tests {
         else {
             panic!("expected resident logical values");
         };
-        assert_eq!(logical_values.device_id, owner.device_id());
+        assert_eq!(logical_values.device_id(), owner.device_id());
         assert!(runmat_accelerate_api::handle_is_logical(&logical_values));
     }
 

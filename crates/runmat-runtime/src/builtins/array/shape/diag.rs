@@ -2460,7 +2460,7 @@ mod tests {
             let Value::GpuTensor(output) = output else {
                 panic!("expected resident result");
             };
-            assert_eq!(output.device_id, proto.device_id);
+            assert_eq!(output.device_id(), proto.device_id());
             assert_eq!(
                 runmat_accelerate_api::handle_storage(&output),
                 GpuTensorStorage::Real
@@ -2614,7 +2614,7 @@ mod tests {
                 panic!("expected resident logical result");
             };
             assert!(runmat_accelerate_api::handle_is_logical(&output));
-            assert_eq!(output.device_id, proto.device_id);
+            assert_eq!(output.device_id(), proto.device_id());
             assert!(std::ptr::eq(
                 runmat_accelerate_api::provider_for_handle(&output).unwrap(),
                 provider
