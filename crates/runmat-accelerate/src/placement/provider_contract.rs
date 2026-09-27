@@ -16,6 +16,7 @@ mod logical;
 pub(crate) mod logarithm_roots;
 pub(crate) mod power;
 pub(crate) mod real_unary;
+mod rounding;
 pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
@@ -168,7 +169,7 @@ fn provider_element_type(dtype: NumericDType) -> ProviderElementType {
 pub(crate) fn in_process_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 7, IN_PROCESS_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 8, IN_PROCESS_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
@@ -177,6 +178,7 @@ pub(crate) fn in_process_capability_snapshot(
     trigonometry::append(&mut snapshot);
     power::append(&mut snapshot);
     logarithm_roots::append(&mut snapshot);
+    rounding::append(&mut snapshot);
     snapshot
 }
 
@@ -184,7 +186,7 @@ pub(crate) fn in_process_capability_snapshot(
 pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 8, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 9, WGPU_OPERATIONS);
     logical::append(&mut snapshot);
     integer_conversion::append(&mut snapshot);
     arithmetic::append(&mut snapshot);
@@ -193,6 +195,7 @@ pub(crate) fn wgpu_capability_snapshot(
     trigonometry::append(&mut snapshot);
     power::append(&mut snapshot);
     logarithm_roots::append(&mut snapshot);
+    rounding::append(&mut snapshot);
     snapshot
 }
 
@@ -201,6 +204,9 @@ pub(crate) fn in_process_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = fusion_elementwise::validate(provider, false, query) {
+        return result;
+    }
+    if let Some(result) = rounding::validate(provider, rounding::HookProfile::InProcess, query) {
         return result;
     }
     if let Some(result) = integer_conversion::validate(provider, false, query) {
@@ -257,6 +263,9 @@ pub(crate) fn wgpu_feasibility(
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
     if let Some(result) = fusion_elementwise::validate(provider, true, query) {
+        return result;
+    }
+    if let Some(result) = rounding::validate(provider, rounding::HookProfile::Wgpu, query) {
         return result;
     }
     if let Some(result) = integer_conversion::validate(provider, true, query) {

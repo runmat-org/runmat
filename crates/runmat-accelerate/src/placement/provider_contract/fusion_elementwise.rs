@@ -6,7 +6,7 @@ use super::*;
 
 /// Shared costing consumes the same physical plan as feasibility. This is a
 /// prior for the complete route, not timing evidence from one kernel enqueue.
-#[cfg(feature = "wgpu")]
+#[cfg(any(feature = "wgpu", test))]
 pub(crate) fn physical_work(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
@@ -16,7 +16,9 @@ pub(crate) fn physical_work(
 
 pub(crate) struct PhysicalWork {
     pub estimate: ProviderResourceEstimate,
+    #[cfg(any(feature = "wgpu", test))]
     pub scratch_bytes: u64,
+    #[cfg(any(feature = "wgpu", test))]
     pub queue_submissions: u32,
 }
 
@@ -358,7 +360,7 @@ fn analyze(
     }
     Some(match result {
         ProviderFeasibility::Supported { estimate } => {
-            let Some(queue_submissions) = estimate
+            let Some(_queue_submissions) = estimate
                 .dispatches
                 .and_then(|dispatches| dispatches.checked_add(materialization_setup_submissions))
             else {
@@ -369,8 +371,10 @@ fn analyze(
             };
             Ok(PhysicalWork {
                 estimate,
+                #[cfg(any(feature = "wgpu", test))]
                 scratch_bytes,
-                queue_submissions,
+                #[cfg(any(feature = "wgpu", test))]
+                queue_submissions: _queue_submissions,
             })
         }
         rejected => Err(rejected),

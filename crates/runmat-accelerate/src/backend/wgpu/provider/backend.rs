@@ -109,6 +109,8 @@ mod solve;
 mod telemetry;
 #[path = "ops/tensor.rs"]
 mod tensor;
+#[path = "ops/storage_move.rs"]
+mod storage_move;
 #[path = "ops/window.rs"]
 mod window;
 
