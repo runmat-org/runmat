@@ -1,5 +1,8 @@
 use std::fmt;
 
+mod canonical;
+pub use canonical::canonical_fusion_spec;
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashMap;
 

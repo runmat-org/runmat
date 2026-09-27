@@ -18,6 +18,8 @@ use crate::graph::{
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
 
+mod expression;
+
 /// Fusion plans can contain `Value` constants, including GC handles. Keep them
 /// thread-confined so the type system does not imply cross-thread GC safety.
 pub type FusionPlanRef = Rc<FusionPlan>;
@@ -1258,17 +1260,11 @@ impl FusionGroupPlan {
                                 }
                                 // Fallback: treat as leaf dependency
                             }
-                            AccelNodeLabel::Builtin { name } => {
-                                // Allow simple casts to flow through (single/double)
-                                if (name.eq_ignore_ascii_case("single")
-                                    || name.eq_ignore_ascii_case("double"))
-                                    && node.inputs.len() == 1
-                                {
-                                    stack.push(node.inputs[0]);
-                                    continue;
-                                }
-                                // Unknown builtin: treat as leaf
-                            }
+                            // Builtin producers, including conversions, are
+                            // materialized dependencies unless their operation
+                            // is retained explicitly. A cast is not an identity:
+                            // single -> double still contains Single rounding.
+                            AccelNodeLabel::Builtin { .. } => {}
                             _ => {
                                 // Unknown producer: treat as leaf
                             }
@@ -2767,11 +2763,7 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                 }
                 let node_ref = graph.node(*node)?;
                 match &node_ref.label {
-                    AccelNodeLabel::Builtin { name }
-                        if name.eq_ignore_ascii_case("single")
-                            || name.eq_ignore_ascii_case("double")
-                            || name.eq_ignore_ascii_case("gpuarray") =>
-                    {
+                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("gpuarray") => {
                         if node_ref.inputs.len() != 1 {
                             return None;
                         }
@@ -2855,10 +2847,7 @@ fn peel_numeric_casts(
                 }
                 let node_ref = graph.node(*node)?;
                 if let AccelNodeLabel::Builtin { name } = &node_ref.label {
-                    if name.eq_ignore_ascii_case("single")
-                        || name.eq_ignore_ascii_case("double")
-                        || name.eq_ignore_ascii_case("gpuarray")
-                    {
+                    if name.eq_ignore_ascii_case("gpuarray") {
                         if node_ref.inputs.len() != 1 {
                             return None;
                         }
@@ -2962,11 +2951,14 @@ fn builtin_expr(
     exprs: &HashMap<ValueId, String>,
     scalar_ty: &str,
 ) -> Option<String> {
+    if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
+        return expression::canonical_expression(entry, inputs, exprs, scalar_ty);
+    }
     let func = match name.to_ascii_lowercase().as_str() {
         "isfinite" => return builtin_unary_call("isFinite", inputs, exprs),
         "isinf" => return builtin_unary_call("isInf", inputs, exprs),
         "isnan" => return builtin_unary_call("isNan", inputs, exprs),
-        "single" | "double" | "gpuarray" => return builtin_identity(inputs, exprs),
+        "gpuarray" => return builtin_identity(inputs, exprs),
         "fix" => return builtin_unary_call("trunc", inputs, exprs),
         "sign" => return builtin_unary_call("sign", inputs, exprs),
         "heaviside" => {
