@@ -1,6 +1,7 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 use futures::executor::block_on;
+use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage,
     HostTensorView, NumericElementType,
@@ -21,14 +22,16 @@ enum AddBehavior {
 
 struct ControlledProvider {
     behavior: AddBehavior,
-    free_count: AtomicUsize,
+    owner: TestAllocationOwner,
+    output_probe: Mutex<Option<RetirementProbe>>,
 }
 
 impl ControlledProvider {
     fn new(behavior: AddBehavior) -> Self {
         Self {
             behavior,
-            free_count: AtomicUsize::new(0),
+            owner: TestAllocationOwner::new(),
+            output_probe: Mutex::new(None),
         }
     }
 }
@@ -46,17 +49,12 @@ impl AccelProvider for ControlledProvider {
         })
     }
 
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.free_count.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
     fn device_info(&self) -> String {
         "controlled arithmetic provider".to_owned()
     }
 
     fn device_id(&self) -> u32 {
-        71
+        self.owner.device_id()
     }
 
     fn elem_add<'a>(
@@ -70,20 +68,29 @@ impl AccelProvider for ControlledProvider {
                     runmat_accelerate_api::unsupported_provider_operation("addition unavailable"),
                 ),
                 AddBehavior::Failed => Err(anyhow::anyhow!("device lost")),
-                AddBehavior::InvalidOutput => Ok(handle(self, 99, vec![1, 1])),
+                AddBehavior::InvalidOutput => {
+                    let allocation = self
+                        .owner
+                        .allocate_zeroed(
+                            vec![1, 1],
+                            NumericElementType::F64,
+                            GpuTensorStorage::Real,
+                        )
+                        .expect("actual invalid-shape output allocation");
+                    *self.output_probe.lock().unwrap() = Some(allocation.probe);
+                    Ok(allocation.handle)
+                }
             }
         })
     }
 }
 
-fn handle(provider: &dyn AccelProvider, buffer_id: u64, shape: Vec<usize>) -> GpuTensorHandle {
-    GpuTensorHandle {
-        shape,
-        device_id: provider.device_id(),
-        buffer_id,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real)
+fn handle(provider: &ControlledProvider, shape: Vec<usize>) -> GpuTensorHandle {
+    provider
+        .owner
+        .allocate_zeroed(shape, NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("owned operand")
+        .handle
 }
 
 fn with_provider<R>(
@@ -99,8 +106,8 @@ fn with_provider<R>(
 #[test]
 fn typed_unsupported_operation_permits_host_fallback() {
     with_provider(AddBehavior::Unsupported, |provider| {
-        let left = handle(provider, 1, vec![1, 2]);
-        let right = handle(provider, 2, vec![1, 2]);
+        let left = handle(provider, vec![1, 2]);
+        let right = handle(provider, vec![1, 2]);
         let result = block_on(try_pair(
             ArithmeticProviderOperation::Add,
             PLUS_CATALOG_ENTRY.identity,
@@ -115,8 +122,8 @@ fn typed_unsupported_operation_permits_host_fallback() {
 #[test]
 fn operational_provider_failure_is_not_reclassified_as_unsupported() {
     with_provider(AddBehavior::Failed, |provider| {
-        let left = handle(provider, 1, vec![1, 2]);
-        let right = handle(provider, 2, vec![1, 2]);
+        let left = handle(provider, vec![1, 2]);
+        let right = handle(provider, vec![1, 2]);
         let error = block_on(try_pair(
             ArithmeticProviderOperation::Add,
             PLUS_CATALOG_ENTRY.identity,
@@ -131,8 +138,10 @@ fn operational_provider_failure_is_not_reclassified_as_unsupported() {
 #[test]
 fn invalid_provider_output_is_rejected_and_released() {
     with_provider(AddBehavior::InvalidOutput, |provider| {
-        let left = handle(provider, 1, vec![1, 2]);
-        let right = handle(provider, 2, vec![1, 2]);
+        let left = handle(provider, vec![1, 2]);
+        let right = handle(provider, vec![1, 2]);
+        let left_lease = left.allocation_lease().downgrade();
+        let right_lease = right.allocation_lease().downgrade();
         let error = block_on(try_pair(
             ArithmeticProviderOperation::Add,
             PLUS_CATALOG_ENTRY.identity,
@@ -143,6 +152,21 @@ fn invalid_provider_output_is_rejected_and_released() {
         assert!(error
             .message()
             .contains("invalid element-wise output metadata"));
-        assert_eq!(provider.free_count.load(Ordering::SeqCst), 1);
+        drop(error);
+        assert_eq!(
+            provider
+                .output_probe
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .retirements(),
+            1
+        );
+        assert!(left_lease.acquire().is_some());
+        assert!(right_lease.acquire().is_some());
+        drop((left, right));
+        assert!(left_lease.acquire().is_none());
+        assert!(right_lease.acquire().is_none());
     });
 }

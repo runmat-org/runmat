@@ -13,6 +13,8 @@ fn power_wgpu_matches_cpu_elementwise() {
     let cpu = power_host(Value::Tensor(base.clone()), Value::Tensor(exp.clone())).unwrap();
     let hb = gpu_helpers::upload_tensor(provider, &base).unwrap();
     let he = gpu_helpers::upload_tensor(provider, &exp).unwrap();
+    let base_lease = hb.allocation_lease().downgrade();
+    let exponent_lease = he.allocation_lease().downgrade();
     let gpu = block_on(power_gpu_pair(hb.clone(), he.clone())).unwrap();
     let gathered = test_support::gather(gpu).expect("gather");
     let cpu_tensor = match cpu {
@@ -24,6 +26,8 @@ fn power_wgpu_matches_cpu_elementwise() {
         runmat_accelerate_api::ProviderPrecision::F64 => 1e-9,
         runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
     };
+    assert_eq!(gathered.shape, cpu_tensor.shape);
+    assert_eq!(gathered.len(), cpu_tensor.len());
     for (a, b) in gathered
         .as_f64_slice()
         .expect("gathered double")
@@ -32,6 +36,8 @@ fn power_wgpu_matches_cpu_elementwise() {
     {
         assert!((a - b).abs() < tol);
     }
-    let _ = provider.free(&hb);
-    let _ = provider.free(&he);
+    hb.release().expect("release base");
+    he.release().expect("release exponent");
+    assert!(base_lease.acquire().is_none());
+    assert!(exponent_lease.acquire().is_none());
 }

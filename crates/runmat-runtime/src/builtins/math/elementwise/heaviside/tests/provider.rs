@@ -1,44 +1,66 @@
 #[cfg(feature = "wgpu")]
 use futures::executor::block_on;
+use runmat_accelerate::simple_provider::InProcessProvider;
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, GpuTensorHandle, GpuTensorStorage,
-    HostTensorOwned, HostTensorView, NumericElementType,
+    AccelDownloadFuture, AccelNumericDownloadFuture, AccelProvider, AccelProviderFuture,
+    GpuTensorHandle, HostNumericTensorView, HostTensorView,
 };
 use runmat_value::{Tensor, Value};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::builtins::common::test_support;
 
 use super::execute;
 
-struct FallbackProvider;
+struct FallbackProvider {
+    inner: InProcessProvider,
+    terminal: bool,
+    transfers: AtomicUsize,
+}
+
+impl FallbackProvider {
+    fn new(terminal: bool) -> Self {
+        Self {
+            inner: InProcessProvider::new(),
+            terminal,
+            transfers: AtomicUsize::new(0),
+        }
+    }
+    fn input(&self) -> GpuTensorHandle {
+        self.inner
+            .upload(&HostTensorView {
+                data: &[-1.0, 0.0, 2.0],
+                shape: &[1, 3],
+            })
+            .expect("actual input allocation")
+    }
+}
 
 impl AccelProvider for FallbackProvider {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        Ok(GpuTensorHandle {
-            shape: host.shape.to_vec(),
-            device_id: self.device_id(),
-            buffer_id: 2,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real))
+        self.transfers.fetch_add(1, Ordering::SeqCst);
+        self.inner.upload(host)
     }
 
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        Box::pin(async move {
-            Ok(HostTensorOwned {
-                data: if handle.buffer_id == 2 {
-                    vec![0.0, 0.5, 1.0]
-                } else {
-                    vec![-1.0, 0.0, 2.0]
-                },
-                shape: vec![1, 3],
-                storage: GpuTensorStorage::Real,
-            })
-        })
+        self.transfers.fetch_add(1, Ordering::SeqCst);
+        self.inner.download(handle)
     }
 
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
+    fn upload_numeric_raw(
+        &self,
+        host: &HostNumericTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        self.transfers.fetch_add(1, Ordering::SeqCst);
+        self.inner.upload_numeric_raw(host)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelNumericDownloadFuture<'a> {
+        self.transfers.fetch_add(1, Ordering::SeqCst);
+        self.inner.download_numeric(handle)
     }
 
     fn device_info(&self) -> String {
@@ -46,60 +68,22 @@ impl AccelProvider for FallbackProvider {
     }
 
     fn device_id(&self) -> u32 {
-        17
+        self.inner.device_id()
     }
 
     fn unary_heaviside<'a>(
         &'a self,
         _: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async {
+        Box::pin(async move {
+            if self.terminal {
+                return Err(anyhow::anyhow!("device lost"));
+            }
             Err(runmat_accelerate_api::unsupported_provider_operation(
                 "unary_heaviside unavailable",
             ))
         })
     }
-}
-
-struct FailingProvider;
-
-impl AccelProvider for FailingProvider {
-    fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        unreachable!("terminal provider failure must not enter fallback")
-    }
-
-    fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        Box::pin(async { Err(anyhow::anyhow!("download must not run")) })
-    }
-
-    fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
-    }
-
-    fn device_info(&self) -> String {
-        "heaviside-failure-test".to_owned()
-    }
-
-    fn device_id(&self) -> u32 {
-        19
-    }
-
-    fn unary_heaviside<'a>(
-        &'a self,
-        _: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async { Err(anyhow::anyhow!("device lost")) })
-    }
-}
-
-fn handle(provider: &dyn AccelProvider) -> GpuTensorHandle {
-    GpuTensorHandle {
-        shape: vec![1, 3],
-        device_id: provider.device_id(),
-        buffer_id: 1,
-        descriptor: Default::default(),
-    }
-    .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real)
 }
 
 #[test]
@@ -127,15 +111,17 @@ fn direct_provider_roundtrip_stays_resident() {
 fn typed_unsupported_hook_uses_exact_owner_fallback() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = test_support::accel_test_lock();
-    let provider: &'static dyn AccelProvider = Box::leak(Box::new(FallbackProvider));
+    let provider = Box::leak(Box::new(FallbackProvider::new(false)));
     let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let input = handle(provider);
+    let input = provider.input();
+    let input_lease = input.allocation_lease().downgrade();
     let result = execute(Value::GpuTensor(input.clone())).unwrap();
     let Value::GpuTensor(output) = &result else {
         panic!("expected resident fallback result")
     };
-    assert_eq!(output.device_id, input.device_id);
-    assert_ne!(output.buffer_id, input.buffer_id);
+    assert_eq!(output.device_id(), input.device_id());
+    assert!(!output.shares_allocation_with(&input));
+    let output_lease = output.allocation_lease().downgrade();
     assert!(std::ptr::eq(
         runmat_accelerate_api::provider_for_handle(output).unwrap(),
         provider
@@ -144,18 +130,28 @@ fn typed_unsupported_hook_uses_exact_owner_fallback() {
         test_support::gather(result).unwrap().materialize_f64(),
         vec![0.0, 0.5, 1.0]
     );
+    assert!(output_lease.acquire().is_none());
+    assert!(input_lease.acquire().is_some());
+    drop(input);
+    assert!(input_lease.acquire().is_none());
 }
 
 #[test]
 fn terminal_provider_error_does_not_fallback() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let _guard = test_support::accel_test_lock();
-    let provider: &'static dyn AccelProvider = Box::leak(Box::new(FailingProvider));
+    let provider = Box::leak(Box::new(FallbackProvider::new(true)));
     let _active = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let error = execute(Value::GpuTensor(handle(provider))).expect_err("terminal failure");
+    let input = provider.input();
+    let lease = input.allocation_lease().downgrade();
+    let error = execute(Value::GpuTensor(input.clone())).expect_err("terminal failure");
     assert_eq!(error.identifier(), Some("RunMat:heaviside:ProviderFailed"));
     assert!(error.message().contains("device lost"));
     assert_eq!(error.gpu_gather_retry(), crate::GpuGatherRetry::Never);
+    assert_eq!(provider.transfers.load(Ordering::SeqCst), 0);
+    assert!(lease.acquire().is_some());
+    drop((error, input));
+    assert!(lease.acquire().is_none());
 }
 
 #[cfg(feature = "wgpu")]

@@ -12,15 +12,21 @@ fn restores_output_to_exact_input_owner() {
     test_support::with_test_provider(|provider| {
         let source = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).expect("source");
         let handle = gpu_helpers::upload_tensor(provider, &source).expect("upload");
-        let device_id = handle.device_id;
-        let result =
-            block_on(rescale_builtin(Value::GpuTensor(handle), vec![])).expect("resident rescale");
+        let device_id = handle.device_id();
+        let input_lease = handle.allocation_lease().downgrade();
+        let result = block_on(rescale_builtin(Value::GpuTensor(handle.clone()), vec![]))
+            .expect("resident rescale");
         let Value::GpuTensor(output) = &result else {
             panic!("resident output")
         };
-        assert_eq!(output.device_id, device_id);
+        assert_eq!(output.device_id(), device_id);
+        let output_lease = output.allocation_lease().downgrade();
         let gathered = test_support::gather(result).expect("gather");
         assert_eq!(gathered.shape, vec![1, 3]);
         assert_close(&gathered.materialize_f64(), &[0.0, 0.5, 1.0]);
+        assert!(input_lease.acquire().is_some());
+        drop(handle);
+        assert!(input_lease.acquire().is_none());
+        assert!(output_lease.acquire().is_none());
     });
 }
