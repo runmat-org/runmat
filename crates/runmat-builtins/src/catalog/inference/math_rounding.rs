@@ -266,6 +266,11 @@ pub(super) fn infer_rounding(
 }
 
 fn materialize_rounding_result(output: &mut ValueFact) {
+    if output.residency != ResidencyFact::Host {
+        // Placement facts do not distinguish explicit device intent from an
+        // automatically resident value whose structured fallback stays host.
+        output.residency = ResidencyFact::Unknown;
+    }
     if output.numeric().is_some_and(|numeric| {
         numeric.domain == NumericDomain::Real
             && matches!(numeric.class, NumericClass::Double | NumericClass::Single)

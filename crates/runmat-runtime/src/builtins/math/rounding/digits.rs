@@ -30,7 +30,7 @@ macro_rules! floating_digits {
                 return value;
             }
             let order = value.abs().log10().floor() as i64;
-            if digits >= i64::from($roundtrip) - order {
+            if digits >= i64::from($roundtrip) - 1 - order {
                 return value;
             }
             if digits > $subnormal {
@@ -69,6 +69,11 @@ mod tests {
         assert_eq!(significant_f64(23.75, 22).to_bits(), 23.75_f64.to_bits());
         assert_eq!(decimal_f32(23.75, 20).to_bits(), 23.75_f32.to_bits());
         assert_eq!(significant_f32(23.75, 22).to_bits(), 23.75_f32.to_bits());
+        assert_eq!(
+            decimal_f64(1.8050000000000002, 16).to_bits(),
+            1.8050000000000002_f64.to_bits()
+        );
+        assert_eq!(decimal_f32(5.369, 8).to_bits(), 5.369_f32.to_bits());
         assert_eq!(significant_f64(1.25, i32::MAX), 1.25);
         assert_eq!(significant_f32(1.25, i32::MAX), 1.25);
         assert_eq!(decimal_f64(f64::MAX, 2), f64::MAX);

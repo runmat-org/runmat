@@ -58,7 +58,7 @@ fn rm_round_digits_{ty}(a: {ty}, requested: i32, significant: bool) -> {ty} {{
         if requested >= {roundtrip} {{ return a; }}
         digits = requested - 1 - i32(order);
     }}
-    if digits >= {roundtrip} - i32(order) {{ return a; }}
+    if digits >= {roundtrip} - 1 - i32(order) {{ return a; }}
     if digits > {subnormal} {{ return a; }}
     if digits < -{maximum} {{
         let units = {ty}(0.0);
