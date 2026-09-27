@@ -15,8 +15,7 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
 use crate::builtins::math::linalg::type_resolvers::matrix_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use log::warn;
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -446,7 +445,7 @@ fn ctranspose_cell_array(ca: CellArray) -> BuiltinResult<CellArray> {
 }
 
 async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
-    ensure_vector_or_matrix_shape(&handle.shape)?;
+    ensure_vector_or_matrix_shape(handle.shape())?;
     let input_complex =
         runmat_accelerate_api::handle_storage(&handle) == GpuTensorStorage::ComplexInterleaved;
     if input_complex && runmat_accelerate_api::handle_integer_type(&handle).is_some() {
@@ -465,99 +464,62 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         if expected_shape.len() >= 2 {
             expected_shape.swap(0, 1);
         }
-        let mut transposed: Option<GpuTensorHandle> = None;
-        if rank <= 2 {
-            match provider.transpose(&handle) {
-                Ok(out)
-                    if native_ctranspose_output_matches(
-                        &handle,
-                        &out,
-                        provider,
-                        &expected_shape,
-                    ) && !same_handle(&handle, &out) =>
-                {
-                    transposed = Some(out)
-                }
-                Ok(out) => free_rejected_native_output(&handle, &out, provider),
-                Err(err) => {
-                    let info = provider.device_info_struct();
-                    warn!(
-                        "ctranspose: provider {} (backend: {}) missing transpose hook; falling back ({err})",
-                        info.name,
-                        info.backend.as_deref().unwrap_or("unknown")
-                    );
-                }
-            }
+        let transpose = if rank <= 2 {
+            provider.transpose(&handle)
         } else {
             let order = ctranspose_order(rank);
             let zero_based: Vec<usize> = order.iter().map(|&idx| idx - 1).collect();
-            match provider.permute(&handle, &zero_based) {
-                Ok(out)
-                    if native_ctranspose_output_matches(
-                        &handle,
-                        &out,
-                        provider,
-                        &expected_shape,
-                    ) && !same_handle(&handle, &out) =>
-                {
-                    transposed = Some(out)
-                }
-                Ok(out) => free_rejected_native_output(&handle, &out, provider),
-                Err(err) => {
-                    let info = provider.device_info_struct();
-                    warn!(
-                        "ctranspose: provider {} (backend: {}) missing permute hook; falling back ({err})",
-                        info.name,
-                        info.backend.as_deref().unwrap_or("unknown")
-                    );
-                }
+            provider.permute(&handle, &zero_based)
+        };
+        let transposed = match transpose {
+            Ok(output)
+                if native_ctranspose_output_matches(
+                    &handle,
+                    &output,
+                    provider,
+                    &expected_shape,
+                ) =>
+            {
+                // Transpose may lawfully return a lazy view of the same allocation.
+                Some(output)
             }
-        }
-
-        if let Some(transposed_handle) = transposed {
-            match provider.unary_conj(&transposed_handle).await {
-                Ok(conjugated)
+            Ok(output) => return Err(reject_native_output(output, "malformed transpose output")),
+            Err(error)
+                if gpu_helpers::provider_hook_is_unsupported(&error)
+                    || error.to_string() == "transpose not supported by provider" =>
+            {
+                None
+            }
+            Err(error) => return Err(native_provider_error(error)),
+        };
+        if let Some(transposed) = transposed {
+            match provider.unary_conj(&transposed).await {
+                Ok(mut output)
                     if native_conjugate_output_matches(
                         &handle,
-                        &transposed_handle,
-                        &conjugated,
+                        &transposed,
+                        &output,
                         provider,
                         &expected_shape,
                     ) =>
                 {
-                    if let Some(info) =
-                        runmat_accelerate_api::handle_transpose_info(&transposed_handle)
-                    {
-                        runmat_accelerate_api::record_handle_transpose(
-                            &conjugated,
-                            info.base_rows,
-                            info.base_cols,
-                        );
-                    }
-                    provider.free(&transposed_handle).ok();
-                    if input_complex
-                        || runmat_accelerate_api::handle_storage(&conjugated)
-                            == GpuTensorStorage::ComplexInterleaved
-                    {
-                        return gpu_helpers::complex_gpu_value(conjugated);
-                    }
-                    return gpu_helpers::resident_gpu_value(conjugated);
+                    // The producer owns its layout. Copying the intermediate's
+                    // transpose annotation onto a materialized output is invalid.
+                    gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+                    return if input_complex {
+                        gpu_helpers::complex_gpu_value(output)
+                    } else {
+                        gpu_helpers::resident_gpu_value(output)
+                    };
                 }
-                Ok(rejected) => {
-                    cleanup_rejected_conjugate(&handle, &transposed_handle, &rejected, provider);
+                Ok(output) => {
+                    return Err(reject_native_output(output, "malformed conjugate output"))
                 }
-                Err(err) => {
-                    if !same_handle(&handle, &transposed_handle) {
-                        provider.free(&transposed_handle).ok();
-                    }
-                    let info = provider.device_info_struct();
-                    warn!(
-                        "ctranspose: provider {} (backend: {}) missing unary_conj hook; falling back ({err})",
-                        info.name,
-                        info.backend.as_deref().unwrap_or("unknown")
-                    );
-                }
+                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) => return Err(native_provider_error(error)),
             }
+            // The intermediate owns its lease throughout the await and retires
+            // here (also on error or cancellation), without freeing borrowed aliases.
         }
     }
 
@@ -579,45 +541,7 @@ async fn ctranspose_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             )));
         }
     };
-    if let Some(provider) = owner {
-        match &transposed_value {
-            Value::Tensor(transposed) => {
-                match gpu_helpers::upload_tensor(provider, transposed) {
-                    Ok(uploaded) => return gpu_helpers::resident_gpu_value(uploaded),
-                    Err(err) => warn!(
-                        "ctranspose: re-upload after host fallback failed; returning host tensor ({err})"
-                    ),
-                }
-            }
-            Value::ComplexTensor(transposed) => {
-                match gpu_helpers::upload_complex_tensor(provider, transposed) {
-                    Ok(uploaded) => return gpu_helpers::complex_gpu_value(uploaded),
-                    Err(err) => warn!(
-                        "ctranspose: complex re-upload after host fallback failed; returning host tensor ({err})"
-                    ),
-                }
-            }
-            Value::LogicalArray(transposed) => {
-                let data: Vec<f64> = transposed
-                    .data
-                    .iter()
-                    .map(|&bit| if bit == 0 { 0.0 } else { 1.0 })
-                    .collect();
-                let view = HostTensorView {
-                    data: &data,
-                    shape: &transposed.shape,
-                };
-                match provider.upload(&view) {
-                    Ok(uploaded) => return gpu_helpers::logical_gpu_value(uploaded),
-                    Err(err) => warn!(
-                        "ctranspose: logical re-upload after host fallback failed; returning host logical array ({err})"
-                    ),
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(transposed_value)
+    gpu_helpers::restore_class_preserving_value(&handle, transposed_value, NAME)
 }
 
 fn native_ctranspose_output_matches(
@@ -637,6 +561,8 @@ fn native_ctranspose_output_matches(
             == runmat_accelerate_api::handle_storage(input)
         && runmat_accelerate_api::handle_integer_type(output)
             == runmat_accelerate_api::handle_integer_type(input)
+        && runmat_accelerate_api::handle_is_logical(output)
+            == runmat_accelerate_api::handle_is_logical(input)
         && runmat_accelerate_api::provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
 }
@@ -649,38 +575,23 @@ fn native_conjugate_output_matches(
     expected_shape: &[usize],
 ) -> bool {
     native_ctranspose_output_matches(transposed, output, provider, expected_shape)
-        && !same_handle(original, output)
-        && !same_handle(transposed, output)
+        && !original.shares_allocation_with(output)
+        && !transposed.shares_allocation_with(output)
 }
 
-fn cleanup_rejected_conjugate(
-    original: &GpuTensorHandle,
-    transposed: &GpuTensorHandle,
-    rejected: &GpuTensorHandle,
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    if !same_handle(original, rejected) {
-        free_rejected_native_output(transposed, rejected, provider);
-    }
-    if !same_handle(original, transposed) {
-        let _ = provider.free(transposed);
-    }
+fn reject_native_output(output: GpuTensorHandle, detail: &str) -> RuntimeError {
+    gpu_helpers::reject_gpu_output(
+        output,
+        internal_error(format!("ctranspose: {detail}"))
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never),
+    )
 }
 
-fn free_rejected_native_output(
-    input: &GpuTensorHandle,
-    output: &GpuTensorHandle,
-    invoked_provider: &dyn runmat_accelerate_api::AccelProvider,
-) {
-    if same_handle(input, output) {
-        return;
-    }
-    let owner = runmat_accelerate_api::provider_for_handle(output).unwrap_or(invoked_provider);
-    let _ = owner.free(output);
-}
-
-fn same_handle(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
-    left.device_id() == right.device_id() && left.buffer_id() == right.buffer_id()
+fn native_provider_error(source: anyhow::Error) -> RuntimeError {
+    let mut error = internal_error(format!("ctranspose: provider failed: {source}"))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    error.source = Some(source.into_boxed_dyn_error());
+    error
 }
 
 fn ctranspose_order(rank: usize) -> Vec<usize> {
@@ -693,6 +604,10 @@ fn ctranspose_order(rank: usize) -> Vec<usize> {
     }
     order
 }
+
+#[cfg(test)]
+#[path = "ctranspose_owned_tests.rs"]
+mod owned_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
@@ -1233,14 +1148,12 @@ pub(crate) mod tests {
                     provider,
                     &[2, 2]
                 ));
-                cleanup_rejected_conjugate(&input, &transposed, &rejected, provider);
+                let error = reject_native_output(rejected, "malformed conjugate output");
+                assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
 
                 block_on(provider.download(&input)).expect("original input remains live");
-                assert!(
-                    block_on(provider.download(&transposed)).is_err(),
-                    "rejected transpose temporary must be freed exactly once"
-                );
-                provider.free(&input).unwrap();
+                block_on(provider.download(&transposed))
+                    .expect("independently owned intermediate remains live");
             }
         });
     }
