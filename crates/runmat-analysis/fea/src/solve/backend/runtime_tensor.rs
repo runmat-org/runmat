@@ -61,10 +61,10 @@ fn try_dot_gpu(a: &[f64], b: &[f64]) -> Option<f64> {
             .and_then(|host| host.data.first().copied()),
     };
 
-    let _ = provider.free(&sum);
-    let _ = provider.free(&mul);
-    let _ = provider.free(&bh);
-    let _ = provider.free(&ah);
+    drop(sum);
+    drop(mul);
+    drop(bh);
+    drop(ah);
     scalar
 }
 
@@ -90,10 +90,10 @@ fn try_axpy_gpu(alpha: f64, x: &[f64], y: &[f64]) -> Option<Vec<f64>> {
     let out_h = block_on(provider.elem_add(&scaled, &yh)).ok()?;
     let host = block_on(provider.download(&out_h)).ok()?;
 
-    let _ = provider.free(&out_h);
-    let _ = provider.free(&scaled);
-    let _ = provider.free(&yh);
-    let _ = provider.free(&xh);
+    drop(out_h);
+    drop(scaled);
+    drop(yh);
+    drop(xh);
     Some(host.data)
 }
 
@@ -118,8 +118,8 @@ fn try_vec_sub_gpu(a: &[f64], b: &[f64]) -> Option<Vec<f64>> {
     let out_h = block_on(provider.elem_sub(&ah, &bh)).ok()?;
     let host = block_on(provider.download(&out_h)).ok()?;
 
-    let _ = provider.free(&out_h);
-    let _ = provider.free(&bh);
-    let _ = provider.free(&ah);
+    drop(out_h);
+    drop(bh);
+    drop(ah);
     Some(host.data)
 }

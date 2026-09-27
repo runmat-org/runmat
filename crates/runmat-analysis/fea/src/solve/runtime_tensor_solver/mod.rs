@@ -10,6 +10,8 @@ use crate::{
 
 mod operator_impl;
 mod preconditioner_impl;
+#[cfg(test)]
+mod ownership_tests;
 
 use operator_impl::{
     apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
@@ -52,15 +54,6 @@ impl RuntimeTensorWorkspace {
             precond_y: None,
             precond_z: None,
         })
-    }
-
-    fn release(&mut self, provider: &dyn runmat_accelerate_api::AccelProvider) {
-        if let Some(handle) = self.precond_y.take() {
-            let _ = provider.free(&handle);
-        }
-        if let Some(handle) = self.precond_z.take() {
-            let _ = provider.free(&handle);
-        }
     }
 }
 
@@ -346,7 +339,7 @@ fn solve_runtime_tensor_linear_system_internal(
     let mut r = if initial_guess.is_some() {
         let ax = apply_k_device(&device_operator, &x)?;
         let residual = block_on(provider.elem_sub(&rhs_h, &ax)).ok()?;
-        let _ = provider.free(&ax);
+        drop(ax);
         residual
     } else {
         block_on(provider.elem_add(&rhs_h, &zero_h)).ok()?
@@ -410,22 +403,22 @@ fn solve_runtime_tensor_linear_system_internal(
 
         let denom = dot_handle(provider, &p, &ap, &mut host_sync_count)?;
         if denom.abs() <= 1.0e-18 {
-            let _ = provider.free(&ap);
+            drop(ap);
             break;
         }
         let alpha = rz_old / denom;
 
         let scaled_p = provider.scalar_mul(&p, alpha).ok()?;
         let new_x = block_on(provider.elem_add(&x, &scaled_p)).ok()?;
-        let _ = provider.free(&x);
-        let _ = provider.free(&scaled_p);
+        drop(x);
+        drop(scaled_p);
         x = new_x;
 
         let scaled_ap = provider.scalar_mul(&ap, alpha).ok()?;
         let new_r = block_on(provider.elem_sub(&r, &scaled_ap)).ok()?;
-        let _ = provider.free(&r);
-        let _ = provider.free(&scaled_ap);
-        let _ = provider.free(&ap);
+        drop(r);
+        drop(scaled_ap);
+        drop(ap);
         r = new_r;
 
         let rr = dot_handle(provider, &r, &r, &mut host_sync_count)?;
@@ -445,7 +438,7 @@ fn solve_runtime_tensor_linear_system_internal(
         )?;
         let rz_new = dot_handle(provider, &r, &new_z, &mut host_sync_count)?;
         if rz_old.abs() <= 1.0e-18 {
-            let _ = provider.free(&z);
+            drop(z);
             z = new_z;
             break;
         }
@@ -453,9 +446,9 @@ fn solve_runtime_tensor_linear_system_internal(
 
         let beta_p = provider.scalar_mul(&p, beta).ok()?;
         let new_p = block_on(provider.elem_add(&new_z, &beta_p)).ok()?;
-        let _ = provider.free(&p);
-        let _ = provider.free(&beta_p);
-        let _ = provider.free(&z);
+        drop(p);
+        drop(beta_p);
+        drop(z);
         p = new_p;
         z = new_z;
         rz_old = rz_new;
@@ -486,22 +479,21 @@ fn solve_runtime_tensor_linear_system_internal(
         });
     }
 
-    let _ = provider.free(&z);
-    let _ = provider.free(&p);
-    let _ = provider.free(&r);
-    let _ = provider.free(&x);
-    let _ = provider.free(&zero_h);
-    let _ = provider.free(&inv);
-    let _ = provider.free(&ilu_l_subdiag_h);
-    let _ = provider.free(&ilu_upper_superdiag_h);
-    let _ = provider.free(&ilu_inv_u_diag_h);
-    let _ = provider.free(&diag_h);
-    let _ = provider.free(&upper_left_h);
-    let _ = provider.free(&upper_right_h);
-    let _ = provider.free(&constrained_mask_h);
-    let _ = provider.free(&unconstrained_mask_h);
-    let _ = provider.free(&rhs_h);
-    workspace.release(provider);
+    drop(z);
+    drop(p);
+    drop(r);
+    drop(x);
+    drop(zero_h);
+    drop(inv);
+    drop(ilu_l_subdiag_h);
+    drop(ilu_upper_superdiag_h);
+    drop(ilu_inv_u_diag_h);
+    drop(diag_h);
+    drop(upper_left_h);
+    drop(upper_right_h);
+    drop(constrained_mask_h);
+    drop(unconstrained_mask_h);
+    drop(rhs_h);
 
     Some(LinearSolveResult {
         iterations,

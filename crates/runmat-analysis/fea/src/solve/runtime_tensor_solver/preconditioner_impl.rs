@@ -35,7 +35,7 @@ pub(super) fn apply_preconditioner_device(
                 &workspace.full_indices,
                 &values,
             )?;
-            let _ = ctx.provider.free(&values);
+            drop(values);
             block_on(ctx.provider.elem_add(&z_target, ctx.zero_like)).ok()
         }
         SpdPreconditionerKind::Ilu0 => apply_ilu0_approx_device(ctx, r, workspace),
@@ -70,12 +70,12 @@ fn apply_ilu0_approx_device(
             .provider
             .scatter_linear(&y, &workspace.full_indices, &y_next);
 
-        let _ = ctx.provider.free(&constrained);
-        let _ = ctx.provider.free(&unconstrained);
-        let _ = ctx.provider.free(&tmp);
-        let _ = ctx.provider.free(&l_term);
-        let _ = ctx.provider.free(&y_prev_shift);
-        let _ = ctx.provider.free(&y_next);
+        drop(constrained);
+        drop(unconstrained);
+        drop(tmp);
+        drop(l_term);
+        drop(y_prev_shift);
+        drop(y_next);
     }
 
     let z = ensure_workspace_slot(
@@ -105,13 +105,13 @@ fn apply_ilu0_approx_device(
             .provider
             .scatter_linear(&z, &workspace.full_indices, &z_new);
 
-        let _ = ctx.provider.free(&constrained);
-        let _ = ctx.provider.free(&unconstrained);
-        let _ = ctx.provider.free(&scaled);
-        let _ = ctx.provider.free(&tmp);
-        let _ = ctx.provider.free(&u_term);
-        let _ = ctx.provider.free(&z_next_shift);
-        let _ = ctx.provider.free(&z_new);
+        drop(constrained);
+        drop(unconstrained);
+        drop(scaled);
+        drop(tmp);
+        drop(u_term);
+        drop(z_next_shift);
+        drop(z_new);
     }
 
     block_on(ctx.provider.elem_add(&z, ctx.zero_like)).ok()

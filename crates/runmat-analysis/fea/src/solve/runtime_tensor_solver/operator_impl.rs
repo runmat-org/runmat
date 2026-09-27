@@ -44,15 +44,15 @@ pub(super) fn apply_k_device(
     )
     .ok()?;
 
-    let _ = ctx.provider.free(&constrained_part);
-    let _ = ctx.provider.free(&unconstrained_part);
-    let _ = ctx.provider.free(&unconstrained_value);
-    let _ = ctx.provider.free(&tmp);
-    let _ = ctx.provider.free(&right_term);
-    let _ = ctx.provider.free(&left_term);
-    let _ = ctx.provider.free(&diag_term);
-    let _ = ctx.provider.free(&x_next);
-    let _ = ctx.provider.free(&x_prev);
+    drop(constrained_part);
+    drop(unconstrained_part);
+    drop(unconstrained_value);
+    drop(tmp);
+    drop(right_term);
+    drop(left_term);
+    drop(diag_term);
+    drop(x_next);
+    drop(x_prev);
     Some(y)
 }
 
@@ -112,7 +112,7 @@ pub(super) fn dot_handle(
                 .and_then(|host| host.data.first().copied())
         }
     };
-    let _ = provider.free(&sum);
-    let _ = provider.free(&mul);
+    drop(sum);
+    drop(mul);
     out
 }
