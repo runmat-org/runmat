@@ -264,24 +264,14 @@ fn restore_host_outputs_transactionally(
         ) {
             Ok(Value::GpuTensor(handle)) => restored.push(Value::GpuTensor(handle)),
             Ok(_) => {
-                free_restored_outputs(&restored, source);
                 return Ok(host_outputs());
             }
             Err(error) => {
-                free_restored_outputs(&restored, source);
                 return Err(error);
             }
         }
     }
     Ok(restored)
-}
-
-fn free_restored_outputs(outputs: &[Value], source: &runmat_accelerate_api::GpuTensorHandle) {
-    for output in outputs {
-        if let Value::GpuTensor(handle) = output {
-            gpu_helpers::free_unprotected_exact_owner(handle, &[source]);
-        }
-    }
 }
 
 fn effective_output_dims(
@@ -405,9 +395,6 @@ fn try_gpu_ind2sub(
         match result {
             Ok(mut handles) => {
                 if handles.len() != dims.len() {
-                    for output in &handles {
-                        gpu_helpers::free_unprotected_exact_owner(output, &[handle]);
-                    }
                     return Err(ind2sub_provider_error(
                         "ind2sub: provider returned an unexpected number of outputs.",
                     ));
@@ -435,9 +422,6 @@ fn try_gpu_ind2sub(
                             .all(|prior| !gpu_helpers::same_gpu_handle(output, prior))
                 });
                 if !valid {
-                    for output in &handles {
-                        gpu_helpers::free_unprotected_exact_owner(output, &[handle]);
-                    }
                     return Err(ind2sub_provider_error(
                         "ind2sub: provider returned an invalid output handle.",
                     ));
@@ -991,9 +975,8 @@ pub(crate) mod tests {
                     runmat_accelerate_api::handle_provenance(&handle),
                     Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 );
-                let _ = provider.free(&handle);
             }
-            let _ = provider.free(&indices);
+            drop(indices);
         });
     }
 

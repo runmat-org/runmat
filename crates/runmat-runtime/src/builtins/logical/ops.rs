@@ -303,16 +303,15 @@ async fn provider_input_contains_nan(
         && gpu_helpers::exact_provider_for_handle(&mask)
             .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !mask_valid {
-        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
         return Err(logical_error_with_message(
             "logical: provider returned a malformed NaN mask",
             &LOGICAL_ERROR_INTERNAL,
         ));
     }
-    let maximum = provider.reduce_max(&mask).await.map_err(|error| {
-        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
-        logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL)
-    })?;
+    let maximum = provider
+        .reduce_max(&mask)
+        .await
+        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
     let maximum_valid = !gpu_helpers::same_gpu_handle(&maximum, source)
         && !gpu_helpers::same_gpu_handle(&maximum, &mask)
         && maximum.shape.iter().product::<usize>() == 1
@@ -320,20 +319,15 @@ async fn provider_input_contains_nan(
         && gpu_helpers::exact_provider_for_handle(&maximum)
             .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !maximum_valid {
-        gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
-        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
         return Err(logical_error_with_message(
             "logical: provider returned a malformed NaN reduction",
             &LOGICAL_ERROR_INTERNAL,
         ));
     }
-    let downloaded = provider.download(&maximum).await.map_err(|error| {
-        gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
-        gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
-        logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL)
-    })?;
-    gpu_helpers::free_unprotected_exact_owner(&maximum, &[source, &mask]);
-    gpu_helpers::free_unprotected_exact_owner(&mask, &[source]);
+    let downloaded = provider
+        .download(&maximum)
+        .await
+        .map_err(|error| logical_error_with_message(error.to_string(), &LOGICAL_ERROR_INTERNAL))?;
     Ok(downloaded.data.first().is_some_and(|value| *value != 0.0))
 }
 
@@ -380,7 +374,6 @@ fn logical_buffer_to_gpu(
         match p.upload(&view) {
             Ok(mut handle) => {
                 if !valid_logical_gpu_output(&handle, source, p) {
-                    gpu_helpers::free_unprotected_exact_owner(&handle, &[source]);
                     if explicit {
                         return Err(logical_error_with_message(
                             "logical: provider returned an invalid restored logical output",
@@ -437,7 +430,6 @@ async fn try_gpu_cast(
         && gpu_helpers::exact_provider_for_handle(&zeros)
             .is_some_and(|owner| std::ptr::eq(owner, provider));
     if !zeros_valid {
-        gpu_helpers::free_unprotected_exact_owner(&zeros, &[input]);
         return None;
     }
     let result = provider
@@ -450,11 +442,10 @@ async fn try_gpu_cast(
             {
                 Some(output)
             } else {
-                gpu_helpers::free_unprotected_exact_owner(&output, &[input, &zeros]);
                 None
             }
         });
-    let _ = provider.free(&zeros);
+    drop(zeros);
     result
 }
 

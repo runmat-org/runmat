@@ -518,7 +518,6 @@ async fn build_sequence(
                 ) {
                     return Ok(finalize_sequence_handle(handle, Some(source)));
                 }
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[]);
             }
             if source.explicit {
                 return Err(terminal_gpu_error(
@@ -574,7 +573,6 @@ async fn build_sequence(
                 ) {
                     return Ok(finalize_sequence_handle(handle, source));
                 }
-                gpu_helpers::free_unprotected_exact_owner(&handle, &[]);
             }
         }
         if source.is_some_and(|source| source.explicit) {
@@ -616,37 +614,26 @@ async fn try_gpu_logspace(
         .or_else(runmat_accelerate_api::provider)?;
     let exponents = provider.linspace(start, stop, count).ok()?;
     if !valid_sequence_handle(&exponents, count, provider, &[]) {
-        gpu_helpers::free_unprotected_exact_owner(&exponents, &[]);
         return None;
     }
 
     let scaled = match provider.scalar_mul(&exponents, LN_10) {
         Ok(handle) if valid_sequence_handle(&handle, count, provider, &[&exponents]) => handle,
-        Ok(handle) => {
-            gpu_helpers::free_unprotected_exact_owner(&handle, &[&exponents]);
-            provider.free(&exponents).ok();
-            return None;
-        }
+        Ok(_) => return None,
         Err(_) => {
-            provider.free(&exponents).ok();
             return None;
         }
     };
-    provider.free(&exponents).ok();
+    drop(exponents);
 
     let result = match provider.unary_exp(&scaled).await {
         Ok(handle) if valid_sequence_handle(&handle, count, provider, &[&scaled]) => handle,
-        Ok(handle) => {
-            gpu_helpers::free_unprotected_exact_owner(&handle, &[&scaled]);
-            provider.free(&scaled).ok();
-            return None;
-        }
+        Ok(_) => return None,
         Err(_) => {
-            provider.free(&scaled).ok();
             return None;
         }
     };
-    provider.free(&scaled).ok();
+    drop(scaled);
 
     Some(finalize_sequence_handle(result, source))
 }
@@ -1160,7 +1147,7 @@ pub(crate) mod tests {
             )
             .expect_err("resident integer endpoint must be rejected");
             assert!(error.message().contains("single or double"));
-            provider.free(&endpoint).ok();
+            drop(endpoint);
         });
     }
 
