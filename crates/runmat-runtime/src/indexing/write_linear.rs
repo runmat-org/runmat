@@ -282,7 +282,7 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
             Ok((value.re, value.im))
         }
         Value::LogicalArray(array) if array.data.len() == 1 => {
-            Ok((f64::from(array.data[0] != 0), 0.0))
+            Ok((if array.data[0] != 0 { 1.0 } else { 0.0 }, 0.0))
         }
         Value::GpuTensor(h) => {
             if !h.shape().iter().all(|&extent| extent == 1) {

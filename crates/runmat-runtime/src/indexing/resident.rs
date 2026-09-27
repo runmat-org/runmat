@@ -81,6 +81,12 @@ pub(super) fn restore(
             provider, &tensor, &protected,
         )
         .map_err(|cause| failure("indexed result", ProviderExecutionError::from_source(cause)))?,
+        Value::ComplexTensor(_) if runmat_accelerate_api::handle_is_logical(input) => {
+            return Err(semantic_error(
+                "AssignmentTypeMismatch",
+                "Logical assignment requires real numeric or logical values",
+            ));
+        }
         Value::ComplexTensor(tensor) => {
             gpu_helpers::upload_complex_tensor_protecting(provider, &tensor, &protected)?
         }

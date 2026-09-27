@@ -8,7 +8,6 @@ use crate::indexing::integer_assignment::{
 use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
-use runmat_accelerate_api::{HostIntegerDataOwned, HostIntegerDataView, HostIntegerTensorView};
 use runmat_value::{
     ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType, NumericScalar,
     NumericStorage, SparseTensor, StringArray, Tensor, Value,
@@ -16,10 +15,6 @@ use runmat_value::{
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
     mex("ShapeMismatch", format!("{context}: {err}"))
-}
-
-fn map_acceleration_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
-    mex("AccelerationOperationFailed", format!("{context}: {err}"))
 }
 
 fn is_empty_delete_rhs(value: &Value) -> bool {
@@ -1000,134 +995,8 @@ pub fn delete_complex_with_plan(
         .map_err(|error| map_slice_shape_error("complex slice deletion", error))
 }
 
-pub async fn assign_gpu_slice_with_plan(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    plan: &IndexPlan,
-    rhs: &Value,
-) -> Result<Value, RuntimeError> {
-    if plan.indices.is_empty() {
-        return Ok(Value::GpuTensor(handle.clone()));
-    }
-    let mut unique_indices = plan.indices.clone();
-    unique_indices.sort_unstable();
-    if unique_indices.windows(2).any(|pair| pair[0] == pair[1]) {
-        return Err(mex(
-            "RepeatedGpuAssignmentIndex",
-            "gpuArray indexed assignment does not support repeated target subscripts",
-        ));
-    }
-    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider owns the target gpuArray",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-        if let Value::GpuTensor(rhs_handle) = rhs {
-            if runmat_accelerate_api::handle_integer_type(rhs_handle)
-                == runmat_accelerate_api::handle_integer_type(handle)
-            {
-                if let Ok(rhs_indices) = integer_gpu_rhs_indices_for_plan(&rhs_handle.shape, plan) {
-                    let reuses_rhs = rhs_indices
-                        .iter()
-                        .enumerate()
-                        .all(|(index, &rhs_index)| rhs_index as usize == index);
-                    let values = if reuses_rhs {
-                        rhs_handle.clone()
-                    } else {
-                        provider
-                            .gather_linear(rhs_handle, &rhs_indices, &plan.output_shape)
-                            .map_err(|e| {
-                                map_acceleration_error(
-                                    "expand exact integer gpuArray assignment rhs",
-                                    e,
-                                )
-                            })?
-                    };
-                    let result = provider
-                        .scatter_linear(handle, &plan.indices, &values)
-                        .map_err(|e| {
-                            map_acceleration_error("exact integer gpuArray slice assignment", e)
-                        });
-                    if !reuses_rhs {
-                        let _ = provider.free(&values);
-                    }
-                    result?;
-                    return Ok(Value::GpuTensor(handle.clone()));
-                }
-            }
-        }
-        let tensor = download_integer_tensor(handle).await?;
-        let Value::Tensor(updated) = assign_tensor_with_plan(tensor, plan, rhs).await? else {
-            unreachable!("real integer slice assignment must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    if let Value::GpuTensor(vh) = rhs {
-        let rows = plan.base_shape.first().copied().unwrap_or(1);
-        let cols = plan.base_shape.get(1).copied().unwrap_or(1);
-        if let Some(col) = plan.properties.full_column {
-            if col < cols {
-                let v_rows = match vh.shape.len() {
-                    1 | 2 => vh.shape[0],
-                    _ => 0,
-                };
-                if v_rows == rows {
-                    if let Ok(new_h) = provider.scatter_column(handle, col, vh) {
-                        return Ok(Value::GpuTensor(new_h));
-                    }
-                }
-            }
-        }
-        if let Some(row) = plan.properties.full_row {
-            if row < rows {
-                let v_cols = match vh.shape.len() {
-                    1 => vh.shape[0],
-                    2 => vh.shape[1],
-                    _ => 0,
-                };
-                if v_cols == cols {
-                    if let Ok(new_h) = provider.scatter_row(handle, row, vh) {
-                        return Ok(Value::GpuTensor(new_h));
-                    }
-                }
-            }
-        }
-    }
-    let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
-    let value_shape = vec![rhs_values.len().max(1), 1];
-    let upload_result = if rhs_values.is_empty() {
-        provider.zeros(&[0, 1])
-    } else {
-        provider.upload(&runmat_accelerate_api::HostTensorView {
-            data: &rhs_values,
-            shape: &value_shape,
-        })
-    };
-    if let Ok(values_handle) = upload_result {
-        if provider
-            .scatter_linear(handle, &plan.indices, &values_handle)
-            .is_ok()
-        {
-            return Ok(Value::GpuTensor(handle.clone()));
-        }
-    }
-
-    let host = provider
-        .download(handle)
-        .await
-        .map_err(|e| map_acceleration_error("gather for slice assign", e))?;
-    let t =
-        Tensor::new(host.data, host.shape).map_err(|e| map_slice_shape_error("slice assign", e))?;
-    let shape = t.shape.clone();
-    let mut storage = t
-        .into_numeric_storage()
-        .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
-    let t = Tensor::from_numeric_storage(storage, shape)
-        .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    upload_tensor_to_gpu(&t)
-}
+mod resident;
+pub use resident::{assign_gpu_slice_with_plan, delete_gpu_slice_with_plan};
 
 fn integer_gpu_rhs_indices_for_plan(
     rhs_shape: &[usize],
@@ -1197,45 +1066,6 @@ fn integer_gpu_rhs_indices_for_plan(
         }
     }
     Ok(output)
-}
-
-pub async fn delete_gpu_slice_with_plan(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    plan: &IndexPlan,
-    rhs: &Value,
-) -> Result<Value, RuntimeError> {
-    if !is_empty_delete_rhs(rhs) {
-        return Err(mex(
-            "DeletionRequiresEmptyRhs",
-            "Indexed deletion requires empty RHS",
-        ));
-    }
-    if plan.indices.is_empty() {
-        return Ok(Value::GpuTensor(handle.clone()));
-    }
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    if runmat_accelerate_api::handle_integer_type(handle).is_some() {
-        let tensor = download_integer_tensor(handle).await?;
-        let Value::Tensor(updated) = delete_tensor_with_plan(tensor, plan, rhs)? else {
-            unreachable!("integer slice deletion must produce a real tensor")
-        };
-        return upload_tensor_to_gpu(&updated);
-    }
-    let host = provider
-        .download(handle)
-        .await
-        .map_err(|e| map_acceleration_error("gather for slice deletion", e))?;
-    let t = Tensor::new(host.data, host.shape)
-        .map_err(|e| map_slice_shape_error("slice deletion", e))?;
-    let Value::Tensor(updated) = delete_tensor_with_plan(t, plan, rhs)? else {
-        unreachable!()
-    };
-    upload_tensor_to_gpu(&updated)
 }
 
 pub async fn materialize_rhs_linear_real(
@@ -1396,73 +1226,16 @@ pub async fn materialize_rhs_nd_real(
     Ok(out)
 }
 
-pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    let new_h = if let Some(storage) = t.integer_storage() {
-        let view = integer_tensor_view(storage, &t.shape);
-        provider
-            .upload_integer(&view)
-            .map_err(|e| map_acceleration_error("exact integer reupload after slice assign", e))?
-    } else {
-        let data = t.materialize_f64();
-        let view = runmat_accelerate_api::HostTensorView {
-            data: &data,
-            shape: &t.shape,
-        };
-        provider
-            .upload(&view)
-            .map_err(|e| map_acceleration_error("reupload after slice assign", e))?
-    };
-    Ok(Value::GpuTensor(new_h))
-}
-
 pub(crate) async fn download_integer_tensor(
     handle: &runmat_accelerate_api::GpuTensorHandle,
 ) -> Result<Tensor, RuntimeError> {
-    let provider = runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered for integer gpuArray",
-        )
-    })?;
-    let integer = provider
-        .download_integer(handle)
-        .await
-        .map_err(|e| map_acceleration_error("exact integer gather for assignment", e))?;
-    let storage = match integer.data {
-        HostIntegerDataOwned::I8(values) => IntegerStorage::I8(values),
-        HostIntegerDataOwned::I16(values) => IntegerStorage::I16(values),
-        HostIntegerDataOwned::I32(values) => IntegerStorage::I32(values),
-        HostIntegerDataOwned::I64(values) => IntegerStorage::I64(values),
-        HostIntegerDataOwned::U8(values) => IntegerStorage::U8(values),
-        HostIntegerDataOwned::U16(values) => IntegerStorage::U16(values),
-        HostIntegerDataOwned::U32(values) => IntegerStorage::U32(values),
-        HostIntegerDataOwned::U64(values) => IntegerStorage::U64(values),
-    };
-    Tensor::new_integer(storage, integer.shape)
-        .map_err(|e| map_slice_shape_error("integer gpuArray assignment gather", e))
-}
-
-fn integer_tensor_view<'a>(
-    storage: &'a IntegerStorage,
-    shape: &'a [usize],
-) -> HostIntegerTensorView<'a> {
-    let data = match storage {
-        IntegerStorage::I8(values) => HostIntegerDataView::I8(values),
-        IntegerStorage::I16(values) => HostIntegerDataView::I16(values),
-        IntegerStorage::I32(values) => HostIntegerDataView::I32(values),
-        IntegerStorage::I64(values) => HostIntegerDataView::I64(values),
-        IntegerStorage::U8(values) => HostIntegerDataView::U8(values),
-        IntegerStorage::U16(values) => HostIntegerDataView::U16(values),
-        IntegerStorage::U32(values) => HostIntegerDataView::U32(values),
-        IntegerStorage::U64(values) => HostIntegerDataView::U64(values),
-    };
-    HostIntegerTensorView { data, shape }
+    match super::resident::gather(handle).await? {
+        Value::Tensor(tensor) if tensor.integer_storage().is_some() => Ok(tensor),
+        _ => Err(mex(
+            "AccelerationOperationFailed",
+            "Expected a native real integer payload",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -1471,8 +1244,8 @@ mod tests {
         assign_complex_with_plan, assign_gpu_slice_with_plan, assign_sparse_with_plan,
         assign_tensor_with_plan, build_complex_rhs_view, build_string_rhs_view,
         delete_complex_with_plan, delete_gpu_slice_with_plan, delete_tensor_with_plan,
-        integer_gpu_rhs_indices_for_plan, map_acceleration_error, materialize_rhs_linear_real,
-        materialize_rhs_nd_real, validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
+        integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real, materialize_rhs_nd_real,
+        validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
     };
     use crate::indexing::plan::IndexPlan;
     use futures::executor::block_on;
@@ -1483,12 +1256,14 @@ mod tests {
 
     #[test]
     fn gpu_assignment_rejects_repeated_target_subscripts_before_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 3],
-            device_id: 91,
-            buffer_id: 17,
-            descriptor: Default::default(),
-        };
+        let handle = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 3],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .expect("genuine unregistered input")
+            .handle;
         let plan = IndexPlan::new(vec![1, 1], vec![1, 2], vec![2], 1, vec![1, 3]);
         let error = block_on(assign_gpu_slice_with_plan(&handle, &plan, &Value::Num(4.0)))
             .expect_err("repeated gpuArray assignment targets must reject");
@@ -2344,7 +2119,10 @@ mod tests {
 
     #[test]
     fn slice_acceleration_error_mapping_reports_identifier() {
-        let err = map_acceleration_error("slice assign", "provider failed");
+        let err = crate::indexing::resident::failure(
+            "slice assign",
+            anyhow::anyhow!("provider failed").into(),
+        );
         assert_eq!(err.identifier(), Some("RunMat:AccelerationOperationFailed"));
     }
 }
