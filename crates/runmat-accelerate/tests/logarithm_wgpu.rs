@@ -10,8 +10,8 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
     .expect("logarithm qualification requires a compatible WGPU adapter");
     let single = provider.precision() == ProviderPrecision::F32;
     let tolerance = if single { 2e-5 } else { 1e-11 };
-    for operation in 0..3 {
-        let source = [0.0, 1e-10, 0.5, 1.0, 2.0, 16.0, f64::INFINITY, f64::NAN];
+    for operation in 0..4 {
+        let source = [0.0, 1e-10, -1.0, -2.0, 2.0, 16.0, f64::INFINITY, f64::NAN];
         let input = provider
             .upload(&HostTensorView {
                 data: &source,
@@ -22,7 +22,8 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
         let output = match operation {
             0 => provider.unary_log2(&input).await,
             1 => provider.unary_log10(&input).await,
-            _ => provider.unary_log1p(&input).await,
+            2 => provider.unary_log1p(&input).await,
+            _ => provider.unary_log(&input).await,
         }
         .unwrap();
         assert_ne!(input.buffer_id, output.buffer_id);
@@ -50,7 +51,8 @@ async fn actual_logarithm_hooks_match_represented_inputs_and_own_distinct_output
             let expected = match operation {
                 0 => represented.log2(),
                 1 => represented.log10(),
-                _ => represented.ln_1p(),
+                2 => represented.ln_1p(),
+                _ => represented.ln(),
             };
             if expected.is_nan() {
                 assert!(actual.is_nan());

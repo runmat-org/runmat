@@ -252,12 +252,22 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
     } else {
         unary_helper_names(op, precision)
     };
-    let helpers = helper_names
+    let mut helpers = helper_names
         .iter()
         .map(|name| wgsl_function(template, name))
         .collect::<Vec<_>>()
         .join("\n\n");
-    let case_body = if matches!(op, UnaryOpCode::Gammaln) {
+    let logarithm_body = match op {
+        UnaryOpCode::Log => Some("return runmat_log(a);"),
+        UnaryOpCode::Log1p => Some("return runmat_log1p(a);"),
+        UnaryOpCode::Log10 => Some("return runmat_log(a) * 0.4342944819032518;"),
+        UnaryOpCode::Log2 => Some("return runmat_log(a) * 1.4426950408889634;"),
+        _ => None,
+    };
+    let case_body = if let Some(body) = logarithm_body {
+        helpers = super::logarithms::helpers(precision);
+        body.to_owned()
+    } else if matches!(op, UnaryOpCode::Gammaln) {
         inline_gammaln_body(precision)
     } else if matches!(op, UnaryOpCode::Erfcinv) {
         inline_erfcinv_body(precision)
