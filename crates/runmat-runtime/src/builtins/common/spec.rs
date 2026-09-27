@@ -14,7 +14,8 @@ pub use canonical::{
 };
 pub use epilogue::{fusion_epilogue_operation, FusionEpilogueOperation};
 pub use selected::{
-    selected_builtin_binding, selected_fusion_binding, SelectedFusionBinding, SelectedFusionIdentity,
+    selected_builtin_binding, selected_fusion_binding, SelectedFusionBinding,
+    SelectedFusionIdentity,
 };
 pub use structural::FusionStructuralOperation;
 

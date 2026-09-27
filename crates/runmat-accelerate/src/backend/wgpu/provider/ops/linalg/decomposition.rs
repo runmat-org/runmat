@@ -42,7 +42,7 @@ impl WgpuProvider {
         }
         if entry_lhs.shape.len() != 2 {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "dot: only 2D tensors are currently supported by the WGPU provider"
+                "dot: only 2D tensors are currently supported by the WGPU provider",
             ));
         }
 
@@ -59,9 +59,12 @@ impl WgpuProvider {
             return self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, lhs, rhs);
         }
         if dim_index > 1 {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(format!(
-                "dot: unsupported dimension {} for WGPU provider", target_dim
-            )));
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                format!(
+                    "dot: unsupported dimension {} for WGPU provider",
+                    target_dim
+                ),
+            ));
         }
 
         let product =

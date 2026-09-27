@@ -1,8 +1,8 @@
 pub use inventory;
 mod class_declarations;
 mod legacy_index;
-pub use legacy_index::with_builtin_functions_by_exact_name;
 pub use class_declarations::{standard_class_declaration, standard_class_is_subclass};
+pub use legacy_index::with_builtin_functions_by_exact_name;
 pub mod catalog;
 pub use catalog::*;
 mod catalog_fingerprint;
@@ -49,7 +49,9 @@ pub mod wasm_registry {
         });
     }
 
-    pub(crate) fn with_function_index<R>(visit: impl FnOnce(&[&'static BuiltinFunction]) -> R) -> R {
+    pub(crate) fn with_function_index<R>(
+        visit: impl FnOnce(&[&'static BuiltinFunction]) -> R,
+    ) -> R {
         FUNCTION_INDEX.with_borrow(|index| visit(index))
     }
 

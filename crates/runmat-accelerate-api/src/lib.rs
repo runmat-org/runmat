@@ -15,8 +15,8 @@ use std::sync::Arc;
 pub mod test_support;
 mod platform;
 mod provider_registry;
-pub use provider_registry::same_provider_instance;
 pub use platform::AcceleratorThreadBound;
+pub use provider_registry::same_provider_instance;
 pub mod allocation;
 pub use allocation::{
     GpuPhysicalDescriptor, GpuTensorHandle, GpuTensorLayout, GpuTensorView, GpuTensorWireDescriptor,
@@ -3097,7 +3097,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Box::pin(async move { Ok(None) })
     }
     fn transpose(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
-        Err(unsupported_provider_operation("transpose not supported by provider"))
+        Err(unsupported_provider_operation(
+            "transpose not supported by provider",
+        ))
     }
     fn conv1d(
         &self,
