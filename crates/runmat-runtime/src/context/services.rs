@@ -189,6 +189,14 @@ pub trait RuntimeAccelerationService {
     }
 }
 
+/// Deferred candidate evidence with no runtime context/service ownership. Send
+/// prevents a source from retaining the session's Rc graph; callbacks still do
+/// not deliver feedback themselves. The owning session polls nonblocking.
+pub trait RuntimePlacementFeedbackSource: Send {
+    fn signature(&self) -> &runmat_execution::PlacementSignature;
+    fn take_ready(&mut self) -> Option<runmat_execution::PlacementFeedback>;
+}
+
 /// Session-owned execution-placement authority. The runtime exposes only
 /// executor-neutral contracts; candidate generation and policy remain in their
 /// owning executor/acceleration crates.
@@ -199,6 +207,18 @@ pub trait RuntimePlacementService {
     ) -> Result<runmat_execution::PlacementDecision, RuntimeError>;
 
     fn observe(&self, feedback: runmat_execution::PlacementFeedback) -> Result<(), RuntimeError>;
+
+    /// Optional bounded retention. Rejection is dropped measurement, never an
+    /// execution failure; returning the source lets the caller release it safely.
+    fn defer_feedback(
+        &self,
+        source: Box<dyn RuntimePlacementFeedbackSource>,
+    ) -> Result<(), Box<dyn RuntimePlacementFeedbackSource>> {
+        Err(source)
+    }
+
+    /// Called at evaluation/placement/profile boundaries, never a device wait.
+    fn drain_feedback(&self) {}
 
     fn invalidate(&self, invalidation: runmat_execution::PlacementInvalidation);
 }

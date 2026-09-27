@@ -53,6 +53,8 @@ pub(crate) enum LocalPlacementOutcome {
         cpu_cost: ExecutionCostEstimate,
         provider_cost: ExecutionCostEstimate,
         feedback: Option<Box<LocalPlacementFeedback>>,
+        /// Exact compact query already validated by this placement authority.
+        provider_query: Box<ProviderFeasibilityQuery>,
     },
     ProviderRejected {
         code: ProviderRejectionCode,
@@ -280,6 +282,7 @@ pub(crate) fn plan_local(
         cpu_cost,
         provider_cost,
         feedback,
+        provider_query: Box::new(cost_query.operation),
     })
 }
 

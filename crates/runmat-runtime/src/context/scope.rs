@@ -83,11 +83,21 @@ impl<F: Future> Future for ContextFuture<F> {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
         let _guard = RuntimeContextGuard::enter(this.context.clone());
-        this.future
+        let result = this
+            .future
             .as_mut()
             .expect("context future polled after completion")
             .as_mut()
-            .poll(cx)
+            .poll(cx);
+        if result.is_ready() {
+            // Completion destructors run under this invocation before observing
+            // receipts they may complete or invalidate.
+            drop(this.future.take());
+            if let Some(placement) = this.context.service_ports().placement() {
+                placement.drain_feedback();
+            }
+        }
+        result
     }
 }
 
@@ -96,6 +106,9 @@ impl<F> Drop for ContextFuture<F> {
         if let Some(future) = self.future.take() {
             let _guard = RuntimeContextGuard::enter(self.context.clone());
             drop(future);
+            if let Some(placement) = self.context.service_ports().placement() {
+                placement.drain_feedback();
+            }
         }
     }
 }

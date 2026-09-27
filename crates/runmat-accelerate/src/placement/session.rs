@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{partition::evaluate_selections, partition::solve_partition, PlacementPolicy};
+mod pending;
 
 pub const PLACEMENT_PROFILE_SCHEMA_VERSION: u32 = 1;
 const MAX_FEEDBACK_OBSERVATIONS: u64 = 1_048_576;
@@ -155,6 +156,7 @@ struct PlacementSessionState {
 pub struct PlacementSession {
     config: PlacementSessionConfig,
     state: RefCell<PlacementSessionState>,
+    pending: pending::PendingFeedback,
 }
 
 impl Default for PlacementSession {
@@ -168,6 +170,7 @@ impl PlacementSession {
         Self {
             config,
             state: RefCell::new(PlacementSessionState::default()),
+            pending: pending::PendingFeedback::default(),
         }
     }
 
@@ -175,6 +178,7 @@ impl PlacementSession {
         &self,
         mut request: PlacementPlanRequest,
     ) -> Result<PlacementDecision, PlacementPlanError> {
+        self.drain_observations();
         request.validate().map_err(|message| PlacementPlanError {
             code: "RunMat:Placement:InvalidRequest",
             message: message.into(),
@@ -250,6 +254,11 @@ impl PlacementSession {
     }
 
     pub fn observe(&self, feedback: PlacementFeedback) -> Result<(), PlacementPlanError> {
+        self.drain_observations();
+        self.record_feedback(feedback)
+    }
+
+    fn record_feedback(&self, feedback: PlacementFeedback) -> Result<(), PlacementPlanError> {
         if feedback.signature.validate().is_err()
             || feedback.candidate.is_empty()
             || feedback.candidate.len() > 128
@@ -314,6 +323,7 @@ impl PlacementSession {
     }
 
     pub fn invalidate(&self, invalidation: PlacementInvalidation) {
+        self.pending.invalidate(&invalidation);
         let mut state = self.state.borrow_mut();
         match invalidation {
             PlacementInvalidation::All => {
@@ -354,6 +364,7 @@ impl PlacementSession {
     }
 
     pub fn profile_snapshot(&self) -> PlacementProfileSnapshot {
+        self.drain_observations();
         PlacementProfileSnapshot {
             schema_version: PLACEMENT_PROFILE_SCHEMA_VERSION,
             feedback: self.state.borrow().feedback.values().cloned().collect(),
@@ -402,6 +413,10 @@ impl PlacementSession {
                 });
             }
         }
+        // A successful import replaces the observation epoch. In-flight samples
+        // from the previous profile must not repopulate the replacement later.
+        // Validate the entire import first, so rejected imports change nothing.
+        self.pending.invalidate(&PlacementInvalidation::All);
         let mut state = self.state.borrow_mut();
         state.tick = restored_tick;
         state.decisions.clear();
@@ -431,6 +446,17 @@ fn valid_profile_series(series: &PlacementFeedbackSeries) -> bool {
 }
 
 impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
+    fn defer_feedback(
+        &self,
+        source: Box<dyn runmat_runtime::context::RuntimePlacementFeedbackSource>,
+    ) -> Result<(), Box<dyn runmat_runtime::context::RuntimePlacementFeedbackSource>> {
+        self.drain_observations();
+        self.pending.push(source)
+    }
+
+    fn drain_feedback(&self) {
+        self.drain_observations();
+    }
     fn plan(
         &self,
         request: PlacementPlanRequest,
@@ -444,6 +470,22 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
 
     fn invalidate(&self, invalidation: PlacementInvalidation) {
         PlacementSession::invalidate(self, invalidation);
+    }
+}
+
+impl PlacementSession {
+    fn drain_observations(&self) {
+        for feedback in self.pending.take_ready() {
+            if let Err(error) = self.record_feedback(feedback) {
+                log::warn!("placement observation rejected: {error}");
+            }
+        }
+    }
+}
+
+impl Drop for PlacementSession {
+    fn drop(&mut self) {
+        self.drain_observations();
     }
 }
 

@@ -33,7 +33,8 @@ pub use services::{
     RuntimeDistributedRetirement, RuntimeDistributedService, RuntimeDistributedSnapshot,
     RuntimeErrorService, RuntimeForeignService, RuntimeHostService, RuntimeNativeService,
     RuntimeObjectService, RuntimeParallelResources, RuntimeParallelService,
-    RuntimePlacementService, RuntimeServiceFuture, RuntimeServicePorts, RuntimeSpmdAdmission,
-    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWorkspaceService,
+    RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
+    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
+    RuntimeSpmdService, RuntimeWorkspaceService,
 };
 pub(crate) use state::RuntimeContextState;

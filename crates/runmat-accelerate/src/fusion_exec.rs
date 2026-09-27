@@ -30,6 +30,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 mod observation;
+mod provider_observation;
+use provider_observation::FusionPlacementSelection;
 mod outputs;
 mod elementwise;
 pub use elementwise::{execute_elementwise, execute_elementwise_placed};
@@ -178,40 +180,6 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
         .max()
 }
 
-struct FusionPlacementSelection {
-    observer: FusionPlacementObserver,
-    feedback: Option<LocalPlacementFeedback>,
-    started: Instant,
-}
-
-impl FusionPlacementSelection {
-    fn submitted(mut self) {
-        // Provider APIs return submitted handles, not a completion timestamp.
-        // Do not train execution cost with enqueue/staging latency. Errors and
-        // cancelled futures still retain the ticket and report failure on drop.
-        self.feedback = None;
-    }
-}
-
-impl Drop for FusionPlacementSelection {
-    fn drop(&mut self) {
-        let Some(feedback) = &self.feedback else {
-            return;
-        };
-        let Some(service) = feedback.runtime.service_ports().placement() else {
-            return;
-        };
-        // Only unsuccessful attempts reach this path. Successful submission is
-        // deliberately not a completed-device-execution cost sample.
-        let _ = service.observe(runmat_execution::PlacementFeedback {
-            signature: feedback.signature.clone(),
-            candidate: feedback.candidate.clone(),
-            total_elapsed_ns: runmat_time::duration_ns_saturating(self.started.elapsed()),
-            succeeded: false,
-        });
-    }
-}
-
 fn select_fusion_provider(
     request: &FusionExecutionRequest<'_>,
     provider: &dyn AccelProvider,
@@ -280,11 +248,9 @@ fn select_fusion_provider_with_contract(
             scalar_work_units,
         )?;
         observer.selected(PlacementVariant::ProviderFusion, "direct_request", None);
-        return Ok(FusionExecutionOutcome::Executed(FusionPlacementSelection {
-            observer,
-            feedback: None,
-            started: Instant::now(),
-        }));
+        return Ok(FusionExecutionOutcome::Executed(
+            FusionPlacementSelection::new(observer, None, provider, None),
+        ));
     }
 
     let operation = fusion_operation_token(&request.plan.group.kind);
@@ -358,6 +324,7 @@ fn select_fusion_provider_with_contract(
             selected,
             provider_cost,
             feedback,
+            provider_query,
             ..
         } if selected.kind.is_provider() => {
             observer.provider_candidate();
@@ -366,11 +333,14 @@ fn select_fusion_provider_with_contract(
                 "complete_cost",
                 provider_cost.checked_total_ns(),
             );
-            Ok(FusionExecutionOutcome::Executed(FusionPlacementSelection {
-                observer,
-                feedback: feedback.map(|feedback| *feedback),
-                started: Instant::now(),
-            }))
+            Ok(FusionExecutionOutcome::Executed(
+                FusionPlacementSelection::new(
+                    observer,
+                    feedback.map(|feedback| *feedback),
+                    provider,
+                    Some(&provider_query),
+                ),
+            ))
         }
         LocalPlacementOutcome::Selected {
             cpu_cost, feedback, ..
