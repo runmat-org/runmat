@@ -20,6 +20,22 @@ pub(super) enum LogarithmOperation {
 }
 
 impl LogarithmOperation {
+    pub(super) const fn catalog_entry(self) -> &'static runmat_builtins::BuiltinCatalogEntry {
+        match self {
+            Self::Natural => &runmat_builtins::LOG_CATALOG_ENTRY,
+            Self::OnePlus => &runmat_builtins::LOG1P_CATALOG_ENTRY,
+            Self::Binary => &runmat_builtins::LOG2_CATALOG_ENTRY,
+            Self::Common => &runmat_builtins::LOG10_CATALOG_ENTRY,
+        }
+    }
+    pub(super) const fn real_predicate(self) -> runmat_types::RealUnaryPredicate {
+        match self {
+            Self::OnePlus => runmat_types::RealUnaryPredicate::AtLeastMinusOne,
+            Self::Natural | Self::Binary | Self::Common => {
+                runmat_types::RealUnaryPredicate::Nonnegative
+            }
+        }
+    }
     pub(super) const fn name(self) -> &'static str {
         match self {
             Self::Natural => "log",

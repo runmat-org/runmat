@@ -29,6 +29,16 @@ async fn realsqrt_builtin(value: Value) -> BuiltinResult<Value> {
         &runmat_builtins::REALSQRT_ERROR_TOO_MANY_OUTPUTS,
         "realsqrt",
     )?;
+    super::super::real_unary_preparation::execute(
+        &runmat_builtins::REALSQRT_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::Nonnegative,
+        value,
+        evaluate_admitted,
+    )
+    .await
+}
+
+async fn evaluate_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(errors::with_detail(

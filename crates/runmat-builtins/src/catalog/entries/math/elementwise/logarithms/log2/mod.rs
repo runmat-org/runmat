@@ -25,7 +25,7 @@ use crate::{
 use runmat_types::{EffectKind, ExecutionStackRequirement};
 
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-const EFFECTS: [EffectKind; 1] = [EffectKind::MayThrow];
+const EFFECTS: [EffectKind; 2] = [EffectKind::MaySuspend, EffectKind::MayThrow];
 
 pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
@@ -39,7 +39,7 @@ pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
             LogarithmKind::Binary,
         )),
         compatibility: BuiltinCompatibility::Matlab,
-        async_behavior: BuiltinAsyncBehavior::NeverSuspends,
+        async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Pure,
         semantic_kind: BuiltinSemanticKind::General,
         workspace_effect: None,
@@ -48,7 +48,16 @@ pub const LOG2_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         capabilities: &[],
     },
     placement: BuiltinPlacementContract {
-        preparation: crate::BuiltinOperandPreparation::RuntimeOwned,
+        preparation: crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::RealUnary(
+                runmat_types::RealUnaryPredicate::Nonnegative,
+            ),
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]),
         portability: BuiltinPortability::NativeAndWasm,
         accelerator: BuiltinAcceleratorPolicy::Optional,
         residency: BuiltinResidencyPolicy::Dynamic,

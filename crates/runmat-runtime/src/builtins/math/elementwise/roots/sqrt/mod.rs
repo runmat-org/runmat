@@ -41,6 +41,16 @@ async fn sqrt_builtin(value: Value) -> BuiltinResult<Value> {
     if let Some(symbolic) = symbolic_function(&value, SymbolicFunction::Sqrt) {
         return Ok(symbolic);
     }
+    super::super::real_unary_preparation::execute(
+        &runmat_builtins::SQRT_CATALOG_ENTRY,
+        runmat_types::RealUnaryPredicate::Nonnegative,
+        value,
+        evaluate_admitted,
+    )
+    .await
+}
+
+async fn evaluate_admitted(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(handle) => provider::evaluate(handle).await,
         Value::Complex(real, imag) => Ok(complex::evaluate_scalar(real, imag)),

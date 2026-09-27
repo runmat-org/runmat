@@ -88,8 +88,8 @@ pub const SQRT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "The result is real double for nonnegative input and complex double when any value is negative. Exactness validation precedes provider access or gather.",
     }];
 const SQRT_BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
-    unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry = {
+    let mut entry = unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "sqrt" },
         documentation: SQRT_DOCUMENTATION,
@@ -101,3 +101,21 @@ pub const SQRT_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_audit: None,
         fusion: BuiltinFusionPolicy::Never,
     });
+    entry.contract.async_behavior = crate::BuiltinAsyncBehavior::MaySuspend;
+    entry.contract.effects = &[
+        runmat_types::EffectKind::MaySuspend,
+        runmat_types::EffectKind::MayThrow,
+    ];
+    entry.placement.preparation =
+        crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::RealUnary(
+                runmat_types::RealUnaryPredicate::Nonnegative,
+            ),
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]);
+    entry
+};

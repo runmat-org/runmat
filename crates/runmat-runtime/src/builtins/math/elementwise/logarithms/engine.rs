@@ -24,8 +24,16 @@ pub(super) async fn execute_non_table(
     value: Value,
 ) -> BuiltinResult<Value> {
     super::extensions::ensure(operation, &value).await?;
-    match value {
-        Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
-        value => super::host::evaluate(operation, value),
-    }
+    super::super::real_unary_preparation::execute(
+        operation.catalog_entry(),
+        operation.real_predicate(),
+        value,
+        |value| async move {
+            match value {
+                Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,
+                value => super::host::evaluate(operation, value),
+            }
+        },
+    )
+    .await
 }

@@ -113,8 +113,8 @@ pub const LOG10_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
         notes: "The RunMat-only overload validates exact binary64 conversion before computation. Negative real values produce complex double output; resident values gather through their exact owner.",
     }];
 const BINDINGS: [BuiltinBindingDeclaration; 1] = crate::REQUIRED_DEFAULT_BINDING;
-pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry =
-    unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
+pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry = {
+    let mut entry = unary_numeric_catalog_entry(UnaryNumericCatalogSpec {
         provenance: crate::BuiltinCatalogProvenance::new(file!(), module_path!()),
         identity: BuiltinCatalogIdentity { name: "log10" },
         documentation: LOG10_DOCUMENTATION,
@@ -128,3 +128,21 @@ pub const LOG10_CATALOG_ENTRY: BuiltinCatalogEntry =
         integer_audit: None,
         fusion: BuiltinFusionPolicy::Never,
     });
+    entry.contract.async_behavior = crate::BuiltinAsyncBehavior::MaySuspend;
+    entry.contract.effects = &[
+        runmat_types::EffectKind::MaySuspend,
+        runmat_types::EffectKind::MayThrow,
+    ];
+    entry.placement.preparation =
+        crate::BuiltinOperandPreparation::Forms(&[crate::BuiltinPreparationForm {
+            id: crate::BuiltinPreparationFormId(0),
+            binding_variant: "default",
+            signatures: &[0],
+            data_arguments: &[0],
+            operation: crate::BuiltinPreparationOperation::RealUnary(
+                runmat_types::RealUnaryPredicate::Nonnegative,
+            ),
+            provider_requirement: crate::BuiltinPreparationProviderRequirement::InputSupported,
+        }]);
+    entry
+};
