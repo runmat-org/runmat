@@ -705,7 +705,7 @@ async fn parse_dimension_spec(value: &Value) -> BuiltinResult<Option<DimSelectio
         }
         Value::Tensor(t) => parse_dimension_tensor(value, &t.shape).await,
         Value::LogicalArray(logical) => parse_dimension_tensor(value, &logical.shape).await,
-        Value::GpuTensor(handle) => parse_dimension_tensor(value, &handle.shape).await,
+        Value::GpuTensor(handle) => parse_dimension_tensor(value, handle.shape()).await,
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Ok(None),
         Value::Complex(_, _) | Value::ComplexTensor(_) => Ok(None),
         _ => Ok(None),
@@ -786,46 +786,45 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
         return sum_gpu_with_omitnan(handle, parsed).await;
     }
 
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return sum_gpu_fallback(&handle, parsed).await;
     };
 
-    let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
+    let resolved = resolve_dims(handle.shape(), &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
     if matches!(parsed.output, OutputTemplate::Native)
         && runmat_accelerate_api::handle_integer_type(&handle).is_some()
     {
-        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape)
+        if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape())
         {
-            return provider
+            let mut output = provider
                 .reduce_integer_sum_native(&handle)
                 .await
-                .map(Value::GpuTensor)
-                .map_err(|err| {
-                    sum_internal_error(format!(
-                        "sum: native integer gpuArray reduction failed: {err}"
-                    ))
-                });
+                .map_err(sum_provider_error)?;
+            gpu_helpers::propagate_output_provenance(&mut output, [&handle])?;
+            return gpu_helpers::resident_gpu_value(output);
         }
         let mut current = handle.clone();
         for &dim in &resolved.dims_in_bounds {
             current = provider
                 .reduce_integer_sum_native_dim(&current, dim)
                 .await
-                .map_err(|err| {
-                    sum_internal_error(format!(
-                        "sum: native integer gpuArray reduction failed: {err}"
-                    ))
-                })?;
+                .map_err(sum_provider_error)?;
         }
-        return Ok(Value::GpuTensor(current));
+        gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
+        return gpu_helpers::resident_gpu_value(current);
     }
 
-    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(&handle.shape) {
-        if let Ok(reduced) = provider.reduce_sum(&handle).await {
-            return Ok(Value::GpuTensor(reduced));
+    if resolved.dims_in_bounds.len() == handle.shape().len() && !is_scalar_shape(handle.shape()) {
+        match provider.reduce_sum(&handle).await {
+            Ok(mut reduced) => {
+                gpu_helpers::propagate_output_provenance(&mut reduced, [&handle])?;
+                return gpu_helpers::resident_gpu_value(reduced);
+            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) => return Err(sum_provider_error(error)),
         }
     }
 
@@ -835,10 +834,15 @@ async fn sum_gpu(handle: GpuTensorHandle, parsed: &ParsedArguments) -> BuiltinRe
             Ok(next) => {
                 current = next;
             }
-            Err(_) => return sum_gpu_fallback(&handle, parsed).await,
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                drop(current);
+                return sum_gpu_fallback(&handle, parsed).await;
+            }
+            Err(error) => return Err(sum_provider_error(error)),
         }
     }
-    Ok(Value::GpuTensor(current))
+    gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
+    gpu_helpers::resident_gpu_value(current)
 }
 
 async fn sum_gpu_with_omitnan(
@@ -847,16 +851,16 @@ async fn sum_gpu_with_omitnan(
 ) -> BuiltinResult<Value> {
     #[cfg(all(test, feature = "wgpu"))]
     {
-        if handle.device_id != 0 {
+        if handle.device_id() != 0 {
             let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                 runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
             );
         }
     }
-    let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) else {
+    let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) else {
         return sum_gpu_fallback(&handle, parsed).await;
     };
-    let resolved = resolve_dims(&handle.shape, &parsed.selection)?;
+    let resolved = resolve_dims(handle.shape(), &parsed.selection)?;
     if resolved.dims_in_bounds.is_empty() {
         return Ok(Value::GpuTensor(handle));
     }
@@ -864,37 +868,40 @@ async fn sum_gpu_with_omitnan(
     // Replace NaNs with 0 on device, then reduce along requested dims.
     let cleaned = match provider.map_nan_to_zero(&handle) {
         Ok(cleaned) => cleaned,
-        Err(err) => {
-            log::trace!("sum: provider omitnan cleanup fallback triggered: {err}");
+        Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
             return sum_gpu_fallback(&handle, parsed).await;
         }
+        Err(error) => return Err(sum_provider_error(error)),
     };
 
     // Reduce along requested dimensions iteratively on device.
-    let mut current = cleaned.clone();
+    let mut current = cleaned;
     for &dim in &resolved.dims_in_bounds {
         match provider.reduce_sum_dim(&current, dim).await {
             Ok(next) => {
-                // free previous intermediate if it is owned
-                if !std::ptr::eq(&current, &cleaned) {
-                    let _ = provider.free(&current);
-                }
                 current = next;
             }
-            Err(_) => {
-                // Clean up and fall back to host for correctness (should be rare)
-                let _ = provider.free(&cleaned);
-                if !std::ptr::eq(&current, &cleaned) {
-                    let _ = provider.free(&current);
-                }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {
+                drop(current);
                 return sum_gpu_fallback(&handle, parsed).await;
             }
+            Err(error) => return Err(sum_provider_error(error)),
         }
     }
-    // Free the cleaned input if it wasn't freed in loop
-    let _ = provider.free(&cleaned);
-    Ok(Value::GpuTensor(current))
+    gpu_helpers::propagate_output_provenance(&mut current, [&handle])?;
+    gpu_helpers::resident_gpu_value(current)
 }
+
+fn sum_provider_error(source: anyhow::Error) -> RuntimeError {
+    let mut error = sum_internal_error(format!("sum: provider execution failed: {source}"));
+    error.source = Some(source.into_boxed_dyn_error());
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
+#[cfg(test)]
+#[path = "sum/owning_tests.rs"]
+mod owning_tests;
 
 #[allow(dead_code)]
 fn reduce_omitnan_2d(
