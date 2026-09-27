@@ -5,6 +5,7 @@ mod power;
 mod logarithms;
 mod remainder;
 mod unary;
+mod arithmetic;
 #[cfg(test)]
 mod owning_routes;
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
@@ -1555,20 +1556,6 @@ fn poly_integral_complex_interleaved(coeffs: &[f64], constant: f64) -> Result<Ve
     Ok(out)
 }
 
-#[derive(Clone, Copy)]
-enum ElementwiseBinaryOp {
-    Add,
-    Sub,
-    Mul,
-    Div,
-}
-
-struct BinaryOperand<'a> {
-    data: &'a [f64],
-    storage: GpuTensorStorage,
-    shape: &'a [usize],
-}
-
 fn logical_len_for_shape(context: &str, shape: &[usize]) -> Result<usize> {
     if shape.contains(&0) {
         return Ok(0);
@@ -1604,63 +1591,6 @@ fn storage_pair(data: &[f64], storage: &GpuTensorStorage, idx: usize) -> (f64, f
         GpuTensorStorage::Real => (data[idx], 0.0),
         GpuTensorStorage::ComplexInterleaved => (data[idx * 2], data[idx * 2 + 1]),
     }
-}
-
-fn elementwise_binary_broadcast_data(
-    context: &str,
-    lhs: BinaryOperand<'_>,
-    rhs: BinaryOperand<'_>,
-    op: ElementwiseBinaryOp,
-) -> Result<(Vec<f64>, Vec<usize>, GpuTensorStorage)> {
-    ensure_storage_len(context, lhs.data, lhs.shape, &lhs.storage)?;
-    ensure_storage_len(context, rhs.data, rhs.shape, &rhs.storage)?;
-    let shape = runtime_broadcast_shapes(context, lhs.shape, rhs.shape).map_err(|e| anyhow!(e))?;
-    let logical_len = shape.iter().copied().product::<usize>();
-    let lhs_strides = runtime_compute_strides(lhs.shape);
-    let rhs_strides = runtime_compute_strides(rhs.shape);
-    let output_storage = if lhs.storage == GpuTensorStorage::ComplexInterleaved
-        || rhs.storage == GpuTensorStorage::ComplexInterleaved
-    {
-        GpuTensorStorage::ComplexInterleaved
-    } else {
-        GpuTensorStorage::Real
-    };
-
-    if output_storage == GpuTensorStorage::Real {
-        let mut out = Vec::with_capacity(logical_len);
-        for idx in 0..logical_len {
-            let lhs_idx = runtime_broadcast_index(idx, &shape, lhs.shape, &lhs_strides);
-            let rhs_idx = runtime_broadcast_index(idx, &shape, rhs.shape, &rhs_strides);
-            let value = match op {
-                ElementwiseBinaryOp::Add => lhs.data[lhs_idx] + rhs.data[rhs_idx],
-                ElementwiseBinaryOp::Sub => lhs.data[lhs_idx] - rhs.data[rhs_idx],
-                ElementwiseBinaryOp::Mul => lhs.data[lhs_idx] * rhs.data[rhs_idx],
-                ElementwiseBinaryOp::Div => lhs.data[lhs_idx] / rhs.data[rhs_idx],
-            };
-            out.push(value);
-        }
-        return Ok((out, shape, GpuTensorStorage::Real));
-    }
-
-    let mut out = Vec::with_capacity(logical_len * 2);
-    for idx in 0..logical_len {
-        let lhs_idx = runtime_broadcast_index(idx, &shape, lhs.shape, &lhs_strides);
-        let rhs_idx = runtime_broadcast_index(idx, &shape, rhs.shape, &rhs_strides);
-        let (ar, ai) = storage_pair(lhs.data, &lhs.storage, lhs_idx);
-        let (br, bi) = storage_pair(rhs.data, &rhs.storage, rhs_idx);
-        let (re, im) = match op {
-            ElementwiseBinaryOp::Add => (ar + br, ai + bi),
-            ElementwiseBinaryOp::Sub => (ar - br, ai - bi),
-            ElementwiseBinaryOp::Mul => (ar * br - ai * bi, ar * bi + ai * br),
-            ElementwiseBinaryOp::Div => {
-                let denom = br * br + bi * bi;
-                ((ar * br + ai * bi) / denom, (ai * br - ar * bi) / denom)
-            }
-        };
-        out.push(re);
-        out.push(im);
-    }
-    Ok((out, shape, GpuTensorStorage::ComplexInterleaved))
 }
 
 fn require_non_integer_elementwise_inputs(
@@ -5695,33 +5625,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            require_non_integer_elementwise_inputs("elem_add", a, b)?;
-            let (out, shape, storage) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let abuf = guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-                let bbuf = guard
-                    .get(&b)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-                elementwise_binary_broadcast_data(
-                    "elem_add",
-                    BinaryOperand {
-                        data: abuf,
-                        storage: runmat_accelerate_api::handle_storage(a),
-                        shape: a.shape(),
-                    },
-                    BinaryOperand {
-                        data: bbuf,
-                        storage: runmat_accelerate_api::handle_storage(b),
-                        shape: b.shape(),
-                    },
-                    ElementwiseBinaryOp::Add,
-                )?
-            };
-            self.allocate_tensor_with_storage(out, shape, storage)
-        })
+        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Add) })
     }
 
     fn elem_mul<'a>(
@@ -5729,33 +5633,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            require_non_integer_elementwise_inputs("elem_mul", a, b)?;
-            let (out, shape, storage) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let abuf = guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-                let bbuf = guard
-                    .get(&b)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-                elementwise_binary_broadcast_data(
-                    "elem_mul",
-                    BinaryOperand {
-                        data: abuf,
-                        storage: runmat_accelerate_api::handle_storage(a),
-                        shape: a.shape(),
-                    },
-                    BinaryOperand {
-                        data: bbuf,
-                        storage: runmat_accelerate_api::handle_storage(b),
-                        shape: b.shape(),
-                    },
-                    ElementwiseBinaryOp::Mul,
-                )?
-            };
-            self.allocate_tensor_with_storage(out, shape, storage)
-        })
+        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Mul) })
     }
 
     fn elem_sub<'a>(
@@ -5763,33 +5641,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            require_non_integer_elementwise_inputs("elem_sub", a, b)?;
-            let (out, shape, storage) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let abuf = guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-                let bbuf = guard
-                    .get(&b)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-                elementwise_binary_broadcast_data(
-                    "elem_sub",
-                    BinaryOperand {
-                        data: abuf,
-                        storage: runmat_accelerate_api::handle_storage(a),
-                        shape: a.shape(),
-                    },
-                    BinaryOperand {
-                        data: bbuf,
-                        storage: runmat_accelerate_api::handle_storage(b),
-                        shape: b.shape(),
-                    },
-                    ElementwiseBinaryOp::Sub,
-                )?
-            };
-            self.allocate_tensor_with_storage(out, shape, storage)
-        })
+        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Sub) })
     }
 
     fn elem_div<'a>(
@@ -5797,33 +5649,7 @@ impl AccelProvider for InProcessProvider {
         a: &'a GpuTensorHandle,
         b: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move {
-            require_non_integer_elementwise_inputs("elem_div", a, b)?;
-            let (out, shape, storage) = {
-                let guard = registry(self.device_id).lock().unwrap();
-                let abuf = guard
-                    .get(&a)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-                let bbuf = guard
-                    .get(&b)
-                    .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", b.buffer_id()))?;
-                elementwise_binary_broadcast_data(
-                    "elem_div",
-                    BinaryOperand {
-                        data: abuf,
-                        storage: runmat_accelerate_api::handle_storage(a),
-                        shape: a.shape(),
-                    },
-                    BinaryOperand {
-                        data: bbuf,
-                        storage: runmat_accelerate_api::handle_storage(b),
-                        shape: b.shape(),
-                    },
-                    ElementwiseBinaryOp::Div,
-                )?
-            };
-            self.allocate_tensor_with_storage(out, shape, storage)
-        })
+        Box::pin(async move { self.native_binary(a, b, arithmetic::Operation::Div) })
     }
 
     fn elem_pow<'a>(
@@ -7556,62 +7382,15 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn scalar_add(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let logical_len = ensure_storage_len("scalar_add", abuf, a.shape(), &storage)?;
-            if storage == GpuTensorStorage::Real {
-                abuf.iter().map(|&x| x + scalar).collect()
-            } else {
-                let mut out = Vec::with_capacity(logical_len * 2);
-                for idx in 0..logical_len {
-                    let (re, im) = storage_pair(abuf, &storage, idx);
-                    out.push(re + scalar);
-                    out.push(im);
-                }
-                out
-            }
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Add, false)
     }
 
     fn scalar_sub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let logical_len = ensure_storage_len("scalar_sub", abuf, a.shape(), &storage)?;
-            if storage == GpuTensorStorage::Real {
-                abuf.iter().map(|&x| x - scalar).collect()
-            } else {
-                let mut out = Vec::with_capacity(logical_len * 2);
-                for idx in 0..logical_len {
-                    let (re, im) = storage_pair(abuf, &storage, idx);
-                    out.push(re - scalar);
-                    out.push(im);
-                }
-                out
-            }
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Sub, false)
     }
 
     fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            ensure_storage_len("scalar_mul", abuf, a.shape(), &storage)?;
-            abuf.iter().map(|&x| x * scalar).collect()
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Mul, false)
     }
 
     fn scalar_max(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
@@ -7632,75 +7411,15 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn scalar_div(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            ensure_storage_len("scalar_div", abuf, a.shape(), &storage)?;
-            if storage == GpuTensorStorage::Real && scalar == 0.0 {
-                abuf.iter().map(|&x| f64::INFINITY * x.signum()).collect()
-            } else {
-                abuf.iter().map(|&x| x / scalar).collect()
-            }
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Div, false)
     }
 
     fn scalar_rsub(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let logical_len = ensure_storage_len("scalar_rsub", abuf, a.shape(), &storage)?;
-            if storage == GpuTensorStorage::Real {
-                abuf.iter().map(|&x| scalar - x).collect()
-            } else {
-                let mut out = Vec::with_capacity(logical_len * 2);
-                for idx in 0..logical_len {
-                    let (re, im) = storage_pair(abuf, &storage, idx);
-                    out.push(scalar - re);
-                    out.push(-im);
-                }
-                out
-            }
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Sub, true)
     }
 
     fn scalar_rdiv(&self, a: &GpuTensorHandle, scalar: f64) -> Result<GpuTensorHandle> {
-        let storage = runmat_accelerate_api::handle_storage(a);
-        let out = {
-            let guard = registry(self.device_id).lock().unwrap();
-            let abuf = guard
-                .get(&a)
-                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id()))?;
-            let logical_len = ensure_storage_len("scalar_rdiv", abuf, a.shape(), &storage)?;
-            if storage == GpuTensorStorage::Real {
-                abuf.iter()
-                    .map(|&x| {
-                        if x == 0.0 {
-                            f64::INFINITY * scalar.signum()
-                        } else {
-                            scalar / x
-                        }
-                    })
-                    .collect()
-            } else {
-                let mut out = Vec::with_capacity(logical_len * 2);
-                for idx in 0..logical_len {
-                    let (re, im) = storage_pair(abuf, &storage, idx);
-                    let denom = re * re + im * im;
-                    out.push(scalar * re / denom);
-                    out.push(-scalar * im / denom);
-                }
-                out
-            }
-        };
-        self.allocate_tensor_with_storage(out, a.shape().to_vec(), storage)
+        self.native_scalar(a, scalar, arithmetic::Operation::Div, true)
     }
 
     fn transpose(&self, a: &GpuTensorHandle) -> Result<GpuTensorHandle> {
@@ -10804,26 +10523,20 @@ mod tests {
 
     #[test]
     fn simple_provider_broadcast_canonicalizes_one_dimensional_row_shorthand() {
-        let left = [1.0, 2.0, 3.0];
-        let right = [10.0, 20.0, 30.0, 40.0, 50.0, 60.0];
-        let (values, shape, storage) = elementwise_binary_broadcast_data(
-            "plus",
-            BinaryOperand {
-                data: &left,
-                storage: GpuTensorStorage::Real,
-                shape: &[3],
-            },
-            BinaryOperand {
-                data: &right,
-                storage: GpuTensorStorage::Real,
-                shape: &[1, 3, 2],
-            },
-            ElementwiseBinaryOp::Add,
-        )
-        .expect("row shorthand broadcast");
-        assert_eq!(shape, vec![1, 3, 2]);
-        assert_eq!(values, vec![11.0, 22.0, 33.0, 41.0, 52.0, 63.0]);
-        assert_eq!(storage, GpuTensorStorage::Real);
+        let provider = InProcessProvider::new();
+        let left = provider
+            .allocate_tensor(vec![1.0, 2.0, 3.0], vec![3])
+            .unwrap();
+        let right = provider
+            .allocate_tensor(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![1, 3, 2])
+            .unwrap();
+        let output = block_on(provider.elem_add(&left, &right)).expect("row shorthand broadcast");
+        assert_eq!(output.shape(), &[1, 3, 2]);
+        assert_eq!(
+            block_on(provider.download(&output)).unwrap().data,
+            vec![11.0, 22.0, 33.0, 41.0, 52.0, 63.0]
+        );
+        assert_eq!(output.physical().storage(), GpuTensorStorage::Real);
     }
 
     #[test]
