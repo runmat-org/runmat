@@ -1582,8 +1582,8 @@ impl FusionGroupPlan {
         // scaled formula.
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n");
-            shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
-            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str("fn isFinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (bitcast<u32>(x) & 0x7fffffffu) == 0x7f800000u; }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f32, b: f32) -> f32 {\n",
                 "    if isNan(a) || isNan(b) { return a + b; }\n",
@@ -1597,8 +1597,8 @@ impl FusionGroupPlan {
             ));
         } else {
             shader.push_str("fn isNan(x: f64) -> bool { let bits = bitcast<u64>(x); return (bits & 0x7ff0000000000000u) == 0x7ff0000000000000u && (bits & 0x000fffffffffffffu) != 0u; }\n");
-            shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str("fn isFinite(x: f64) -> bool { return (bitcast<u64>(x) & 0x7ff0000000000000u) != 0x7ff0000000000000u; }\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (bitcast<u64>(x) & 0x7fffffffffffffffu) == 0x7ff0000000000000u; }\n");
             shader.push_str(concat!(
                 "fn hypot(a: f64, b: f64) -> f64 {\n",
                 "    if isNan(a) || isNan(b) { return a + b; }\n",
@@ -3777,6 +3777,25 @@ mod tests {
         let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
         assert!(wgsl.contains("@compute"));
         assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn classification_helpers_use_ieee_encoding_not_finite_thresholds() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        for (scalar, word, exponent, magnitude) in [
+            ("f32", "u32", "0x7f800000u", "0x7fffffffu"),
+            ("f64", "u64", "0x7ff0000000000000u", "0x7fffffffffffffffu"),
+        ] {
+            let shader = plan.groups[0].generate_wgsl(scalar).unwrap();
+            assert!(shader.contains(&format!(
+                "fn isFinite(x: {scalar}) -> bool {{ return (bitcast<{word}>(x) & {exponent}) != {exponent}; }}"
+            )));
+            assert!(shader.contains(&format!(
+                "fn isInf(x: {scalar}) -> bool {{ return (bitcast<{word}>(x) & {magnitude}) == {exponent}; }}"
+            )));
+        }
     }
 
     #[test]

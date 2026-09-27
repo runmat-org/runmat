@@ -1,6 +1,7 @@
 pub mod bandwidth;
 pub mod centered_gram;
 pub mod circshift;
+pub mod classification;
 pub mod comms;
 pub mod conv;
 pub mod creation;
