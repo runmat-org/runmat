@@ -28,6 +28,8 @@ use std::sync::Arc;
 
 #[path = "../../src/analysis_thermal/tests/prestress/fixture.rs"]
 mod fixture;
+#[path = "thermal_prestress/observations.rs"]
+mod observations;
 
 pub(super) async fn run_local() {
     let directory = tempfile::tempdir().unwrap();
@@ -47,6 +49,7 @@ pub(super) async fn run_local() {
         .unwrap();
         assert_completion(&completed, branch);
     }
+    observations::run_local().await;
 }
 
 pub(super) async fn run_remote(pool: Arc<RemotePoolDriver>, revision: ProgramRevision) {
@@ -60,6 +63,7 @@ pub(super) async fn run_remote(pool: Arc<RemotePoolDriver>, revision: ProgramRev
         .unwrap();
         assert_completion(&completed, branch);
     }
+    observations::run_remote(pool, revision).await;
 }
 
 fn policy() -> StructuralSequenceExecutionPolicy {
@@ -76,7 +80,7 @@ pub(super) fn preparation(
     scope: &str,
     revision: ProgramRevision,
 ) -> ThermalPrestressStudyPreparation {
-    let order = if branch % 2 == 0 {
+    let order = if branch.is_multiple_of(2) {
         ElementOrder::Tet4
     } else {
         ElementOrder::Tet10

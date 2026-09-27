@@ -6,7 +6,7 @@ use runmat_execution::{
     resource::ResourceAccounting,
 };
 use runmat_execution_artifact::{
-    cache::{CacheExport, CacheImport},
+    cache::{CacheExport, CacheImport, FilesystemObjectStore},
     ArtifactAccess, ArtifactResult, ProgramExecutionObject, ProgramExecutionRequest,
     ProgramExecutionResponse,
 };

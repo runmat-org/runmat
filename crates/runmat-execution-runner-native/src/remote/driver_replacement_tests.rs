@@ -328,6 +328,11 @@ fn random_response_driver_replacement_replays_on_a_different_worker() {
     run_actual_driver_replacement(ExactStudyFamily::ModalRandomResponse);
 }
 
+#[test]
+fn authored_thermal_prestress_driver_replacement_replays_on_a_different_worker() {
+    run_actual_driver_replacement(ExactStudyFamily::ThermalPrestressedModal);
+}
+
 fn run_actual_driver_replacement(family: ExactStudyFamily) {
     std::thread::Builder::new()
         .name(format!("actual-driver-replacement-{family:?}"))
@@ -414,7 +419,27 @@ async fn actual_driver_replacement_case(family: ExactStudyFamily) {
                     .then(|| result.clone())
                     .flatten()
             })
-            .unwrap();
+            .unwrap_or_else(|| {
+                let diagnostics = state
+                    .artifacts
+                    .values()
+                    .filter(|artifact| artifact.kind == artifact_kind(DriverArtifactKind::Diagnostic))
+                    .map(|artifact| {
+                        open_object(
+                            &control.run_key,
+                            &artifact.ciphertext,
+                            RUN_ID,
+                            EncryptionPurpose::DetailedEvent,
+                        )
+                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+                        .unwrap_or_else(|error| format!("diagnostic decryption failed: {error}"))
+                    })
+                    .collect::<Vec<_>>();
+                panic!(
+                    "replacement did not publish success: transitions={:?}; diagnostics={diagnostics:?}",
+                    state.transitions
+                );
+            });
         (
             result,
             state.transitions.clone(),
@@ -466,13 +491,44 @@ async fn actual_driver_replacement_case(family: ExactStudyFamily) {
             })
             .unwrap();
     }
-    let imported = import_exact_structural_study_result(
-        &store,
-        outputs.response,
-        &fixture.expectation,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
+    let imported = match &fixture.expectation {
+        StudyExpectation::Exact(expectation) => import_exact_structural_study_result(
+            &store,
+            outputs.response,
+            expectation,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap(),
+        StudyExpectation::Typed(expectation) => {
+            let mut foreign_source = expectation.clone();
+            foreign_source.authored_study_digest =
+                Digest::sha256(b"foreign authored thermal source");
+            assert!(crate::import_structural_study_result(
+                &store,
+                outputs.response.clone(),
+                &foreign_source,
+                ObjectInventoryLimits::default(),
+            )
+            .is_err());
+            let empty_cold_store = super::object_transfer::RemoteObjectStore::new().unwrap();
+            assert!(crate::import_structural_study_result(
+                &empty_cold_store,
+                outputs.response.clone(),
+                expectation,
+                ObjectInventoryLimits::default(),
+            )
+            .is_err());
+            let imported = crate::import_structural_study_result(
+                &store,
+                outputs.response,
+                expectation,
+                ObjectInventoryLimits::default(),
+            )
+            .unwrap();
+            thermal::assert_authored_result(&imported);
+            imported
+        }
+    };
     assert_replacement_result(family, imported.analysis);
 }
 
@@ -481,6 +537,9 @@ fn assert_replacement_result(
     analysis: ExactStructuralStudyAnalysisResult,
 ) {
     match (family, analysis) {
+        (ExactStudyFamily::ThermalPrestressedModal, ExactStructuralStudyAnalysisResult::StructuralPrestressedModal(result)) => {
+            result.modal_numerical_receipt.validate_against(result.modal_numerical_receipt.source_result(), &result.modal_result).unwrap();
+        }
         (
             ExactStudyFamily::StructuralTransient,
             ExactStructuralStudyAnalysisResult::StructuralTransient {
@@ -524,6 +583,8 @@ fn assert_replacement_result(
 mod fixture;
 #[path = "driver_replacement_tests/relay.rs"]
 mod relay;
+#[path = "driver_replacement_tests/thermal.rs"]
+mod thermal;
 
 use fixture::*;
 use relay::*;

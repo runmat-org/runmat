@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 mod composition;
 mod constraints;
+mod domains;
 mod excitations;
 mod initial_conditions;
 mod physics;
@@ -88,6 +89,7 @@ fn model(
         .collect();
     let lowered_properties = properties::lower(declaration, bound, diagnostics);
     let lowered_physics = physics::lower(declaration, bound, diagnostics);
+    let (thermal, thermo_mechanical) = domains::lower(declaration, diagnostics);
     let mut signals = signals::lower(declaration, bound, diagnostics);
     let constraints = constraints::lower(declaration, bound, &signals, diagnostics);
     let lowered_excitations = excitations::lower(declaration, bound, &signals, diagnostics);
@@ -115,6 +117,8 @@ fn model(
         response_spectra: spectral_inputs.response_spectra,
         random_excitations: spectral_inputs.random_excitations,
         initial_conditions,
+        thermal,
+        thermo_mechanical,
     }
 }
 

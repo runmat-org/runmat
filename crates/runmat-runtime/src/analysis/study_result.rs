@@ -6,8 +6,14 @@ use super::StructuralStudyNumericalResult;
 
 pub(super) mod thermal;
 mod thermal_completion;
+pub(super) mod thermal_observation_admission;
+mod thermal_observations;
 mod thermal_source;
 pub use thermal_completion::ThermalStudyCompletion;
+pub use thermal_observations::{
+    ThermalObservationHistoryRoot, ThermalObservationObjectRoot, ThermalObservationPublication,
+    ThermalObservationSampleRoot, ThermalObservationSeriesRoot,
+};
 pub use thermal_source::{ThermalStudyObjectSource, ThermalStudySource};
 
 /// Placement-neutral completed structural study.

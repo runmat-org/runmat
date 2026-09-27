@@ -241,103 +241,8 @@ struct CompletedRunFacts {
         Option<crate::analysis::frequency_result::StructuralFrequencyPersistence>,
 }
 
-fn completed_run_facts(run: CompletedStudyStepRun) -> CompletedRunFacts {
-    match run {
-        CompletedStudyStepRun::Standard(run) => {
-            let run = *run;
-            let data = run.data;
-            CompletedRunFacts {
-                identity: data.run.identity.clone(),
-                operation: run.operation,
-                op_version: run.op_version,
-                run_id: data.run_id.clone(),
-                run_status: data.run_status,
-                numerically_acceptable: data.numerically_acceptable,
-                production_publishable: data.production_publishable,
-                solver_convergence: data.solver_convergence,
-                result_quality: data.result_quality,
-                quality_reasons: data.quality_reasons.clone(),
-                production_publication_reasons: data.production_publication_reasons.clone(),
-                provenance: data.provenance.clone(),
-                numerical_result: crate::analysis::AnalysisStudyStepNumericalResultData::Standard,
-                standard_persistence: Some(data),
-                frequency_persistence: None,
-            }
-        }
-        CompletedStudyStepRun::StructuralFrequency(run) => {
-            let run = *run;
-            let operation = run_operation_for_identity(&run.identity)
-                .expect("admitted structural-frequency identity has a runtime operation");
-            CompletedRunFacts {
-                identity: run.identity,
-                operation: operation.name().to_string(),
-                op_version: operation.version().to_string(),
-                run_id: run.run_id,
-                run_status: run.run_status,
-                numerically_acceptable: run.numerically_acceptable,
-                production_publishable: run.production_publishable,
-                solver_convergence: run.solver_convergence,
-                result_quality: run.result_quality,
-                quality_reasons: run.quality_reasons,
-                production_publication_reasons: run.production_publication_reasons,
-                provenance: run.provenance,
-                numerical_result: run.numerical_result,
-                standard_persistence: None,
-                frequency_persistence: Some(run.persistence),
-            }
-        }
-        CompletedStudyStepRun::StructuralResponseSpectrum(run) => {
-            let run = *run;
-            let operation = run_operation_for_identity(&run.identity)
-                .expect("admitted response-spectrum identity has a runtime operation");
-            CompletedRunFacts {
-                identity: run.identity,
-                operation: operation.name().to_string(),
-                op_version: operation.version().to_string(),
-                run_id: run.run_id,
-                run_status: run.run_status,
-                numerically_acceptable: run.numerically_acceptable,
-                production_publishable: run.production_publishable,
-                solver_convergence: run.solver_convergence,
-                result_quality: run.result_quality,
-                quality_reasons: run.quality_reasons,
-                production_publication_reasons: run.production_publication_reasons,
-                provenance: run.provenance,
-                numerical_result:
-                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralResponseSpectrum(
-                        Box::new(run.numerical_result),
-                    ),
-                standard_persistence: Some(run.persistence),
-                frequency_persistence: None,
-            }
-        }
-        CompletedStudyStepRun::StructuralRandomResponse(run) => {
-            let run = *run;
-            let operation = run_operation_for_identity(&run.identity)
-                .expect("admitted random-response identity has a runtime operation");
-            CompletedRunFacts {
-                identity: run.identity,
-                operation: operation.name().to_string(),
-                op_version: operation.version().to_string(),
-                run_id: run.run_id,
-                run_status: run.run_status,
-                numerically_acceptable: run.numerically_acceptable,
-                production_publishable: run.production_publishable,
-                solver_convergence: run.solver_convergence,
-                result_quality: run.result_quality,
-                quality_reasons: run.quality_reasons,
-                production_publication_reasons: run.production_publication_reasons,
-                provenance: run.provenance,
-                numerical_result:
-                    crate::analysis::AnalysisStudyStepNumericalResultData::StructuralRandomResponse(
-                        Box::new(run.numerical_result),
-                    ),
-                standard_persistence: Some(run.persistence),
-                frequency_persistence: None,
-            }
-        }
-    }
-}
+mod run_facts;
+use run_facts::completed_run_facts;
 
 pub(in crate::analysis) fn complete_study_run(
     mut prepared: PreparedStudyCompletion,
@@ -345,7 +250,22 @@ pub(in crate::analysis) fn complete_study_run(
     mut states: Vec<CanonicalSemanticState>,
     frozen_project_digest: Option<runmat_execution::Digest>,
 ) -> Result<OperationEnvelope<AnalysisStudyRunData>, OperationErrorEnvelope> {
+    let mut thermal_observations = None;
     if let Some(prefix) = prepared.thermal_prefix.take() {
+        if prefix.thermal.observations.is_some() {
+            let CompletedStudyStepRun::Standard(run) = &prefix.completed.run else {
+                return Err(completion_error(
+                    &prepared.context,
+                    "RM.FEA.RUN_STUDY.RESULT_KIND_MISMATCH",
+                    "thermal observations require a standard thermal run",
+                ));
+            };
+            thermal_observations = Some((
+                run.data.run_id.clone(),
+                prefix.thermal,
+                prefix.observation_source,
+            ));
+        }
         prepared.steps.insert(0, prefix.authored);
         completed_steps.insert(0, prefix.completed);
         states.splice(0..0, prefix.states);
@@ -513,6 +433,11 @@ pub(in crate::analysis) fn complete_study_run(
     )?;
     for run in &runs_to_persist {
         persist_linear_static_run(&context, run)?;
+    }
+    if let Some((run_id, completed, source)) = thermal_observations {
+        storage::persist_thermal_observations(&run_id, &completed, &source).map_err(|error| {
+            completion_storage_error(&context, "RM.FEA.RUN_STUDY.ARTIFACT_STORE_FAILED", error)
+        })?;
     }
     for (step, persistence) in &frequency_runs_to_persist {
         storage::persist_structural_frequency_result(step, persistence).map_err(|error| {

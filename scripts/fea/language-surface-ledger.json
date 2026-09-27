@@ -25,8 +25,16 @@
         "materials": {},
         "material_assignments": {},
         "structural": {},
-        "thermal": {},
-        "thermo_mechanical": {},
+        "thermal": {
+          "cardinality": "optional_once_after_included_model_coalescing",
+          "target": "explicit authored thermal domain; no inferred reference temperature",
+          "validation": "finite nonnegative Kelvin; conflicting included declarations reject"
+        },
+        "thermo_mechanical": {
+          "cardinality": "optional_once_after_included_model_coalescing",
+          "target": "explicit authored thermomechanical domain; no inferred reference temperature",
+          "validation": "finite nonnegative Kelvin; conflicting included declarations reject"
+        },
         "electro_thermal": {},
         "electromagnetic": {},
         "cfd": {},
@@ -42,6 +50,38 @@
         "random_excitations": {},
         "sequence": {}
       }
+    },
+    {
+      "source": "crates/runmat-analysis/core/src/problem/domains.rs",
+      "kind": "struct",
+      "name": "ThermalDomain",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once_per_explicit_domain",
+        "default": "none",
+        "target": "model thermal reference_temperature",
+        "identity": "authored source and compiled model identity",
+        "validation": "temperature dimension, finite nonnegative Kelvin, duplicate and conflict rejection",
+        "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
+        "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
+      },
+      "members": { "reference_temperature": {} }
+    },
+    {
+      "source": "crates/runmat-analysis/core/src/problem/domains.rs",
+      "kind": "struct",
+      "name": "ThermoMechanicalDomain",
+      "defaults": {
+        "disposition": "authored_dsl",
+        "cardinality": "required_once_per_explicit_domain",
+        "default": "none",
+        "target": "model thermomechanical reference_temperature",
+        "identity": "authored source and compiled model identity",
+        "validation": "temperature dimension, finite nonnegative Kelvin, duplicate and conflict rejection",
+        "positive_coverage": "core.model_realization.domains.root_and_included_models_preserve_both_explicit_domains",
+        "negative_coverage": "core.model_realization.domains.declarations_coalesce_without_defaults_and_conflicts_are_order_independent"
+      },
+      "members": { "reference_temperature": {} }
     },
     {
       "source": "crates/runmat-runtime/src/analysis/contracts.rs",

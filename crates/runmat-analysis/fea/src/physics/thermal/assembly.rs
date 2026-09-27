@@ -395,9 +395,7 @@ pub(crate) fn assemble(
                 operator_id: constraint.constraint_id.clone(),
             });
         }
-        let mut faces = projection
-            .boundary_faces_matching(&target.region_id)
-            .peekable();
+        let mut faces = projection.boundary_faces_for_target(target).peekable();
         if faces.peek().is_none() {
             return Err(ThermalAssemblyError::UnmappedBoundary {
                 operator_id: constraint.constraint_id.clone(),
@@ -419,7 +417,7 @@ pub(crate) fn assemble(
 
     for boundary in &model.boundaries {
         let mut faces = projection
-            .boundary_faces_matching(&boundary.target.region_id)
+            .boundary_faces_for_target(&boundary.target)
             .peekable();
         match &boundary.operator {
             BoundaryOperator::ThermalHeatFlux { value } => {
@@ -553,14 +551,13 @@ fn boundary_faces_for_target<'a>(
     projection: &'a AnalysisProjection,
     target: &'a RealizedExcitationTarget,
 ) -> impl Iterator<Item = &'a crate::topology::ProjectedBoundaryFace> + 'a {
-    projection.boundary_faces.iter().filter(move |face| {
-        let RealizedExcitationTarget::Region(target) = target else {
-            return false;
-        };
-        face.provenance
-            .iter()
-            .any(|entity| target.matches_persistent_entity(entity))
-    })
+    let region = match target {
+        RealizedExcitationTarget::Region(target) => Some(target),
+        _ => None,
+    };
+    region
+        .into_iter()
+        .flat_map(move |target| projection.boundary_faces_for_target(target))
 }
 
 fn add_scaled_matrix(assembler: &mut RealSparseAssembler, matrix: &RealSparseMatrix, scale: f64) {

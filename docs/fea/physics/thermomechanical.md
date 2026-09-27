@@ -7,7 +7,13 @@ a constitutive contribution; it does not convert temperature into an arbitrary e
 The `.fea` language checks steady, transient, and nonlinear thermomechanical procedure contracts.
 The numerical library admits experimental prescribed-temperature structural realizations and an
 experimental **retained thermal state to static solid solve** path. Neither is bidirectionally
-coupled, and the public typed `.fea` executor does not yet connect the retained-state path end to end.
+coupled. Compiled-study execution connects a thermal prefix to this same-mesh preload and a supported
+buckling, prestressed modal, direct harmonic or modal-reduced harmonic consumer. This narrow graph
+has local/remote numerical execution and typed publication. Explicit authored model domains and
+`thermomechanical preload` preserve the thermal-to-prestress binding. The authored modal fixture
+passes actual-CAD execution after pre-execution driver/worker replacement and cold declared-object
+import. This does not qualify other outer-root consumer/order combinations, mid-phase restart,
+or production use.
 
 ## What thermomechanical equation is implemented?
 
@@ -43,6 +49,7 @@ structural step or feeds deformation back into temperature.
 | Procedure | Contract | Registered realization |
 | --- | --- | --- |
 | `thermomechanical steady` | Coupled static thermal/structural state | Prescribed profile, or retained solved temperature on Tet4/Tet10 through the Rust library |
+| `thermomechanical preload` | Named retained thermal state to structural and geometric-stiffness states | Experimental same-mesh Tet4/Tet10 static solid path; authored modal CAD replay verified, broader qualification open |
 | `thermomechanical transient` | Time samples and coupled evolving state | Not currently admitted as a coupled transient solve |
 | `thermomechanical nonlinear` | Load-factor domain and coupled nonlinear state | Same profile family with experimental nonlinear structural policy |
 
@@ -80,21 +87,38 @@ model check.
 
 ## How do I transfer a solved temperature field into structural analysis?
 
-The intended study graph names the exact retained thermal state and makes dependency explicit:
+Declare both domains explicitly in the study's model. Their absolute reference temperatures must
+be finite and nonnegative; included models may repeat an identical declaration but conflicting
+declarations reject. No domain or reference temperature is inferred from a material:
+
+```fea
+model heated_solid {
+    thermal { reference_temperature = 293.15 K }
+    thermomechanical { reference_temperature = 293.15 K }
+    // Material assignment and boundary constraints belong here as usual.
+}
+```
+
+The study graph names the exact retained thermal state and makes dependency explicit:
 
 ```fea
 analysis temperature { thermal steady {} retain temperature }
 
 analysis deformation after analysis.temperature {
-    thermomechanical steady {
+    thermomechanical preload {
         temperature = analysis.temperature.state.temperature
     }
 }
 ```
 
 The typed state must retain mesh/topology, units, reference temperature, and producer identity.
-The `.fea` source-to-source workflow above remains a contract target; do not assume the two blocks
-will execute as a coupled sequence yet.
+This is a one-way preload, not a bidirectional coupled solve or an interrupted-solve restart.
+The preload publishes structural-primary and geometric-stiffness states for a supported downstream
+consumer. The [complete authored fixture](../examples/thermal-prestress-experimental.fea) includes
+geometry, materials, constraints and a prestressed-modal consumer. Its regression replaces the
+driver and worker before execution, then cold-imports only declared result objects and checks
+the exact retained thermal state. It does not resume an interrupted thermal phase. The isolated
+blocks above are not a standalone executable study.
 
 The Rust numerical library provides the narrower executable path:
 
@@ -116,8 +140,11 @@ measured whole-task memory bound.
 Thermal structural results retain a physical identity that commits the full solver model, source
 transition and solved fields. Numerical receipts separately commit the complete transported result
 and execution workload. Completion import, field recovery and prestress-state publication preserve
-that physical identity. These worker-level facilities do not yet provide a whole-study thermal →
-structural → modal/harmonic/buckling scheduler or qualify the coupled path for production.
+that physical identity. The shared same-pool scheduler retains the actual thermal publication task
+dependency through the preload and supported modal/harmonic/buckling consumer. Cold numerical-prefix
+replay and typed publication are supported. The authored modal fixture also passes actual-CAD
+cold replay after pre-execution replacement; the full outer-root matrix, genuine durable
+whole-chain qualification and remaining numerical/resource/release gates are not yet complete.
 
 The result includes the thermal transition and a source-linked `SolverResultIdentity`. Completed
 thermal results retain the producer step identity
@@ -145,9 +172,9 @@ inventories, temperature/gradient/flux/storage-rate histories, finite values, sh
 reference and initial-state evidence, and typed accepted linear/energy residual evidence. These are
 consistency checks, not an independent numerical-accuracy certificate. Native `PublishState` can
 consume this typed result and verifies the publication request's source identity, producer, and
-topology; structural result bytes are not accepted as thermal results. This does not yet provide
-a portable thermal solve task, full source-to-source sequence routing, or complete transport
-resource accounting.
+topology; structural result bytes are not accepted as thermal results. Portable thermal tasks and
+compiled thermal-prestress composition use these checks. They do not by themselves establish
+authored source-to-source qualification or complete transport resource accounting.
 
 `execution::ThermalWorkload` provides canonical numerical intent and a local execution entry for
 an explicitly selected standalone thermal step. It retains the entire authored model and sequence
@@ -157,7 +184,9 @@ step admission: unsupported upstream state and checkpoint/restart inputs are rej
 silently initialized as a fresh solve. Portable workloads additionally reject lifecycle activations
 and coupled families pending their executable contracts. Multiple thermal steps may be selected
 individually without rewriting their sequence identity; this is not sequence orchestration. The
-local entry does not yet supply thermal producer resource admission or a portable worker task.
+native coordinator uses separately admitted portable solve, recovery, observation and publication
+tasks. Their resource plans do not establish a measured whole-process memory bound, and the
+composition does not yet resume a partially completed thermal phase after driver replacement.
 
 Thermal execution and workload preflight now share `ThermalSolveSchedule`: the sorted unique union
 of grid points, active signal breakpoints, and required history coordinates, preserving left-limit

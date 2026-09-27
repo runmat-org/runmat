@@ -6,6 +6,7 @@ use crate::analysis_thermal_prestress::{
 use crate::StructuralSequenceExecutionPolicy;
 use runmat_execution::{resource::ResourceRequest, task::RetryPolicy};
 use runmat_meshing_core::ElementOrder;
+mod observation_queries;
 
 #[derive(Clone)]
 struct DownloadedThermalObjects(BTreeMap<Digest, Vec<u8>>);
@@ -18,35 +19,57 @@ impl CacheImport for DownloadedThermalObjects {
 
 #[test]
 fn runtime_thermal_source_replays_real_completion_and_authenticates_all_catalog_bytes() {
-    run(false);
+    run(None, ElementOrder::Tet4);
 }
 
 #[test]
-fn runtime_thermal_publication_rejects_unprojected_authored_observations() {
-    run(true);
+fn runtime_thermal_publication_preserves_authored_observations_and_selective_histories() {
+    for policy in [
+        runmat_analysis_core::PartialAccessPolicy::ManifestAndChunks,
+        runmat_analysis_core::PartialAccessPolicy::WholeArtifact,
+    ] {
+        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+            run(Some(policy), order);
+        }
+    }
 }
 
-fn run(with_observation: bool) {
+fn run(observation_policy: Option<runmat_analysis_core::PartialAccessPolicy>, order: ElementOrder) {
     let directory = tempfile::tempdir().unwrap();
     let mut pool = RecordingPool::new(directory.path());
-    let mut prepared = preparation(1, ElementOrder::Tet4);
-    if with_observation {
-        use runmat_analysis_core::{ObservationRequest, PartialAccessPolicy, SamplingPolicy};
+    let mut prepared = preparation(1, order);
+    if let Some(policy) = observation_policy {
+        use runmat_analysis_core::{
+            IndependentDomain, ObservationId, ObservationRequest, ProcedureStep, SamplingPolicy,
+        };
         use runmat_analysis_fea::study::{
             plan_structural_study, StructuralNumericalPlanningPolicy, StructuralStudyPlanningPolicy,
         };
-        let ObservationRequest::History(mut observation) =
-            crate::analysis_thermal::tests::history_finalization::histories(
-                PartialAccessPolicy::ManifestAndChunks,
-            )
-            .remove(0)
-        else {
+        let mut histories = crate::analysis_thermal::tests::history_finalization::histories(policy);
+        let ObservationRequest::History(mut observation) = histories[0].clone() else {
             unreachable!()
         };
         observation.sampling = SamplingPolicy::Final;
         observation.reduction = None;
-        prepared.compiled.model.sequence.steps[0].observations =
-            vec![ObservationRequest::Field(observation)];
+        observation.observation_id = ObservationId("temperature-final".into());
+        histories.push(ObservationRequest::Field(observation));
+        let step = &mut prepared.compiled.model.sequence.steps[0];
+        let mut transient = ProcedureStep::thermal_transient(step.step_id.0.clone());
+        transient.state_outputs = step.state_outputs.clone();
+        transient.independent_domain = IndependentDomain::TimeSeconds {
+            origin: 0.0,
+            start: 0.0,
+            end: 2.0,
+            interval_count: 2,
+        };
+        transient.accuracy.resources.maximum_samples = 3;
+        transient.observations = histories;
+        *step = transient;
+        prepared.compiled.properties = runmat_analysis_fea::properties::compile_property_map(
+            &prepared.compiled.model,
+            Some(&prepared.structural.mesh),
+        )
+        .unwrap();
         prepared.structural.authored_study_digest = prepared.compiled.definition_digest().unwrap();
         prepared.structural.workloads = plan_structural_study(
             &prepared.compiled,
@@ -96,6 +119,11 @@ fn run(with_observation: bool) {
     let task_count = pool.tasks.len();
     let root = prepare_thermal_study_root(&completed.thermal).unwrap();
     let source = RetainedThermalSource {
+        inventory_limits: completed
+            .thermal
+            .preparation()
+            .output_policy
+            .inventory_limits(),
         completed: completed.thermal,
         store: pool.store.clone(),
         objects: root
@@ -106,6 +134,9 @@ fn run(with_observation: bool) {
     };
     let dto = completion(&source.completed).unwrap();
     source.authenticate(&dto).unwrap();
+    if observation_policy.is_some() {
+        observation_queries::check(&source, &dto);
+    }
     assert!(!dto.field_partitions.is_empty());
     assert_eq!(
         pool.tasks.len(),
@@ -197,7 +228,7 @@ fn run(with_observation: bool) {
     };
     let numerical = StructuralStudyNumericalResult::ThermalPrestress {
         thermal: Box::new(thermal),
-        thermal_source,
+        thermal_source: thermal_source.clone(),
         structural: Box::new(StructuralStudyNumericalResult::StructuralPrestressedModal(
             Box::new(StructuralStudyPrestressedModalNumericalResult {
                 frozen_project_digest,
@@ -214,21 +245,8 @@ fn run(with_observation: bool) {
     };
     // Explicit fixture evidence tests the typed boundary, not exact-CAD meshing qualification.
     let evidence = runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&mesh);
-    let result = StructuralStudyResult::new(compiled, mesh, evidence, workloads, numerical);
-    if with_observation {
-        let error = result
-            .err()
-            .expect("unprojected observations must fail closed");
-        assert!(
-            error
-                .to_string()
-                .contains("does not yet project authored observations"),
-            "{error}"
-        );
-        assert_eq!(pool.tasks.len(), task_count);
-        return;
-    }
-    let result = result.unwrap();
+    let result =
+        StructuralStudyResult::new(compiled, mesh, evidence, workloads, numerical).unwrap();
     let published = runmat_runtime::analysis::publish_structural_study_result(
         &result,
         runmat_runtime::operations::OperationContext::new(
@@ -249,6 +267,21 @@ fn run(with_observation: bool) {
             .unwrap()
             .unwrap();
     assert!(thermal_run.run.fields.is_empty());
+    if observation_policy.is_some() {
+        observation_queries::check_persistence(
+            &published.data.steps[0].run_id,
+            &thermal_run,
+            &dto,
+            &thermal_source,
+            &source,
+        );
+        assert_eq!(thermal_run.run.observations.len(), 1);
+        assert_eq!(thermal_run.run.series_reductions.len(), 1);
+        assert!(
+            thermal_run.run.observation_histories.is_empty(),
+            "histories stay catalog-backed"
+        );
+    }
     let histories = thermal_run.thermal_results.unwrap();
     assert_eq!(
         histories.temperature_snapshots.len(),

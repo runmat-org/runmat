@@ -11,7 +11,6 @@ use runmat_analysis_fea::{
     study::{CompiledAnalysisStudy, ThermalStudyProduct},
 };
 use runmat_execution::{ExecutionScopeId, PoolId};
-use runmat_execution_artifact::cache::FilesystemObjectStore;
 
 use crate::{
     analysis_task_pool::{
@@ -52,13 +51,16 @@ pub async fn execute_thermal_prestress_study_locally_with_source(
     mut config: NativeExecutionConfig,
     preparation: ThermalPrestressStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
-) -> NativeExecutionResult<(CompletedThermalPrestressStudy, FilesystemObjectStore)> {
+) -> NativeExecutionResult<(
+    CompletedThermalPrestressStudy,
+    crate::NativeProgramObjectSource,
+)> {
     policy.validate()?;
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
     let completed = execute_with_pool(&mut pool, preparation, policy).await?;
-    Ok((completed, pool.object_store()))
+    Ok((completed, pool.object_source()))
 }
 
 pub async fn execute_thermal_prestress_study_remotely(

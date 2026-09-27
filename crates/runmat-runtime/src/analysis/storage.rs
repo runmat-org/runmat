@@ -30,6 +30,12 @@ use super::render_tiles::{
 mod discovery;
 mod frequency;
 mod frequency_page;
+mod object_payload;
+mod observations;
+pub use observations::{
+    load_observation_history_sample, load_observation_publication, persist_thermal_observations,
+    ObservationHistoryLookup,
+};
 
 use frequency::PersistedStructuralFrequencyArtifact;
 
@@ -80,54 +86,8 @@ pub enum AnalysisFieldPageLookup {
     Page(Box<AnalysisFieldPageResult>),
 }
 
-pub trait AnalysisArtifactStore: Send + Sync {
-    fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String>;
-    fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
-    fn load_run_metadata(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
-    fn load_field_inventory(&self, run_id: &str) -> Result<Option<Vec<AnalysisField>>, String>;
-    fn load_render_tile_index(&self, run_id: &str) -> Result<Option<RenderTileIndex>, String>;
-    fn plan_render_view(
-        &self,
-        run_id: &str,
-        view: Option<RenderViewRequest>,
-    ) -> Result<Option<RenderViewSelection>, String>;
-    fn load_render_tile(
-        &self,
-        run_id: &str,
-        mesh_index: usize,
-        tile_index: usize,
-    ) -> Result<Option<RenderTile>, String>;
-    fn load_render_lod_node(
-        &self,
-        run_id: &str,
-        mesh_index: usize,
-        node_index: usize,
-    ) -> Result<Option<RenderTile>, String>;
-    fn load_render_topology(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<super::AnalysisRenderTopology>, String>;
-    fn load_field_page(
-        &self,
-        run_id: &str,
-        selection: &AnalysisFieldSelection,
-        options: AnalysisFieldRequestOptions,
-    ) -> Result<AnalysisFieldPageLookup, String>;
-    fn list_run_metadata(&self) -> Result<Vec<AnalysisRunResult>, String>;
-    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String>;
-    fn persist_structural_frequency(
-        &self,
-        step: &AnalysisStudyStepRunData,
-        object_catalog: &runmat_execution::value::PublishedObjectCatalog,
-        artifact_roots: &crate::analysis::StructuralFrequencyArtifactRootIndex,
-        source: &dyn runmat_execution::value::PublishedObjectSource,
-    ) -> Result<AnalysisArtifactRecord, String>;
-    fn load_structural_frequency(
-        &self,
-        run_id: &str,
-    ) -> Result<Option<AnalysisStudyStepRunData>, String>;
-}
-
+mod store_contract;
+pub use store_contract::AnalysisArtifactStore;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnalysisArtifactStoreConfig {
     InMemory,
@@ -141,6 +101,7 @@ pub struct AnalysisArtifactRetentionConfig {
 }
 
 pub struct InMemoryAnalysisArtifactStore {
+    observations: RwLock<HashMap<String, observations::ObservationAttachment>>,
     runs: RwLock<HashMap<String, PersistedAnalysisArtifact>>,
     chunks: RwLock<HashMap<Digest, Arc<[u8]>>>,
 }
@@ -148,6 +109,7 @@ pub struct InMemoryAnalysisArtifactStore {
 impl InMemoryAnalysisArtifactStore {
     pub fn new() -> Self {
         Self {
+            observations: RwLock::new(HashMap::new()),
             runs: RwLock::new(HashMap::new()),
             chunks: RwLock::new(HashMap::new()),
         }
@@ -161,6 +123,28 @@ impl Default for InMemoryAnalysisArtifactStore {
 }
 
 impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
+    fn load_observation_publication(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<super::ThermalObservationPublication>, String> {
+        self.observation_publication(run_id)
+    }
+    fn persist_thermal_observations(
+        &self,
+        run_id: &str,
+        completed: &super::ThermalStudyCompletion,
+        source: &super::ThermalStudyObjectSource,
+    ) -> Result<(), String> {
+        self.persist_observations(run_id, completed, source)
+    }
+    fn load_observation_history_sample(
+        &self,
+        run_id: &str,
+        observation_id: &runmat_analysis_core::ObservationId,
+        sample: runmat_analysis_fea::results::field::RecoveredFieldSample,
+    ) -> Result<ObservationHistoryLookup, String> {
+        self.observation_sample(run_id, observation_id, sample)
+    }
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
         let prepared = prepare_run_artifact(run, Utc::now().to_rfc3339())?;
@@ -619,6 +603,28 @@ impl FilesystemAnalysisArtifactStore {
 }
 
 impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
+    fn load_observation_publication(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<super::ThermalObservationPublication>, String> {
+        self.observation_publication(run_id)
+    }
+    fn persist_thermal_observations(
+        &self,
+        run_id: &str,
+        completed: &super::ThermalStudyCompletion,
+        source: &super::ThermalStudyObjectSource,
+    ) -> Result<(), String> {
+        self.persist_observations(run_id, completed, source)
+    }
+    fn load_observation_history_sample(
+        &self,
+        run_id: &str,
+        observation_id: &runmat_analysis_core::ObservationId,
+        sample: runmat_analysis_fea::results::field::RecoveredFieldSample,
+    ) -> Result<ObservationHistoryLookup, String> {
+        self.observation_sample(run_id, observation_id, sample)
+    }
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String> {
         validate_run_identity(run)?;
         let path = self.run_path(&run.run_id)?;
@@ -1797,105 +1803,8 @@ fn validate_run_id_token(run_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn prune_filesystem_runs(root: &Path) -> Result<(), String> {
-    let retention = current_retention_config();
-    let max_runs = retention.max_runs.unwrap_or_else(|| {
-        std::env::var("RUNMAT_FEA_ARTIFACT_MAX_RUNS")
-            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS"))
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0)
-    });
-    let max_runs_per_kind = retention.max_runs_per_kind.unwrap_or_else(|| {
-        std::env::var("RUNMAT_FEA_ARTIFACT_MAX_RUNS_PER_KIND")
-            .or_else(|_| std::env::var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND"))
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(0)
-    });
-    if max_runs == 0 && max_runs_per_kind == 0 {
-        return Ok(());
-    }
-
-    let runs_dir = root.join("runs");
-    ensure_owned_directory(root, "analysis artifact root")?;
-    ensure_owned_directory(&runs_dir, "analysis artifact runs directory")?;
-    let mut artifacts = Vec::new();
-    for entry in fs_read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))? {
-        let path = entry.path().to_path_buf();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
-            continue;
-        }
-        if entry.file_type() != FsFileType::File {
-            return Err(format!(
-                "analysis run artifact must be a regular file: {}",
-                path.display()
-            ));
-        }
-        let run_id = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .ok_or_else(|| {
-                format!(
-                    "analysis run artifact filename is invalid: {}",
-                    path.display()
-                )
-            })?;
-        let bytes = fs_read(&path).map_err(|err| format!("failed to read artifact file: {err}"))?;
-        let Ok(persisted) = decode_persisted_artifact(&bytes, run_id) else {
-            continue;
-        };
-        let (identity, embedded_run_id, created_at) = match persisted {
-            PersistedAnalysisArtifact::Standard(persisted) => (
-                persisted.metadata.run.identity,
-                persisted.metadata.run_id,
-                parse_recorded_at(&persisted.created_at),
-            ),
-            PersistedAnalysisArtifact::StructuralFrequency(persisted) => (
-                persisted.step.identity,
-                persisted.step.run_id,
-                parse_recorded_at(&persisted.created_at),
-            ),
-        };
-        let modified_at = fs_modified(&path).ok().flatten().map(DateTime::<Utc>::from);
-        artifacts.push(FilesystemRunArtifact {
-            path,
-            identity,
-            run_id: embedded_run_id,
-            created_at,
-            modified_at,
-        });
-    }
-    sort_filesystem_artifacts_newest_first(&mut artifacts);
-
-    let mut to_remove = Vec::new();
-    if max_runs_per_kind > 0 {
-        let mut per_kind_counts: HashMap<AnalysisRunIdentity, usize> = HashMap::new();
-        for artifact in &artifacts {
-            let count = per_kind_counts
-                .entry(artifact.identity.clone())
-                .or_default();
-            *count += 1;
-            if *count > max_runs_per_kind {
-                to_remove.push(artifact.path.clone());
-            }
-        }
-    }
-    if max_runs > 0 {
-        for (index, artifact) in artifacts.iter().enumerate() {
-            if index >= max_runs {
-                to_remove.push(artifact.path.clone());
-            }
-        }
-    }
-    to_remove.sort();
-    to_remove.dedup();
-    for path in to_remove {
-        let _ = fs_remove_file(path);
-    }
-    Ok(())
-}
-
+mod retention;
+use retention::prune_filesystem_runs;
 #[derive(Debug)]
 struct FilesystemRunArtifact {
     path: PathBuf,

@@ -4,7 +4,12 @@ pub(super) struct ExactStudyFixture {
     pub(super) control: DurableControl,
     pub(super) run_key: RunKeyMaterial,
     pub(super) inventory: ResourceInventory,
-    pub(super) expectation: crate::ExactStructuralStudyResultExpectation,
+    pub(super) expectation: StudyExpectation,
+}
+
+pub(super) enum StudyExpectation {
+    Exact(Box<crate::ExactStructuralStudyResultExpectation>),
+    Typed(Box<crate::StructuralStudyResultExpectation>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -12,6 +17,7 @@ pub(super) enum ExactStudyFamily {
     StructuralTransient,
     ModalResponseSpectrum,
     ModalRandomResponse,
+    ThermalPrestressedModal,
 }
 
 impl ExactStudyFamily {
@@ -20,15 +26,16 @@ impl ExactStudyFamily {
             Self::StructuralTransient => b"driver replacement direct transient",
             Self::ModalResponseSpectrum => b"driver replacement modal response spectrum",
             Self::ModalRandomResponse => b"driver replacement modal random response",
+            Self::ThermalPrestressedModal => b"driver replacement authored thermal modal",
         }
     }
 
     pub(super) const fn interruption(self) -> ReplacementInterruption {
         match self {
             Self::StructuralTransient => ReplacementInterruption::RecoveryClosure,
-            Self::ModalResponseSpectrum | Self::ModalRandomResponse => {
-                ReplacementInterruption::ReplayableExecutionStart
-            }
+            Self::ModalResponseSpectrum
+            | Self::ModalRandomResponse
+            | Self::ThermalPrestressedModal => ReplacementInterruption::ReplayableExecutionStart,
         }
     }
 
@@ -40,6 +47,7 @@ impl ExactStudyFamily {
             },
             Self::ModalResponseSpectrum => crate::exact_structural_sweep_root::conformance_tests::box_modal_response_spectrum_workloads(),
             Self::ModalRandomResponse => crate::exact_structural_sweep_root::conformance_tests::box_random_response_workloads(),
+            Self::ThermalPrestressedModal => unreachable!("typed root compiles authored workloads"),
         }
     }
 }
@@ -47,6 +55,9 @@ impl ExactStudyFamily {
 pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture {
     let project_root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project_root.path().join("src")).unwrap();
+    if family == ExactStudyFamily::ThermalPrestressedModal {
+        thermal::write_authored_project(project_root.path());
+    }
     std::fs::write(
         project_root.path().join("runmat.toml"),
         "[package]\nname = \"driver-replacement-study\"\n[sources]\nroots = [\"src\"]\n",
@@ -68,43 +79,67 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
         authorization_scope: RUN_ID.into(),
         encryption_context: Digest::sha256(b"driver replacement exact study encryption"),
     };
-    let meshing_request = coarse_box_request();
-    let exact_meshing = prepare_exact_meshing_root(ExactMeshingRootPreparation {
-        program_revision: revision.clone(),
-        artifact_access: access.clone(),
-        source_name: "box.brep",
-        source_bytes: BOX,
-        import_options: ExactCadImportOptions::default(),
-        contact_definitions: Vec::new(),
-        meshing_request,
-        preferred_edges_per_partition: 64,
-        preferred_faces_per_partition: 64,
-        maximum_chunk_bytes: 1024,
-    })
-    .unwrap();
-    let prepared = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
-        program_revision: revision.clone(),
-        artifact_access: access,
-        authored_study_digest: Digest::sha256(family.authored_digest_label()),
-        frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
-        geometry_source_digest: Digest::sha256(BOX),
-        workloads: family.workloads(),
-        analysis_accelerator_requests: Vec::new(),
-        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
-        input_materializations: Vec::new(),
-        exact_meshing,
-    })
-    .unwrap();
-    let expectation = prepared.result_expectation();
+    let (request, objects, programs, expectation) = if family
+        == ExactStudyFamily::ThermalPrestressedModal
+    {
+        let prepared =
+            thermal::prepare_authored_root(project_root.path(), revision.clone(), access.clone());
+        (
+            prepared.request().clone(),
+            prepared.transport_objects().unwrap(),
+            prepared
+                .required_programs()
+                .iter()
+                .map(|program| (program.recipe.clone(), program.artifact.clone()))
+                .collect::<Vec<_>>(),
+            StudyExpectation::Typed(Box::new(prepared.result_expectation())),
+        )
+    } else {
+        let meshing_request = coarse_box_request();
+        let exact_meshing = prepare_exact_meshing_root(ExactMeshingRootPreparation {
+            program_revision: revision.clone(),
+            artifact_access: access.clone(),
+            source_name: "box.brep",
+            source_bytes: BOX,
+            import_options: ExactCadImportOptions::default(),
+            contact_definitions: Vec::new(),
+            meshing_request,
+            preferred_edges_per_partition: 64,
+            preferred_faces_per_partition: 64,
+            maximum_chunk_bytes: 1024,
+        })
+        .unwrap();
+        let prepared = prepare_exact_structural_study_root(ExactStructuralStudyRootPreparation {
+            program_revision: revision.clone(),
+            artifact_access: access,
+            authored_study_digest: Digest::sha256(family.authored_digest_label()),
+            frozen_project_digest: Some(Digest::from_bytes(*project_identity.graph_digest.bytes())),
+            geometry_source_digest: Digest::sha256(BOX),
+            workloads: family.workloads(),
+            analysis_accelerator_requests: Vec::new(),
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
+            input_materializations: Vec::new(),
+            exact_meshing,
+        })
+        .unwrap();
+        (
+            prepared.request().clone(),
+            prepared.transport_objects().unwrap(),
+            prepared
+                .required_programs()
+                .unwrap()
+                .into_iter()
+                .map(|program| (program.recipe, program.artifact))
+                .collect::<Vec<_>>(),
+            StudyExpectation::Exact(Box::new(prepared.result_expectation())),
+        )
+    };
     let mut builder = ExecutionBundleBuilder::native(&project, revision.clone())
         .unwrap()
         .with_compiled_package_closure();
-    for program in prepared.required_programs().unwrap() {
-        builder = builder.with_materialized_program(
-            program.recipe,
-            program.artifact.form,
-            program.artifact.executable_bytes,
-        );
+    for (recipe, artifact) in programs {
+        builder =
+            builder.with_materialized_program(recipe, artifact.form, artifact.executable_bytes);
     }
     let mut bundle = Vec::new();
     write_bundle(
@@ -113,7 +148,6 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
         ArchiveLimits::default(),
     )
     .unwrap();
-    let request = prepared.request().clone();
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V1,
         recipe: request.recipe.clone(),
@@ -125,12 +159,7 @@ pub(super) fn exact_study_fixture(family: ExactStudyFamily) -> ExactStudyFixture
     let run_key = RunKeyMaterial::from_entropy([41; 32]).unwrap();
     let mut artifacts = BTreeMap::new();
     let mut locations = Vec::new();
-    for (index, object) in prepared
-        .transport_objects()
-        .unwrap()
-        .into_iter()
-        .enumerate()
-    {
+    for (index, object) in objects.into_iter().enumerate() {
         let artifact_id = format!("input-object-{index}");
         let ciphertext =
             seal_object(&run_key, RUN_ID, EncryptionPurpose::Input, &object.bytes).unwrap();
@@ -249,7 +278,7 @@ fn box_direct_transient_workload() -> StructuralTransientWorkload {
     }
 }
 
-fn coarse_box_request() -> MeshingRequest {
+pub(super) fn coarse_box_request() -> MeshingRequest {
     let mut request = crate::resolve_native_meshing_request(
         &ExactCadImportOptions::default(),
         runmat_meshing_core::MeshingRequestSettings::default(),

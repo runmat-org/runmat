@@ -206,8 +206,8 @@ impl LocalAnalysisTaskPool {
         }
     }
 
-    pub(crate) fn object_store(&self) -> FilesystemObjectStore {
-        self.store.clone()
+    pub(crate) fn object_source(&self) -> crate::NativeProgramObjectSource {
+        self.session.object_source()
     }
 }
 

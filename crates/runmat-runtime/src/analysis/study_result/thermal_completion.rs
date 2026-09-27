@@ -10,6 +10,7 @@ use runmat_execution::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThermalStudyCompletion {
+    pub observations: Option<super::ThermalObservationPublication>,
     pub compiled: runmat_analysis_fea::study::CompiledAnalysisStudy,
     pub workload: ThermalWorkload,
     pub host_workload_digest: Digest,

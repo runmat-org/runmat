@@ -208,6 +208,55 @@ fn same_line_collections_require_commas() {
 }
 
 #[test]
+fn signed_unit_exponents_preserve_quantity_arithmetic() {
+    for (unit, operation) in [("K^-1", "+"), ("K^+1", "-"), ("kg*m^-3", "+")] {
+        let source = format!("model m {{\nvalue = 2 {unit} {operation} 3 {unit}\n}}\n");
+        let module = parse_fea(&source);
+        assert!(module.diagnostics.is_empty(), "{:?}", module.diagnostics);
+        let FeaModuleItem::Declaration(declaration) = &module.items[0] else {
+            panic!("expected model");
+        };
+        let FeaStatementKind::Assignment { value, .. } = &declaration.body.statements[0].kind
+        else {
+            panic!("expected assignment");
+        };
+        let FeaExpressionKind::Binary {
+            left,
+            operator,
+            right,
+        } = &value.kind
+        else {
+            panic!("expected quantity arithmetic");
+        };
+        assert_eq!(
+            *operator,
+            if operation == "+" {
+                FeaBinaryOperator::Add
+            } else {
+                FeaBinaryOperator::Subtract
+            }
+        );
+        for operand in [left, right] {
+            let FeaExpressionKind::Quantity { unit: tokens, .. } = &operand.kind else {
+                panic!("expected quantity operand");
+            };
+            assert_eq!(&source[tokens.span.start..tokens.span.end], unit);
+        }
+        let formatted = format_fea(&source, FeaFormatOptions::default());
+        assert!(
+            formatted.diagnostics.is_empty(),
+            "{:?}",
+            formatted.diagnostics
+        );
+        assert!(formatted.source.contains(unit));
+        assert_eq!(
+            format_fea(&formatted.source, FeaFormatOptions::default()).source,
+            formatted.source
+        );
+    }
+}
+
+#[test]
 fn formatter_is_canonical_and_idempotent() {
     let source = "study   bracket{\ngeometry=geometry.g\noutput peak=max(output.stress,over=geometry.g.region.body)\n}\n";
     let formatted = format_fea(source, FeaFormatOptions::default());

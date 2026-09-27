@@ -84,14 +84,14 @@ pub async fn execute_structural_frequency_locally_with_source(
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<(
     CompletedStructuralFrequencyStudy,
-    crate::FilesystemObjectStore,
+    crate::NativeProgramObjectSource,
 )> {
     policy.validate()?;
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
     let completion = execute_with_pool(&mut pool, preparation, policy, Vec::new()).await?;
-    Ok((completion, pool.object_store()))
+    Ok((completion, pool.object_source()))
 }
 
 pub async fn execute_structural_frequency_remotely(

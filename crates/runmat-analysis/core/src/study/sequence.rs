@@ -408,6 +408,19 @@ impl ProcedureStep {
         step
     }
 
+    pub fn thermomechanical_preload(
+        step_id: impl Into<String>,
+        thermal_producer: impl Into<String>,
+        state_id: impl Into<String>,
+    ) -> Self {
+        let mut step = Self::structural_preload(step_id);
+        step.family = PhysicsFamily::Coupled(CoupledPhysicsFamily::Thermomechanical);
+        let mut input = prestress_input(thermal_producer, state_id);
+        input.required_kind = StateKind::Thermal;
+        step.state_inputs.push(input);
+        step
+    }
+
     pub fn structural_modal(step_id: impl Into<String>) -> Self {
         Self::experimental(
             step_id,
@@ -751,72 +764,4 @@ fn prestress_input(producer_step: impl Into<String>, state_id: impl Into<String>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn thermal_template_names_its_transient_equation_and_domain() {
-        let step = ProcedureStep::thermal_transient("thermal");
-        assert_eq!(step.family, PhysicsFamily::Thermal);
-        assert_eq!(step.procedure, AnalysisProcedure::TransientResponse);
-        assert_eq!(
-            step.independent_domain,
-            IndependentDomain::TimeSeconds {
-                origin: 0.0,
-                start: 0.0,
-                end: 1.0,
-                interval_count: 10,
-            }
-        );
-        assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);
-    }
-
-    #[test]
-    fn thermal_steady_template_names_equilibrium_and_static_domain() {
-        let step = ProcedureStep::thermal_steady("thermal_equilibrium");
-        assert_eq!(step.family, PhysicsFamily::Thermal);
-        assert_eq!(step.procedure, AnalysisProcedure::Static);
-        assert_eq!(step.independent_domain, IndependentDomain::Static);
-        assert_eq!(step.state_outputs[0].kind, StateKind::Thermal);
-    }
-
-    #[test]
-    fn electromagnetic_template_names_harmonic_complex_equation() {
-        let step = ProcedureStep::electromagnetic_harmonic("em");
-        assert_eq!(step.family, PhysicsFamily::Electromagnetic);
-        assert_eq!(step.procedure, AnalysisProcedure::HarmonicResponse);
-        assert_eq!(
-            step.independent_domain,
-            IndependentDomain::FrequencyHertz(vec![60.0])
-        );
-        assert_eq!(
-            step.state_outputs[0].kind,
-            StateKind::ElectromagneticComplex
-        );
-    }
-
-    #[test]
-    fn structural_dynamic_templates_distinguish_direct_and_modal_solution_spaces() {
-        let direct = ProcedureStep::structural_harmonic("direct");
-        assert_eq!(direct.solution_space, SolutionSpace::Direct);
-        assert_eq!(direct.procedure, AnalysisProcedure::HarmonicResponse);
-        assert_eq!(direct.state_outputs[0].kind, StateKind::StructuralComplex);
-
-        let transient =
-            ProcedureStep::structural_modal_transient("modal_time", "modes", "modal_basis");
-        assert_eq!(transient.solution_space, SolutionSpace::ModalReduced);
-        assert_eq!(transient.procedure, AnalysisProcedure::TransientResponse);
-        assert_eq!(transient.state_inputs.len(), 1);
-        assert_eq!(transient.state_inputs[0].use_as, StateUse::ModalBasis);
-
-        let harmonic =
-            ProcedureStep::structural_modal_harmonic("modal_frequency", "modes", "modal_basis");
-        assert_eq!(harmonic.solution_space, SolutionSpace::ModalReduced);
-        assert_eq!(harmonic.procedure, AnalysisProcedure::HarmonicResponse);
-        assert_eq!(
-            harmonic.state_inputs[0].required_kind,
-            StateKind::ModalBasis
-        );
-        assert_eq!(harmonic.state_outputs[0].kind, StateKind::StructuralComplex);
-    }
-}
+mod tests;

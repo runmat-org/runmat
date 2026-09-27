@@ -33,13 +33,13 @@ pub async fn execute_structural_prestressed_modal_frequency_study_locally_with_s
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<(
     CompletedStructuralPrestressedModalFrequencyStudy,
-    crate::FilesystemObjectStore,
+    crate::NativeProgramObjectSource,
 )> {
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
     let completion = execute_with_pool(&mut pool, preparation, policy).await?;
-    Ok((completion, pool.object_store()))
+    Ok((completion, pool.object_source()))
 }
 
 pub async fn execute_structural_prestressed_modal_frequency_study_remotely(

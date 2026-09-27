@@ -76,8 +76,15 @@ pub(super) fn complete(
         ));
     };
     options.solver_mesh_artifact_path = persisted_mesh.artifact_path.clone();
-    let run = thermal_run::admit(&thermal, &mesh, options, &thermal_run_id, &intent.context)
-        .map_err(invalid)?;
+    let run = thermal_run::admit(
+        &thermal,
+        &thermal_source,
+        &mesh,
+        options,
+        &thermal_run_id,
+        &intent.context,
+    )
+    .map_err(invalid)?;
     workloads.remove(&thermal.workload.step_id);
     let prefix = super::super::publication::ThermalPrefixCompletion {
         completed: CompletedStudyStep {
@@ -88,6 +95,8 @@ pub(super) fn complete(
         },
         authored,
         states: thermal.states.clone(),
+        observation_source: thermal_source,
+        thermal: Box::new(thermal),
     };
     let prepared = PreparedStudyCompletion {
         thermal_prefix: Some(Box::new(prefix)),

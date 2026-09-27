@@ -4,6 +4,7 @@ mod lower;
 mod output;
 mod requirements;
 mod study;
+mod thermal_preload;
 mod values;
 
 use super::CheckedFeaDeclaration;

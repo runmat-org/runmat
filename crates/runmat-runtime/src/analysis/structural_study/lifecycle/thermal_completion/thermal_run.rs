@@ -5,6 +5,7 @@ use runmat_analysis_fea::results::field::reconstruct_recovered_field;
 
 pub(super) fn admit(
     completed: &ThermalStudyCompletion,
+    source: &crate::analysis::ThermalStudyObjectSource,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     options: &AnalysisThermalRunOptions,
     run_id: &str,
@@ -64,7 +65,10 @@ pub(super) fn admit(
     }
     // Canonical thermal fields live in the histories below. Duplicating the final
     // sample in run.fields violates the shared artifact store's unique field IDs.
-    let run = manifest.run.clone();
+    let mut run = manifest.run.clone();
+    crate::analysis::study_result::thermal_observation_admission::project(
+        completed, source, &mut run,
+    )?;
     let (production_publishable, production_publication_reasons) =
         evaluate_production_publication(&run, accuracy.numerically_acceptable);
     let provenance = RunProvenance {

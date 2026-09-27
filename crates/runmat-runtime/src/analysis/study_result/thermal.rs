@@ -57,18 +57,7 @@ pub(in crate::analysis) fn validate(
     if &thermal.compiled != compiled || prefix.thermal != Some(&thermal.workload) {
         return Err("thermal completion differs from the exact compiled producer".into());
     }
-    // The portable root retains observation catalogs, but this runtime adapter
-    // currently projects only the canonical thermal field histories. Do not
-    // silently publish a run that drops authored observation outputs.
-    if compiled
-        .model
-        .sequence
-        .steps
-        .iter()
-        .any(|step| step.step_id == thermal.workload.step_id && !step.observations.is_empty())
-    {
-        return Err("typed thermal runtime publication does not yet project authored observations; the portable completion root retains them".into());
-    }
+    super::thermal_observation_admission::validate(thermal, mesh)?;
     thermal
         .compiled
         .validate_against(mesh)

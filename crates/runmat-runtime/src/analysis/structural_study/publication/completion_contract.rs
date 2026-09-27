@@ -42,6 +42,8 @@ pub(in crate::analysis) struct ThermalPrefixCompletion {
     pub authored: PreparedStudyStep,
     pub completed: CompletedStudyStep,
     pub states: Vec<CanonicalSemanticState>,
+    pub observation_source: crate::analysis::ThermalStudyObjectSource,
+    pub thermal: Box<crate::analysis::ThermalStudyCompletion>,
 }
 
 pub(in crate::analysis) enum CompletedStudyStepRun {

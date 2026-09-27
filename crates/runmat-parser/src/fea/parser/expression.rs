@@ -336,6 +336,16 @@ impl ExpressionParser<'_> {
 
     fn is_unit_token(&self, cursor: usize) -> bool {
         let kind = self.token(self.indices[cursor]).kind;
+        if matches!(kind, FeaTokenKind::Plus | FeaTokenKind::Minus) {
+            // A sign after a unit power belongs to its exponent; other signs
+            // remain arithmetic operators between quantity expressions.
+            return cursor > 0
+                && self.token(self.indices[cursor - 1]).kind == FeaTokenKind::Caret
+                && self
+                    .indices
+                    .get(cursor + 1)
+                    .is_some_and(|index| self.token(*index).kind == FeaTokenKind::Number);
+        }
         is_name_token(kind)
             || matches!(
                 kind,

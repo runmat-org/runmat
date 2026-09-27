@@ -48,11 +48,38 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
     revision: runmat_execution::ProgramRevision,
 ) {
     let limits = NativeAnalysisHostLimits::default();
-    for (order, scope) in [
-        (ElementOrder::Tet4, ThermalStudyScope::Standalone),
-        (ElementOrder::Tet10, ThermalStudyScope::Standalone),
-        (ElementOrder::Tet4, ThermalStudyScope::SelectedStep),
-        (ElementOrder::Tet10, ThermalStudyScope::SelectedStep),
+    use runmat_analysis_core::PartialAccessPolicy::{ManifestAndChunks, WholeArtifact};
+    for (order, scope, storage) in [
+        (
+            ElementOrder::Tet4,
+            ThermalStudyScope::Standalone,
+            ManifestAndChunks,
+        ),
+        (
+            ElementOrder::Tet10,
+            ThermalStudyScope::Standalone,
+            ManifestAndChunks,
+        ),
+        (
+            ElementOrder::Tet4,
+            ThermalStudyScope::SelectedStep,
+            ManifestAndChunks,
+        ),
+        (
+            ElementOrder::Tet10,
+            ThermalStudyScope::SelectedStep,
+            ManifestAndChunks,
+        ),
+        (
+            ElementOrder::Tet4,
+            ThermalStudyScope::SelectedStep,
+            WholeArtifact,
+        ),
+        (
+            ElementOrder::Tet10,
+            ThermalStudyScope::SelectedStep,
+            WholeArtifact,
+        ),
     ] {
         let mesh = canonical_tetrahedron_solver_mesh(order);
         let mut model = super::fixture_model(super::FixtureId::CantileverLinearStatic);
@@ -94,7 +121,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         second.state_id = StateId("second-temperature".into());
         step.state_outputs.push(second);
         let declarations = step.state_outputs.clone();
-        step.observations = authored_observations();
+        step.observations = authored_observations(storage);
         step.accuracy.resources.maximum_samples = 3;
         if scope == ThermalStudyScope::SelectedStep {
             selected::configure_model(&mut model, &mesh, step);
@@ -387,7 +414,9 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
     }
 }
 
-fn authored_observations() -> Vec<runmat_analysis_core::ObservationRequest> {
+pub(super) fn authored_observations(
+    storage: runmat_analysis_core::PartialAccessPolicy,
+) -> Vec<runmat_analysis_core::ObservationRequest> {
     use runmat_analysis_core::*;
     let history = ObservationSpec {
         observation_id: ObservationId("temperature-history".into()),
@@ -413,7 +442,7 @@ fn authored_observations() -> Vec<runmat_analysis_core::ObservationRequest> {
             precision: SignalPrecision::Real64,
             compression: CompressionPolicy::Lossless,
             retention: RetentionPolicy::Canonical,
-            partial_access: PartialAccessPolicy::ManifestAndChunks,
+            partial_access: storage,
         },
         purpose: ObservationPurpose::Publication,
         cost: ObservationCostPolicy::Automatic,

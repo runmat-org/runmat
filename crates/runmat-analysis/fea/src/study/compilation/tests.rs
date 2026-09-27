@@ -227,6 +227,8 @@ fn imported_study(document: &runmat_geometry_core::GeometryDocument) -> Realized
         model: AuthoredModel {
             module_path: "project/main.fea".into(),
             model_id: "body".into(),
+            thermal: None,
+            thermo_mechanical: None,
             inputs: Vec::new(),
             includes: Vec::new(),
             sections: Vec::new(),

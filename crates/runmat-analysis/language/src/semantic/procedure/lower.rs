@@ -177,6 +177,15 @@ fn lower_procedure(
     let step = match (procedure.family.as_str(), procedure.procedure.as_str()) {
         ("structural", "static") => ProcedureStep::structural_static(id),
         ("structural", "preload") => ProcedureStep::structural_preload(id),
+        ("thermomechanical", "preload") => {
+            let state = super::thermal_preload::temperature(
+                declaration,
+                procedure,
+                statements,
+                diagnostics,
+            )?;
+            ProcedureStep::thermomechanical_preload(id, state.0, state.1)
+        }
         ("structural", "modal") => {
             let mut step = ProcedureStep::structural_modal(id);
             step.independent_domain = IndependentDomain::Eigenvalue {
@@ -460,11 +469,10 @@ fn add_state_flow(
             successor: step.step_id.clone(),
             reason: SequenceDependencyReason::StateTransfer,
         });
+        // Inputs name already published states: temperature, geometric stiffness
+        // and modal basis are reused, not re-derived by transferring them. The
+        // producer owns any linearization; consumers preserve its reference state.
         let (method, reference) = match input.use_as {
-            StateUse::Prestress => (
-                StateTransitionMethod::DeriveOperatorContribution,
-                ReferenceStatePolicy::ExplicitLinearizationPoint,
-            ),
             StateUse::InitialGuess => (
                 StateTransitionMethod::InitialGuessOnly,
                 ReferenceStatePolicy::Preserve,

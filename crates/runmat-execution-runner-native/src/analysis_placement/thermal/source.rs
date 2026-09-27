@@ -9,18 +9,19 @@ use runmat_execution::{
     value::{PublishedObjectSource, ValueRef},
     Digest,
 };
-use runmat_execution_artifact::{
-    cache::{CacheImport, FilesystemObjectStore},
-    ArtifactResult,
-};
+use runmat_execution_artifact::{cache::CacheImport, ArtifactResult};
 use runmat_runtime::analysis::{
     ThermalStudyCompletion, ThermalStudyObjectSource, ThermalStudySource,
 };
 
+mod observations;
+#[cfg(test)]
+use runmat_execution_artifact::cache::FilesystemObjectStore;
 #[cfg(test)]
 mod tests;
 
 struct RetainedThermalSource<S> {
+    inventory_limits: runmat_execution_artifact::object::ObjectInventoryLimits,
     completed: CompletedThermalStudy,
     store: S,
     objects: BTreeMap<Digest, Vec<u8>>,
@@ -61,6 +62,49 @@ impl<S: CacheImport + Send + Sync> PublishedObjectSource for RetainedThermalSour
 }
 
 impl<S: CacheImport + Send + Sync> ThermalStudySource for RetainedThermalSource<S> {
+    fn read_observation(
+        &self,
+        catalog: observations::CatalogIdentity,
+        artifact: observations::ArtifactIdentity,
+        observation: &runmat_analysis_core::ObservationId,
+    ) -> Result<observations::ObservationResult, String> {
+        observations::read_observation(
+            &self.completed,
+            self,
+            self.inventory_limits,
+            catalog,
+            artifact,
+            observation,
+        )
+    }
+    fn read_history_sample(
+        &self,
+        catalog: observations::CatalogIdentity,
+        history: observations::HistoryIdentity,
+        coordinate: runmat_analysis_fea::results::field::RecoveredFieldSample,
+    ) -> Result<observations::HistorySample, String> {
+        observations::read_history_sample(
+            &self.completed,
+            self,
+            self.inventory_limits,
+            catalog,
+            history,
+            coordinate,
+        )
+    }
+    fn read_series_reduction(
+        &self,
+        catalog: observations::CatalogIdentity,
+        series: observations::SeriesIdentity,
+    ) -> Result<observations::SeriesResult, String> {
+        observations::read_series_reduction(
+            &self.completed,
+            self,
+            self.inventory_limits,
+            catalog,
+            series,
+        )
+    }
     fn authenticate(&self, candidate: &ThermalStudyCompletion) -> Result<(), String> {
         let replay = ThermalPrestressSource::import(
             self,
@@ -99,6 +143,7 @@ fn completion(completed: &CompletedThermalStudy) -> Result<ThermalStudyCompletio
         }
     }
     Ok(ThermalStudyCompletion {
+        observations: observations::publication(completed, &root.catalog)?,
         host_workload_digest: completed.result.host.workload.identity.digest(),
         compiled: completed.compiled.clone(),
         workload: completed.workload.clone(),
@@ -122,10 +167,11 @@ fn completion(completed: &CompletedThermalStudy) -> Result<ThermalStudyCompletio
 
 pub(super) fn convert(
     completed: CompletedThermalStudy,
-    store: FilesystemObjectStore,
+    store: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(ThermalStudyCompletion, ThermalStudyObjectSource), String> {
     let root = prepare_thermal_study_root(&completed).map_err(|error| error.to_string())?;
     let source = RetainedThermalSource {
+        inventory_limits: completed.preparation().output_policy.inventory_limits(),
         objects: root
             .objects
             .into_iter()
@@ -146,6 +192,7 @@ pub fn thermal_study_completion_from_source(
     source: impl CacheImport + Send + Sync + 'static,
 ) -> Result<(ThermalStudyCompletion, ThermalStudyObjectSource), String> {
     let source = RetainedThermalSource {
+        inventory_limits: completed.preparation().output_policy.inventory_limits(),
         completed,
         store: source,
         objects: BTreeMap::new(),

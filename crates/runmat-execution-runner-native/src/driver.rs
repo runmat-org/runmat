@@ -81,7 +81,7 @@ impl TaskCompletion {
 
 pub(crate) struct LocalDriver {
     config: NativeExecutionConfig,
-    store_root: std::path::PathBuf,
+    store_lifetime: Arc<crate::program_object_source::SessionStoreLifetime>,
     scope_id: ExecutionScopeId,
     pool_id: PoolId,
     driver: Mutex<Driver>,
@@ -144,13 +144,15 @@ impl LocalDriver {
             }))?;
         }
         prepare_session_root(&config.store_root)?;
+        let store_lifetime =
+            crate::program_object_source::SessionStoreLifetime::new(config.store_root.clone());
         let artifacts = ArtifactStore::new(config.store_root.join("artifacts"))?;
         let objects =
             FilesystemObjectStore::open(config.store_root.join("objects"), config.max_object_bytes)
                 .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
         let checkpoints = CheckpointStore::new(config.store_root.join("checkpoints"))?;
         let local = Arc::new(Self {
-            store_root: config.store_root.clone(),
+            store_lifetime,
             config,
             scope_id,
             pool_id,
@@ -166,6 +168,13 @@ impl LocalDriver {
 
     pub(crate) fn object_store(&self) -> FilesystemObjectStore {
         self.objects.clone()
+    }
+
+    pub(crate) fn object_source(&self) -> crate::NativeProgramObjectSource {
+        crate::NativeProgramObjectSource::new(
+            self.objects.clone(),
+            Arc::clone(&self.store_lifetime),
+        )
     }
 
     pub(crate) const fn scope_id(&self) -> ExecutionScopeId {
@@ -446,12 +455,6 @@ impl LocalDriver {
                 .expect("local driver poisoned")
                 .snapshot(),
         )
-    }
-}
-
-impl Drop for LocalDriver {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.store_root);
     }
 }
 

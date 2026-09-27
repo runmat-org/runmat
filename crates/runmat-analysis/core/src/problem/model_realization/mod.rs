@@ -7,6 +7,7 @@ use runmat_geometry_core::{ResolvedGeometryRegions, UnitSystem};
 use crate::{AnalysisModel, AnalysisModelId, AuthoredMaterialRef, MaterialModel, RealizedStudy};
 
 mod constraints;
+mod domains;
 mod physics;
 mod properties;
 mod targets;
@@ -68,6 +69,7 @@ pub fn realize_analysis_model(
     let material_resolution =
         targets::MaterialResolution::new(materials, &models, &target_resolver)?;
     let properties = properties::realize_model_properties(&models, &target_resolver)?;
+    let (thermal, thermo_mechanical) = domains::realize(&models)?;
     let mut sequence = study.sequence.clone();
     for step in &mut sequence.steps {
         for observation in &mut step.observations {
@@ -90,8 +92,8 @@ pub fn realize_analysis_model(
         materials: material_resolution.materials,
         material_assignments: material_resolution.assignments,
         structural: None,
-        thermal: None,
-        thermo_mechanical: None,
+        thermal,
+        thermo_mechanical,
         electro_thermal: None,
         electromagnetic: None,
         cfd: None,
@@ -120,6 +122,8 @@ pub fn realize_analysis_model(
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AnalysisModelRealizationError {
+    #[error("included/root models contain conflicting `{0}` domain declarations")]
+    ConflictingDomain(&'static str),
     #[error("authored model is invalid: {0}")]
     InvalidModel(String),
     #[error("model `{0}` still contains unbound inputs")]

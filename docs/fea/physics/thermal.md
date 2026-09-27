@@ -5,10 +5,18 @@ heat flux, convection, and volumetric heat generation. RunMat separates thermal 
 from boundary conditions: conductivity, density, and specific heat belong to solid/cell material
 regions; temperatures and fluxes target compatible regions on the same admitted geometry.
 
-The typed `.fea` contracts and tetrahedral thermal finite-element assembly are implemented. The
-public typed `.fea` executor does not yet connect a thermal study from source through publication,
-so `runmat fea run` rejects the family today. The equations below describe the implemented thermal
-assembly—not a claim that the public end-to-end path is production-qualified.
+The typed `.fea` contracts and tetrahedral thermal finite-element assembly are implemented.
+Experimental compiled-study execution supports a thermal prefix feeding a same-mesh thermomechanical
+preload and supported buckling, prestressed modal, direct harmonic or modal-reduced harmonic
+consumer. This is not blanket admission of standalone thermal or arbitrary coupled graphs.
+Authored models now preserve explicit thermal reference temperatures, and
+`thermomechanical preload` binds a named retained thermal state to that compiled path.
+The authored thermal-to-modal fixture passes actual-CAD execution after pre-execution driver/worker
+replacement and cold import from declared objects. Other outer-root consumer/order combinations
+and mid-phase restart remain unqualified; the equations below describe implemented assembly,
+not production qualification. See the
+[thermal-prestress example](../examples/thermal-prestress-experimental.fea) and
+[state-transfer contract](./thermomechanical#how-do-i-transfer-a-solved-temperature-field-into-structural-analysis).
 
 ## Retained thermal field histories
 
@@ -37,12 +45,32 @@ field retains its physical time coordinate. A complete history and a final field
 publication obligations: publishing one frame cannot satisfy a history declaration. Accuracy
 validation binds the observation catalog to the original thermal workload and mesh.
 
-This library boundary does not yet enable `runmat fea run` for thermal studies. Runtime routing,
-a closed durable thermal result root/reimport, bounded driver imports and selected-input transport,
-checkpoint-prefix lineage for evicted samples, and restart remain open integration gates.
+Typed thermal-prestress completion retains the thermal prefix in local runtime publication and
+remote CLI conversion. Portable thermal roots authenticate their complete declared object closure;
+tasks transfer their declared input inventories rather than all historical catalog objects.
+The authored modal fixture covers actual-CAD cold replay after pre-execution replacement.
+The full outer-root consumer/order matrix, genuine durable whole-chain qualification,
+bounded driver imports, checkpoint-prefix lineage for evicted samples and restart remain open gates.
 Resource reservations are conservative admission bounds, not measured memory-use evidence.
 Convergence, energy balance, thermoelastic transfer and formulation-specific release evidence
 remain required before any production claim.
+
+### Authored observations and selective reads
+
+Thermal-prestress runtime publication projects retained non-history observations and finalized
+series reductions into the ordinary run. Histories retain their publication catalog and typed
+object roots instead of being flattened into `run.observation_histories`. Discover them with
+`storage::load_observation_publication(run_id)`; select a retained coordinate with
+`analysis_observation_history_sample_by_run_id_op(run_id, observation_id, sample, context)`.
+These are Rust runtime APIs, not new `.fea` syntax or plotting operations.
+
+`ManifestAndChunks` reads the history metadata and selected sample partition; it does not read
+unrelated history samples or canonical thermal fields. `WholeArtifact` necessarily reads the
+whole history object. Both return the same typed sample, including physical coordinate, units,
+source identity and reduction attribution. Missing, altered or unretained samples fail rather
+than being interpolated or recomputed. Cold runtime reads use persisted objects, not the worker
+session. Initial source authentication and persistence still inspect the complete declared closure;
+selective query behavior does not establish bounded admission memory.
 
 ## What heat equation does RunMat assemble?
 
@@ -54,13 +82,17 @@ $$
 \quad\text{in }\Omega.
 $$
 
-RunMat supports prescribed temperature on $\Gamma_T$, applied outward heat flux $\bar q$ on
+RunMat supports prescribed temperature on $\Gamma_T$, applied inward heat flux $\bar q$ on
 $\Gamma_q$, and convection on $\Gamma_h$:
 
 $$
-T=\bar T,\qquad -k\nabla T\cdot\mathbf n=\bar q,\qquad
+T=\bar T,\qquad k\nabla T\cdot\mathbf n=\bar q,\qquad
 -k\nabla T\cdot\mathbf n=h(T-T_\infty).
 $$
+
+Here $\mathbf n$ is the outward unit normal. Positive prescribed flux adds heat to the
+body; the recovered heat-flux vector is $-k\nabla T$, whose outward normal component is
+therefore $-\bar q$ on $\Gamma_q$. Convection uses the outward heat-loss convention.
 
 Tetrahedral shape functions produce conductivity and consistent-capacity operators
 
@@ -206,7 +238,7 @@ Common causes are:
 - a face selected where a solid heat source is required, or the reverse;
 - overlapping temperature fields that prescribe conflicting nodal values;
 - omitted contact/interface resistance between separate bodies;
-- an incorrect sign convention for outward flux;
+- confusing positive inward prescribed flux with the outward component of recovered heat flux;
 - time steps or mesh spacing too coarse for the thermal gradient.
 
 RunMat separately reports missing material coverage, conflicting temperatures, unmapped sources,

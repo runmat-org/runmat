@@ -46,6 +46,8 @@ fn material_assignment_requires_declared_strongly_typed_inputs() {
     AuthoredModel {
         module_path: "project/main.fea".into(),
         model_id: "bracket".into(),
+        thermal: None,
+        thermo_mechanical: None,
         inputs: vec![
             AuthoredInputDefinition {
                 input_id: material.input_id.clone(),
@@ -92,6 +94,8 @@ fn boundary_vertices_are_not_material_domains() {
     let model = AuthoredModel {
         module_path: "project/main.fea".into(),
         model_id: "invalid".into(),
+        thermal: None,
+        thermo_mechanical: None,
         inputs: Vec::new(),
         includes: Vec::new(),
         sections: Vec::new(),

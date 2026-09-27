@@ -124,9 +124,7 @@ pub use study_placement::{
     StructuralStudyPlacementExecutor, StructuralStudyPlacementFuture,
     StructuralStudyPlacementResult,
 };
-pub use study_result::{
-    StructuralStudyResult, ThermalStudyCompletion, ThermalStudyObjectSource, ThermalStudySource,
-};
+pub use study_result::*;
 pub use study_sweep::{
     analysis_complete_study_sweep_op, analysis_study_sweep_definition,
     analysis_study_sweep_identity, AnalysisStudySweepRunOutcome,
@@ -407,8 +405,9 @@ pub use figures::{
     AnalysisFigureMeshSource, AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
 pub use operations::{
-    analysis_field_page_by_run_id_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_results_op, analysis_trends_op,
+    analysis_field_page_by_run_id_op, analysis_observation_history_sample_by_run_id_op,
+    analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,
+    analysis_trends_op,
 };
 pub(crate) use operations::{analysis_run_field_ids, collect_analysis_result_fields};
 pub use runmat_analysis_core::FormulationRequirement;

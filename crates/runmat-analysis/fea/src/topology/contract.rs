@@ -57,6 +57,18 @@ impl AnalysisProjection {
         })
     }
 
+    /// Match the resolved entity inventory when present, not the authored alias.
+    pub fn boundary_faces_for_target<'a>(
+        &'a self,
+        target: &'a runmat_analysis_core::RegionTarget,
+    ) -> impl Iterator<Item = &'a ProjectedBoundaryFace> + 'a {
+        self.boundary_faces.iter().filter(move |face| {
+            face.provenance
+                .iter()
+                .any(|entity| target.matches_persistent_entity(entity))
+        })
+    }
+
     pub fn visit_element_quadrature(
         &self,
         element: &ProjectedElement,

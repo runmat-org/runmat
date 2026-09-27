@@ -57,8 +57,15 @@ impl NativeProgramSession {
         self.driver.pool_id()
     }
 
+    /// Writable execution storage scoped to this session. A cloned store does not
+    /// retain its directory; use `object_source` for readers returned beyond execution.
     pub fn object_store(&self) -> FilesystemObjectStore {
         self.driver.object_store()
+    }
+
+    /// Retain read access to results independently of this session's execution lifetime.
+    pub fn object_source(&self) -> crate::NativeProgramObjectSource {
+        self.driver.object_source()
     }
 
     pub fn artifact_access(&self) -> &ArtifactAccess {

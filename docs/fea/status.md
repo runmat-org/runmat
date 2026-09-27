@@ -30,7 +30,21 @@ This page separates language support, executable native whole-study support, and
 
 The typed native `.fea` executor currently admits structural procedure graphs. Structural static, modal, direct/modal transient, direct/modal harmonic, response-spectrum, random-response, prestress-dependent dynamics, and buckling have typed planning/execution contracts, but each formulation retains its own qualification status and may require `experimental`.
 
-Thermal, acoustic, electromagnetic, fluid, thermo-mechanical, electro-thermal, conjugate heat-transfer, and fluid-structure procedure contracts are represented and checked by the language. They are not yet admitted by the typed native whole-study executor. Runtime object-level operations and solver components for several of those families exist, but they are not a substitute for the complete geometry-to-publication `.fea` path and are not advertised here as runnable typed studies.
+The experimental compiled-study executor also supports a thermal prefix → same-mesh thermomechanical
+preload → buckling, prestressed modal, direct harmonic or modal-reduced harmonic consumer.
+Local and remote publication retain canonical thermal fields, authored observation catalogs,
+selectively readable histories and finalized reductions. This narrow coupled envelope does not
+admit standalone thermal, arbitrary thermal dependencies or bidirectional coupling. Explicit
+authored thermal domains and `thermomechanical preload` lowering are implemented. The
+[thermal-prestress modal fixture](./examples/thermal-prestress-experimental.fea) passes actual-CAD
+execution after pre-execution driver/worker replacement and cold import from declared objects,
+including foreign-source and missing-object rejection. Full outer-root consumer/order coverage
+and genuine mid-phase restart remain open; this is not production qualification.
+
+Acoustic, electromagnetic, fluid, electro-thermal, conjugate heat-transfer and fluid-structure
+procedure contracts are represented and checked by the language but are not yet admitted by the
+typed native whole-study executor. Runtime object-level operations and solver components are not
+a substitute for that complete path.
 
 `docs/fea/examples/acoustic-production-rejected.fea` is a fail-closed example: it checks as an authored contract and rejects execution because the requested production family is unavailable.
 

@@ -422,3 +422,4 @@ fn deserialization_rejects_caller_asserted_nullspace_proof() {
 
 mod numerical;
 mod signals;
+mod target_resolution;

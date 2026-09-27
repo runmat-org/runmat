@@ -2,6 +2,8 @@ use runmat_geometry_core::GeometryRegionRole;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuthoredModelError {
+    #[error("{0} reference temperature must be finite and nonnegative kelvin")]
+    InvalidDomainReferenceTemperature(&'static str),
     #[error("{0} must not be empty")]
     InvalidToken(&'static str),
     #[error("model input `{0}` is duplicated")]

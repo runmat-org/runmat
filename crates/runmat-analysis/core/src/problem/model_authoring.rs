@@ -98,6 +98,8 @@ pub struct AuthoredModelInclude {
 pub struct AuthoredModel {
     pub module_path: String,
     pub model_id: String,
+    pub thermal: Option<super::domains::ThermalDomain>,
+    pub thermo_mechanical: Option<super::domains::ThermoMechanicalDomain>,
     pub inputs: Vec<AuthoredInputDefinition>,
     pub includes: Vec<AuthoredModelInclude>,
     pub sections: Vec<AuthoredSectionDefinition>,
@@ -129,6 +131,26 @@ impl AuthoredModel {
     pub fn validate(&self) -> Result<(), AuthoredModelError> {
         token("model module path", &self.module_path)?;
         token("model id", &self.model_id)?;
+        for (domain, temperature) in [
+            (
+                "thermal",
+                self.thermal
+                    .as_ref()
+                    .map(|domain| domain.reference_temperature),
+            ),
+            (
+                "thermo_mechanical",
+                self.thermo_mechanical
+                    .as_ref()
+                    .map(|domain| domain.reference_temperature),
+            ),
+        ] {
+            if temperature.is_some_and(|value| !value.is_finite() || value.kelvin < 0.0) {
+                return Err(AuthoredModelError::InvalidDomainReferenceTemperature(
+                    domain,
+                ));
+            }
+        }
         let mut inputs = BTreeMap::new();
         for input in &self.inputs {
             input
