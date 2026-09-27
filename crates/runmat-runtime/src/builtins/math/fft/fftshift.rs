@@ -451,11 +451,12 @@ async fn fftshift_gpu_fallback(handle: GpuTensorHandle, dims: &[usize]) -> Built
         }
         Value::LogicalArray(array) => Value::LogicalArray(fftshift_logical(array, dims)?),
         other => {
-            return Err(fftshift_error_with_detail(
+            let mut error = fftshift_error_with_detail(
                 &FFTSHIFT_ERROR_INTERNAL,
                 format!("unexpected downloaded value {other:?}"),
-            )
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never));
+            );
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            return Err(error);
         }
     };
     gpu_helpers::restore_class_preserving_value(&handle, shifted, BUILTIN_NAME)

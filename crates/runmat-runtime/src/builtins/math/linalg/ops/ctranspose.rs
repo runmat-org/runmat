@@ -580,16 +580,14 @@ fn native_conjugate_output_matches(
 }
 
 fn reject_native_output(output: GpuTensorHandle, detail: &str) -> RuntimeError {
-    gpu_helpers::reject_gpu_output(
-        output,
-        internal_error(format!("ctranspose: {detail}"))
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never),
-    )
+    let mut error = internal_error(format!("ctranspose: {detail}"));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    gpu_helpers::reject_gpu_output(output, error)
 }
 
 fn native_provider_error(source: anyhow::Error) -> RuntimeError {
-    let mut error = internal_error(format!("ctranspose: provider failed: {source}"))
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never);
+    let mut error = internal_error(format!("ctranspose: provider failed: {source}"));
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
     error.source = Some(source.into_boxed_dyn_error());
     error
 }
