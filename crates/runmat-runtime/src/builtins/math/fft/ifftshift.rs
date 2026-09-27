@@ -5,8 +5,7 @@
 
 use super::common::{
     apply_shift, apply_shift_numeric_storage, build_shift_plan, compute_shift_dims,
-    free_rejected_provider_fft_output, gpu_metadata_snapshot, restore_gpu_metadata,
-    same_gpu_handle, ShiftKind,
+    gpu_metadata_snapshot, restore_gpu_metadata, same_gpu_handle, ShiftKind,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -468,7 +467,6 @@ async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult
                     ));
                 }
                 if !valid_ifftshift_gpu_output(provider, &out, &handle, input_metadata) {
-                    free_rejected_provider_fft_output(provider, &out, &[&handle]);
                     return Err(ifftshift_terminal_error(
                         "provider circshift returned malformed metadata",
                     ));
@@ -549,8 +547,11 @@ fn restore_ifftshift_gpu_value(
                     return Ok(value);
                 }
             }
-            gpu_helpers::upload_tensor(provider, tensor).map_err(|error| {
-                ifftshift_terminal_error(format!("failed to restore owner result: {error}"))
+            gpu_helpers::upload_tensor_protecting(provider, tensor, &[input]).map_err(|source| {
+                let mut error =
+                    ifftshift_terminal_error(format!("failed to restore owner result: {source}"));
+                error.source = Some(Box::new(source));
+                error
             })?
         }
         Value::ComplexTensor(tensor) => {
@@ -561,20 +562,31 @@ fn restore_ifftshift_gpu_value(
             if provider.precision() != required {
                 return Ok(value);
             }
-            gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|error| {
-                ifftshift_terminal_error(format!("failed to restore owner result: {error}"))
-            })?
+            gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[input]).map_err(
+                |source| {
+                    let mut error = ifftshift_terminal_error(format!(
+                        "failed to restore owner result: {source}"
+                    ));
+                    error.source = Some(Box::new(source));
+                    error
+                },
+            )?
         }
-        Value::LogicalArray(array) => {
-            let tensor = tensor::logical_to_tensor(array).map_err(|error| {
-                ifftshift_terminal_error(format!("logical restoration failed: {error}"))
-            })?;
-            let output = gpu_helpers::upload_tensor(provider, &tensor).map_err(|error| {
-                ifftshift_terminal_error(format!("failed to restore owner result: {error}"))
-            })?;
-            runmat_accelerate_api::set_handle_logical(&output, true);
-            output
-        }
+        Value::LogicalArray(array) => runmat_accelerate_api::upload_logical_protecting(
+            provider,
+            &runmat_accelerate_api::HostLogicalTensorView {
+                data: &array.data,
+                shape: &array.shape,
+            },
+            &[input],
+        )
+        .map_err(|source| {
+            let mut error = ifftshift_terminal_error(format!(
+                "failed to restore logical owner result: {source}"
+            ));
+            error.source = Some(Box::new(source));
+            error
+        })?,
         _ => {
             return Err(ifftshift_terminal_error(
                 "unexpected host result during restoration",
@@ -588,7 +600,6 @@ fn restore_ifftshift_gpu_value(
         ));
     }
     if !valid_ifftshift_gpu_output(provider, &output, input, input_metadata) {
-        free_rejected_provider_fft_output(provider, &output, &[input]);
         return Err(ifftshift_terminal_error(
             "provider upload returned malformed metadata",
         ));

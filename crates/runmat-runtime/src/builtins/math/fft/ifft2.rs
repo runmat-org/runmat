@@ -1,12 +1,13 @@
 //! MATLAB-compatible `ifft2` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    complex_tensor_to_real_value, download_provider_complex_tensor, ensure_wide_integer_data_exact,
-    free_rejected_provider_fft_output, gather_gpu_complex_tensor, gpu_metadata_snapshot,
-    is_wide_integer_value, parse_2d_lengths_from_data, parse_2d_lengths_from_tensor, parse_length,
-    parse_symflag, provider_operation_unsupported, restore_complex_gpu_result,
-    restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle, transform_axes_complex_tensor,
-    valid_provider_fft_output, value_to_complex_tensor, TransformDirection,
+    complex_tensor_to_real_value, download_owned_provider_complex_tensor,
+    download_provider_complex_tensor, ensure_wide_integer_data_exact, gather_gpu_complex_tensor,
+    gpu_metadata_snapshot, is_wide_integer_value, parse_2d_lengths_from_data,
+    parse_2d_lengths_from_tensor, parse_length, parse_symflag, provider_operation_unsupported,
+    restore_complex_gpu_result, restore_gpu_metadata, restore_real_gpu_result, same_gpu_handle,
+    transform_axes_complex_tensor, valid_provider_fft_output, value_to_complex_tensor,
+    TransformDirection,
 };
 use super::ifft::ifft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
@@ -532,7 +533,6 @@ async fn ifft2_gpu(
                         runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                         precision,
                     ) {
-                        free_rejected_provider_fft_output(provider, &first, &[&handle]);
                         return Err(ifft2_provider_error(
                             "first ifft_dim pass returned malformed metadata",
                         ));
@@ -551,16 +551,6 @@ async fn ifft2_gpu(
                                 if same_gpu_handle(&second, &handle) {
                                     restore_gpu_metadata(&handle, input_metadata);
                                 }
-                                if same_gpu_handle(&second, &first) {
-                                    free_rejected_provider_fft_output(provider, &first, &[&handle]);
-                                } else {
-                                    free_rejected_provider_fft_output(
-                                        provider,
-                                        &second,
-                                        &[&handle, &first],
-                                    );
-                                    free_rejected_provider_fft_output(provider, &first, &[&handle]);
-                                }
                                 return Err(ifft2_provider_error(
                                     "second ifft_dim pass aliased a protected handle",
                                 ));
@@ -572,35 +562,25 @@ async fn ifft2_gpu(
                                 runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
                                 precision,
                             ) {
-                                free_rejected_provider_fft_output(
-                                    provider,
-                                    &second,
-                                    &[&handle, &first],
-                                );
-                                free_rejected_provider_fft_output(provider, &first, &[&handle]);
                                 return Err(ifft2_provider_error(
                                     "second ifft_dim pass returned malformed metadata",
                                 ));
                             }
-                            free_rejected_provider_fft_output(
-                                provider,
-                                &first,
-                                &[&handle, &second],
-                            );
                             if !symmetric {
                                 return Ok(Value::GpuTensor(second));
                             }
-                            let complex = download_provider_complex_tensor(
+                            let complex = download_owned_provider_complex_tensor(
                                 provider,
-                                &second,
+                                second,
                                 BUILTIN_NAME,
-                                true,
                             )
                             .await
-                            .map_err(|error| {
-                                ifft2_provider_error(format!(
-                                    "provider result download failed: {error}"
-                                ))
+                            .map_err(|source| {
+                                let mut error = ifft2_provider_error(format!(
+                                    "provider result download failed: {source}"
+                                ));
+                                error.source = Some(Box::new(source));
+                                error
                             })?;
                             let Value::Tensor(real) = finalize_ifft2_output(complex, true)? else {
                                 unreachable!("symmetric ifft2 produces a real tensor")
@@ -608,19 +588,16 @@ async fn ifft2_gpu(
                             return restore_real_gpu_result(&handle, &real, BUILTIN_NAME);
                         }
                         Err(error) if provider_operation_unsupported(&error, "ifft_dim") => {
-                            let downloaded = download_provider_complex_tensor(
-                                provider,
-                                &first,
-                                BUILTIN_NAME,
-                                false,
-                            )
-                            .await;
-                            free_rejected_provider_fft_output(provider, &first, &[&handle]);
+                            let downloaded =
+                                download_provider_complex_tensor(provider, &first, BUILTIN_NAME)
+                                    .await;
                             let completed = ifft_complex_tensor(
-                                downloaded.map_err(|error| {
-                                    ifft2_provider_error(format!(
-                                        "partial provider result download failed: {error}"
-                                    ))
+                                downloaded.map_err(|source| {
+                                    let mut error = ifft2_provider_error(format!(
+                                        "partial provider result download failed: {source}"
+                                    ));
+                                    error.source = Some(Box::new(source));
+                                    error
                                 })?,
                                 lengths.1,
                                 Some(2),
@@ -628,7 +605,6 @@ async fn ifft2_gpu(
                             return restore_ifft2_gpu_result(&handle, completed, symmetric);
                         }
                         Err(error) => {
-                            free_rejected_provider_fft_output(provider, &first, &[&handle]);
                             return Err(ifft2_provider_error(format!(
                                 "second ifft_dim pass failed: {error}"
                             )));

@@ -371,29 +371,19 @@ async fn fft2_gpu(
         if let Ok(first) = provider.fft_dim(&handle, lengths.0, 0).await {
             match provider.fft_dim(&first, lengths.1, 1).await {
                 Ok(second) => {
-                    if first.buffer_id() != handle.buffer_id()
-                        && first.buffer_id() != second.buffer_id()
-                    {
-                        provider.free(&first).ok();
-                        runmat_accelerate_api::clear_residency(&first);
-                    }
                     return Ok(Value::GpuTensor(second));
                 }
                 Err(_) => {
-                    let partial =
-                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, false)
-                            .await
-                            .map_err(|source| {
-                                fft2_error_with_source(
-                                    &FFT2_ERROR_INVALID_INPUT,
-                                    "provider download failed",
-                                    source,
-                                )
-                            });
-                    if first.buffer_id() != handle.buffer_id() {
-                        provider.free(&first).ok();
-                        runmat_accelerate_api::clear_residency(&first);
-                    }
+                    let partial = download_provider_complex_tensor(provider, &first, BUILTIN_NAME)
+                        .await
+                        .map_err(|source| {
+                            fft2_error_with_source(
+                                &FFT2_ERROR_INVALID_INPUT,
+                                "provider download failed",
+                                source,
+                            )
+                        });
+                    drop(first);
                     let completed = fft_complex_tensor(partial?, lengths.1, Some(2))?;
                     return restore_complex_gpu_result(&handle, &completed, BUILTIN_NAME);
                 }

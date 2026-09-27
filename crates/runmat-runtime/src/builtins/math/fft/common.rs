@@ -16,6 +16,9 @@ use std::collections::HashSet;
 use std::mem::size_of;
 use std::sync::Arc;
 
+#[cfg(test)]
+mod owned_download_tests;
+
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
 }
@@ -273,12 +276,13 @@ pub fn restore_complex_gpu_result(
         return Ok(complex_tensor_into_value(tensor.clone()));
     }
     let source_metadata = gpu_metadata_snapshot(source);
-    let output = gpu_helpers::upload_complex_tensor(provider, tensor).map_err(|source| {
-        provider_integrity_error(
-            builtin,
-            format!("{builtin}: failed to restore GPU result: {source}"),
-        )
-    })?;
+    let output = gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &[source])
+        .map_err(|source| {
+            build_runtime_error(format!("{builtin}: failed to restore GPU result: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })?;
     if same_gpu_handle(source, &output) {
         restore_gpu_metadata(source, source_metadata);
         return Err(provider_integrity_error(
@@ -293,10 +297,12 @@ pub fn restore_complex_gpu_result(
         GpuTensorStorage::ComplexInterleaved,
         precision,
     ) {
-        free_rejected_provider_fft_output(provider, &output, &[source]);
-        return Err(provider_integrity_error(
-            builtin,
-            format!("{builtin}: provider returned an invalid restored complex result"),
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_integrity_error(
+                builtin,
+                format!("{builtin}: provider returned an invalid restored complex result"),
+            ),
         ));
     }
     gpu_helpers::complex_gpu_value(output)
@@ -321,12 +327,13 @@ pub fn restore_real_gpu_result(
         return Ok(tensor::tensor_into_value(tensor.clone()));
     }
     let source_metadata = gpu_metadata_snapshot(source);
-    let output = gpu_helpers::upload_tensor(provider, tensor).map_err(|error| {
-        provider_integrity_error(
-            builtin,
-            format!("{builtin}: failed to restore GPU result: {error}"),
-        )
-    })?;
+    let output =
+        gpu_helpers::upload_tensor_protecting(provider, tensor, &[source]).map_err(|source| {
+            build_runtime_error(format!("{builtin}: failed to restore GPU result: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })?;
     if same_gpu_handle(source, &output) {
         restore_gpu_metadata(source, source_metadata);
         return Err(provider_integrity_error(
@@ -341,10 +348,12 @@ pub fn restore_real_gpu_result(
         GpuTensorStorage::Real,
         precision,
     ) {
-        free_rejected_provider_fft_output(provider, &output, &[source]);
-        return Err(provider_integrity_error(
-            builtin,
-            format!("{builtin}: provider returned an invalid restored real result"),
+        return Err(gpu_helpers::reject_gpu_output(
+            output,
+            provider_integrity_error(
+                builtin,
+                format!("{builtin}: provider returned an invalid restored real result"),
+            ),
         ));
     }
     Ok(Value::GpuTensor(output))
@@ -399,25 +408,6 @@ pub fn valid_provider_fft_output(
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && !runmat_accelerate_api::handle_is_logical(handle)
-}
-
-/// Release a malformed provider result without freeing an aliased input handle.
-pub fn free_rejected_provider_fft_output(
-    _provider: &dyn AccelProvider,
-    output: &GpuTensorHandle,
-    protected: &[&GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|handle| same_gpu_handle(handle, output))
-    {
-        return;
-    }
-    if let Some(owner) = runmat_accelerate_api::provider_for_handle(output) {
-        if owner.free(output).is_ok() {
-            runmat_accelerate_api::clear_residency(output);
-        }
-    }
 }
 
 /// Convert any numeric value into a `ComplexTensor`.
@@ -630,29 +620,43 @@ pub async fn download_provider_complex_tensor(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     builtin: &str,
-    free_after_download: bool,
 ) -> BuiltinResult<ComplexTensor> {
-    let decoded = gpu_helpers::download_floating_projection_async(provider, handle)
+    gpu_helpers::download_floating_projection_async(provider, handle)
         .await
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+        .map_err(|source| {
+            build_runtime_error(format!("{builtin}: {source}"))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+        })
         .and_then(|host| {
             let precision = runmat_accelerate_api::handle_precision(handle)
                 .unwrap_or_else(|| provider.precision());
             host_to_complex_tensor_with_precision(host, precision, builtin)
-        });
-    if free_after_download {
-        match provider.free(handle) {
-            Ok(()) => runmat_accelerate_api::clear_residency(handle),
-            Err(error) if decoded.is_ok() => {
-                return Err(provider_integrity_error(
-                    builtin,
-                    format!("{builtin}: failed to free downloaded provider result: {error}"),
-                ));
-            }
-            Err(_) => {}
+        })
+}
+
+/// Consume an execution-owned intermediate after readback. Borrowed inputs use
+/// the non-consuming decoder above; shared aliases retain their own leases.
+pub async fn download_owned_provider_complex_tensor(
+    provider: &dyn AccelProvider,
+    handle: GpuTensorHandle,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    match download_provider_complex_tensor(provider, &handle, builtin).await {
+        Err(error) => Err(gpu_helpers::reject_gpu_output(handle, error)),
+        Ok(decoded) => {
+            handle.release().map_err(|source| {
+                build_runtime_error(format!(
+                    "{builtin}: provider result retirement failed: {source}"
+                ))
+                .with_builtin(builtin)
+                .with_source(source)
+                .build()
+            })?;
+            Ok(decoded)
         }
     }
-    decoded
 }
 
 /// Return the first non-singleton dimension (1-based), defaulting to 1.
@@ -1483,8 +1487,7 @@ mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(IntegerElementType::I32)
             );
-            provider.free(&handle).ok();
-            runmat_accelerate_api::clear_residency(&handle);
+            handle.release().expect("release integer source");
         });
     }
 
@@ -1503,8 +1506,7 @@ mod tests {
                 runmat_accelerate_api::handle_integer_type(&handle),
                 Some(IntegerElementType::U64)
             );
-            provider.free(&handle).ok();
-            runmat_accelerate_api::clear_residency(&handle);
+            handle.release().expect("release wide integer source");
         });
     }
 

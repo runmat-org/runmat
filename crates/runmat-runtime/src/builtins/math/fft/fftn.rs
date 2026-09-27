@@ -288,7 +288,6 @@ fn fftn_host(value: Value, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
 async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         let mut current = handle.clone();
-        let mut prior_handles = Vec::new();
         let mut logical_shape = current.shape().to_vec();
         if logical_shape.is_empty() {
             logical_shape.push(1);
@@ -302,14 +301,13 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
             let len = sizes.as_ref().and_then(|v| v.get(axis).copied());
             match provider.fft_dim(&current, len, axis).await {
                 Ok(next) => {
-                    if current.buffer_id() != next.buffer_id() {
-                        prior_handles.push(current);
-                    }
+                    // Replacing the actual owning reference retires the old
+                    // intermediate; aliased input/output leases remain live.
                     current = next;
                 }
                 Err(_) => {
                     let downloaded =
-                        download_provider_complex_tensor(provider, &current, BUILTIN_NAME, false)
+                        download_provider_complex_tensor(provider, &current, BUILTIN_NAME)
                             .await
                             .map_err(|source| {
                                 fftn_error_with_source(
@@ -333,25 +331,10 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
                             )
                         });
                     }
-                    for prior in prior_handles {
-                        if prior.buffer_id() != handle.buffer_id() {
-                            provider.free(&prior).ok();
-                            runmat_accelerate_api::clear_residency(&prior);
-                        }
-                    }
-                    if current.buffer_id() != handle.buffer_id() {
-                        provider.free(&current).ok();
-                        runmat_accelerate_api::clear_residency(&current);
-                    }
+                    drop(current);
                     let partial = transformed?;
                     return restore_complex_gpu_result(&handle, &partial, BUILTIN_NAME);
                 }
-            }
-        }
-        for prior in prior_handles {
-            if prior.buffer_id() != handle.buffer_id() && prior.buffer_id() != current.buffer_id() {
-                provider.free(&prior).ok();
-                runmat_accelerate_api::clear_residency(&prior);
             }
         }
         return Ok(Value::GpuTensor(current));
@@ -365,7 +348,7 @@ async fn fftn_gpu_fallback(
     sizes: Option<Vec<usize>>,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
-        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false)
+        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME)
             .await
             .map_err(|source| {
                 fftn_error_with_source(
