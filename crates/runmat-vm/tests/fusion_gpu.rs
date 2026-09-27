@@ -424,7 +424,6 @@ impl AccelProvider for TestProvider {
         options: &'a CovarianceOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            suspension::pending_covariance_if_armed().await;
             if second.is_some() {
                 bail!("test provider: covariance secondary input unsupported");
             }
@@ -781,6 +780,18 @@ impl AccelProvider for TestProvider {
         _options: &'a CorrcoefOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { Err(anyhow!("corrcoef (test provider): not implemented")) })
+    }
+
+    fn unary_single<'a>(
+        &'a self,
+        _input: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            suspension::pending_single_if_armed().await;
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "unary_single not supported by test provider",
+            ))
+        })
     }
 
     fn fused_elementwise(

@@ -71,8 +71,16 @@ fn check_cancelled_with_residency_cleanup(stack: &[Value], vars: &[Value]) -> Vm
 
 fn clear_cancelled_residency(stack: &[Value], vars: &[Value]) {
     #[cfg(feature = "native-accel")]
-    for value in stack.iter().chain(vars) {
-        clear_residency(value);
+    {
+        // Session publication outlives this frame. Cancellation must release
+        // execution-owned values without invalidating globals or persistents,
+        // including values published while a suspended instruction was active.
+        let published = runtime_globals::collect_thread_roots();
+        for value in stack.iter().chain(vars) {
+            if let Err(error) = accel_residency::clear_value_excluding_values(value, &published) {
+                log::warn!("failed to clear cancelled GPU residency: {error}");
+            }
+        }
     }
     #[cfg(not(feature = "native-accel"))]
     let _ = (stack, vars);

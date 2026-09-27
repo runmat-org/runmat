@@ -1,4 +1,4 @@
-//! Compiler-produced special fusion must wake without provider cooperation.
+//! Compiler-produced typed fusion must wake without provider cooperation.
 use super::*;
 use std::cell::{Cell, RefCell};
 use std::future::Future;
@@ -17,6 +17,46 @@ thread_local! {
 }
 
 struct Scope;
+
+fn publish_borrowed(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    handles: &[&GpuTensorHandle],
+) {
+    // A raw handle clone is not an independent owner. Publish through the real
+    // session authority retained by the fixture across execution cancellation.
+    block_on(runtime.scope(async {
+        for (index, handle) in handles.iter().enumerate() {
+            runmat_runtime::workspace::session::store_global_named(
+                &format!("suspension_borrowed_{index}"),
+                Value::GpuTensor((*handle).clone()),
+            );
+        }
+    }));
+}
+
+fn unpublish_borrowed(runtime: &runmat_runtime::context::RuntimeContext) {
+    block_on(runtime.scope(async {
+        for name in runmat_runtime::workspace::session::global_names() {
+            if name.starts_with("suspension_borrowed_") {
+                runmat_runtime::workspace::session::store_global_named(&name, Value::Num(0.0));
+            }
+        }
+    }));
+}
+
+fn assert_published_buffers(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    provider: &TestProvider,
+) {
+    block_on(runtime.scope(async {
+        for value in runmat_runtime::workspace::session::roots() {
+            let Value::GpuTensor(handle) = value else {
+                panic!("fixture publishes only borrowed device values")
+            };
+            assert_eq!(provider.pull(&handle).unwrap().1, handle.shape);
+        }
+    }));
+}
 impl Drop for Scope {
     fn drop(&mut self) {
         PENDING.with(|slot| slot.replace(None));
@@ -32,9 +72,16 @@ impl Drop for PendingDrop {
     }
 }
 
-pub(super) async fn pending_covariance_if_armed() {
+pub(super) async fn pending_single_if_armed() {
     let probe = PENDING.with(|slot| slot.borrow().clone());
     if let Some(probe) = probe {
+        assert_eq!(
+            runmat_accelerate::fusion::active_group_plan_clone()
+                .expect("Single restoration must run inside the production fusion region")
+                .group
+                .kind,
+            FusionKind::ElementwiseChain,
+        );
         probe.polls.set(probe.polls.get() + 1);
         let _drop = PendingDrop(probe);
         futures::future::pending::<()>().await;
@@ -130,13 +177,19 @@ fn stochastic_witness(resident: bool, cancel: bool) {
             Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
             source.token(),
         );
+        let mut published = vec![&drift];
+        published.extend(borrowed.as_ref());
+        publish_borrowed(&runtime, &published);
         let probe = Rc::new(Probe::default());
         assert!(DOWNLOAD
             .with(|slot| slot.replace(Some((drift.buffer_id, probe.clone()))))
             .is_none());
         let _scope = Scope;
         let mut execution = Box::pin(runmat_vm::interpret_resume_in_context(
-            &bytecode, resume, None, runtime,
+            &bytecode,
+            resume,
+            None,
+            runtime.clone(),
         ));
         let wakes = Arc::new(Wakes::default());
         let waker = Waker::from(wakes.clone());
@@ -148,6 +201,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
             baseline.len() + usize::from(!resident),
             "state upload must precede pending drift download"
         );
+        assert_published_buffers(&runtime, provider);
         if cancel {
             source.cancel(runmat_execution::CancellationReason::User);
             assert!(wakes.0.load(Ordering::SeqCst) > 0);
@@ -161,6 +215,8 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         assert_eq!(probe.drops.get(), 1);
         assert_eq!(probe.polls.get(), 1);
         assert_eq!(*provider.buffers.lock().unwrap(), baseline);
+        assert_published_buffers(&runtime, provider);
+        unpublish_borrowed(&runtime);
         provider.free(&drift).unwrap();
         if let Some(handle) = borrowed {
             provider.free(&handle).unwrap();
@@ -178,13 +234,13 @@ impl Wake for Wakes {
 }
 
 #[test]
-fn pending_special_fusion_cancellation_preserves_borrowed_input() {
+fn pending_typed_fusion_cancellation_preserves_borrowed_input() {
     witness(true, true);
     witness(true, false);
 }
 
 #[test]
-fn pending_special_fusion_cancellation_releases_uploaded_input() {
+fn pending_typed_fusion_cancellation_releases_uploaded_input() {
     // This also exercises the shared fusion allocation owner: the cancellation
     // boundary alone cannot release raw handles allocated by a compound kernel.
     witness(false, true);
@@ -196,16 +252,19 @@ fn witness(resident: bool, cancel: bool) {
         let _lock = accel_test_lock();
         ensure_provider_registered();
         let provider = PROVIDER.get().unwrap();
-        let source = "x = [1,2,3;4,5,6;7,8,9;10,11,12;13,14,15]; mu = mean(x,1); centered = x - mu; cov = (centered.' * centered) / 4;";
+        // The semantic compiler admits elementwise windows, not CenteredGram
+        // windows. Single output restoration is an actual awaited provider
+        // boundary after the fused F64 submission and owned allocations.
+        let source = "x = 1:4096; y = single(sin(x) .* x + 2);";
         let bytecode = compile_semantic(source);
         assert!(bytecode
             .runtime_fusion_groups()
             .iter()
-            .any(|group| { group.kind == FusionKind::CenteredGram }));
-        let data = (1..=15).map(f64::from).collect::<Vec<_>>();
-        let borrowed = resident.then(|| provider.push(data.clone(), vec![5, 3]));
+            .any(|group| { group.kind == FusionKind::ElementwiseChain }));
+        let data = (1..=4096).map(f64::from).collect::<Vec<_>>();
+        let borrowed = resident.then(|| provider.push(data.clone(), vec![1, 4096]));
         let input = borrowed.as_ref().map_or_else(
-            || Value::Tensor(Tensor::new(data, vec![5, 3]).unwrap()),
+            || Value::Tensor(Tensor::new(data, vec![1, 4096]).unwrap()),
             |handle| Value::GpuTensor(handle.clone()),
         );
         let baseline = provider.buffers.lock().unwrap().clone();
@@ -220,13 +279,19 @@ fn witness(resident: bool, cancel: bool) {
             runmat_runtime::context::RuntimeServicePorts::default()
                 .with_placement(placement.clone()),
         );
+        if let Some(handle) = &borrowed {
+            publish_borrowed(&runtime, &[handle]);
+        }
         let probe = Rc::new(Probe::default());
         assert!(PENDING
             .with(|slot| slot.replace(Some(probe.clone())))
             .is_none());
         let _scope = Scope;
         let mut execution = Box::pin(runmat_vm::interpret_resume_in_context(
-            &bytecode, resume, None, runtime,
+            &bytecode,
+            resume,
+            None,
+            runtime.clone(),
         ));
         let wakes = Arc::new(Wakes::default());
         let waker = Waker::from(wakes.clone());
@@ -235,9 +300,14 @@ fn witness(resident: bool, cancel: bool) {
         assert_eq!(
             probe.polls.get(),
             1,
-            "actual covariance provider hook entered"
+            "actual post-submission Single restoration hook entered"
         );
         assert_eq!(probe.drops.get(), 0);
+        assert!(
+            provider.buffers.lock().unwrap().len() > baseline.len(),
+            "fusion owns submitted output buffers before restoration suspends"
+        );
+        assert_published_buffers(&runtime, provider);
         if cancel {
             source.cancel(runmat_execution::CancellationReason::User);
             assert!(
@@ -260,8 +330,8 @@ fn witness(resident: bool, cancel: bool) {
         let feedback = profile
             .feedback
             .iter()
-            .find(|series| series.candidate.contains("fusion.centered_gram"))
-            .expect("selected compound fusion reports terminal failure");
+            .find(|series| series.candidate.contains("fusion.elementwise"))
+            .expect("selected typed fusion reports terminal failure");
         assert_eq!(feedback.samples, 0);
         assert_eq!(feedback.failures, 1);
         assert_eq!(
@@ -274,7 +344,9 @@ fn witness(resident: bool, cancel: bool) {
             baseline,
             "only invocation-owned uploads must be released"
         );
+        assert_published_buffers(&runtime, provider);
         if let Some(handle) = borrowed {
+            unpublish_borrowed(&runtime);
             provider.free(&handle).unwrap();
         }
         assert!(runmat_runtime::context::legacy::active().is_none());
