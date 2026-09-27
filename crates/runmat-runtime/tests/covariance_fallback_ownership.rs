@@ -223,10 +223,7 @@ fn typed_unsupported_weight_upload_uses_supported_host_compute_and_restore() {
         1,
     ))
     .unwrap();
-    let Value::OutputList(values) = &result else {
-        panic!("outputs")
-    };
-    let Value::GpuTensor(output) = &values[0] else {
+    let Value::GpuTensor(output) = &result else {
         panic!("restored covariance")
     };
     let host = block_on(provider.inner.download(output)).unwrap();

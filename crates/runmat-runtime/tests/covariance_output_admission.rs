@@ -259,10 +259,7 @@ fn valid_covariance_output_adopts_explicit_intent_and_owns_only_its_result() {
         1,
     ))
     .unwrap();
-    let Value::OutputList(outputs) = &result else {
-        panic!("requested output list")
-    };
-    let Value::GpuTensor(output) = &outputs[0] else {
+    let Value::GpuTensor(output) = &result else {
         panic!("resident result")
     };
     assert_eq!(output.shape(), [2, 2]);
@@ -317,19 +314,11 @@ fn covariance_shape_admission_matches_host_vectors_matrices_and_empty_inputs() {
             1,
         ))
         .unwrap();
-        let Value::OutputList(host) = host else {
-            panic!("host outputs")
-        };
-        let Value::OutputList(resident) = resident else {
-            panic!("resident outputs")
-        };
-        let Value::GpuTensor(output) = &resident[0] else {
+        let Value::GpuTensor(output) = &resident else {
             panic!("resident covariance")
         };
-        let expected = match &host[0] {
-            Value::Num(number) => Tensor::new(vec![*number], vec![1, 1]).unwrap(),
-            Value::Tensor(tensor) => tensor.clone(),
-            other => panic!("unexpected host covariance: {other:?}"),
+        let Value::Tensor(expected) = host else {
+            panic!("covariance host result must be a dense tensor, got {host:?}");
         };
         let actual = block_on(provider.download(output)).unwrap();
         assert_eq!(actual.shape, expected.shape, "{shape:?}");
