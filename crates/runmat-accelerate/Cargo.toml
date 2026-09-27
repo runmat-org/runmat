@@ -47,6 +47,7 @@ libm = "0.2"
 pollster = { version = "0.3", optional = true }
 
 [dev-dependencies]
+runmat-accelerate-api = { workspace = true, features = ["test-support"] }
 runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
