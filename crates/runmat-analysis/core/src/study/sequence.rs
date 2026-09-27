@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::ResponseSpectrumId;
 
+mod activation;
+pub use activation::{
+    ActivationLifecycle, ExcitationCaseSelection, StepObjectActivation, StepObjectRef,
+};
+
 use super::{
     accuracy::AccuracyPlan, output::ObservationRequest, AnalysisProcedure, CoupledPhysicsFamily,
     PhysicsFamily, SolutionSpace,
@@ -91,6 +96,7 @@ pub struct ProcedureStep {
     pub solution_space: SolutionSpace,
     pub independent_domain: IndependentDomain,
     pub settings: ProcedureSettings,
+    pub excitation_case_selection: ExcitationCaseSelection,
     pub activations: Vec<StepObjectActivation>,
     pub state_inputs: Vec<StateInput>,
     pub state_outputs: Vec<StateOutput>,
@@ -176,41 +182,6 @@ pub enum SequenceDependencyReason {
     AuthoredOrdering,
     SharedInterface,
     Adaptation,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StepObjectRef {
-    Constraint(String),
-    Boundary(String),
-    Connector(String),
-    Interface(String),
-    Excitation(String),
-    InitialCondition(String),
-    MaterialParameter(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct StepObjectActivation {
-    pub object: StepObjectRef,
-    pub lifecycle: ActivationLifecycle,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ActivationLifecycle {
-    Activate,
-    Continue {
-        from_step: ProcedureStepId,
-    },
-    Modify {
-        prior_step: ProcedureStepId,
-        prior_object: StepObjectRef,
-    },
-    Deactivate {
-        from_step: ProcedureStepId,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -382,6 +353,7 @@ impl ProcedureStep {
             solution_space,
             independent_domain,
             settings: ProcedureSettings::None,
+            excitation_case_selection: ExcitationCaseSelection::All,
             activations: Vec::new(),
             state_inputs: Vec::new(),
             state_outputs,

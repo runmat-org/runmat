@@ -36,4 +36,6 @@ pub(crate) use sample::{
 pub(crate) use time_grid::ProcedureTimeGrid;
 
 #[cfg(test)]
+mod selection_tests;
+#[cfg(test)]
 mod tests;

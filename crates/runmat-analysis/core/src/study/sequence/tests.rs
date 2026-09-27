@@ -1,6 +1,36 @@
 use super::*;
 
 #[test]
+fn excitation_selection_changes_solver_identity_and_roundtrips_distinctly() {
+    let original = ProcedureStep::structural_static("response");
+    let mut encoded_contracts = std::collections::BTreeSet::new();
+    for selection in [
+        ExcitationCaseSelection::All,
+        ExcitationCaseSelection::Only(vec![]),
+        ExcitationCaseSelection::Only(vec![crate::ExcitationCaseId("probe".into())]),
+        ExcitationCaseSelection::Only(vec![crate::ExcitationCaseId("other".into())]),
+    ] {
+        let mut step = original.clone();
+        step.excitation_case_selection = selection;
+        assert!(
+            encoded_contracts.insert(serde_json::to_vec(&step.solver_identity_contract()).unwrap())
+        );
+        let bytes = serde_json::to_vec(&step).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<ProcedureStep>(&bytes).unwrap(),
+            step
+        );
+    }
+    // Authoring omission is lowered to All; a canonical contract must state its selection.
+    let mut incomplete = serde_json::to_value(&original).unwrap();
+    incomplete
+        .as_object_mut()
+        .unwrap()
+        .remove("excitation_case_selection");
+    assert!(serde_json::from_value::<ProcedureStep>(incomplete).is_err());
+}
+
+#[test]
 fn thermomechanical_preload_consumes_exact_thermal_state_and_produces_structural_state() {
     let step = ProcedureStep::thermomechanical_preload("preload", "heat", "hot");
     assert_eq!(

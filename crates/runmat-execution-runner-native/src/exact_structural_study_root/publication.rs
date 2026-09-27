@@ -54,6 +54,11 @@ mod specialized_publication_import;
 mod tests;
 mod thermal_prefix;
 
+#[cfg(test)]
+mod substitution_tests;
+#[cfg(test)]
+pub(crate) use substitution_tests::assert_foreign_thermal_substitution_rejected;
+
 use inventory::*;
 pub(crate) use packaging::package_exact_structural_study_result;
 pub use result_import::import_exact_structural_study_result;

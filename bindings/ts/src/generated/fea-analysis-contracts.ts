@@ -139,6 +139,7 @@ export type FeaErrorContributionKind = "geometry_admission" | "boundary_approxim
 export interface FeaAccuracyPlan { accuracy_plan_id: string; criteria: FeaAccuracyCriterion[]; unavailable_evidence: "fail" | "mark_indeterminate_experimental"; exceeded_limit: "refine" | "tighten_solver" | "extend_sampling" | "fail" | "warn_experimental"; equivalence: "deterministic" | { relative_tolerance: number } | { absolute_tolerance: number }; resources: { maximum_refinement_cycles: number; maximum_solver_tightenings: number; maximum_samples: number; maximum_wall_time_milliseconds: number; maximum_resident_bytes: number }; }
 export interface FeaProcedureStep {
   step_id: string; family: FeaPhysicsFamily; procedure: FeaAnalysisProcedure; solution_space: "direct" | "modal_reduced";
+  excitation_case_selection: "all" | { only: string[] };
   independent_domain: FeaIndependentDomain; activations: FeaStepObjectActivation[]; state_inputs: FeaStateInput[];
   state_outputs: FeaStateOutput[]; observations: FeaObservationRequest[]; accuracy: FeaAccuracyPlan; restart: FeaRestartPolicy;
 }

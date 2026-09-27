@@ -23,9 +23,37 @@ pub(crate) fn validate_model_excitations(
         .collect::<HashSet<_>>();
     validate_excitations(&model.excitations, &signals, &steps)?;
     validate_cases(&model.excitation_cases, &model.excitations, &steps)?;
+    validate_case_selections(&model.excitation_cases, &model.sequence.steps)?;
     validate_initial_conditions(&model.initial_conditions, &signals, &steps)?;
     validate_response_spectra(&model.response_spectra, &signals)?;
     validate_random_excitations(&model.random_excitations)?;
+    Ok(())
+}
+
+fn validate_case_selections(
+    cases: &[crate::ExcitationCase],
+    steps: &[crate::ProcedureStep],
+) -> Result<(), AnalysisValidationError> {
+    let known = cases
+        .iter()
+        .map(|case| &case.case_id)
+        .collect::<HashSet<_>>();
+    for step in steps {
+        if let crate::ExcitationCaseSelection::Only(ids) = &step.excitation_case_selection {
+            let mut selected = HashSet::new();
+            for id in ids {
+                if !known.contains(id) || !selected.insert(id) {
+                    return Err(AnalysisValidationError::InvalidProcedureStep {
+                        step_id: step.step_id.0.clone(),
+                        detail: format!(
+                            "selected excitation case `{}` must exist and occur only once",
+                            id.0
+                        ),
+                    });
+                }
+            }
+        }
+    }
     Ok(())
 }
 

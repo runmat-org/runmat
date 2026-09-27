@@ -92,7 +92,10 @@ async fn prestressed_modal_reaches_an_admitted_result_over_encrypted_quic() {
     ));
     capabilities.insert(Capability::ProcessIsolation);
     let resources = ResourceRequest {
-        cpu_millicores: 500,
+        cpu_millicores: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+            .checked_cpu_millicores()
+            .unwrap()
+            .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
         accelerator_count: 0,

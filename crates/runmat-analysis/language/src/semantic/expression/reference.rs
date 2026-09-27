@@ -16,6 +16,9 @@ pub(super) fn quantity_type(value: &FeaType, dimension: PhysicalDimension) -> Op
 
 pub(super) fn contextual_reference_type(path: &[String]) -> Option<FeaType> {
     match path {
+        // The containing study resolves these against its bound model closure during
+        // procedure lowering, including unknown/ambiguous-name diagnostics.
+        [namespace, _] if namespace == "load_case" => Some(FeaType::LoadCase),
         [analysis, _, state, _] if analysis == "analysis" && state == "state" => {
             Some(FeaType::Unknown)
         }

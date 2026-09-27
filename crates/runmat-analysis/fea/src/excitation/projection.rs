@@ -104,7 +104,14 @@ impl<'a> ScalarProjectionAccumulator<'a> {
     }
 
     pub(crate) fn finish(self) -> SpatialProjectionEvidence {
-        let normalization_scale = self.requested_scale.max(self.projected_scale);
+        // Contribution norms bound the integral in exact arithmetic. Include the
+        // retained integral norms as well so independent rounding cannot violate
+        // that bound. This retains cancellation scales without a dimensional floor.
+        let normalization_scale = self
+            .requested_scale
+            .max(self.projected_scale)
+            .max(self.requested.real.hypot(self.requested.imaginary))
+            .max(self.projected.real.hypot(self.projected.imaginary));
         let error = (self.requested.real - self.projected.real)
             .hypot(self.requested.imaginary - self.projected.imaginary);
         let relative_error = if normalization_scale == 0.0 {
@@ -234,8 +241,14 @@ impl<'a> SpatialProjectionAccumulator<'a> {
     pub(crate) fn finish(self) -> SpatialProjectionEvidence {
         let resultant_scale = self
             .requested_resultant_scale
-            .max(self.projected_resultant_scale);
-        let moment_scale = self.requested_moment_scale.max(self.projected_moment_scale);
+            .max(self.projected_resultant_scale)
+            .max(norm(self.requested_resultant))
+            .max(norm(self.projected_resultant));
+        let moment_scale = self
+            .requested_moment_scale
+            .max(self.projected_moment_scale)
+            .max(norm(self.requested_moment))
+            .max(norm(self.projected_moment));
         let resultant_relative_error = relative_vector_error(
             self.requested_resultant,
             self.projected_resultant,

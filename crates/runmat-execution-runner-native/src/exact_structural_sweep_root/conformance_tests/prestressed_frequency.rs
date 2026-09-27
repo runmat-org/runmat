@@ -2,12 +2,12 @@ use super::*;
 
 #[tokio::test(flavor = "current_thread")]
 async fn prestressed_frequency_reaches_an_admitted_result_over_encrypted_quic() {
-    run_prestressed_frequency_conformance(false).await;
+    Box::pin(run_prestressed_frequency_conformance(false)).await;
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn prestressed_modal_frequency_reaches_an_admitted_result_over_encrypted_quic() {
-    run_prestressed_frequency_conformance(true).await;
+    Box::pin(run_prestressed_frequency_conformance(true)).await;
 }
 
 async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
@@ -105,7 +105,10 @@ async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
     ));
     capabilities.insert(Capability::ProcessIsolation);
     let resources = ResourceRequest {
-        cpu_millicores: 500,
+        cpu_millicores: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial()
+            .checked_cpu_millicores()
+            .unwrap()
+            .into(),
         memory_bytes: 1 << 30,
         scratch_bytes: 1 << 30,
         accelerator_count: 0,
@@ -120,8 +123,17 @@ async fn run_prestressed_frequency_conformance(modal_reduced: bool) {
         accelerators: Vec::new(),
         capabilities,
     };
-    let imported =
-        run_exact_study(prepared, expectation, bundle, inventory, resources, access).await;
+    // Keep nested transport/execution state on the heap rather than carrying every
+    // async frame through the default test-thread stack during synchronous import.
+    let imported = Box::pin(run_exact_study(
+        prepared,
+        expectation,
+        bundle,
+        inventory,
+        resources,
+        access,
+    ))
+    .await;
     match imported.analysis {
         crate::ExactStructuralStudyAnalysisResult::StructuralPrestressedFrequency(result)
             if !modal_reduced =>
@@ -256,13 +268,13 @@ async fn run_exact_study(
         let mut recovery = RecordingRecoveryPublisher::default();
         let response = tokio::time::timeout(
             Duration::from_secs(180),
-            crate::remote::exact_structural_study::execute_for_test(
+            Box::pin(crate::remote::exact_structural_study::execute_for_test(
                 Arc::clone(&pool),
                 prepared.request(),
                 &access.authorization_scope,
                 &resources,
                 &mut recovery,
-            ),
+            )),
         )
         .await
         .expect("remote prestressed-frequency exact study timed out")

@@ -63,16 +63,28 @@ pub fn lower_study(
         let Some(procedure) = procedure_block(declaration, statements, diagnostics) else {
             continue;
         };
+        let Some(selection) =
+            super::load_cases::lower(declaration, procedure.1, models, diagnostics)
+        else {
+            continue;
+        };
+        let procedure_statements = procedure
+            .1
+            .iter()
+            .filter(|statement| !super::load_cases::is_selection(statement))
+            .cloned()
+            .collect::<Vec<_>>();
         let Some(mut step) = lower_procedure(
             declaration,
             &analysis,
             &procedure.0,
-            procedure.1,
+            &procedure_statements,
             models,
             diagnostics,
         ) else {
             continue;
         };
+        step.excitation_case_selection = selection;
         if let Some(retained) = values::retained_name(statements) {
             if step.state_outputs.len() == 1 {
                 step.state_outputs[0].state_id = StateId(retained);
@@ -255,12 +267,7 @@ fn lower_procedure(
             step
         }
         ("structural", "prestressed_harmonic") => {
-            let state =
-                requirements::state(declaration, procedure, statements, "prestress", diagnostics)?;
-            let mut step = ProcedureStep::structural_prestressed_harmonic(id, state.0, state.1);
-            step.independent_domain =
-                requirements::frequencies(declaration, procedure, statements, diagnostics)?;
-            step
+            super::prestressed_harmonic::lower(id, declaration, procedure, statements, diagnostics)?
         }
         ("structural", "modal_response_spectrum") => {
             let state =
@@ -448,6 +455,27 @@ fn add_state_flow(
     transitions: &mut Vec<StateTransition>,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) {
+    let producers = step
+        .state_inputs
+        .iter()
+        .filter_map(|input| match &input.source {
+            StateSource::Upstream { producer_step, .. } => Some(producer_step.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if !producers.is_empty()
+        && !analysis
+            .predecessor
+            .as_deref()
+            .is_some_and(|after| producers.contains(&after))
+    {
+        error(
+            declaration,
+            analysis.span,
+            format!("analysis `{}` must declare `after analysis.<producer>` naming one of its consumed state producers", analysis.name),
+            diagnostics,
+        );
+    }
     for input in &step.state_inputs {
         let StateSource::Upstream {
             producer_step,
@@ -456,14 +484,6 @@ fn add_state_flow(
         else {
             continue;
         };
-        if analysis.predecessor.as_deref() != Some(producer_step.as_str()) {
-            error(
-                declaration,
-                analysis.span,
-                format!("analysis `{}` must declare `after analysis.{}` because it consumes that analysis state", analysis.name, producer_step.as_str()),
-                diagnostics,
-            );
-        }
         dependencies.push(SequenceDependency {
             predecessor: producer_step.clone(),
             successor: step.step_id.clone(),

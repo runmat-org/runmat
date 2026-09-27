@@ -81,6 +81,7 @@ pub struct SolverProcedureStep<'a> {
     pub solution_space: SolutionSpace,
     pub independent_domain: &'a IndependentDomain,
     pub activations: &'a [StepObjectActivation],
+    pub excitation_case_selection: &'a crate::ExcitationCaseSelection,
     pub state_inputs: &'a [StateInput],
     pub restart: RestartPolicy,
 }
@@ -192,6 +193,7 @@ impl AnalysisSequence {
 impl crate::ProcedureStep {
     pub fn solver_identity_contract(&self) -> SolverProcedureStep<'_> {
         SolverProcedureStep {
+            excitation_case_selection: &self.excitation_case_selection,
             step_id: &self.step_id,
             family: self.family,
             procedure: self.procedure,

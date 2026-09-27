@@ -28,7 +28,6 @@ impl ThermalOperatorAssembly {
         let storage_rate = apply_matrix(&self.capacity, &rate);
         let mut storage = PowerSum::default();
         let mut applied = PowerSum::default();
-        let mut reaction = PowerSum::default();
         let mut storage_absolute = PowerSum::default();
         let mut applied_absolute = PowerSum::default();
         let mut nodal_reaction = vec![0.0; storage_rate.len()];
@@ -38,8 +37,6 @@ impl ThermalOperatorAssembly {
             applied.add(self.applied_source[node]);
             applied_absolute.add(self.applied_source[node].abs());
             if self.prescribed_temperature_k[node].is_some() {
-                reaction.add(-power);
-                reaction.add(self.applied_source[node]);
                 nodal_reaction[node] = self.applied_source[node] - power;
             }
         }
@@ -49,11 +46,10 @@ impl ThermalOperatorAssembly {
         // Prescribed/prescribed pairs cancel globally but still contribute to individual
         // reactions and hence the physical through-flow scale, not an absolute-T floor.
         for (element_index, element) in self.projection.elements.iter().enumerate() {
-            let first_prescribed = self.prescribed_temperature_k[element.node_indices[0]].is_some();
             if element
                 .node_indices
                 .iter()
-                .all(|&node| self.prescribed_temperature_k[node].is_some() == first_prescribed)
+                .all(|&node| self.prescribed_temperature_k[node].is_none())
             {
                 continue;
             }
@@ -81,13 +77,6 @@ impl ThermalOperatorAssembly {
                             }
                             if right_prescribed {
                                 nodal_reaction[right] -= left_reaction;
-                            }
-                            if left_prescribed != right_prescribed {
-                                reaction.add(if left_prescribed {
-                                    left_reaction
-                                } else {
-                                    -left_reaction
-                                });
                             }
                         }
                     }
@@ -127,7 +116,6 @@ impl ThermalOperatorAssembly {
                         boundary_absolute.add(power.abs());
                         for (&node, &shape) in face.node_indices.iter().zip(point.shape_values()) {
                             if self.prescribed_temperature_k[node].is_some() {
-                                reaction.add(-shape * power);
                                 nodal_reaction[node] -= shape * power;
                             }
                         }
@@ -135,8 +123,13 @@ impl ThermalOperatorAssembly {
                     .map_err(|error| ThermalAssemblyError::InvalidProjection(error.to_string()))?;
             }
         }
+        // Both claims describe the same recovered nodal transfers. Summing the
+        // unrounded quadrature terms separately can exceed the nodal L1 scale
+        // by rounding alone when every reaction has the same sign.
+        let mut reaction = PowerSum::default();
         let mut reaction_absolute = PowerSum::default();
         for value in nodal_reaction {
+            reaction.add(value);
             reaction_absolute.add(value.abs());
         }
         Ok(ThermalEnergyBalance::from_power_transfers(

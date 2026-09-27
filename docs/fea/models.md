@@ -149,7 +149,7 @@ material carbon_epoxy {
     }
 
     rayleigh_damping {
-        mass_coefficient = 0.2 1/s
+        mass_coefficient = 0.2 Hz
         stiffness_coefficient = 20 us
     }
 }

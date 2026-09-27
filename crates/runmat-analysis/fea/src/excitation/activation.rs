@@ -9,17 +9,20 @@ pub(crate) struct ActiveAction<'a> {
     pub action: &'a ExcitationAction,
     model: &'a AnalysisModel,
     step_id: Option<&'a str>,
+    selection: Option<&'a runmat_analysis_core::ExcitationCaseSelection>,
 }
 
 impl<'a> ActiveAction<'a> {
     pub(crate) fn case_ids(&self) -> impl Iterator<Item = &'a ExcitationCaseId> + Clone {
         let action = self.action.excitation();
         let step_id = self.step_id;
+        let selection = self.selection;
         self.model
             .excitation_cases
             .iter()
             .filter(move |case| {
                 case_is_active(&case.activation, step_id)
+                    && selection.is_none_or(|selection| selection.includes(&case.case_id))
                     && case.action_ids.contains(&action.excitation_id)
             })
             .map(|case| &case.case_id)
@@ -48,6 +51,7 @@ pub(crate) fn active_actions<'a>(
             action,
             model,
             step_id,
+            selection: step.map(|step| &step.excitation_case_selection),
         };
         if selected.case_ids().next().is_none()
             || step.is_some_and(|step| {

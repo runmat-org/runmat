@@ -30,11 +30,13 @@ mv "$tmp" "$job/driver.json"
 if grep -q LONG "$job"/*.m; then
   sleep 60
 else
-  sleep 0.2
+  : > "$job/helper.ready"
+  while [ ! -f "$job/helper.release" ]; do sleep 0.01; done
 fi
 tmp="$job/completion.helper.tmp"
 printf '{"schema_version":3,"success":true,"exit_code":0,"message":null,"response":null,"resources":null}' > "$tmp"
 mv "$tmp" "$job/completion.json"
+: > "$job/helper.completed"
 "#,
     )
     .unwrap();
@@ -81,19 +83,43 @@ async fn detached_job_survives_supervisor_reopen_and_submission_is_idempotent() 
         .submit(submission(b"different", Some("same-request")))
         .await
         .is_err());
+    let job_dir = config.paths.jobs.join(record.handle.id.to_string());
+    if !wait_for_helper(&job_dir.join("helper.ready")).await {
+        let diagnostic = first.show(record.handle.id).await;
+        let _ = first.cancel(record.handle.id).await;
+        panic!("driver did not reach readiness handshake: {diagnostic:?}");
+    }
     drop(first);
 
     let reopened = LocalSupervisor::open(config).unwrap();
-    let mut recovered = reopened.show(record.handle.id).await.unwrap();
-    for _ in 0..50 {
-        if recovered.state.is_terminal() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        recovered = reopened.show(record.handle.id).await.unwrap();
+    // The detached driver is demonstrably alive across reopen and cannot finish
+    // until this supervisor releases it. Time passing is not completion evidence.
+    let running = reopened.show(record.handle.id).await.unwrap();
+    if running.state != LocalJobState::Running {
+        let _ = reopened.cancel(record.handle.id).await;
+        panic!("driver did not survive supervisor reopen: {running:?}");
     }
+    std::fs::write(job_dir.join("helper.release"), b"release").unwrap();
+    if !wait_for_helper(&job_dir.join("helper.completed")).await {
+        let diagnostic = reopened.show(record.handle.id).await;
+        let _ = reopened.cancel(record.handle.id).await;
+        panic!("driver did not acknowledge durable completion: {diagnostic:?}");
+    }
+    let recovered = reopened.show(record.handle.id).await.unwrap();
     assert_eq!(recovered.state, LocalJobState::Succeeded);
     assert_eq!(recovered.exit_code, Some(0));
+}
+
+async fn wait_for_helper(marker: &std::path::Path) -> bool {
+    // Bound deadlock diagnostics, not a presumed process-start/finish duration.
+    // File markers avoid uncancellable blocking FIFO reads during test teardown.
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .is_ok()
 }
 
 #[tokio::test]

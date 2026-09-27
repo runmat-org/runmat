@@ -1,5 +1,7 @@
 #[path = "thermal_prestress/planning.rs"]
 mod planning;
+#[path = "thermal_prestress/reduced.rs"]
+mod reduced;
 pub mod support;
 use runmat_analysis_core::{
     CoupledPhysicsFamily, PhysicsFamily, ReferenceStatePolicy, StateKind, StateSource,

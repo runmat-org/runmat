@@ -329,11 +329,20 @@ fn random_response_driver_replacement_replays_on_a_different_worker() {
 }
 
 #[test]
-fn authored_thermal_prestress_driver_replacement_replays_on_a_different_worker() {
-    run_actual_driver_replacement(ExactStudyFamily::ThermalPrestressedModal);
+fn authored_thermal_outer_root_matrix_replays_after_preexecution_driver_replacement() {
+    // Thermal interruption occurs before execution starts. This is not a claim of restart
+    // from a completed heat/preload/basis phase; those recovery protocols are distinct.
+    let results = thermal::Case::matrix()
+        .map(|case| {
+            run_actual_driver_replacement(ExactStudyFamily::ThermalPrestress(case)).unwrap()
+        })
+        .collect::<Vec<_>>();
+    for (index, result) in results.iter().enumerate() {
+        result.reject_foreign_thermal(&results[(index + 1) % results.len()]);
+    }
 }
 
-fn run_actual_driver_replacement(family: ExactStudyFamily) {
+fn run_actual_driver_replacement(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     std::thread::Builder::new()
         .name(format!("actual-driver-replacement-{family:?}"))
         .stack_size(ACTUAL_DRIVER_TEST_STACK_BYTES)
@@ -342,14 +351,14 @@ fn run_actual_driver_replacement(family: ExactStudyFamily) {
                 .enable_all()
                 .build()
                 .expect("actual-driver replacement runtime")
-                .block_on(actual_driver_replacement_case(family));
+                .block_on(actual_driver_replacement_case(family))
         })
         .expect("actual-driver replacement test thread")
         .join()
-        .expect("actual-driver replacement test thread panicked");
+        .expect("actual-driver replacement test thread panicked")
 }
 
-async fn actual_driver_replacement_case(family: ExactStudyFamily) {
+async fn actual_driver_replacement_case(family: ExactStudyFamily) -> Option<thermal::ColdReplay> {
     let fixture = exact_study_fixture(family);
     let driver_material = driver_identity_material();
     let directory = tempfile::tempdir().unwrap();
@@ -494,42 +503,28 @@ async fn actual_driver_replacement_case(family: ExactStudyFamily) {
     let imported = match &fixture.expectation {
         StudyExpectation::Exact(expectation) => import_exact_structural_study_result(
             &store,
-            outputs.response,
+            outputs.response.clone(),
             expectation,
             ObjectInventoryLimits::default(),
         )
         .unwrap(),
         StudyExpectation::Typed(expectation) => {
-            let mut foreign_source = expectation.clone();
-            foreign_source.authored_study_digest =
-                Digest::sha256(b"foreign authored thermal source");
-            assert!(crate::import_structural_study_result(
-                &store,
-                outputs.response.clone(),
-                &foreign_source,
-                ObjectInventoryLimits::default(),
-            )
-            .is_err());
-            let empty_cold_store = super::object_transfer::RemoteObjectStore::new().unwrap();
-            assert!(crate::import_structural_study_result(
-                &empty_cold_store,
-                outputs.response.clone(),
-                expectation,
-                ObjectInventoryLimits::default(),
-            )
-            .is_err());
-            let imported = crate::import_structural_study_result(
-                &store,
-                outputs.response,
-                expectation,
-                ObjectInventoryLimits::default(),
-            )
-            .unwrap();
-            thermal::assert_authored_result(&imported);
-            imported
+            let ExactStudyFamily::ThermalPrestress(case) = family else {
+                panic!("typed fixture must identify its authored thermal branch");
+            };
+            thermal::import_cold(case, &store, outputs.response.clone(), expectation)
         }
     };
     assert_replacement_result(family, imported.analysis);
+    match &fixture.expectation {
+        StudyExpectation::Typed(expectation) => Some(thermal::ColdReplay {
+            store,
+            response: outputs.response,
+            expectation: expectation.as_ref().clone(),
+            thermal: imported.thermal.expect("typed fixture retains heat result"),
+        }),
+        StudyExpectation::Exact(_) => None,
+    }
 }
 
 fn assert_replacement_result(
@@ -537,9 +532,7 @@ fn assert_replacement_result(
     analysis: ExactStructuralStudyAnalysisResult,
 ) {
     match (family, analysis) {
-        (ExactStudyFamily::ThermalPrestressedModal, ExactStructuralStudyAnalysisResult::StructuralPrestressedModal(result)) => {
-            result.modal_numerical_receipt.validate_against(result.modal_numerical_receipt.source_result(), &result.modal_result).unwrap();
-        }
+        (ExactStudyFamily::ThermalPrestress(case), result) => thermal::assert_branch(case, &result),
         (
             ExactStudyFamily::StructuralTransient,
             ExactStructuralStudyAnalysisResult::StructuralTransient {

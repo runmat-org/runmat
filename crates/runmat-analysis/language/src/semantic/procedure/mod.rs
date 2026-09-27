@@ -1,7 +1,9 @@
 mod header;
 mod initial_conditions;
+mod load_cases;
 mod lower;
 mod output;
+mod prestressed_harmonic;
 mod requirements;
 mod study;
 mod thermal_preload;

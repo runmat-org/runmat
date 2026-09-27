@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+mod phases;
+
 use runmat_analysis_execution::{
     AnalysisHostWorkload, ImportedSemanticState, ImportedStructuralLinearResult,
     ImportedStructuralModalResult, PlannedResourceUsageAttempt, PreparedAnalysisProgram,
@@ -38,7 +40,7 @@ pub async fn execute_structural_prestressed_modal_frequency_study_locally_with_s
     configure_local_analysis(&mut config, &policy.resources);
     let session = NativeProgramSession::new(config)?;
     let mut pool = LocalAnalysisTaskPool::new(session);
-    let completion = execute_with_pool(&mut pool, preparation, policy).await?;
+    let completion = execute_with_thermal_source(&mut pool, preparation, policy, None).await?;
     Ok((completion, pool.object_source()))
 }
 
@@ -47,15 +49,13 @@ pub async fn execute_structural_prestressed_modal_frequency_study_remotely(
     preparation: StructuralPrestressedFrequencyStudyPreparation,
     policy: StructuralSequenceExecutionPolicy,
 ) -> NativeExecutionResult<CompletedStructuralPrestressedModalFrequencyStudy> {
-    execute_with_pool(&mut RemoteAnalysisTaskPool::new(pool), preparation, policy).await
-}
-
-async fn execute_with_pool(
-    pool: &mut impl AnalysisTaskPool,
-    preparation: StructuralPrestressedFrequencyStudyPreparation,
-    policy: StructuralSequenceExecutionPolicy,
-) -> NativeExecutionResult<CompletedStructuralPrestressedModalFrequencyStudy> {
-    execute_with_thermal_source(pool, preparation, policy, None).await
+    execute_with_thermal_source(
+        &mut RemoteAnalysisTaskPool::new(pool),
+        preparation,
+        policy,
+        None,
+    )
+    .await
 }
 
 pub(crate) async fn execute_with_thermal_source(
@@ -75,117 +75,43 @@ pub(crate) async fn execute_with_thermal_source(
     let artifact_access = preparation.artifact_access.clone();
     let chunk_bytes = preparation.chunk_bytes;
     let inventory_limits = preparation.inventory_limits;
-    let (mut coordinator, preload_dependencies) = match thermal {
-        Some(thermal) => {
-            let (source, dependency) = thermal.into_parts(pool)?;
-            (
-                StructuralPrestressedModalFrequencyStudyCoordinator::new_with_thermal_source(
-                    preparation,
-                    source,
-                )
-                .map_err(protocol)?,
-                vec![dependency],
-            )
-        }
-        None => (
-            StructuralPrestressedModalFrequencyStudyCoordinator::new(preparation)
-                .map_err(protocol)?,
-            Vec::new(),
-        ),
-    };
+    let (mut coordinator, preload_dependencies) = coordinator(pool, preparation, thermal)?;
     crate::analysis_thermal_prestress::validate_preload_dependencies(
         &coordinator.preload_dependencies(),
         &preload_dependencies,
     )?;
 
-    let preload = coordinator.prepare_preload().map_err(protocol)?;
-    let executed_preload = execute_one(
+    let preload_dependency = Box::pin(phases::preload(
         pool,
-        &preload.host,
-        &preload.program,
-        &preload.resource_plan,
+        &mut coordinator,
         &policy,
         preload_dependencies,
-        "preload",
-    )
+    ))
     .await?;
-    let preload_dependency = dependency(&executed_preload);
-    coordinator
-        .complete_preload(pool, executed_preload.response, &preload)
-        .map_err(protocol)?;
-    verify_identity(
-        coordinator.preload_task_identity(),
-        executed_preload.identity,
-        "preload",
-    )?;
-
-    let prestress = coordinator.prepare_prestress_state().map_err(protocol)?;
-    let executed_prestress = execute_one(
+    let (prestress_dependency, prestress_usage) = Box::pin(phases::prestress(
         pool,
-        &prestress.host,
-        &prestress.program,
-        &prestress.resource_plan,
+        &mut coordinator,
         &policy,
         vec![preload_dependency],
-        "prestress-state publication",
-    )
+    ))
     .await?;
-    let prestress_usage = planned_resource_attempt(&prestress.resource_plan, &executed_prestress)?;
-    let prestress_dependency = dependency(&executed_prestress);
-    coordinator
-        .complete_prestress_state(pool, executed_prestress.response, &prestress)
-        .map_err(protocol)?;
-    verify_identity(
-        coordinator.prestress_state_task_identity(),
-        executed_prestress.identity,
-        "prestress-state publication",
-    )?;
-
-    let modal = coordinator.prepare_modal().map_err(protocol)?;
-    let executed_modal = execute_one(
+    let modal_dependency = Box::pin(phases::modal(
         pool,
-        &modal.host,
-        &modal.program,
-        &modal.resource_plan,
+        &mut coordinator,
         &policy,
         vec![prestress_dependency],
-        "prestressed-modal solve",
-    )
+    ))
     .await?;
-    let modal_dependency = dependency(&executed_modal);
-    coordinator
-        .complete_modal(pool, executed_modal.response, &modal)
-        .map_err(protocol)?;
-    verify_identity(
-        coordinator.modal_task_identity(),
-        executed_modal.identity,
-        "prestressed-modal solve",
-    )?;
-
-    let basis = coordinator.prepare_basis_state().map_err(protocol)?;
-    let executed_basis = execute_one(
+    let (basis_dependency, basis_usage) = Box::pin(phases::basis(
         pool,
-        &basis.host,
-        &basis.program,
-        &basis.resource_plan,
+        &mut coordinator,
         &policy,
         vec![modal_dependency],
-        "modal-basis publication",
-    )
+    ))
     .await?;
-    let basis_usage = planned_resource_attempt(&basis.resource_plan, &executed_basis)?;
-    let basis_dependency = dependency(&executed_basis);
-    coordinator
-        .complete_basis_state(pool, executed_basis.response, &basis)
-        .map_err(protocol)?;
-    verify_identity(
-        coordinator.basis_state_task_identity(),
-        executed_basis.identity,
-        "modal-basis publication",
-    )?;
 
     let bound = coordinator.bind_frequency().map_err(protocol)?;
-    if bound.state_task != executed_basis.identity {
+    if bound.state_task != basis_dependency.identity {
         return Err(protocol(
             "modal-frequency binding names another basis publication task",
         ));
@@ -194,7 +120,7 @@ pub(crate) async fn execute_with_thermal_source(
     let modal_state = bound
         .modal_state
         .ok_or_else(|| protocol("modal-frequency binding omitted its modal state"))?;
-    let frequency = crate::analysis_frequency::execute_with_pool(
+    let frequency = Box::pin(crate::analysis_frequency::execute_with_pool(
         pool,
         StructuralFrequencyExecutionPreparation {
             workload: bound.workload,
@@ -210,7 +136,7 @@ pub(crate) async fn execute_with_thermal_source(
         },
         policy,
         vec![basis_dependency],
-    )
+    ))
     .await?;
 
     Ok(CompletedStructuralPrestressedModalFrequencyStudy {
@@ -292,4 +218,33 @@ fn task_policy(policy: &StructuralSequenceExecutionPolicy) -> AnalysisTaskBatchP
 
 fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
     NativeExecutionError::Protocol(error.to_string())
+}
+
+fn coordinator(
+    pool: &mut impl AnalysisTaskPool,
+    preparation: StructuralPrestressedFrequencyStudyPreparation,
+    thermal: Option<crate::analysis_thermal_prestress::BoundThermalExecution>,
+) -> NativeExecutionResult<(
+    Box<StructuralPrestressedModalFrequencyStudyCoordinator>,
+    Vec<AnalysisTaskDependency>,
+)> {
+    let (coordinator, dependencies) = match thermal {
+        Some(thermal) => {
+            let (source, dependency) = thermal.into_parts(pool)?;
+            (
+                StructuralPrestressedModalFrequencyStudyCoordinator::new_with_thermal_source(
+                    preparation,
+                    source,
+                )
+                .map_err(protocol)?,
+                vec![dependency],
+            )
+        }
+        None => (
+            StructuralPrestressedModalFrequencyStudyCoordinator::new(preparation)
+                .map_err(protocol)?,
+            Vec::new(),
+        ),
+    };
+    Ok((Box::new(coordinator), dependencies))
 }

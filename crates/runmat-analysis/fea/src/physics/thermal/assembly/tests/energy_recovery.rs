@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn transient_reaction_power_and_scale_share_the_same_nodal_transfers() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut assembly = energy_assembly(&model, order, 0.0);
+        let previous = vec![293.15; assembly.projection.nodes.len()];
+        for (node, projected) in assembly.projection.nodes.iter().enumerate() {
+            if projected.coordinates_m[0] == 0.0 {
+                assembly.prescribed_temperature_k[node] = Some(310.0);
+            }
+        }
+        for increment in [0.01, 0.1, 1.0, 10.0, 16.85] {
+            let temperature = assembly
+                .projection
+                .nodes
+                .iter()
+                .map(|node| 293.15 + increment * (1.0 + node.coordinates_m[0]))
+                .collect::<Vec<_>>();
+            let balance = assembly
+                .energy_balance(
+                    &model,
+                    ExcitationSamplePoint::Static,
+                    &previous,
+                    &temperature,
+                    1.0,
+                )
+                .unwrap();
+            assert!(
+                balance.validate().is_ok(),
+                "{order:?}, {increment}: {balance:?}"
+            );
+        }
+    }
+}
+
 fn energy_assembly(
     model: &AnalysisModel,
     order: ElementOrder,
@@ -119,7 +154,18 @@ fn conductive_prescribed_reactions_have_analytical_sign_and_cancel_internal_pair
                 1.0,
             )
             .unwrap();
-        assert_eq!(all_prescribed.prescribed_boundary_power_w, 0.0);
+        all_prescribed.validate().unwrap();
+        // Equal/opposite nodal conductive transfers cancel globally, but must
+        // not disappear from the physical through-flow normalization. The
+        // integrated linear-field nodal gradients give L1 = 2 * expected.
+        assert!(
+            (all_prescribed.scale.prescribed_w - 2.0 * expected).abs() <= 2.0 * expected * 1.0e-12,
+            "{order:?}: {all_prescribed:?}"
+        );
+        assert!(
+            all_prescribed.relative_residual < 1.0e-12,
+            "{order:?}: {all_prescribed:?}"
+        );
     }
 }
 

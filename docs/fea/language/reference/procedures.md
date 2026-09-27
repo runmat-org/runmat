@@ -17,7 +17,7 @@ not invent domains or state inputs.
 | `structural modal_harmonic` | retained `basis` plus frequencies |
 | `structural prestressed_modal` | retained `prestress` plus mode count |
 | `structural buckling` | retained `prestress` plus mode count |
-| `structural prestressed_harmonic` | retained `prestress` plus frequencies |
+| `structural prestressed_harmonic` | retained `prestress` plus frequencies; optional retained `basis` selects modal reduction |
 | `structural modal_response_spectrum` | retained `basis` and one or more model spectra |
 | `structural random_response` | retained `basis`, random excitation, frequency domain, and accuracy controls |
 | `structural nonlinear` | load-factor domain and nonlinear controls |
@@ -35,9 +35,10 @@ procedure forms are `static` or family-appropriate `steady`, `transient`, `harmo
 `modal`, and `nonlinear` where the family admits it. Each form lowers to a typed physics family,
 procedure, independent domain, solution space, and state kind.
 
-Language recognition is not an execution or maturity claim. The public typed `.fea` runner is
-currently structural-only; family promotion requires its complete formulation, runner,
-publication, local/cluster, validation, and release evidence.
+Language recognition is not an execution or maturity claim. The typed structural-study runner
+also supports an explicit thermal-state prefix feeding thermomechanical preload and supported
+structural consumers. This does not promote every recognized coupled family: promotion requires
+complete formulation, runner, publication, local/cluster, validation, and release evidence.
 
 ## State flow
 
@@ -45,6 +46,32 @@ Procedures publish typed states. `retain <name>` names an unambiguous state outp
 states explicitly, for example `basis = analysis.modes.state.basis`. The checker verifies state
 kind, producer, topology, solution space, completeness, persistence, and transition method. `after`
 alone supplies ordering and does not substitute for a required state binding.
+
+A prestressed harmonic response can consume both states explicitly:
+
+```fea
+analysis response after analysis.modes {
+    structural prestressed_harmonic {
+        prestress = analysis.preload.state.geometric_stiffness
+        basis = analysis.modes.state.modal_basis
+        frequencies = [60 Hz]
+    }
+}
+```
+
+Without `basis`, this procedure uses a direct solve. With `basis`, it uses modal reduction.
+For multiple state producers, `after` names one consumed producer; every explicit state
+binding independently creates a required dependency and transition. It does not discard
+the other producer or permit its state to be unavailable.
+
+## Load cases
+
+Inside a procedure, `load_cases = [load_case.service]` selects exactly the named load cases
+for that step. `load_cases = []` selects no load cases; omitting the property leaves the
+model's cases eligible under their existing activation rules. Selection does not disable
+supports, prescribed temperatures, or other boundary conditions. Unknown and duplicate
+case names are rejected. Use explicit empty selection on a heat/preload step when a
+mechanical excitation is intended only for a later harmonic response.
 
 ## Domains
 

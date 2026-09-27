@@ -6,6 +6,34 @@ use crate::{
 };
 
 #[test]
+fn procedure_case_selection_requires_unique_known_cases_but_permits_empty() {
+    use crate::{ExcitationCase, ExcitationCaseId, ExcitationCaseSelection, ProcedureStep};
+    let id = ExcitationCaseId("probe".into());
+    let cases = [ExcitationCase {
+        case_id: id.clone(),
+        action_ids: vec![ExcitationId("force".into())],
+        activation: ExcitationCaseActivation::Always,
+    }];
+    let mut step = ProcedureStep::structural_static("response");
+    assert_eq!(step.excitation_case_selection, ExcitationCaseSelection::All);
+    assert!(validate_case_selections(&cases, &[step.clone()]).is_ok());
+    for selected in [vec![], vec![id.clone()]] {
+        step.excitation_case_selection = ExcitationCaseSelection::Only(selected);
+        assert!(validate_case_selections(&cases, &[step.clone()]).is_ok());
+    }
+    for selected in [
+        vec![id.clone(), id],
+        vec![ExcitationCaseId("missing".into())],
+    ] {
+        step.excitation_case_selection = ExcitationCaseSelection::Only(selected);
+        assert!(matches!(
+            validate_case_selections(&cases, &[step.clone()]),
+            Err(AnalysisValidationError::InvalidProcedureStep { .. })
+        ));
+    }
+}
+
+#[test]
 fn scalar_integral_action_rejects_a_moment_requirement() {
     let signal = PhysicalSignal::HeatFlux(Signal {
         signal_id: SignalId("flux".to_string()),

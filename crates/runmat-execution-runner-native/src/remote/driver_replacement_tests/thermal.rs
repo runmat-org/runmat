@@ -3,9 +3,36 @@ use runmat_analysis_execution::{
     prepare_geometry_materialization_program, prepare_geometry_materialization_request,
     GeometryMaterializationPreparation, PreparedGeometrySource,
 };
+use runmat_execution_artifact::ProgramExecutionResponse;
 
-pub(super) fn write_authored_project(root: &std::path::Path) {
-    std::fs::write(root.join("src/heated.fea"), SOURCE).unwrap();
+#[path = "thermal/result.rs"]
+mod result;
+#[path = "thermal/source.rs"]
+mod source;
+pub(super) use result::{assert_branch, import_cold};
+pub(super) use source::{Branch, Case};
+
+pub(super) struct ColdReplay {
+    pub store: crate::remote::object_transfer::RemoteObjectStore,
+    pub response: ProgramExecutionResponse,
+    pub expectation: crate::StructuralStudyResultExpectation,
+    pub thermal: Box<runmat_analysis_execution::CompletedThermalStudy>,
+}
+
+impl ColdReplay {
+    pub(super) fn reject_foreign_thermal(&self, donor: &Self) {
+        crate::exact_structural_study_root::assert_foreign_thermal_substitution_rejected(
+            &self.store,
+            &self.response,
+            &self.expectation,
+            &donor.store,
+            &donor.thermal,
+        );
+    }
+}
+
+pub(super) fn write_authored_project(root: &std::path::Path, case: Case) {
+    std::fs::write(root.join("src/heated.fea"), case.source()).unwrap();
     std::fs::create_dir_all(root.join("src/geometry")).unwrap();
     std::fs::write(root.join("src/geometry/box.brep"), BOX).unwrap();
 }
@@ -14,6 +41,7 @@ pub(super) fn prepare_authored_root(
     root: &std::path::Path,
     revision: ProgramRevision,
     access: ArtifactAccess,
+    case: Case,
 ) -> crate::PreparedStructuralStudyRoot {
     let path = root.join("src/heated.fea");
     let checked = runmat_runtime::analysis::check_fea_path_in_root(root, &path).unwrap();
@@ -41,13 +69,15 @@ pub(super) fn prepare_authored_root(
         &source.roots,
     )
     .unwrap();
+    let mut meshing_request = fixture::coarse_box_request();
+    meshing_request.element_order = case.order;
     let geometry_meshing =
         crate::prepare_geometry_meshing_root(crate::GeometryMeshingRootPreparation {
             program_revision: revision.clone(),
             artifact_access: access.clone(),
             geometry,
             geometry_source_objects: source.objects,
-            meshing_request: fixture::coarse_box_request(),
+            meshing_request,
             preferred_edges_per_partition: 64,
             preferred_faces_per_partition: 64,
         })
@@ -78,59 +108,31 @@ pub(super) fn prepare_authored_root(
     .unwrap()
 }
 
-pub(super) fn assert_authored_result(result: &crate::ExactStructuralStudyResult) {
-    let thermal = result
-        .thermal
-        .as_ref()
-        .expect("cold typed root must retain thermal source");
-    assert_eq!(result.compiled_study.as_ref(), Some(&thermal.compiled));
-    assert_eq!(thermal.states.len(), 1);
-    assert_eq!(
-        thermal.states[0].state.state_id,
-        runmat_analysis_core::StateId("heated".into())
-    );
-    let ExactStructuralStudyAnalysisResult::StructuralPrestressedModal(modal) = &result.analysis
-    else {
-        panic!("authored chain must finish with prestressed modal");
-    };
-    let source = modal
-        .preload_result
-        .linearization
-        .as_ref()
-        .unwrap()
-        .thermal_source()
+#[test]
+fn authored_matrix_variants_typecheck_with_explicit_physical_loads() {
+    for case in Case::matrix() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(directory.path().join("src")).unwrap();
+        write_authored_project(directory.path(), case);
+        let checked = runmat_runtime::analysis::check_fea_path_in_root(
+            directory.path(),
+            &directory.path().join("src/heated.fea"),
+        )
         .unwrap();
-    assert_eq!(
-        source.transition().source_state,
-        thermal.states[0].state.identity
-    );
-    // The importer retains the authored template, not the worker invocation.
-    // Rebind from the independently imported thermal state before checking the
-    // result against the complete input; do not copy its own claimed transition.
-    let mut bound = (*modal.preload_workload).clone();
-    assert!(bound.state_input.is_none());
-    assert!(modal
-        .preload_result
-        .validate_thermal_workload(&bound)
-        .is_err());
-    let transition = runmat_analysis_fea::execution::CanonicalStateTransition::bind_upstream(
-        &bound.model,
-        &bound.step_id,
-        &thermal.states[0].state,
-        runmat_analysis_core::StateUse::Prestress,
-        Digest::from_bytes(*thermal.preparation().mesh.canonical_digest.bytes()),
-    )
-    .unwrap();
-    assert_eq!(&transition, source.transition());
-    bound.state_input = Some(
-        runmat_analysis_fea::execution::StructuralLinearStateInput::ThermalPrestress(transition),
-    );
-    modal
-        .preload_result
-        .validate_thermal_workload(&bound)
-        .unwrap();
-    modal.modal_result.validate().unwrap();
+        assert!(checked.is_valid(), "{case:?}: {:#?}", checked.diagnostics);
+        let resolved = checked
+            .resolve_study("project/src/heated.fea", "heated_modes")
+            .unwrap();
+        let realized = resolved
+            .study
+            .realize_with_models(&resolved.models, &resolved.geometry, &[])
+            .unwrap();
+        let terminal = realized.sequence.steps.last().unwrap();
+        let reduced = case.branch == Branch::ModalReducedHarmonic;
+        assert_eq!(terminal.state_inputs.len(), if reduced { 2 } else { 1 });
+        assert_eq!(
+            terminal.solution_space == runmat_analysis_core::SolutionSpace::ModalReduced,
+            reduced
+        );
+    }
 }
-
-const SOURCE: &str =
-    include_str!("../../../../../docs/fea/examples/thermal-prestress-experimental.fea");

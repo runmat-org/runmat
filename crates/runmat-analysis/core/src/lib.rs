@@ -237,13 +237,13 @@ pub use study::output::{
     SeriesWeighting, SignConvention, SolverObservationEvent, SpatialReduction,
 };
 pub use study::sequence::{
-    ActivationLifecycle, AnalysisSequence, IndependentDomain, InitialStateConflictPolicy,
-    ProcedureSettings, ProcedureStep, ProcedureStepId, ReferenceStatePolicy, RestartPolicy,
-    SequenceBranch, SequenceBranchId, SequenceDependency, SequenceDependencyReason,
-    StateCompleteness, StateId, StateInput, StateKind, StateOutput, StatePersistence, StateSource,
-    StateTransition, StateTransitionMethod, StateUse, StepObjectActivation, StepObjectRef,
-    StructuralRandomResponseSettings, TopologyTransitionPolicy, TransitionId,
-    ValidatedAnalysisSequence,
+    ActivationLifecycle, AnalysisSequence, ExcitationCaseSelection, IndependentDomain,
+    InitialStateConflictPolicy, ProcedureSettings, ProcedureStep, ProcedureStepId,
+    ReferenceStatePolicy, RestartPolicy, SequenceBranch, SequenceBranchId, SequenceDependency,
+    SequenceDependencyReason, StateCompleteness, StateId, StateInput, StateKind, StateOutput,
+    StatePersistence, StateSource, StateTransition, StateTransitionMethod, StateUse,
+    StepObjectActivation, StepObjectRef, StructuralRandomResponseSettings,
+    TopologyTransitionPolicy, TransitionId, ValidatedAnalysisSequence,
 };
 pub use study::{
     AnalysisProcedure, BoundaryTransferImplementation, ConstitutiveImplementation,

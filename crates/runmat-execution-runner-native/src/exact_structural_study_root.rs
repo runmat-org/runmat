@@ -7,6 +7,9 @@ mod contract;
 mod publication;
 mod region_resolution;
 
+#[cfg(test)]
+pub(crate) use publication::assert_foreign_thermal_substitution_rejected;
+
 pub(crate) use contract::structural_workload_inventory_digest;
 pub use contract::{
     decode_exact_structural_study_root, prepare_exact_structural_study_root,
