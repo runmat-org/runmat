@@ -1,8 +1,10 @@
 use super::*;
 use runmat_accelerate_api::{
-    GpuTensorHandle, GpuTensorStorage, HostNumericTensorView, NumericElementType,
+    test_support::{RetirementProbe, TestAllocationOwner},
+    GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
+    HostNumericTensorOwned, HostNumericTensorView, NumericElementType,
 };
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 #[derive(Clone, Copy)]
 enum Mode {
@@ -12,13 +14,13 @@ enum Mode {
     Success,
 }
 struct Provider {
-    device: u32,
+    owner: TestAllocationOwner,
     mode: Mode,
-    freed: AtomicUsize,
+    allocations: Mutex<Vec<RetirementProbe>>,
 }
 impl AccelProvider for Provider {
     fn device_id(&self) -> u32 {
-        self.device
+        self.owner.device_id()
     }
     fn device_info(&self) -> String {
         "typed upload promotion fixture".into()
@@ -32,19 +34,29 @@ impl AccelProvider for Provider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         Box::pin(async { anyhow::bail!("unused") })
     }
-    fn free(&self, _: &GpuTensorHandle) -> Result<()> {
-        self.freed.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
     fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
         match self.mode {
             Mode::Unsupported => Err(runmat_accelerate_api::unsupported_provider_operation(
                 "integer transfer test",
             )),
             Mode::Failure => Err(anyhow!("injected integer allocation failure")),
-            Mode::Malformed => Ok(GpuTensorHandle::new(host.shape.to_vec(), self.device, 1)),
-            Mode::Success => Ok(GpuTensorHandle::new(host.shape.to_vec(), self.device, 1)
-                .with_numeric_descriptor(host.element_type(), host.storage)),
+            Mode::Malformed | Mode::Success => {
+                let HostNumericDataView::I64(values) = host.data else {
+                    panic!("exact integer upload")
+                };
+                let data = if matches!(self.mode, Mode::Malformed) {
+                    HostNumericDataOwned::F64(vec![0.0; values.len()])
+                } else {
+                    HostNumericDataOwned::I64(values.to_vec())
+                };
+                let allocation = self.owner.allocate_numeric(HostNumericTensorOwned {
+                    data,
+                    shape: host.shape.to_vec(),
+                    storage: host.storage,
+                })?;
+                self.allocations.lock().unwrap().push(allocation.probe);
+                Ok(allocation.handle)
+            }
         }
     }
 }
@@ -65,9 +77,9 @@ fn native_auto_integer_upload_fallback_is_only_typed_unsupported() {
         Mode::Success,
     ] {
         let provider = Box::leak(Box::new(Provider {
-            device: runmat_accelerate_api::next_device_id(),
+            owner: TestAllocationOwner::new(),
             mode,
-            freed: AtomicUsize::new(0),
+            allocations: Mutex::new(Vec::new()),
         }));
         let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
         let result = auto.promote_tensor_protecting(&value, 1, None, &[]);
@@ -76,30 +88,38 @@ fn native_auto_integer_upload_fallback_is_only_typed_unsupported() {
                 assert!(runmat_accelerate_api::is_invalid_numeric_upload_result(
                     &result.unwrap_err()
                 ));
-                assert_eq!(provider.freed.load(Ordering::SeqCst), 1);
+                assert_eq!(provider.allocations.lock().unwrap()[0].retirements(), 1);
             }
             Mode::Failure => {
                 assert!(result
                     .unwrap_err()
                     .to_string()
                     .contains("allocation failure"));
-                assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
+                assert!(provider.allocations.lock().unwrap().is_empty());
             }
             Mode::Unsupported => {
                 assert_eq!(result.unwrap(), value);
-                assert_eq!(provider.freed.load(Ordering::SeqCst), 0);
+                assert!(provider.allocations.lock().unwrap().is_empty());
             }
             Mode::Success => {
                 let Value::GpuTensor(handle) = result.unwrap() else {
                     panic!("resident integer result")
                 };
-                assert_eq!(
-                    handle.descriptor.element_type,
-                    Some(NumericElementType::I64)
-                );
-                assert_eq!(handle.descriptor.storage, Some(GpuTensorStorage::Real));
-                assert_eq!(handle.device_id, provider.device);
-                provider.free(&handle).unwrap();
+                assert_eq!(handle.physical().element_type(), NumericElementType::I64);
+                assert_eq!(handle.physical().storage(), GpuTensorStorage::Real);
+                assert_eq!(handle.device_id(), provider.owner.device_id());
+                let probe = provider.allocations.lock().unwrap()[0].clone();
+                probe
+                    .with_data(&handle, |data| {
+                        let HostNumericDataView::I64(values) = data else {
+                            panic!("native integer storage")
+                        };
+                        assert_eq!(values, &[9_007_199_254_740_993, -3]);
+                    })
+                    .unwrap();
+                assert_eq!(probe.retirements(), 0);
+                drop(handle);
+                assert_eq!(probe.retirements(), 1);
             }
         }
     }
