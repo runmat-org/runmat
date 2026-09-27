@@ -67,6 +67,14 @@ pub fn validate_builtin_catalog_with_aliases(
             errors.push(error(Some(name), "documentation summary must not be empty"));
         }
         validate_documentation(entry, &mut errors);
+        for extension in entry.extensions {
+            if let Err(message) = extension.validate_error_contract() {
+                errors.push(error(
+                    Some(name),
+                    format!("extension {}: {message}", extension.id),
+                ));
+            }
+        }
         errors.extend(
             super::validate_builtin_preparation(entry)
                 .into_iter()

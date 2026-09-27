@@ -97,7 +97,7 @@ pub const COLORMAP_NON_UINT8_INTEGER_EXTENSION: BuiltinExtensionDescriptor =
 
 pub const COLORMAP_AXES_DEFAULT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "colormap-axes-local-default",
-    mode: BuiltinExtensionMode::RunMatOnly,
+    mode: BuiltinExtensionMode::ProfileDependentBehavior,
     description: "RunMat untargeted calls use the current axes palette; MATLAB profile uses the current figure palette. Explicit targets have the same meaning in either profile.",
     error_identifier: None,
 };

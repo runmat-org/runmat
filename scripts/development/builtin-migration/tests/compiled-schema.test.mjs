@@ -3,6 +3,22 @@ import test from "node:test";
 
 import { constant, legacyFunction } from "../compiled-schema.mjs";
 
+test("extension schema distinguishes rejected forms and profile-dependent behavior", () => {
+  const fixture = legacyFunctionFixture([]);
+  for (const [mode, error_identifier, valid] of [
+    ["RunMatOnly", "RunMat:compatibility:Fixture", true],
+    ["RunMatOnly", null, false],
+    ["RunMatOnly", "RunMat:Fixture", false],
+    ["ProfileDependentBehavior", null, true],
+    ["ProfileDependentBehavior", "RunMat:compatibility:Fixture", false],
+    ["Unknown", null, false],
+  ]) {
+    fixture.extensions = [{ id: "fixture", mode, description: "Fixture", error_identifier }];
+    if (valid) assert.doesNotThrow(() => legacyFunction(fixture));
+    else assert.throws(() => legacyFunction(fixture));
+  }
+});
+
 test("constant documentation is optional, canonical, and strictly shaped", () => {
   const value = {
     name: "pi", kind: "real_double",

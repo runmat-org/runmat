@@ -52,7 +52,7 @@ pub const LS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 };
 pub const LS_PORTABLE_ROWS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "ls-portable-row-layout",
-    mode: BuiltinExtensionMode::RunMatOnly,
+    mode: BuiltinExtensionMode::ProfileDependentBehavior,
     description: "RunMat mode returns one padded character row per entry on every platform",
     error_identifier: None,
 };

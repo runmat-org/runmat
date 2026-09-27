@@ -49,10 +49,20 @@ pub fn ensure_builtin_extension_enabled(
     extension: &BuiltinExtensionDescriptor,
     context: &str,
 ) -> Result<(), RuntimeError> {
-    let enabled = match extension.mode {
-        BuiltinExtensionMode::RunMatOnly => runmat_extensions_enabled(),
-    };
-    if enabled {
+    // Profile selection is not a rejected-call gate. A misplaced descriptor
+    // must fail in either profile, including the otherwise permissive one.
+    if extension.mode != BuiltinExtensionMode::RunMatOnly
+        || extension.validate_error_contract().is_err()
+    {
+        return Err(build_runtime_error(format!(
+            "{context}: extension {} is not a valid rejected-form admission gate",
+            extension.id
+        ))
+        .with_identifier("RunMat:internal:InvalidExtensionGate")
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .build());
+    }
+    if runmat_extensions_enabled() {
         return Ok(());
     }
     let mut builder = build_runtime_error(format!(
@@ -153,6 +163,49 @@ impl Drop for RunMatExtensionsGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_gate_rejects_profile_behavior_misuse_in_both_profiles() {
+        let behavior = BuiltinExtensionDescriptor {
+            id: "fixture-profile-behavior",
+            mode: BuiltinExtensionMode::ProfileDependentBehavior,
+            description: "Both profiles accept the call with different defaults",
+            error_identifier: None,
+        };
+        let rejected = BuiltinExtensionDescriptor {
+            id: "fixture-rejected-form",
+            mode: BuiltinExtensionMode::RunMatOnly,
+            description: "Extra argument form",
+            error_identifier: Some("RunMat:compatibility:FixtureExtension"),
+        };
+        for enabled in [false, true] {
+            let _mode = push_runmat_extensions_enabled(enabled);
+            let error = ensure_builtin_extension_enabled(&behavior, "fixture").unwrap_err();
+            assert_eq!(
+                error.identifier(),
+                Some("RunMat:internal:InvalidExtensionGate")
+            );
+            let admitted = ensure_builtin_extension_enabled(&rejected, "fixture");
+            if enabled {
+                assert!(admitted.is_ok());
+            } else {
+                assert_eq!(
+                    admitted.unwrap_err().identifier(),
+                    Some("RunMat:compatibility:FixtureExtension")
+                );
+            }
+            let invalid = BuiltinExtensionDescriptor {
+                error_identifier: None,
+                ..rejected
+            };
+            assert_eq!(
+                ensure_builtin_extension_enabled(&invalid, "fixture")
+                    .unwrap_err()
+                    .identifier(),
+                Some("RunMat:internal:InvalidExtensionGate")
+            );
+        }
+    }
 
     #[path = "metadata_view.rs"]
     mod metadata_view;
@@ -1799,14 +1852,12 @@ mod tests {
     }
 
     #[test]
-    fn every_builtin_extension_has_a_structured_compatibility_identifier() {
+    fn every_builtin_extension_has_a_valid_typed_error_contract() {
         for builtin in metadata_view::integer_metadata() {
             for extension in builtin.extensions {
                 assert!(
-                    extension.error_identifier.is_some_and(|identifier| {
-                        identifier.starts_with("RunMat:compatibility:")
-                    }),
-                    "{} extension {} must use the compatibility identifier namespace",
+                    extension.validate_error_contract().is_ok(),
+                    "{} extension {} must match its typed rejection/profile contract",
                     builtin.name,
                     extension.id
                 );
@@ -2440,8 +2491,7 @@ mod tests {
             // live metadata invariants above, but are not public exports.
             .filter(|builtin| {
                 builtin.descriptor.is_some_and(|descriptor| {
-                    descriptor.completion_policy
-                        == runmat_builtins::BuiltinCompletionPolicy::Public
+                    descriptor.completion_policy == runmat_builtins::BuiltinCompletionPolicy::Public
                 })
             })
             .filter(|builtin| {
