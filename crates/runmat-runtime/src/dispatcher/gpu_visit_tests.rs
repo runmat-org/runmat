@@ -21,7 +21,15 @@ fn live_borrow_conflict_is_not_absence_of_device_aliases() {
 #[test]
 fn visits_object_arrays_and_cyclic_handle_properties_once() {
     runmat_gc::gc_test_context(|| {
-        let device = Value::GpuTensor(GpuTensorHandle::new(vec![1, 1], 72, 8));
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let expected_id = allocation.handle.buffer_id();
+        let device = Value::GpuTensor(allocation.handle);
         let mut object = runmat_value::ObjectInstance::new("TraversalFixture");
         object.properties.insert("data".into(), device);
         let target = runmat_gc::gc_allocate(Value::Object(object)).unwrap();
@@ -51,8 +59,8 @@ fn visits_object_arrays_and_cyclic_handle_properties_once() {
             .unwrap(),
         );
         let mut visited = Vec::new();
-        visit_gpu_handles(&value, &mut |handle| visited.push(handle.buffer_id));
-        assert_eq!(visited, vec![8]);
+        visit_gpu_handles(&value, &mut |handle| visited.push(handle.buffer_id()));
+        assert_eq!(visited, vec![expected_id]);
         assert!(value_contains_gpu(&value));
     });
 }

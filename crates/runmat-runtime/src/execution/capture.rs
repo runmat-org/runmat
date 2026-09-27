@@ -145,84 +145,80 @@ mod tests {
     };
     use runmat_value::{CellArray, HandleRef, StructArray, StructValue};
 
-    struct RejectProvider;
-    static REJECT_PROVIDER: RejectProvider = RejectProvider;
-
-    impl AccelProvider for RejectProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("unsupported"))
-        }
-
-        fn download<'a>(&'a self, _handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
-        }
-
-        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn device_info(&self) -> String {
-            "reject-provider".into()
-        }
-
-        fn device_id(&self) -> u32 {
-            41
-        }
+    struct CaptureProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+        policy: SpawnHandleConcurrency,
     }
 
-    struct ShareProvider;
-    static SHARE_PROVIDER: ShareProvider = ShareProvider;
-
-    impl AccelProvider for ShareProvider {
-        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-            Err(anyhow::anyhow!("unsupported"))
+    impl AccelProvider for CaptureProvider {
+        fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "unused capture upload",
+            ))
         }
-
-        fn download<'a>(&'a self, _handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-            Box::pin(async { Err(anyhow::anyhow!("unsupported")) })
+        fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async {
+                Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "unused capture download",
+                ))
+            })
         }
-
-        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn device_info(&self) -> String {
-            "share-provider".into()
+            "capture fixture owner".into()
         }
-
         fn device_id(&self) -> u32 {
-            42
+            self.owner.device_id()
         }
-
         fn spawn_handle_concurrency(&self) -> SpawnHandleConcurrency {
-            SpawnHandleConcurrency::ImmutableShare
+            self.policy
         }
     }
 
-    fn gpu(device_id: u32, buffer_id: u64) -> Value {
-        Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1],
-            device_id,
-            buffer_id,
-            descriptor: Default::default(),
+    fn reject_provider() -> &'static CaptureProvider {
+        static PROVIDER: std::sync::OnceLock<CaptureProvider> = std::sync::OnceLock::new();
+        PROVIDER.get_or_init(|| CaptureProvider {
+            owner: Default::default(),
+            policy: SpawnHandleConcurrency::Reject,
         })
+    }
+    fn share_provider() -> &'static CaptureProvider {
+        static PROVIDER: std::sync::OnceLock<CaptureProvider> = std::sync::OnceLock::new();
+        PROVIDER.get_or_init(|| CaptureProvider {
+            owner: Default::default(),
+            policy: SpawnHandleConcurrency::ImmutableShare,
+        })
+    }
+    fn gpu(owner: &runmat_accelerate_api::test_support::TestAllocationOwner) -> Value {
+        Value::GpuTensor(
+            owner
+                .allocate_zeroed(
+                    vec![1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap()
+                .handle,
+        )
     }
 
     #[test]
     fn spawn_capture_obeys_provider_concurrency_policy() {
-        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
-        let error = validate_spawn_capture(&gpu(41, 7)).expect_err("reject capture");
+        let _guard = ThreadProviderGuard::set(Some(reject_provider()));
+        let error =
+            validate_spawn_capture(&gpu(&reject_provider().owner)).expect_err("reject capture");
         assert_eq!(error.identifier(), Some("RunMat:SpawnGpuHandleUnsupported"));
         drop(_guard);
 
-        let _guard = ThreadProviderGuard::set(Some(&SHARE_PROVIDER));
-        validate_spawn_capture(&gpu(42, 9)).expect("immutable sharing is safe");
+        let _guard = ThreadProviderGuard::set(Some(share_provider()));
+        validate_spawn_capture(&gpu(&share_provider().owner)).expect("immutable sharing is safe");
     }
 
     #[test]
     fn spawn_capture_rejects_missing_provider() {
         let _guard = ThreadProviderGuard::set(None);
-        let error = validate_spawn_capture(&gpu(99, 13)).expect_err("missing provider");
+        runmat_accelerate_api::clear_provider();
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let error = validate_spawn_capture(&gpu(&owner)).expect_err("missing provider");
         assert_eq!(error.identifier(), Some("RunMat:SpawnProviderUnavailable"));
     }
 
@@ -252,9 +248,10 @@ mod tests {
 
     #[test]
     fn spawn_capture_recurses_through_cells_closures_and_handle_objects() {
-        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let _guard = ThreadProviderGuard::set(Some(reject_provider()));
         let cell = Value::Cell(
-            CellArray::new(vec![Value::Num(1.0), gpu(41, 11)], 1, 2).expect("test cell"),
+            CellArray::new(vec![Value::Num(1.0), gpu(&reject_provider().owner)], 1, 2)
+                .expect("test cell"),
         );
         assert_eq!(
             validate_spawn_capture(&cell).unwrap_err().identifier(),
@@ -264,7 +261,7 @@ mod tests {
         let closure = Value::Closure(runmat_value::Closure {
             function_name: "worker".into(),
             bound_function: None,
-            captures: vec![gpu(41, 21)],
+            captures: vec![gpu(&reject_provider().owner)],
         });
         assert_eq!(
             validate_spawn_capture(&closure).unwrap_err().identifier(),
@@ -272,7 +269,9 @@ mod tests {
         );
 
         let mut payload = StructValue::new();
-        payload.fields.insert("nested".into(), gpu(41, 31));
+        payload
+            .fields
+            .insert("nested".into(), gpu(&reject_provider().owner));
         let target = runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc payload");
         let object = Value::HandleObject(HandleRef {
             class_name: "Payload".into(),
@@ -287,7 +286,7 @@ mod tests {
 
     #[test]
     fn spawn_capture_recurses_through_nd_structure_arrays() {
-        let _guard = ThreadProviderGuard::set(Some(&REJECT_PROVIDER));
+        let _guard = ThreadProviderGuard::set(Some(reject_provider()));
         let element = |payload: Value, nested: Value| {
             let mut value = StructValue::new();
             value.insert("payload", payload);
@@ -298,7 +297,7 @@ mod tests {
             vec!["payload".into(), "nested".into()],
             vec![
                 element(Value::Num(1.0), Value::Num(2.0)),
-                element(Value::Num(3.0), gpu(41, 51)),
+                element(Value::Num(3.0), gpu(&reject_provider().owner)),
             ],
             vec![1, 1, 2],
         )

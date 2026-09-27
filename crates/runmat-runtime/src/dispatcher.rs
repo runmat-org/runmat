@@ -94,17 +94,6 @@ fn gather_if_needed_async_impl<'a>(
     Box::pin(async move {
         match value {
             Value::GpuTensor(handle) => {
-                // In parallel test runs, ensure the WGPU provider is reasserted for WGPU handles.
-                #[cfg(all(test, feature = "wgpu"))]
-                {
-                    let active_owner = runmat_accelerate_api::provider()
-                        .is_some_and(|provider| provider.device_id() == handle.device_id());
-                    if handle.device_id() != 0 && !active_owner {
-                        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
-                        runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
-                    );
-                    }
-                }
                 let provider =
                     runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
@@ -1156,6 +1145,17 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    fn gpu_fixture(shape: Vec<usize>) -> GpuTensorHandle {
+        runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                shape,
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap()
+            .handle
+    }
+
     static TEST_CLASS_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
@@ -1251,21 +1251,13 @@ mod tests {
                 Some("RunMat:gpu:IntegerFloatingProjection")
             );
 
-            for handle in [&single_handle, &integer_handle] {
-                provider.free(handle).unwrap();
-                runmat_accelerate_api::clear_handle_metadata(handle);
-            }
+            drop((single_handle, integer_handle));
         });
     }
 
     #[test]
     fn compatibility_errors_never_trigger_automatic_gpu_gather_retry() {
-        let gpu = Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 1,
-            descriptor: Default::default(),
-        });
+        let gpu = Value::GpuTensor(gpu_fixture(vec![1, 1]));
         let compatibility_error =
             crate::build_runtime_error("example gpuArray call form is a RunMat extension")
                 .with_identifier("RunMat:compatibility:ExampleExtension")
@@ -1298,14 +1290,10 @@ mod tests {
             std::slice::from_ref(&gpu)
         ));
 
-        let automatic_gpu = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 5,
-            descriptor: Default::default(),
-        };
-        let automatic_gpu =
-            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let automatic_gpu = gpu_fixture(vec![1, 1]);
+        let automatic_gpu = automatic_gpu
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
         let ordinary_gpu_error = crate::build_runtime_error("GPU input requires host fallback")
             .with_identifier("RunMat:example:UnsupportedGpuPath")
             .build();
@@ -1313,25 +1301,20 @@ mod tests {
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
         ));
-        let automatic_gpu =
-            automatic_gpu.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatic_gpu = automatic_gpu
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         assert!(!should_retry_with_gpu_gather(
             &ordinary_gpu_error,
             &[Value::GpuTensor(automatic_gpu.clone())]
         ));
-        runmat_accelerate_api::clear_handle_metadata(&automatic_gpu);
 
         let terminal_gpu_error = crate::build_runtime_error("GPU input is semantically invalid")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build();
         assert!(!should_retry_with_gpu_gather(
             &terminal_gpu_error,
-            &[Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 2,
-                descriptor: Default::default(),
-            })]
+            &[Value::GpuTensor(gpu_fixture(vec![1, 1]))]
         ));
 
         let nested_terminal = crate::build_runtime_error("terminal provider decision")
@@ -1342,12 +1325,7 @@ mod tests {
             .build();
         assert!(!should_retry_with_gpu_gather(
             &wrapped_terminal,
-            &[Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 3,
-                descriptor: Default::default(),
-            })]
+            &[Value::GpuTensor(gpu_fixture(vec![1, 1]))]
         ));
 
         let nested_request = crate::build_runtime_error("host implementation is required")
@@ -1356,63 +1334,42 @@ mod tests {
         let wrapped_request = crate::build_runtime_error("provider path unavailable")
             .with_source(nested_request)
             .build();
-        let requested_handle = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 4,
-            descriptor: Default::default(),
-        };
+        let requested_handle = gpu_fixture(vec![1, 1]);
         assert!(should_retry_with_gpu_gather(
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
         ));
-        let requested_handle =
-            requested_handle.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let requested_handle = requested_handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
         assert!(!should_retry_with_gpu_gather(
             &wrapped_request,
             &[Value::GpuTensor(requested_handle.clone())]
         ));
-        runmat_accelerate_api::clear_handle_metadata(&requested_handle);
     }
 
     #[test]
     fn builtin_result_provenance_follows_gpu_input_intent() {
-        let explicit = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 91,
-            descriptor: Default::default(),
-        };
-        let automatic = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 92,
-            descriptor: Default::default(),
-        };
-        let explicit_result = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 93,
-            descriptor: Default::default(),
-        };
-        let automatic_result = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 94,
-            descriptor: Default::default(),
-        };
-        let explicit =
-            explicit.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let automatic =
-            automatic.with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
+        let explicit = gpu_fixture(vec![1, 1]);
+        let automatic = gpu_fixture(vec![1, 1]);
+        let explicit_result = gpu_fixture(vec![1, 1]);
+        let automatic_result = gpu_fixture(vec![1, 1]);
+        let explicit = explicit
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let automatic = automatic
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
 
         let mut explicit_value = Value::GpuTensor(explicit_result.clone());
-        super::propagate_gpu_provenance(&[Value::GpuTensor(explicit.clone())], &mut explicit_value);
+        super::propagate_gpu_provenance(&[Value::GpuTensor(explicit.clone())], &mut explicit_value)
+            .unwrap();
         let mut automatic_value = Value::GpuTensor(automatic_result.clone());
         super::propagate_gpu_provenance(
             &[Value::GpuTensor(automatic.clone())],
             &mut automatic_value,
-        );
+        )
+        .unwrap();
 
         assert_eq!(
             runmat_accelerate_api::handle_provenance(&explicit_result),
@@ -1422,7 +1379,7 @@ mod tests {
             unreachable!()
         };
         assert_eq!(
-            explicit_value.descriptor.provenance,
+            explicit_value.view().provenance(),
             Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
         assert_eq!(
@@ -1433,84 +1390,59 @@ mod tests {
             unreachable!()
         };
         assert_eq!(
-            automatic_value.descriptor.provenance,
+            automatic_value.view().provenance(),
             Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
-        for handle in [&explicit, &automatic, &explicit_result, &automatic_result] {
-            runmat_accelerate_api::clear_handle_metadata(handle);
-        }
     }
 
     #[test]
     fn builtin_result_provenance_preserves_producer_intent_without_gpu_inputs() {
-        let explicitly_created = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 95,
-            descriptor: Default::default(),
-        }
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
-        let automatically_created = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 96,
-            descriptor: Default::default(),
-        };
+        let explicitly_created = gpu_fixture(vec![1, 1])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let automatically_created = gpu_fixture(vec![1, 1]);
 
         let mut explicit_value = Value::GpuTensor(explicitly_created.clone());
-        super::propagate_gpu_provenance(&[], &mut explicit_value);
+        super::propagate_gpu_provenance(&[], &mut explicit_value).unwrap();
         let mut automatic_value = Value::GpuTensor(automatically_created.clone());
-        super::propagate_gpu_provenance(&[], &mut automatic_value);
+        super::propagate_gpu_provenance(&[], &mut automatic_value).unwrap();
 
         let Value::GpuTensor(explicit_value) = explicit_value else {
             unreachable!()
         };
         assert_eq!(
-            explicit_value.descriptor.provenance,
+            explicit_value.view().provenance(),
             Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
         let Value::GpuTensor(automatic_value) = automatic_value else {
             unreachable!()
         };
         assert_eq!(
-            automatic_value.descriptor.provenance,
+            automatic_value.view().provenance(),
             Some(runmat_accelerate_api::GpuHandleProvenance::Automatic)
         );
-        for handle in [&explicitly_created, &automatically_created] {
-            runmat_accelerate_api::clear_handle_metadata(handle);
-        }
     }
 
     #[test]
     fn builtin_result_provenance_does_not_downgrade_explicit_producer_intent() {
-        let automatic_input = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 97,
-            descriptor: Default::default(),
-        }
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-        let explicit_result = GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 98,
-            descriptor: Default::default(),
-        }
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit);
+        let automatic_input = gpu_fixture(vec![1, 1])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+            .unwrap();
+        let explicit_result = gpu_fixture(vec![1, 1])
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
 
         let mut result = Value::GpuTensor(explicit_result.clone());
-        super::propagate_gpu_provenance(&[Value::GpuTensor(automatic_input.clone())], &mut result);
+        super::propagate_gpu_provenance(&[Value::GpuTensor(automatic_input.clone())], &mut result)
+            .unwrap();
 
         let Value::GpuTensor(result) = result else {
             unreachable!()
         };
         assert_eq!(
-            result.descriptor.provenance,
+            result.view().provenance(),
             Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         );
-        for handle in [&automatic_input, &explicit_result] {
-            runmat_accelerate_api::clear_handle_metadata(handle);
-        }
     }
 
     #[test]
@@ -1521,7 +1453,9 @@ mod tests {
             let mut prototype =
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &prototype_tensor)
                     .expect("upload prototype");
-            runmat_accelerate_api::mark_handle_explicit(&mut prototype);
+            prototype = prototype
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .unwrap();
 
             let dimension_args = || vec![Value::Num(2.0), Value::Num(2.0)];
             let class_selected = |name: &'static str| {
@@ -1557,12 +1491,10 @@ mod tests {
                     runmat_accelerate_api::handle_is_explicit(&handle),
                     "{name} lost explicit gpuArray intent"
                 );
-                provider.free(&handle).expect("free constructor output");
-                runmat_accelerate_api::clear_handle_metadata(&handle);
+                drop(handle);
             }
 
-            provider.free(&prototype).expect("free prototype");
-            runmat_accelerate_api::clear_handle_metadata(&prototype);
+            drop(prototype);
         });
     }
 
@@ -1576,12 +1508,7 @@ mod tests {
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
             bound_function: None,
-            captures: vec![Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1],
-                device_id: 999,
-                buffer_id: 42,
-                descriptor: Default::default(),
-            })],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         assert!(value_contains_gpu(&value));
     }
@@ -1590,12 +1517,7 @@ mod tests {
     fn value_contains_gpu_detects_output_list_entries() {
         let value = Value::OutputList(vec![
             Value::Num(1.0),
-            Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1],
-                device_id: 998,
-                buffer_id: 43,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(gpu_fixture(vec![1])),
         ]);
         assert!(value_contains_gpu(&value));
     }
@@ -1604,13 +1526,7 @@ mod tests {
     fn gather_if_needed_rejects_nested_output_list_before_provider_access() {
         runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
-        let value = Value::OutputList(vec![Value::GpuTensor(GpuTensorHandle {
-            shape: vec![1],
-            // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
-            device_id: 0,
-            buffer_id: 44,
-            descriptor: Default::default(),
-        })]);
+        let value = Value::OutputList(vec![Value::GpuTensor(gpu_fixture(vec![1]))]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("transient sequence must fail before provider access");
         assert_eq!(
@@ -1626,13 +1542,7 @@ mod tests {
         let value = Value::Closure(Closure {
             function_name: "worker".into(),
             bound_function: None,
-            captures: vec![Value::GpuTensor(GpuTensorHandle {
-                shape: vec![1],
-                // Keep device id at zero so test-only WGPU re-registration hooks are not triggered.
-                device_id: 0,
-                buffer_id: 45,
-                descriptor: Default::default(),
-            })],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
         });
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail closure-captured gather");
