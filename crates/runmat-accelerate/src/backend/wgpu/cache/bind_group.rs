@@ -1,8 +1,30 @@
 use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+
+mod entries;
+use entries::BindGroupEntries;
+
+/// Invalidation could not establish completed bookkeeping. Neither variant
+/// asserts that a GPU resource or device has failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CacheInvalidationError {
+    Poisoned,
+    BookkeepingCapacity,
+}
+
+impl std::fmt::Display for CacheInvalidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Poisoned => "bind-group cache bookkeeping is poisoned",
+            Self::BookkeepingCapacity => "bind-group invalidation bookkeeping capacity unavailable",
+        })
+    }
+}
+
+impl std::error::Error for CacheInvalidationError {}
 
 #[derive(Clone, Debug, Eq)]
 struct BindingKey {
@@ -50,8 +72,7 @@ impl Hash for BindGroupKey {
 }
 
 pub struct BindGroupCache {
-    inner: Mutex<HashMap<BindGroupKey, Arc<wgpu::BindGroup>>>,
-    index: Mutex<HashMap<usize, HashSet<BindGroupKey>>>,
+    inner: Mutex<BindGroupEntries<Arc<wgpu::BindGroup>>>,
     hits: AtomicU64,
     misses: AtomicU64,
     per_layout: Mutex<HashMap<usize, (u64, u64)>>,
@@ -66,8 +87,7 @@ impl Default for BindGroupCache {
 impl BindGroupCache {
     pub fn new() -> Self {
         Self {
-            inner: Mutex::new(HashMap::new()),
-            index: Mutex::new(HashMap::new()),
+            inner: Mutex::new(BindGroupEntries::default()),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
             per_layout: Mutex::new(HashMap::new()),
@@ -89,7 +109,7 @@ impl BindGroupCache {
                     .inner
                     .lock()
                     .ok()
-                    .and_then(|map| map.get(&key).cloned())
+                    .and_then(|entries| entries.groups.get(&key).cloned())
                 {
                     self.hits.fetch_add(1, Ordering::Relaxed);
                     log::debug!("bind_group_cache hit layout_ptr={:#x}", key.layout_ptr);
@@ -101,21 +121,12 @@ impl BindGroupCache {
                 }
                 let bind_group = create();
                 let layout_ptr = key.layout_ptr;
-                let key_clone = key.clone();
                 let replaced = self
                     .inner
                     .lock()
                     .ok()
-                    .and_then(|mut map| map.insert(key, bind_group.clone()));
+                    .and_then(|mut entries| entries.insert(key, bind_group.clone()));
                 drop(replaced);
-                if let Ok(mut index) = self.index.lock() {
-                    for binding in &key_clone.bindings {
-                        index
-                            .entry(binding.buffer_ptr)
-                            .or_insert_with(HashSet::new)
-                            .insert(key_clone.clone());
-                    }
-                }
                 self.misses.fetch_add(1, Ordering::Relaxed);
                 log::debug!("bind_group_cache miss layout_ptr={:#x}", layout_ptr);
                 if let Ok(mut per) = self.per_layout.lock() {
@@ -153,45 +164,16 @@ impl BindGroupCache {
             .unwrap_or_default()
     }
 
-    pub fn invalidate_buffer(&self, buffer_ptr: usize) {
-        let removed_keys = {
-            let mut keys_to_remove: Vec<BindGroupKey> = Vec::new();
-            if let Ok(mut index) = self.index.lock() {
-                if let Some(keys_set) = index.remove(&buffer_ptr) {
-                    keys_to_remove.extend(keys_set);
-                    let mut empty_ptrs: HashSet<usize> = HashSet::new();
-                    for key in &keys_to_remove {
-                        for binding in &key.bindings {
-                            if binding.buffer_ptr == buffer_ptr {
-                                continue;
-                            }
-                            if let Some(set) = index.get_mut(&binding.buffer_ptr) {
-                                set.remove(key);
-                                if set.is_empty() {
-                                    empty_ptrs.insert(binding.buffer_ptr);
-                                }
-                            }
-                        }
-                    }
-                    for ptr in empty_ptrs {
-                        index.remove(&ptr);
-                    }
-                } else {
-                    return;
-                }
-            } else {
-                return;
-            }
-            keys_to_remove
-        };
-
-        let removed = self.inner.lock().ok().map(|mut map| {
-            removed_keys
-                .into_iter()
-                .filter_map(|key| map.remove(&key))
-                .collect::<Vec<_>>()
-        });
+    pub fn invalidate_buffer(&self, buffer_ptr: usize) -> Result<(), CacheInvalidationError> {
+        let removed = remove_cached_buffer(&self.inner, buffer_ptr)?;
         drop(removed);
+        Ok(())
+    }
+
+    #[cfg(all(test, panic = "unwind"))]
+    pub(crate) fn poison_for_retirement_test(&self) {
+        let _guard = self.inner.lock().unwrap();
+        panic!("injected bind-group cache poison");
     }
 
     fn make_key(
@@ -233,4 +215,16 @@ impl BindGroupCache {
             bindings,
         })
     }
+}
+
+fn remove_cached_buffer<T>(
+    entries: &Mutex<BindGroupEntries<T>>,
+    buffer_ptr: usize,
+) -> Result<Vec<T>, CacheInvalidationError> {
+    // Both tables are unchanged on poison/capacity failure. Resource drops
+    // happen in the caller, after this guard has gone out of scope.
+    let mut entries = entries
+        .lock()
+        .map_err(|_| CacheInvalidationError::Poisoned)?;
+    entries.remove_buffer(buffer_ptr)
 }

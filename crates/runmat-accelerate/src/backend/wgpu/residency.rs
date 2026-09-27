@@ -38,6 +38,20 @@ pub struct BufferResidency {
     max_per_key: usize,
 }
 
+/// Optional buffer reuse was declined; this is not a device/free failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PoolRejectionReason {
+    Empty,
+    Full,
+    Poisoned,
+    BookkeepingCapacity,
+}
+
+pub struct RejectedBuffer {
+    pub reason: PoolRejectionReason,
+    pub buffer: Arc<wgpu::Buffer>,
+}
+
 impl BufferResidency {
     pub fn new(max_per_key: usize) -> Self {
         Self {
@@ -70,18 +84,19 @@ impl BufferResidency {
 
         let size_bytes = (len as u64).max(1) * element_size as u64;
         let key = ResidencyKey::new(usage, size_bytes);
-        if let Ok(mut guard) = self.pools.lock() {
-            if let Some(queue) = guard.get_mut(&key) {
-                if let Some(buffer) = queue.pop_front() {
-                    log::trace!(
-                        "buffer_residency: reuse {:?} len={} ptr={:p}",
-                        usage,
-                        len,
-                        Arc::as_ptr(&buffer)
-                    );
-                    return (buffer, true);
-                }
-            }
+        let reused = self
+            .pools
+            .lock()
+            .ok()
+            .and_then(|mut pools| pools.get_mut(&key).and_then(VecDeque::pop_front));
+        if let Some(buffer) = reused {
+            log::trace!(
+                "buffer_residency: reuse {:?} len={} ptr={:p}",
+                usage,
+                len,
+                Arc::as_ptr(&buffer)
+            );
+            return (buffer, true);
         }
 
         let buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
@@ -106,31 +121,14 @@ impl BufferResidency {
         usage: BufferUsageClass,
         allocated_bytes: u64,
         buffer: Arc<wgpu::Buffer>,
-    ) {
-        if allocated_bytes == 0 {
-            return;
-        }
-
-        let key = ResidencyKey::new(usage, allocated_bytes);
-        if let Ok(mut guard) = self.pools.lock() {
-            let queue = guard.entry(key).or_insert_with(VecDeque::new);
-            if queue.len() < self.max_per_key {
-                log::trace!(
-                    "buffer_residency: release {:?} bytes={} ptr={:p}",
-                    usage,
-                    allocated_bytes,
-                    Arc::as_ptr(&buffer)
-                );
-                queue.push_back(buffer);
-            } else {
-                log::trace!(
-                    "buffer_residency: drop {:?} bytes={} ptr={:p} (pool full)",
-                    usage,
-                    allocated_bytes,
-                    Arc::as_ptr(&buffer)
-                );
-            }
-        }
+    ) -> Result<(), RejectedBuffer> {
+        release_into(
+            &self.pools,
+            self.max_per_key,
+            ResidencyKey::new(usage, allocated_bytes),
+            buffer,
+        )
+        .map_err(|(reason, buffer)| RejectedBuffer { reason, buffer })
     }
 
     pub fn pooled_bytes(&self, _element_size: usize) -> u64 {
@@ -147,3 +145,43 @@ impl BufferResidency {
             .unwrap_or(0)
     }
 }
+
+fn release_into<T>(
+    pools: &Mutex<HashMap<ResidencyKey, VecDeque<T>>>,
+    max_per_key: usize,
+    key: ResidencyKey,
+    buffer: T,
+) -> Result<(), (PoolRejectionReason, T)> {
+    if key.allocated_bytes == 0 {
+        return Err((PoolRejectionReason::Empty, buffer));
+    }
+    if max_per_key == 0 {
+        return Err((PoolRejectionReason::Full, buffer));
+    }
+    let mut pools = match pools.lock() {
+        Ok(pools) => pools,
+        Err(_) => return Err((PoolRejectionReason::Poisoned, buffer)),
+    };
+    if let Some(queue) = pools.get_mut(&key) {
+        if queue.len() >= max_per_key {
+            return Err((PoolRejectionReason::Full, buffer));
+        }
+        if queue.try_reserve(1).is_err() {
+            return Err((PoolRejectionReason::BookkeepingCapacity, buffer));
+        }
+        queue.push_back(buffer);
+    } else {
+        // Complete fallible bookkeeping before transferring the resource.
+        let mut queue = VecDeque::new();
+        if pools.try_reserve(1).is_err() || queue.try_reserve(1).is_err() {
+            return Err((PoolRejectionReason::BookkeepingCapacity, buffer));
+        }
+        queue.push_back(buffer);
+        pools.insert(key, queue);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "residency/tests.rs"]
+mod tests;

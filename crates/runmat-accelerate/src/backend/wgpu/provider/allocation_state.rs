@@ -82,6 +82,20 @@ impl AllocationState {
             ));
         }
         log::trace!("wgpu free id={}", handle.buffer_id);
+        // Checked cache failure must leave the existing allocation and its
+        // annotations reachable. This is still the old explicit-free surface:
+        // a later owning-lease slice must mark Retiring before invalidation to
+        // prevent concurrent new cache admission for this allocation.
+        let buffer = self
+            .buffers
+            .lock()
+            .expect("buffer mutex poisoned")
+            .get(&handle.buffer_id)
+            .map(|entry| entry.buffer.clone());
+        if let Some(buffer) = buffer {
+            let buffer_ptr = buffer.as_ref() as *const wgpu::Buffer as usize;
+            self.bind_groups.invalidate_buffer(buffer_ptr)?;
+        }
         let entry = self
             .buffers
             .lock()
@@ -94,12 +108,17 @@ impl AllocationState {
             if entry.len > 0 {
                 let poolable_by_size =
                     self.max_poolable_bytes > 0 && entry.allocated_bytes <= self.max_poolable_bytes;
-                let buffer_ptr = entry.buffer.as_ref() as *const wgpu::Buffer as usize;
-                self.bind_groups.invalidate_buffer(buffer_ptr);
                 let strong_count = Arc::strong_count(&entry.buffer);
                 if poolable_by_size && strong_count == 1 {
-                    self.pool
-                        .release(entry.usage, entry.allocated_bytes, entry.buffer.clone());
+                    if let Err(rejected) =
+                        self.pool
+                            .release(entry.usage, entry.allocated_bytes, entry.buffer.clone())
+                    {
+                        // The pool did not consume this Arc. Releasing it here
+                        // preserves ordinary non-pooled cleanup, outside locks.
+                        log::trace!("buffer_residency: reuse declined: {:?}", rejected.reason);
+                        drop(rejected.buffer);
+                    }
                 } else {
                     log::trace!(
                         "buffer_residency: not pooling buffer id={} len={} bytes={} strong_count={} poolable_by_size={}",

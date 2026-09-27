@@ -152,3 +152,47 @@ fn wgpu_allocation_views_exports_and_pool_keep_existing_physical_lifetimes() {
     assert_eq!(provider.allocations.pooled_bytes(provider.element_size), 0);
     assert!(provider.allocations.lock_entries().unwrap().is_empty());
 }
+
+#[cfg(all(not(target_arch = "wasm32"), panic = "unwind"))]
+#[test]
+#[ignore = "requires an explicitly provisioned WGPU adapter; run with --ignored"]
+fn failed_cache_invalidation_preserves_allocation_and_annotations_without_pooling() {
+    use super::super::backend_types::{WgpuProvider, WgpuProviderOptions};
+    use runmat_accelerate_api::{AccelProvider, HostTensorView};
+    let provider =
+        WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter");
+    let input = provider
+        .upload(&HostTensorView {
+            data: &[1.0, 2.0],
+            shape: &[1, 2],
+        })
+        .unwrap();
+    runmat_accelerate_api::record_handle_transpose(&input, 2, 1);
+    let transpose = runmat_accelerate_api::handle_transpose_info(&input);
+    let original = provider.get_entry_raw(&input).unwrap();
+    let pooled_before = provider.allocations.pooled_bytes(provider.element_size);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        provider.bind_group_cache.poison_for_retirement_test();
+    }))
+    .is_err());
+    let error = provider.free(&input).unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<crate::backend::wgpu::cache::bind_group::CacheInvalidationError>(),
+        Some(&crate::backend::wgpu::cache::bind_group::CacheInvalidationError::Poisoned)
+    );
+    let retained = provider.get_entry_raw(&input).unwrap();
+    assert!(Arc::ptr_eq(&original.buffer, &retained.buffer));
+    assert_eq!(
+        runmat_accelerate_api::handle_transpose_info(&input),
+        transpose
+    );
+    assert_eq!(
+        provider.allocations.pooled_bytes(provider.element_size),
+        pooled_before
+    );
+    // This slice keeps the failed payload in the existing owner. Explicit
+    // quarantine/drain and lease finalization belong to the later state slice.
+    // Remove this fixture's side annotations before its unregistered provider
+    // and retained payload leave scope; this is not a successful free receipt.
+    runmat_accelerate_api::clear_handle_metadata(&input);
+}
