@@ -319,7 +319,7 @@ impl AccelProvider for TestProvider {
         Ok(self.push(host.data.to_vec(), host.shape.to_vec()))
     }
 
-    fn upload_numeric(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         host.validate()?;
         match (host.data, host.storage) {
             (HostNumericDataView::F64(data), runmat_accelerate_api::GpuTensorStorage::Real) => self

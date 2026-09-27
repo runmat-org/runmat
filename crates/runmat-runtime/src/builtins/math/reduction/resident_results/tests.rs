@@ -19,7 +19,7 @@ impl AccelProvider for Provider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view)
     }
-    fn upload_numeric(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, view: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         if self.uploads.fetch_add(1, Ordering::SeqCst) == 1 {
             if self.alias_second {
                 return Ok(self.first.lock().unwrap().clone().unwrap());

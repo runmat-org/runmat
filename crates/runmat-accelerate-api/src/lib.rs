@@ -15,10 +15,14 @@ use std::sync::Mutex;
 use std::sync::RwLock;
 
 mod native_device;
+mod numeric_upload;
 mod placement;
 mod power;
 
 pub use native_device::*;
+pub use numeric_upload::{
+    is_invalid_numeric_upload_result, upload_numeric_protecting, InvalidNumericUploadResult,
+};
 pub use placement::*;
 pub use power::{NumericalDomainEvidence, PowerResultDomain};
 
@@ -1606,16 +1610,31 @@ pub trait AccelProvider: Send + Sync {
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
 
     /// Upload one native numeric payload through the shared all-class transfer
-    /// contract. Providers should override this method as they adopt native
-    /// single and complex integer storage. The default adapter preserves exact
-    /// existing double and real-integer routes and rejects every representation
-    /// those routes cannot express.
+    /// contract. Provider implementations override [`Self::upload_numeric_raw`],
+    /// not this validated entrypoint. Callers with borrowed resident operands
+    /// must use [`upload_numeric_protecting`] directly.
     fn upload_numeric(
         &self,
         host: &crate::HostNumericTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {
+        upload_numeric_protecting(self, host, &[])
+    }
+
+    /// Provider allocation hook, called by the validated upload entrypoints.
+    ///
+    /// Implementors migrating native numeric support must rename their former
+    /// `upload_numeric` override to this method. Return the produced handle
+    /// without performing generic descriptor-rejection cleanup: the shared
+    /// boundary knows which handles are borrowed. Errors must release only
+    /// allocations actually owned by this invocation. The default preserves
+    /// legacy real-double and real-integer transfers; native single and complex
+    /// representations require an override.
+    fn upload_numeric_raw(
+        &self,
+        host: &crate::HostNumericTensorView,
+    ) -> anyhow::Result<GpuTensorHandle> {
         host.validate()?;
-        let handle = match (host.data, host.storage) {
+        match (host.data, host.storage) {
             (crate::HostNumericDataView::F64(data), GpuTensorStorage::Real) => {
                 self.upload(&crate::HostTensorView {
                     data,
@@ -1642,28 +1661,11 @@ pub trait AccelProvider: Send + Sync {
                 })
             }
             (data, storage) => Err(anyhow!(
-                "provider must implement native {:?} {:?} uploads through upload_numeric",
+                "provider must implement native {:?} {:?} uploads through upload_numeric_raw",
                 data.element_type(),
                 storage
             )),
-        }?;
-        let expected_element = host.data.element_type();
-        if handle.shape != host.shape
-            || handle.descriptor.element_type != Some(expected_element)
-            || handle.descriptor.storage != Some(host.storage)
-        {
-            let _ = self.free(&handle);
-            return Err(anyhow!(
-                "provider returned an invalid numeric upload descriptor: expected shape {:?}, element {:?}, storage {:?}; got shape {:?}, element {:?}, storage {:?}",
-                host.shape,
-                expected_element,
-                host.storage,
-                handle.shape,
-                handle.descriptor.element_type,
-                handle.descriptor.storage
-            ));
         }
-        Ok(handle)
     }
 
     /// Download one native numeric payload through the shared all-class

@@ -355,7 +355,7 @@ impl AccelProvider for CudaProvider {
         })
     }
 
-    fn upload_numeric(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView<'_>) -> Result<GpuTensorHandle> {
         self.upload_numeric_impl(host)
     }
 

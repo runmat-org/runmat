@@ -1937,7 +1937,7 @@ impl AccelProvider for WgpuProvider {
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move { self.download_exec(h).await })
     }
-    fn upload_numeric(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
         self.upload_numeric_exec(host)
     }
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {

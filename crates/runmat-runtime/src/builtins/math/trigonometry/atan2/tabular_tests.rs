@@ -42,7 +42,7 @@ impl AccelProvider for Provider {
     fn upload(&self, value: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(value)
     }
-    fn upload_numeric(&self, value: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, value: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         let mut state = self.state.lock().unwrap();
         match state.fault {
             Fault::BorrowedAlias => return Ok(state.second.as_ref().unwrap().clone()),

@@ -30,9 +30,12 @@ impl MxApi {
             }
             let downloaded = pollster::block_on(owner.download_numeric(gpu.lease.handle()))
                 .map_err(|error| format!("could not transfer GPU array to CUDA: {error}"))?;
-            let handle = target
-                .upload_numeric(&downloaded.as_view())
-                .map_err(|error| format!("could not upload GPU array to CUDA: {error}"))?;
+            let handle = runmat_accelerate_api::upload_numeric_protecting(
+                target,
+                &downloaded.as_view(),
+                &[gpu.lease.handle()],
+            )
+            .map_err(|error| format!("could not upload GPU array to CUDA: {error}"))?;
             let value = MxArray::gpu_owned(gpu.class_id, MxGpuLease::owned(handle))?;
             return Ok(self.arena.allocate(value));
         }
@@ -40,8 +43,12 @@ impl MxApi {
         let (class_id, upload) = host_upload(source)?;
         let provider = cuda_provider()?;
         let handle = match &upload {
-            UploadSource::Borrowed(view) => provider.upload_numeric(view),
-            UploadSource::Owned(owned) => provider.upload_numeric(&owned.as_view()),
+            UploadSource::Borrowed(view) => {
+                runmat_accelerate_api::upload_numeric_protecting(provider, view, &[])
+            }
+            UploadSource::Owned(owned) => {
+                runmat_accelerate_api::upload_numeric_protecting(provider, &owned.as_view(), &[])
+            }
         }
         .map_err(|error| format!("could not upload array to CUDA: {error}"))?;
         let value = MxArray::gpu_owned(class_id, MxGpuLease::owned(handle))?;
@@ -575,7 +582,7 @@ mod tests {
             Box::pin(async move { result })
         }
 
-        fn upload_numeric(
+        fn upload_numeric_raw(
             &self,
             host: &HostNumericTensorView<'_>,
         ) -> anyhow::Result<GpuTensorHandle> {

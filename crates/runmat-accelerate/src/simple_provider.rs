@@ -4289,7 +4289,7 @@ impl AccelProvider for InProcessProvider {
         ProviderPrecision::F64
     }
 
-    fn upload_numeric(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> Result<GpuTensorHandle> {
         host.validate()?;
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let data = InProcessNumericData::from_view(host.data);

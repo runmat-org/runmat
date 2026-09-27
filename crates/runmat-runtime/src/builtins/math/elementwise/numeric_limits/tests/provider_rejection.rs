@@ -32,7 +32,7 @@ impl AccelProvider for AliasProvider {
         self.uploads.fetch_add(1, Ordering::Relaxed);
         Ok(self.output.lock().unwrap().as_ref().unwrap().clone())
     }
-    fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.upload(&HostTensorView {
             data: &[],
             shape: &[0, 0],

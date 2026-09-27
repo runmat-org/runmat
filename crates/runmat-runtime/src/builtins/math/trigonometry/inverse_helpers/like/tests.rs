@@ -182,7 +182,7 @@ impl Provider {
     }
 }
 impl AccelProvider for Provider {
-    fn upload_numeric(
+    fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
     ) -> anyhow::Result<GpuTensorHandle> {

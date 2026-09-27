@@ -14,7 +14,7 @@ struct CounterProvider {
     alias_on: Mutex<Option<(u64, u64)>>,
 }
 impl AccelProvider for CounterProvider {
-    fn upload_numeric(
+    fn upload_numeric_raw(
         &self,
         view: &runmat_accelerate_api::HostNumericTensorView<'_>,
     ) -> Result<GpuTensorHandle> {

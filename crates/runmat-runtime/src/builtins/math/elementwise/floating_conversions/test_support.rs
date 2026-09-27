@@ -124,7 +124,7 @@ impl AccelProvider for ConversionHookProvider {
         self.inner.upload(host)
     }
 
-    fn upload_numeric(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, host: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload_numeric(host)
     }
 

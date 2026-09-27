@@ -42,7 +42,7 @@ impl AccelProvider for Provider {
             .expect("configured upload")
             .clone())
     }
-    fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
         Ok(self
             .response
             .lock()

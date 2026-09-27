@@ -140,7 +140,7 @@ impl F32TestProvider {
 }
 
 impl runmat_accelerate_api::AccelProvider for F32TestProvider {
-    fn upload_numeric(
+    fn upload_numeric_raw(
         &self,
         host: &runmat_accelerate_api::HostNumericTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {

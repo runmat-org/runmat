@@ -29,7 +29,10 @@ impl AccelProvider for Provider {
     fn upload(&self, view: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         self.inner.upload(view)
     }
-    fn upload_numeric(&self, view: &HostNumericTensorView<'_>) -> anyhow::Result<GpuTensorHandle> {
+    fn upload_numeric_raw(
+        &self,
+        view: &HostNumericTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
         self.uploads.fetch_add(1, Ordering::SeqCst);
         if self.mode.load(Ordering::SeqCst) == 2 {
             let mut fresh = self.inner.upload_numeric(view)?;

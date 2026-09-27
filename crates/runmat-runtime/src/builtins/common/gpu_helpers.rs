@@ -784,10 +784,7 @@ pub fn upload_complex_tensor_protecting(
         shape: &tensor.shape,
         storage: GpuTensorStorage::ComplexInterleaved,
     };
-    let handle = provider
-        .upload_numeric(&transfer)
-        .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())?;
-    validate_numeric_upload(provider, handle, transfer, protected)
+    runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)
         .map_err(|error| build_runtime_error(format!("gpu upload: {error}")).build())
 }
 
@@ -832,45 +829,8 @@ pub fn upload_tensor_protecting(
         shape: &tensor.shape,
         storage: GpuTensorStorage::Real,
     };
-    let handle = provider
-        .upload_numeric(&transfer)
-        .map_err(|error| error.to_string())?;
-    validate_numeric_upload(provider, handle, transfer, protected)
-}
-
-fn validate_numeric_upload(
-    provider: &dyn AccelProvider,
-    handle: GpuTensorHandle,
-    transfer: HostNumericTensorView<'_>,
-    protected: &[&GpuTensorHandle],
-) -> Result<GpuTensorHandle, String> {
-    let aliases_input = protected
-        .iter()
-        .any(|input| same_gpu_handle(&handle, input));
-    let valid = !aliases_input
-        && handle.device_id == provider.device_id()
-        && handle.shape == transfer.shape
-        && handle.descriptor.element_type == Some(transfer.element_type())
-        && handle.descriptor.storage == Some(transfer.storage);
-    if valid {
-        return Ok(handle);
-    }
-    let detail = if aliases_input {
-        "provider returned an upload result aliasing a borrowed input".to_string()
-    } else {
-        format!(
-        "provider returned descriptor {:?}, shape {:?}, and device {} for {:?} {:?} upload with shape {:?} on device {}",
-        handle.descriptor,
-        handle.shape,
-        handle.device_id,
-        transfer.element_type(),
-        transfer.storage,
-        transfer.shape,
-        provider.device_id()
-    )
-    };
-    free_rejected_provider_output(&handle, protected, provider);
-    Err(detail)
+    runmat_accelerate_api::upload_numeric_protecting(provider, &transfer, protected)
+        .map_err(|error| error.to_string())
 }
 
 mod restore;
@@ -895,13 +855,16 @@ pub fn upload_exact_integer_scalar_like(
     macro_rules! upload {
         ($value:expr, $variant:ident) => {{
             let values = [$value];
-            provider
-                .upload_numeric(&HostNumericTensorView {
+            runmat_accelerate_api::upload_numeric_protecting(
+                provider,
+                &HostNumericTensorView {
                     data: HostNumericDataView::$variant(&values),
                     shape: &shape,
                     storage: GpuTensorStorage::Real,
-                })
-                .map(Some)
+                },
+                &[prototype],
+            )
+            .map(Some)
         }};
     }
     match element_type {
@@ -1000,7 +963,7 @@ mod preserving_download_tests {
         ) -> anyhow::Result<GpuTensorHandle> {
             Ok(self.output.clone())
         }
-        fn upload_numeric(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
+        fn upload_numeric_raw(&self, _: &HostNumericTensorView) -> anyhow::Result<GpuTensorHandle> {
             Ok(self.output.clone())
         }
         fn download<'a>(
@@ -1412,7 +1375,7 @@ mod preserving_download_tests {
             anyhow::bail!("unused")
         }
 
-        fn upload_numeric(
+        fn upload_numeric_raw(
             &self,
             _host: &runmat_accelerate_api::HostNumericTensorView,
         ) -> anyhow::Result<GpuTensorHandle> {
@@ -1453,7 +1416,7 @@ mod preserving_download_tests {
             anyhow::bail!("unused")
         }
 
-        fn upload_numeric(
+        fn upload_numeric_raw(
             &self,
             host: &runmat_accelerate_api::HostNumericTensorView,
         ) -> anyhow::Result<GpuTensorHandle> {

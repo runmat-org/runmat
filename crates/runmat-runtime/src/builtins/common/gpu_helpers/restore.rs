@@ -114,9 +114,17 @@ pub fn restore_class_preserving_value_protecting(
                 shape: &tensor.shape,
                 storage: GpuTensorStorage::Real,
             };
-            let output = match provider.upload_numeric(&transfer) {
+            let output = match runmat_accelerate_api::upload_numeric_protecting(
+                provider, &transfer, &protected,
+            ) {
                 Ok(output) => output,
-                Err(_) if expected_integer.is_none() && !explicit => return Ok(value),
+                Err(error)
+                    if expected_integer.is_none()
+                        && !explicit
+                        && !runmat_accelerate_api::is_invalid_numeric_upload_result(&error) =>
+                {
+                    return Ok(value)
+                }
                 Err(error) => {
                     return Err(build_runtime_error(format!(
                         "{builtin}: failed to restore GPU result: {error}"
@@ -125,13 +133,6 @@ pub fn restore_class_preserving_value_protecting(
                     .build())
                 }
             };
-            let output = validate_numeric_upload(provider, output, transfer, &protected).map_err(
-                |error| {
-                    build_runtime_error(format!("{builtin}: {error}"))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                },
-            )?;
             (
                 output,
                 tensor.shape.clone(),
@@ -190,9 +191,17 @@ pub fn restore_class_preserving_value_protecting(
                 shape: &tensor.shape,
                 storage: GpuTensorStorage::ComplexInterleaved,
             };
-            let output = match provider.upload_numeric(&transfer) {
+            let output = match runmat_accelerate_api::upload_numeric_protecting(
+                provider, &transfer, &protected,
+            ) {
                 Ok(output) => output,
-                Err(_) if expected_integer.is_none() && !explicit => return Ok(value),
+                Err(error)
+                    if expected_integer.is_none()
+                        && !explicit
+                        && !runmat_accelerate_api::is_invalid_numeric_upload_result(&error) =>
+                {
+                    return Ok(value)
+                }
                 Err(error) => {
                     return Err(build_runtime_error(format!(
                         "{builtin}: failed to restore GPU result: {error}"
@@ -201,13 +210,6 @@ pub fn restore_class_preserving_value_protecting(
                     .build())
                 }
             };
-            let output = validate_numeric_upload(provider, output, transfer, &protected).map_err(
-                |error| {
-                    build_runtime_error(format!("{builtin}: {error}"))
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
-                },
-            )?;
             (
                 output,
                 tensor.shape.clone(),
