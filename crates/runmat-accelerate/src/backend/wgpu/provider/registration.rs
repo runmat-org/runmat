@@ -25,6 +25,11 @@ impl<'a> RegistrationBatch<'a> {
 
     pub(super) fn track(&mut self, registered: Result<GpuTensorHandle>) -> Result<GpuTensorHandle> {
         let handle = registered?;
+        if self.handles.iter().any(|owned| {
+            owned.handle.device_id == handle.device_id && owned.handle.buffer_id == handle.buffer_id
+        }) {
+            return Ok(handle);
+        }
         if self.handles.try_reserve(1).is_err() {
             self.owner.free(&handle)?;
             return Err(anyhow!("WGPU registration rollback capacity unavailable"));
@@ -103,7 +108,13 @@ mod tests {
         let foreign = GpuTensorHandle::new(vec![1], device.wrapping_add(1), 1);
         let mut batch = RegistrationBatch::new(&owner);
         batch.track(Ok(first.clone())).unwrap();
+        batch.track(Ok(first.clone())).unwrap();
         batch.track(Ok(intermediate)).unwrap();
+        assert_eq!(
+            batch.handles.len(),
+            2,
+            "owned intermediate aliases are tracked once"
+        );
         batch.publish(&foreign);
         assert!(batch.handles.iter().all(|entry| !entry.published));
         batch.publish(&first);

@@ -340,95 +340,103 @@ impl WgpuProvider {
         &self,
         polynomial: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        let entry = self.get_entry(polynomial)?;
-        ensure!(
-            entry.precision == self.precision,
-            "polyder: precision mismatch between tensor and provider"
-        );
-        let orientation = polynomial_orientation(&entry.shape)?;
-        if entry.len <= 1 {
-            let shape = shape_for_orientation(orientation, 1);
-            let buffer = match self.precision {
-                NumericPrecision::F64 => Arc::new(self.device.create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("runmat-polyder-const-f64"),
-                        contents: cast_slice(&[0.0f64]),
-                        usage: wgpu::BufferUsages::STORAGE
-                            | wgpu::BufferUsages::COPY_DST
-                            | wgpu::BufferUsages::COPY_SRC,
-                    },
-                )),
-                NumericPrecision::F32 => {
-                    let zeros: [f32; 1] = [0.0];
-                    Arc::new(
-                        self.device
-                            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let mut registrations = self.registration_batch();
+        let result = async {
+            let entry = self.get_entry(polynomial)?;
+            ensure!(
+                entry.precision == self.precision,
+                "polyder: precision mismatch between tensor and provider"
+            );
+            let orientation = polynomial_orientation(&entry.shape)?;
+            if entry.len <= 1 {
+                let shape = shape_for_orientation(orientation, 1);
+                let buffer = match self.precision {
+                    NumericPrecision::F64 => Arc::new(self.device.create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("runmat-polyder-const-f64"),
+                            contents: cast_slice(&[0.0f64]),
+                            usage: wgpu::BufferUsages::STORAGE
+                                | wgpu::BufferUsages::COPY_DST
+                                | wgpu::BufferUsages::COPY_SRC,
+                        },
+                    )),
+                    NumericPrecision::F32 => {
+                        let zeros: [f32; 1] = [0.0];
+                        Arc::new(self.device.create_buffer_init(
+                            &wgpu::util::BufferInitDescriptor {
                                 label: Some("runmat-polyder-const-f32"),
                                 contents: cast_slice(&zeros),
                                 usage: wgpu::BufferUsages::STORAGE
                                     | wgpu::BufferUsages::COPY_DST
                                     | wgpu::BufferUsages::COPY_SRC,
-                            }),
-                    )
-                }
+                            },
+                        ))
+                    }
+                };
+                return registrations.track(self.register_existing_buffer(buffer, shape, 1));
+            }
+
+            ensure!(
+                entry.len <= u32::MAX as usize,
+                "polyder: polynomial length exceeds GPU limits"
+            );
+            let output_len = entry.len - 1;
+            let out_buffer =
+                self.create_storage_buffer_checked(output_len, "runmat-polyder-out")?;
+            let params = PolyderParams {
+                input_len: entry.len as u32,
+                output_len: output_len as u32,
+                _pad0: 0,
+                _pad1: 0,
             };
-            return self.register_existing_buffer(buffer, shape, 1);
-        }
-
-        ensure!(
-            entry.len <= u32::MAX as usize,
-            "polyder: polynomial length exceeds GPU limits"
-        );
-        let output_len = entry.len - 1;
-        let out_buffer = self.create_storage_buffer_checked(output_len, "runmat-polyder-out")?;
-        let params = PolyderParams {
-            input_len: entry.len as u32,
-            output_len: output_len as u32,
-            _pad0: 0,
-            _pad1: 0,
-        };
-        let params_buffer = self.uniform_buffer(&params, "runmat-polyder-params");
-        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("runmat-polyder-bind"),
-            layout: &self.pipelines.polyder.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: entry.buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: out_buffer.as_ref().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: params_buffer.as_entire_binding(),
-                },
-            ],
-        });
-        let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
-            params.output_len,
-            crate::backend::wgpu::config::WORKGROUP_SIZE,
-        );
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-polyder-encoder"),
+            let params_buffer = self.uniform_buffer(&params, "runmat-polyder-params");
+            let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-polyder-bind"),
+                layout: &self.pipelines.polyder.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
             });
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("runmat-polyder-pass"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.pipelines.polyder.pipeline);
-            pass.set_bind_group(0, &bind_group, &[]);
-            pass.dispatch_workgroups(groups, 1, 1);
-        }
-        self.submit(encoder);
+            let groups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                params.output_len,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-polyder-encoder"),
+                });
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("runmat-polyder-pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.pipelines.polyder.pipeline);
+                pass.set_bind_group(0, &bind_group, &[]);
+                pass.dispatch_workgroups(groups, 1, 1);
+            }
+            self.submit(encoder);
 
-        let out_shape = shape_for_orientation(orientation, output_len);
-        let handle = self.register_existing_buffer(out_buffer, out_shape, output_len)?;
-        self.trim_polynomial_handle(handle, orientation).await
+            let out_shape = shape_for_orientation(orientation, output_len);
+            let handle = registrations
+                .track(self.register_existing_buffer(out_buffer, out_shape, output_len))?;
+            registrations.track(self.trim_polynomial_handle(&handle, orientation).await)
+        }
+        .await;
+        registrations.finish(result, |batch, out| {
+            batch.publish(out);
+        })
     }
 
     pub(crate) async fn polyder_product_exec(
@@ -436,33 +444,36 @@ impl WgpuProvider {
         p: &GpuTensorHandle,
         q: &GpuTensorHandle,
     ) -> Result<GpuTensorHandle> {
-        let p_entry = self.get_entry(p)?;
-        let q_entry = self.get_entry(q)?;
-        ensure!(
-            p_entry.precision == self.precision && q_entry.precision == self.precision,
-            "polyder: precision mismatch between tensors and provider"
-        );
-        let orientation = polynomial_orientation(&p_entry.shape)?;
-        let conv_orientation = conv_orientation_for(orientation);
+        let mut registrations = self.registration_batch();
+        let result = async {
+            let p_entry = self.get_entry(p)?;
+            let q_entry = self.get_entry(q)?;
+            ensure!(
+                p_entry.precision == self.precision && q_entry.precision == self.precision,
+                "polyder: precision mismatch between tensors and provider"
+            );
+            let orientation = polynomial_orientation(&p_entry.shape)?;
+            let conv_orientation = conv_orientation_for(orientation);
 
-        let dp = self.polyder_exec(p).await?;
-        let dq = self.polyder_exec(q).await?;
-        let options = ProviderConv1dOptions {
-            mode: ProviderConvMode::Full,
-            orientation: conv_orientation,
-        };
-        let term1 = self.conv1d_exec(&dp, q, options)?;
-        let term2 = self.conv1d_exec(p, &dq, options)?;
-        let result = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Add,
-            &term1,
-            &term2,
-        )?;
-        self.free_exec(&dp).ok();
-        self.free_exec(&dq).ok();
-        self.free_exec(&term1).ok();
-        self.free_exec(&term2).ok();
-        self.trim_polynomial_handle(result, orientation).await
+            let dp = registrations.track(self.polyder_exec(p).await)?;
+            let dq = registrations.track(self.polyder_exec(q).await)?;
+            let options = ProviderConv1dOptions {
+                mode: ProviderConvMode::Full,
+                orientation: conv_orientation,
+            };
+            let term1 = registrations.track(self.conv1d_exec(&dp, q, options))?;
+            let term2 = registrations.track(self.conv1d_exec(p, &dq, options))?;
+            let result = registrations.track(self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Add,
+                &term1,
+                &term2,
+            ))?;
+            registrations.track(self.trim_polynomial_handle(&result, orientation).await)
+        }
+        .await;
+        registrations.finish(result, |batch, out| {
+            batch.publish(out);
+        })
     }
 
     pub(crate) async fn polyder_quotient_exec(
@@ -470,59 +481,65 @@ impl WgpuProvider {
         u: &GpuTensorHandle,
         v: &GpuTensorHandle,
     ) -> Result<ProviderPolyderQuotient> {
-        let u_entry = self.get_entry(u)?;
-        let v_entry = self.get_entry(v)?;
-        ensure!(
-            u_entry.precision == self.precision && v_entry.precision == self.precision,
-            "polyder: precision mismatch between tensors and provider"
-        );
-        let orientation_u = polynomial_orientation(&u_entry.shape)?;
-        let orientation_v = polynomial_orientation(&v_entry.shape)?;
-        let options_num = ProviderConv1dOptions {
-            mode: ProviderConvMode::Full,
-            orientation: conv_orientation_for(orientation_u),
-        };
-        let options_den = ProviderConv1dOptions {
-            mode: ProviderConvMode::Full,
-            orientation: conv_orientation_for(orientation_v),
-        };
+        let mut registrations = self.registration_batch();
+        let result = async {
+            let u_entry = self.get_entry(u)?;
+            let v_entry = self.get_entry(v)?;
+            ensure!(
+                u_entry.precision == self.precision && v_entry.precision == self.precision,
+                "polyder: precision mismatch between tensors and provider"
+            );
+            let orientation_u = polynomial_orientation(&u_entry.shape)?;
+            let orientation_v = polynomial_orientation(&v_entry.shape)?;
+            let options_num = ProviderConv1dOptions {
+                mode: ProviderConvMode::Full,
+                orientation: conv_orientation_for(orientation_u),
+            };
+            let options_den = ProviderConv1dOptions {
+                mode: ProviderConvMode::Full,
+                orientation: conv_orientation_for(orientation_v),
+            };
 
-        let du = self.polyder_exec(u).await?;
-        let dv = self.polyder_exec(v).await?;
-        let term1 = self.conv1d_exec(&du, v, options_num)?;
-        let term2 = self.conv1d_exec(u, &dv, options_num)?;
-        let numerator_handle = self.binary_op_exec(
-            crate::backend::wgpu::types::BinaryOpCode::Sub,
-            &term1,
-            &term2,
-        )?;
-        let denominator_handle = self.conv1d_exec(v, v, options_den)?;
-        self.free_exec(&du).ok();
-        self.free_exec(&dv).ok();
-        self.free_exec(&term1).ok();
-        self.free_exec(&term2).ok();
+            let du = registrations.track(self.polyder_exec(u).await)?;
+            let dv = registrations.track(self.polyder_exec(v).await)?;
+            let term1 = registrations.track(self.conv1d_exec(&du, v, options_num))?;
+            let term2 = registrations.track(self.conv1d_exec(u, &dv, options_num))?;
+            let numerator_handle = registrations.track(self.binary_op_exec(
+                crate::backend::wgpu::types::BinaryOpCode::Sub,
+                &term1,
+                &term2,
+            ))?;
+            let denominator_handle = registrations.track(self.conv1d_exec(v, v, options_den))?;
 
-        let numerator = self
-            .trim_polynomial_handle(numerator_handle, orientation_u)
-            .await?;
-        let denominator = self
-            .trim_polynomial_handle(denominator_handle, orientation_v)
-            .await?;
-        Ok(ProviderPolyderQuotient {
-            numerator,
-            denominator,
+            let numerator = registrations.track(
+                self.trim_polynomial_handle(&numerator_handle, orientation_u)
+                    .await,
+            )?;
+            let denominator = registrations.track(
+                self.trim_polynomial_handle(&denominator_handle, orientation_v)
+                    .await,
+            )?;
+            Ok(ProviderPolyderQuotient {
+                numerator,
+                denominator,
+            })
+        }
+        .await;
+        registrations.finish(result, |batch, out| {
+            batch.publish(&out.numerator);
+            batch.publish(&out.denominator);
         })
     }
 
     async fn trim_polynomial_handle(
         &self,
-        handle: GpuTensorHandle,
+        handle: &GpuTensorHandle,
         orientation: PolynomialOrientation,
     ) -> Result<GpuTensorHandle> {
-        let host = self.download_exec(&handle).await?;
+        let host = self.download_exec(handle).await?;
         let trimmed = trim_leading_zeros_real(&host.data);
         if trimmed.len() == host.data.len() {
-            return Ok(handle);
+            return Ok(handle.clone());
         }
         let shape_vec = shape_for_orientation(orientation, trimmed.len());
         let new_handle = if trimmed.is_empty() {
@@ -560,7 +577,6 @@ impl WgpuProvider {
                 }
             }
         };
-        self.free_exec(&handle).ok();
         Ok(new_handle)
     }
 }

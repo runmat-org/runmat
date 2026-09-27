@@ -27,6 +27,37 @@ fn identifiers_do_not_wrap_or_reuse_after_exhaustion() {
 }
 
 #[test]
+fn terminal_bookkeeping_preserves_failed_callback_truth_without_repeating_it() {
+    for stage in [Stage::RegistrationResidency, Stage::Residency] {
+        for failure in [Failure::Callback, Failure::Unwind] {
+            let phase = Phase::Failed {
+                stage,
+                failure,
+                disposition: Disposition::Retained,
+            };
+            assert!(!retirement::terminal_residency(phase, || panic!(
+                "failed callback must not repeat"
+            )));
+        }
+    }
+    let completed_then_poisoned = Phase::Failed {
+        stage: Stage::Residency,
+        failure: Failure::MapPoisoned,
+        disposition: Disposition::Retained,
+    };
+    assert!(retirement::terminal_residency(
+        completed_then_poisoned,
+        || panic!("completed callback must not repeat")
+    ));
+    let calls = std::cell::Cell::new(0);
+    assert!(!retirement::terminal_residency(Phase::Live, || {
+        calls.set(calls.get() + 1);
+        false
+    }));
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
 fn unpublished_retiring_and_failed_records_are_not_live() {
     let state = empty_state();
     let phases = [

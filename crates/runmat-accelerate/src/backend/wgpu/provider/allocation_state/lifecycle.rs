@@ -42,6 +42,44 @@ pub(super) enum Phase {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ResidencyCleanup {
+    Pending,
+    Complete,
+    Incomplete,
+}
+
+impl Phase {
+    pub(super) fn residency_cleanup(self) -> ResidencyCleanup {
+        match self {
+            Self::Live
+            | Self::Retiring(Stage::Cache | Stage::Provenance)
+            | Self::Failed {
+                stage: Stage::Cache | Stage::Provenance,
+                ..
+            } => ResidencyCleanup::Pending,
+            Self::Registering(Stage::RegistrationAnnotations)
+            | Self::Retiring(Stage::Annotations | Stage::Resource | Stage::Complete)
+            | Self::Failed {
+                stage:
+                    Stage::RegistrationAnnotations
+                    | Stage::Annotations
+                    | Stage::Resource
+                    | Stage::Complete,
+                ..
+            }
+            | Self::Failed {
+                stage: Stage::Residency,
+                failure: Failure::MapPoisoned,
+                ..
+            } => ResidencyCleanup::Complete,
+            // Invocation was recorded before entering an external callback.
+            // Missing a completion receipt is not success or retry authority.
+            _ => ResidencyCleanup::Incomplete,
+        }
+    }
+}
+
 pub(super) struct Record {
     pub(super) phase: Phase,
     pub(super) entry: Option<BufferEntry>,

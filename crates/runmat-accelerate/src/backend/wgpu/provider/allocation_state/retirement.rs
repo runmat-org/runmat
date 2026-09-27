@@ -1,5 +1,13 @@
 use super::*;
 
+pub(super) fn terminal_residency(phase: Phase, clear: impl FnOnce() -> bool) -> bool {
+    match phase.residency_cleanup() {
+        lifecycle::ResidencyCleanup::Pending => clear(),
+        lifecycle::ResidencyCleanup::Complete => true,
+        lifecycle::ResidencyCleanup::Incomplete => false,
+    }
+}
+
 impl AllocationState {
     pub(in super::super) fn free(&self, handle: &GpuTensorHandle) -> Result<()> {
         self.free_with_residency(handle, runmat_accelerate_api::clear_residency_checked)
@@ -151,15 +159,6 @@ impl Drop for AllocationState {
                 buffer_id: id,
                 descriptor: GpuTensorDescriptor::numeric(entry.element_type, entry.storage),
             };
-            let callback_unattempted = matches!(
-                record.phase,
-                Phase::Live
-                    | Phase::Retiring(Stage::Cache | Stage::Provenance)
-                    | Phase::Failed {
-                        stage: Stage::Cache | Stage::Provenance,
-                        ..
-                    }
-            );
             let cache = catch_allocation_cleanup_unwind(|| {
                 self.bind_groups
                     .invalidate_buffer(Arc::as_ptr(&entry.buffer) as usize)
@@ -170,8 +169,9 @@ impl Drop for AllocationState {
                 }
                 Ok(())
             });
-            let residency = !callback_unattempted
-                || runmat_accelerate_api::clear_residency_checked(&handle).is_ok();
+            let residency = terminal_residency(record.phase, || {
+                runmat_accelerate_api::clear_residency_checked(&handle).is_ok()
+            });
             let annotations = catch_allocation_cleanup_unwind(|| {
                 runmat_accelerate_api::clear_handle_annotations_checked(&handle)
             });
