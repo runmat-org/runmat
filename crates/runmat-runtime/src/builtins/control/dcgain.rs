@@ -221,19 +221,24 @@ mod tests {
 
     #[test]
     fn dcgain_resident_nonobject_rejects_before_provider_access() {
-        let handle = runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 610,
-            descriptor: Default::default(),
-        }
-        .with_numeric_descriptor(
-            runmat_accelerate_api::NumericElementType::U64,
-            runmat_accelerate_api::GpuTensorStorage::Real,
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::U64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
         );
+        let handle = allocation.handle.clone();
         let error = block_on(dcgain_builtin(Value::GpuTensor(handle)))
             .expect_err("resident nonobject rejection");
         assert_eq!(error.identifier(), Some("RunMat:dcgain:InvalidModel"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]

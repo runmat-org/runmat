@@ -28,6 +28,21 @@ fn run_datetime(args: Vec<Value>) -> Value {
     futures::executor::block_on(datetime_builtin(args)).expect("datetime")
 }
 
+fn unregistered_resident(shape: Vec<usize>) -> runmat_accelerate_api::test_support::TestAllocation {
+    let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+        .allocate_zeroed(
+            shape,
+            runmat_accelerate_api::NumericElementType::F64,
+            runmat_accelerate_api::GpuTensorStorage::Real,
+        )
+        .unwrap();
+    assert!(
+        crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+            .is_none()
+    );
+    allocation
+}
+
 fn as_datetime(value: Value) -> ObjectInstance {
     match value {
         Value::Object(object) => object,
@@ -131,18 +146,17 @@ fn hour_gates_uncertain_typed_and_resident_legacy_extensions_before_access() {
         Some("RunMat:compatibility:HourTypedLegacySerialExtension")
     );
 
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 1],
-        device_id: 0,
-        buffer_id: 9_419_002,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_resident(vec![1, 1]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let resident = futures::executor::block_on(hour_builtin(resident, Vec::new()))
         .expect_err("resident legacy input must gate before provider access");
     assert_eq!(
         resident.identifier(),
         Some("RunMat:compatibility:DatetimeGpuInputExtension")
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -216,23 +230,14 @@ fn minute_and_month_gate_typed_and_resident_extensions_before_access() {
         );
     }
 
+    let allocation = unregistered_resident(vec![1, 1]);
     for result in [
         futures::executor::block_on(minute_builtin(
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_419_003,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(allocation.handle.clone()),
             Vec::new(),
         )),
         futures::executor::block_on(month_builtin(
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_419_004,
-                descriptor: Default::default(),
-            }),
+            Value::GpuTensor(allocation.handle.clone()),
             Vec::new(),
         )),
     ] {
@@ -243,6 +248,9 @@ fn minute_and_month_gate_typed_and_resident_extensions_before_access() {
             Some("RunMat:compatibility:DatetimeGpuInputExtension")
         );
     }
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]
@@ -397,18 +405,17 @@ fn datetime_date_vectors_cover_all_integer_classes_and_preaccess_gates() {
         legacy_arity.identifier(),
         Some("RunMat:compatibility:DatetimeLegacyComponentArityExtension")
     );
-    let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-        shape: vec![1, 3],
-        device_id: 0,
-        buffer_id: 9_397_001,
-        descriptor: Default::default(),
-    });
+    let allocation = unregistered_resident(vec![1, 3]);
+    let resident = Value::GpuTensor(allocation.handle.clone());
     let resident = futures::executor::block_on(datetime_builtin(vec![resident]))
         .expect_err("resident input is gated before provider access");
     assert_eq!(
         resident.identifier(),
         Some("RunMat:compatibility:DatetimeGpuInputExtension")
     );
+    assert_eq!(allocation.probe.retirements(), 0);
+    allocation.handle.release().unwrap();
+    assert_eq!(allocation.probe.retirements(), 1);
 }
 
 #[test]

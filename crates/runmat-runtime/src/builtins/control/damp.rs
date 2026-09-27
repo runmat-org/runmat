@@ -495,14 +495,23 @@ mod tests {
             let error = block_on(damp_builtin(Value::Int(value))).expect_err("object input only");
             assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
         }
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: u32::MAX,
-            buffer_id: u64::MAX - 398,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(damp_builtin(resident)).expect_err("resident object input rejection");
         assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 
     #[test]
@@ -519,7 +528,10 @@ mod tests {
                 .expect_err("dynamic-system object required");
             assert_eq!(error.identifier(), Some("RunMat:damp:InvalidModel"));
             assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         });
     }
 

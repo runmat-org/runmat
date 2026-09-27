@@ -1353,7 +1353,10 @@ mod tests {
             .expect("resident host fallback");
             assert!(matches!(output, Value::Tensor(_)));
             assert!(runmat_accelerate::fusion_residency::is_resident(&handle));
-            let _ = provider.free(&handle);
+            handle.allocation_lease().validate_live().unwrap();
+            let physical = handle.allocation_lease().downgrade();
+            handle.release().unwrap();
+            assert!(physical.acquire().is_none());
         });
     }
 }

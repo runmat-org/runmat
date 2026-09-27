@@ -582,17 +582,26 @@ mod tests {
     #[test]
     fn resident_gate_runs_before_provider_access() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-        let resident = Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-            shape: vec![1, 1],
-            device_id: 0,
-            buffer_id: 9_404_001,
-            descriptor: Default::default(),
-        });
+        let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+            .allocate_zeroed(
+                vec![1, 1],
+                runmat_accelerate_api::NumericElementType::F64,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        assert!(
+            crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                .is_none()
+        );
+        let resident = Value::GpuTensor(allocation.handle.clone());
         let error = block_on(feedback_builtin(tf(vec![1.0], vec![1.0]), vec![resident]))
             .expect_err("resident gate");
         assert_eq!(
             error.identifier(),
             RESIDENT_NUMERIC_EXTENSION.error_identifier
         );
+        assert_eq!(allocation.probe.retirements(), 0);
+        allocation.handle.release().unwrap();
+        assert_eq!(allocation.probe.retirements(), 1);
     }
 }

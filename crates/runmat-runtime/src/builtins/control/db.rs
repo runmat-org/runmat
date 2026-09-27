@@ -895,22 +895,27 @@ pub(crate) mod tests {
                 .expect_err("invalid resistance retains ordinary validation");
             assert_eq!(invalid.identifier(), DB_ERROR_INVALID_RESISTANCE.identifier);
 
-            let resident = runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: 0,
-                buffer_id: 9_306_001,
-                descriptor: Default::default(),
-            }
-            .with_numeric_descriptor(
-                runmat_accelerate_api::NumericElementType::I16,
-                runmat_accelerate_api::GpuTensorStorage::Real,
+            let allocation = runmat_accelerate_api::test_support::TestAllocationOwner::new()
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::I16,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .unwrap();
+            assert!(
+                crate::builtins::common::gpu_helpers::exact_provider_for_handle(&allocation.handle)
+                    .is_none()
             );
-            let error = db_builtin(Value::GpuTensor(resident.clone()), vec![])
+            let resident = allocation.handle.clone();
+            let error = db_builtin(Value::GpuTensor(resident), vec![])
                 .expect_err("MATLAB mode rejects resident integer before gather");
             assert_eq!(
                 error.identifier(),
                 Some("RunMat:compatibility:DbNonfloatingInputExtension")
             );
+            assert_eq!(allocation.probe.retirements(), 0);
+            allocation.handle.release().unwrap();
+            assert_eq!(allocation.probe.retirements(), 1);
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
