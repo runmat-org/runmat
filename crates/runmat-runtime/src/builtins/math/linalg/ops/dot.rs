@@ -398,13 +398,18 @@ async fn try_provider_dot(
         Ok(handle) if valid_provider_dot_output(&handle, lhs_handle, rhs_handle, provider, dim) => {
             Ok(Some(Value::GpuTensor(handle)))
         }
-        Ok(handle) => {
-            free_rejected_dot_handle(&handle, &[lhs_handle, rhs_handle]);
+        Ok(handle) => Err(reject_dot_output(handle)),
+        Err(err)
+            if gpu_helpers::provider_hook_is_unsupported(&err)
+                || err.to_string() == "dot not supported by provider" =>
+        {
             Ok(None)
         }
         Err(err) => {
-            log::trace!("dot: provider dot fallback triggered: {err}");
-            Ok(None)
+            let mut error = dot_internal_error(format!("dot: provider execution failed: {err}"));
+            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            error.source = Some(err.into_boxed_dyn_error());
+            Err(error)
         }
     }
 }
@@ -416,7 +421,7 @@ fn valid_provider_dot_output(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     dim: Option<usize>,
 ) -> bool {
-    let shape = canonical_shape(&lhs.shape);
+    let shape = canonical_shape(lhs.shape());
     let target_dim = dim.unwrap_or_else(|| default_dimension(&shape));
     let mut expected_shape = shape;
     if target_dim <= expected_shape.len() {
@@ -841,7 +846,7 @@ fn promote_result_to_gpu(
             if provider.precision() != expected_precision {
                 return Ok(Value::Tensor(tensor));
             }
-            match gpu_helpers::upload_tensor(provider, &tensor) {
+            match gpu_helpers::upload_tensor_protecting(provider, &tensor, &[anchor]) {
                 Ok(handle)
                     if valid_dot_uploaded_output(
                         &handle,
@@ -853,11 +858,8 @@ fn promote_result_to_gpu(
                 {
                     Ok(Value::GpuTensor(handle))
                 }
-                Ok(handle) => {
-                    free_rejected_dot_handle(&handle, &[anchor]);
-                    Ok(Value::Tensor(tensor))
-                }
-                Err(_) => Ok(Value::Tensor(tensor)),
+                Ok(handle) => Err(reject_dot_output(handle)),
+                Err(error) => Err(error),
             }
         }
         Value::Num(n) => {
@@ -881,7 +883,7 @@ fn valid_dot_uploaded_output(
     expected_shape: &[usize],
     expected_precision: runmat_accelerate_api::ProviderPrecision,
 ) -> bool {
-    output.shape == expected_shape
+    output.shape() == expected_shape
         && output.device_id() == anchor.device_id()
         && !gpu_handles_alias(output, anchor)
         && runmat_accelerate_api::handle_storage(output)
@@ -903,29 +905,13 @@ fn gpu_handles_alias(
     lhs: &runmat_accelerate_api::GpuTensorHandle,
     rhs: &runmat_accelerate_api::GpuTensorHandle,
 ) -> bool {
-    lhs.device_id() == rhs.device_id() && lhs.buffer_id() == rhs.buffer_id()
+    lhs.shares_allocation_with(rhs)
 }
 
-fn free_rejected_dot_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    protected: &[&runmat_accelerate_api::GpuTensorHandle],
-) {
-    if protected
-        .iter()
-        .any(|protected| gpu_handles_alias(handle, protected))
-    {
-        log::trace!("dot: rejected handle aliases a caller-owned input; not freeing it");
-        return;
-    }
-    if let Some(owner) = resolved_actual_dot_owner(handle) {
-        if let Err(error) = owner.free(handle) {
-            log::trace!("dot: failed to free rejected handle through its owner: {error}");
-        }
-    } else {
-        log::trace!(
-            "dot: rejected handle has no resolvable owner; leaving cleanup to its producer"
-        );
-    }
+fn reject_dot_output(handle: runmat_accelerate_api::GpuTensorHandle) -> RuntimeError {
+    let mut error = dot_internal_error("dot: provider returned malformed or aliased output");
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    gpu_helpers::reject_gpu_output(handle, error)
 }
 
 #[cfg(test)]
@@ -1173,8 +1159,8 @@ pub(crate) mod tests {
             let mut owned_rejection = make_output();
             owned_rejection.descriptor.storage =
                 Some(runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved);
-            free_rejected_dot_handle(&owned_rejection, &[]);
-            assert!(block_on(provider.download(&owned_rejection)).is_err());
+            let error = reject_dot_output(owned_rejection);
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
 
             let mut native_alias = lhs.clone();
             native_alias.shape = vec![1, 3];
@@ -1192,7 +1178,8 @@ pub(crate) mod tests {
                 &[1, 3],
                 runmat_accelerate_api::ProviderPrecision::F64,
             ));
-            free_rejected_dot_handle(&native_alias, &[&lhs, &rhs]);
+            let error = reject_dot_output(native_alias);
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
             assert!(block_on(provider.download(&lhs)).is_ok());
 
             let unowned_rejection = runmat_accelerate_api::GpuTensorHandle {
@@ -1209,7 +1196,8 @@ pub(crate) mod tests {
                 Some(1),
             ));
             assert!(resolved_actual_dot_owner(&unowned_rejection).is_none());
-            free_rejected_dot_handle(&unowned_rejection, &[]);
+            let error = reject_dot_output(unowned_rejection);
+            assert_eq!(error.gpu_gather_retry, crate::GpuGatherRetry::Never);
             assert!(block_on(provider.download(&lhs)).is_ok());
 
             provider.free(&lhs).expect("free lhs");

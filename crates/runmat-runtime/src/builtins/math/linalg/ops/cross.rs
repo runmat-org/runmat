@@ -365,6 +365,10 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
     let complex_output = value_is_complex(&lhs) || value_is_complex(&rhs);
 
     if let (Value::GpuTensor(lhs_handle), Value::GpuTensor(rhs_handle)) = (&lhs, &rhs) {
+        if lhs_handle.shape() != rhs_handle.shape() {
+            return Err(cross_error(&CROSS_ERROR_INVALID_INPUT));
+        }
+        resolve_dimension(lhs_handle.shape(), dim)?;
         let requires_floating_boundary = runmat_accelerate_api::handle_integer_type(lhs_handle)
             .is_some()
             || runmat_accelerate_api::handle_integer_type(rhs_handle).is_some()
@@ -390,18 +394,32 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
                         Ok(handle)
                             if native_result_matches_provider(
                                 &handle,
-                                lhs_handle.device_id,
+                                lhs_handle.device_id(),
                                 provider,
                                 expected,
-                            ) =>
+                            ) && handle.shape() == lhs_handle.shape()
+                                && !handle.shares_allocation_with(lhs_handle)
+                                && !handle.shares_allocation_with(rhs_handle) =>
                         {
                             return Ok(Value::GpuTensor(handle));
                         }
                         Ok(handle) => {
-                            free_rejected_native_handle(&handle, provider);
+                            let mut error = cross_internal_error(
+                                "cross: provider returned malformed or aliased output",
+                            );
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            return Err(gpu_helpers::reject_gpu_output(handle, error));
                         }
+                        Err(err)
+                            if gpu_helpers::provider_hook_is_unsupported(&err)
+                                || err.to_string() == "cross not supported by provider" => {}
                         Err(err) => {
-                            log::trace!("cross: provider cross fallback triggered: {err}");
+                            let mut error = cross_internal_error(format!(
+                                "cross: provider execution failed: {err}"
+                            ));
+                            error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                            error.source = Some(err.into_boxed_dyn_error());
+                            return Err(error);
                         }
                     }
                 }
@@ -411,6 +429,13 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
 
     let lhs_gpu = matches!(lhs, Value::GpuTensor(_));
     let rhs_gpu = matches!(rhs, Value::GpuTensor(_));
+    let protected: Vec<_> = [&lhs, &rhs]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle),
+            _ => None,
+        })
+        .collect();
 
     let lhs_host = gather_if_needed_async(&lhs)
         .await
@@ -433,7 +458,7 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             tensor::value_into_tensor_for(CROSS_NAME, rhs_host).map_err(cross_invalid_input)?;
         let result = cross_real_tensor(&lhs_tensor, &rhs_tensor, dim, single_output)?;
         if lhs_gpu || rhs_gpu {
-            return promote_real_result_to_gpu(result, owner.as_ref(), single_output);
+            return promote_real_result_to_gpu(result, owner.as_ref(), single_output, &protected);
         }
         tensor::tensor_into_value(result)
     };
@@ -448,8 +473,9 @@ async fn cross_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResul
             if provider.precision() != expected {
                 return Ok(value);
             }
-            return gpu_helpers::upload_complex_tensor(provider, tensor)
-                .map(gpu_helpers::complex_gpu_value);
+            let output =
+                gpu_helpers::upload_complex_tensor_protecting(provider, tensor, &protected)?;
+            return gpu_helpers::complex_gpu_value(output);
         }
     }
     Ok(value)
@@ -465,18 +491,10 @@ fn native_result_matches_provider(
         && runmat_accelerate_api::handle_precision(handle) == Some(expected_precision)
         && runmat_accelerate_api::handle_storage(handle)
             == runmat_accelerate_api::GpuTensorStorage::Real
+        && !runmat_accelerate_api::handle_is_logical(handle)
+        && runmat_accelerate_api::handle_integer_type(handle).is_none()
         && runmat_accelerate_api::provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
-}
-
-fn free_rejected_native_handle(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    invoked_provider: &'static dyn runmat_accelerate_api::AccelProvider,
-) {
-    let owner = runmat_accelerate_api::provider_for_handle(handle).unwrap_or(invoked_provider);
-    if let Err(err) = owner.free(handle) {
-        log::trace!("cross: failed to free rejected provider result: {err}");
-    }
 }
 
 fn value_is_complex(value: &Value) -> bool {
@@ -745,6 +763,7 @@ fn promote_real_result_to_gpu(
     tensor: Tensor,
     owner: Option<&runmat_accelerate_api::GpuTensorHandle>,
     single_output: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> BuiltinResult<Value> {
     let provider = match owner.and_then(runmat_accelerate_api::provider_for_handle) {
         Some(provider) => provider,
@@ -758,11 +777,13 @@ fn promote_real_result_to_gpu(
     if provider.precision() != expected {
         return Ok(tensor::tensor_into_value(tensor));
     }
-    match gpu_helpers::upload_tensor(provider, &tensor) {
-        Ok(handle) => Ok(Value::GpuTensor(handle)),
-        Err(_) => Ok(tensor::tensor_into_value(tensor)),
-    }
+    let handle = gpu_helpers::upload_tensor_protecting(provider, &tensor, protected)?;
+    gpu_helpers::resident_gpu_value(handle)
 }
+
+#[cfg(test)]
+#[path = "vector_product_owned_tests.rs"]
+mod owned_tests;
 
 #[cfg(test)]
 pub(crate) mod tests {
