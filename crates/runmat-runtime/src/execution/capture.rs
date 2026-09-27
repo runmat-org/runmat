@@ -14,7 +14,7 @@ pub fn validate_spawn_capture(value: &Value) -> Result<(), RuntimeError> {
                 "SpawnProviderUnavailable",
                 format!(
                     "spawn cannot capture GPU handle buffer {} (device {}) without an active provider",
-                    handle.buffer_id, handle.device_id
+                    handle.buffer_id(), handle.device_id()
                 ),
             )
         })?;
@@ -27,7 +27,7 @@ pub fn validate_spawn_capture(value: &Value) -> Result<(), RuntimeError> {
                 "SpawnGpuHandleUnsupported",
                 format!(
                     "spawn cannot capture GPU handle buffer {} on provider '{}' (spawn_handle_concurrency={})",
-                    handle.buffer_id,
+                    handle.buffer_id(),
                     provider.device_info(),
                     policy.as_str()
                 ),

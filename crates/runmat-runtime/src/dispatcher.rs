@@ -7,6 +7,9 @@ use runmat_types::ClassIdentity;
 use runmat_value::Value;
 use std::cell::RefCell;
 
+#[cfg(test)]
+mod provenance_tests;
+
 thread_local! {
     static CLASS_ACCESS_CONTEXT: RefCell<Option<ClassIdentity>> = const { RefCell::new(None) };
 }
@@ -95,16 +98,15 @@ fn gather_if_needed_async_impl<'a>(
                 #[cfg(all(test, feature = "wgpu"))]
                 {
                     let active_owner = runmat_accelerate_api::provider()
-                        .is_some_and(|provider| provider.device_id() == handle.device_id);
-                    if handle.device_id != 0 && !active_owner {
+                        .is_some_and(|provider| provider.device_id() == handle.device_id());
+                    if handle.device_id() != 0 && !active_owner {
                         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
                         runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
                     );
                     }
                 }
-                let provider = runmat_accelerate_api::provider_for_handle(handle)
-                    .filter(|provider| provider.device_id() == handle.device_id)
-                    .ok_or_else(|| {
+                let provider =
+                    runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
                         build_runtime_error("gather: no acceleration provider registered")
                             .with_identifier("RunMat:gather:ProviderUnavailable")
                             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -121,13 +123,16 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                 let host = provider.download_numeric(handle).await.map_err(|err| {
-                    build_runtime_error(format!("gather: {err}"))
-                        .with_identifier("RunMat:gather:DownloadFailed")
-                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                        .build()
+                    crate::runtime_error::with_provider_execution_source(
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:DownloadFailed")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                            .build(),
+                        err.into(),
+                    )
                 })?;
                 let expected_storage = runmat_accelerate_api::handle_storage(handle);
-                if host.shape != handle.shape
+                if host.shape != handle.shape()
                     || host.storage != expected_storage
                     || host.data.element_type() != expected_element
                 {
@@ -212,7 +217,7 @@ fn provider_payload_mismatch(
 ) -> RuntimeError {
     build_runtime_error(format!(
         "gather: provider payload mismatch ({detail}; shape {actual_shape:?}, expected {:?})",
-        handle.shape
+        handle.shape()
     ))
     .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -570,36 +575,41 @@ pub(crate) fn compatibility_checked_builtin_result(
     mut result: Value,
 ) -> Result<Value, RuntimeError> {
     crate::compatibility::ensure_value_compatible(&result, name)?;
-    propagate_gpu_provenance(args, &mut result);
+    propagate_gpu_provenance(args, &mut result)?;
     Ok(result)
 }
 
-fn propagate_gpu_provenance(args: &[Value], result: &mut Value) {
-    let mut saw_gpu = false;
+fn propagate_gpu_provenance(args: &[Value], result: &mut Value) -> Result<(), RuntimeError> {
     let mut explicit = false;
     for arg in args {
-        visit_gpu_handles(arg, &mut |handle| {
-            saw_gpu = true;
+        try_visit_gpu_handles(arg, &mut |handle| {
             explicit |= runmat_accelerate_api::handle_is_explicit(handle);
-        });
+        })?;
     }
-    if !saw_gpu {
-        visit_gpu_handles_mut(result, &mut |handle| {
-            if runmat_accelerate_api::handle_provenance(handle).is_none() {
-                handle.descriptor.provenance =
-                    Some(runmat_accelerate_api::GpuHandleProvenance::Automatic);
-            }
-        });
-        return;
-    }
+    let mut outcome = Ok(());
     visit_gpu_handles_mut(result, &mut |handle| {
-        let result_is_explicit = runmat_accelerate_api::handle_is_explicit(handle);
-        handle.descriptor.provenance = Some(if explicit || result_is_explicit {
+        if outcome.is_err() {
+            return;
+        }
+        let provenance = if explicit || runmat_accelerate_api::handle_is_explicit(handle) {
             runmat_accelerate_api::GpuHandleProvenance::Explicit
         } else {
             runmat_accelerate_api::GpuHandleProvenance::Automatic
-        });
+        };
+        match handle.with_provenance(provenance) {
+            Ok(projected) => *handle = projected,
+            Err(error) => {
+                outcome = Err(
+                    build_runtime_error(format!("GPU result provenance: {error}"))
+                        .with_identifier("RunMat:Gpu:InvalidResult")
+                        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                        .with_source(error)
+                        .build(),
+                )
+            }
+        }
     });
+    outcome
 }
 
 /// Visit resident handles, including nested object/callable payloads, without
