@@ -222,17 +222,8 @@ async fn execute_elementwise_outputs(
                     ));
                 }
                 let data = t.materialize_f64();
-                let view = HostTensorView {
-                    data: &data,
-                    shape: &t.shape,
-                };
                 let started = Instant::now();
-                let handle = allocations.admit(
-                    provider.upload(&view)?,
-                    provider,
-                    &t.shape,
-                    provider.precision(),
-                )?;
+                let handle = allocations.upload(provider, &data, &t.shape)?;
                 observer.upload(
                     started,
                     physical_upload_bytes(provider.precision(), data.len()),
@@ -254,17 +245,8 @@ async fn execute_elementwise_outputs(
                 };
                 temp_scalars.push(vec![scalar]);
                 let data = temp_scalars.last().unwrap();
-                let view = HostTensorView {
-                    data,
-                    shape: &scalar_shape,
-                };
                 let started = Instant::now();
-                let handle = allocations.admit(
-                    provider.upload(&view)?,
-                    provider,
-                    &scalar_shape,
-                    provider.precision(),
-                )?;
+                let handle = allocations.upload(provider, data, &scalar_shape)?;
                 observer.upload(
                     started,
                     physical_upload_bytes(provider.precision(), data.len()),

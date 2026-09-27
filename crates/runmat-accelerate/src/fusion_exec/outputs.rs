@@ -36,6 +36,43 @@ impl FusionAllocations {
         }
     }
 
+    /// The central numeric-upload validator must see every borrowed or already
+    /// owned allocation before it can reject an alias. Validation after the
+    /// raw hook is too late if a convenience adapter has already freed it.
+    pub fn upload(
+        &mut self,
+        provider: &'static dyn AccelProvider,
+        data: &[f64],
+        shape: &[usize],
+    ) -> Result<GpuTensorHandle> {
+        use runmat_accelerate_api::{
+            upload_numeric_protecting, HostNumericDataView, HostNumericTensorView,
+        };
+        let protected: Vec<_> = self
+            .borrowed
+            .iter()
+            .chain(self.allocations.iter().map(|allocation| &allocation.handle))
+            .collect();
+        let single;
+        let data = match provider.precision() {
+            ProviderPrecision::F64 => HostNumericDataView::F64(data),
+            ProviderPrecision::F32 => {
+                single = data.iter().map(|value| *value as f32).collect::<Vec<_>>();
+                HostNumericDataView::F32(&single)
+            }
+        };
+        let handle = upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data,
+                shape,
+                storage: GpuTensorStorage::Real,
+            },
+            &protected,
+        )?;
+        self.admit(handle, provider, shape, provider.precision())
+    }
+
     pub fn admit(
         &mut self,
         handle: GpuTensorHandle,

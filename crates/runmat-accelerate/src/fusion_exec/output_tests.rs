@@ -1,12 +1,14 @@
 use super::*;
 use runmat_accelerate_api::{AccelDownloadFuture, HostTensorView, ThreadProviderGuard};
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::task::{Context, Poll};
 
 struct Owner(Mutex<Vec<u64>>);
 static OWNER: Owner = Owner(Mutex::new(Vec::new()));
 static SERIAL: Mutex<()> = Mutex::new(());
+static UPLOAD_RESULT: AtomicU64 = AtomicU64::new(0);
 impl AccelProvider for Owner {
     fn device_id(&self) -> u32 {
         u32::MAX - 283
@@ -19,6 +21,14 @@ impl AccelProvider for Owner {
     }
     fn upload(&self, _: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
         unreachable!()
+    }
+    fn upload_numeric_raw(
+        &self,
+        _: &runmat_accelerate_api::HostNumericTensorView<'_>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let output = handle(UPLOAD_RESULT.load(Ordering::SeqCst));
+        runmat_accelerate_api::set_handle_logical(&output, true);
+        Ok(output)
     }
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         unreachable!()
@@ -97,4 +107,31 @@ fn publication_keeps_only_outputs_and_releases_intermediates() {
         .unwrap();
     owner.publish(&[&output]);
     assert_eq!(*OWNER.0.lock().unwrap(), vec![6]);
+}
+
+#[test]
+fn upload_rejection_protects_both_originals_and_prior_owned_staging_metadata() {
+    let _serial = SERIAL.lock().unwrap();
+    let _selected = ThreadProviderGuard::set(Some(&OWNER));
+    OWNER.0.lock().unwrap().clear();
+    let borrowed = handle(10);
+    let mut owner = FusionAllocations::new(&[Value::GpuTensor(borrowed.clone())]);
+    let staged = owner
+        .admit(handle(11), &OWNER, &[1, 2], ProviderPrecision::F64)
+        .unwrap();
+    for protected in [&borrowed, &staged] {
+        let before = runmat_accelerate_api::snapshot_handle_metadata(protected);
+        UPLOAD_RESULT.store(protected.buffer_id, Ordering::SeqCst);
+        let error = owner.upload(&OWNER, &[1.0, 2.0], &[1, 2]).unwrap_err();
+        assert!(runmat_accelerate_api::is_invalid_numeric_upload_result(
+            &error
+        ));
+        assert_eq!(
+            runmat_accelerate_api::snapshot_handle_metadata(protected),
+            before
+        );
+        assert!(OWNER.0.lock().unwrap().is_empty());
+    }
+    drop(owner);
+    assert_eq!(*OWNER.0.lock().unwrap(), vec![11]);
 }
