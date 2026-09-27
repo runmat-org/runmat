@@ -4,7 +4,7 @@ use runmat_builtins::{
 };
 use runmat_value::{ComplexTensor, IntegerStorage, Tensor, Value};
 
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::gpu_helpers;
 
 pub(super) const BINARY_SET_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
     BuiltinIntegerInputCapability {
@@ -62,36 +62,26 @@ fn upload_set_output(
     value: Value,
     internal_error: fn(String) -> crate::RuntimeError,
 ) -> crate::BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> crate::BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor| -> crate::BuiltinResult<Value> {
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|error| internal_error(format!("{builtin}: GPU upload failed: {error}")))?;
-        Ok(if logical {
-            gpu_helpers::logical_gpu_value(handle)
-        } else {
-            gpu_helpers::resident_gpu_value(handle)
-        })
+        gpu_helpers::resident_gpu_value(handle)
     };
     match value {
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| internal_error(format!("{builtin}: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
                 .map_err(|error| internal_error(format!("{builtin}: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![f64::from(u8::from(logical))], vec![1, 1])
-                .map_err(|error| internal_error(format!("{builtin}: {error}")))?,
-            true,
-        ),
+        Value::Bool(logical) => {
+            upload_logical_output(provider, &[u8::from(logical)], &[1, 1], builtin)
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical)
-                .map_err(|error| internal_error(format!("{builtin}: {error}")))?;
-            upload_tensor(tensor, true)
+            upload_logical_output(provider, &logical.data, &logical.shape, builtin)
         }
         Value::Complex(real, imaginary) => {
             let tensor = ComplexTensor::new(vec![(real, imaginary)], vec![1, 1])
@@ -112,5 +102,48 @@ fn upload_set_output(
         other => Err(internal_error(format!(
             "{builtin}: cannot restore resident output {other:?}"
         ))),
+    }
+}
+
+/// Upload canonical host logical bytes through their producer-owned API.
+pub(super) fn upload_logical_output(
+    provider: &dyn AccelProvider,
+    data: &[u8],
+    shape: &[usize],
+    builtin: &str,
+) -> crate::BuiltinResult<Value> {
+    let output = provider
+        .upload_logical(&runmat_accelerate_api::HostLogicalTensorView { data, shape })
+        .map_err(|cause| {
+            crate::build_runtime_error(format!("{builtin}: logical upload failed: {cause}"))
+                .with_builtin(builtin)
+                .with_source(cause)
+                .build()
+        })?;
+    gpu_helpers::logical_gpu_value(output)
+}
+
+#[cfg(test)]
+mod owning_upload_tests {
+    use super::*;
+
+    #[test]
+    fn set_outputs_are_genuinely_logical_before_adoption() {
+        crate::builtins::common::test_support::with_test_provider(|provider| {
+            let output =
+                upload_logical_output(provider, &[1, 0, 1, 0], &[2, 2], "ismember").unwrap();
+            let Value::GpuTensor(handle) = &output else {
+                panic!("resident logical output")
+            };
+            assert!(handle.view().is_logical());
+            assert_eq!(handle.shape(), &[2, 2]);
+            let host =
+                futures::executor::block_on(gpu_helpers::gather_value_async(&output)).unwrap();
+            let Value::LogicalArray(array) = host else {
+                panic!("logical host class")
+            };
+            assert_eq!(array.data.as_slice(), &[1, 0, 1, 0]);
+            assert_eq!(array.shape, vec![2, 2]);
+        });
     }
 }

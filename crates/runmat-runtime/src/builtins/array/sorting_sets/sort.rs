@@ -540,35 +540,26 @@ fn upload_sort_value(
     provider: &'static dyn runmat_accelerate_api::AccelProvider,
     value: Value,
 ) -> crate::BuiltinResult<Value> {
-    let upload_tensor = |tensor: Tensor, logical: bool| -> crate::BuiltinResult<Value> {
+    let upload_tensor = |tensor: Tensor| -> crate::BuiltinResult<Value> {
         let handle = gpu_helpers::upload_tensor(provider, &tensor)
             .map_err(|error| sort_internal(format!("sort: GPU upload failed: {error}")))?;
-        Ok(if logical {
-            gpu_helpers::logical_gpu_value(handle)
-        } else {
-            gpu_helpers::resident_gpu_value(handle)
-        })
+        gpu_helpers::resident_gpu_value(handle)
     };
     match value {
-        Value::Tensor(tensor) => upload_tensor(tensor, false),
+        Value::Tensor(tensor) => upload_tensor(tensor),
         Value::Num(number) => upload_tensor(
             Tensor::new(vec![number], vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
         Value::Int(integer) => upload_tensor(
             Tensor::new_integer(IntegerStorage::from_scalar(integer), vec![1, 1])
                 .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            false,
         ),
-        Value::Bool(logical) => upload_tensor(
-            Tensor::new(vec![if logical { 1.0 } else { 0.0 }], vec![1, 1])
-                .map_err(|error| sort_internal(format!("sort: {error}")))?,
-            true,
-        ),
+        Value::Bool(logical) => {
+            super::support::upload_logical_output(provider, &[u8::from(logical)], &[1, 1], "sort")
+        }
         Value::LogicalArray(logical) => {
-            let tensor = tensor::logical_to_tensor(&logical).map_err(sort_internal)?;
-            upload_tensor(tensor, true)
+            super::support::upload_logical_output(provider, &logical.data, &logical.shape, "sort")
         }
         Value::Complex(real, imag) => {
             let tensor = ComplexTensor::new(vec![(real, imag)], vec![1, 1])
