@@ -9,7 +9,7 @@ use runmat_accelerate_api::{
 };
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
 
@@ -83,11 +83,10 @@ impl AccelProvider for Provider {
 }
 
 fn fixture(fault: Fault) -> (&'static Provider, Vec<GpuTensorHandle>, Value) {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
+    let provider = Box::leak(Box::new(Provider {
         inner: test_owner::Owner::new(),
         state: Mutex::default(),
-    });
+    }));
     let handles: Vec<_> = [[1.0, -1.0], [0.0, 1.0]]
         .iter()
         .map(|data| {

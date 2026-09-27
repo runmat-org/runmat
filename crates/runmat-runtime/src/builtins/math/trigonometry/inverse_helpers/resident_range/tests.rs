@@ -1,14 +1,18 @@
 use super::*;
 use crate::builtins::common::test_support;
 use futures::{executor::block_on, task::noop_waker};
-use runmat_accelerate::simple_provider::InProcessProvider;
+#[path = "../../test_owner.rs"]
+mod test_owner;
+use runmat_accelerate_api::{
+    test_support::RetirementProbe, GpuHandleProvenance, WeakGpuTensorHandle,
+};
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProviderFuture, HostTensorView, ThreadProviderGuard,
 };
 use runmat_value::Value;
 use std::{
     future::Future,
-    sync::{Mutex, OnceLock},
+    sync::Mutex,
     task::{Context, Poll},
 };
 
@@ -21,7 +25,7 @@ enum Fault {
     Pending,
     BorrowedAlias,
     TemporaryAlias,
-    MissingStorage,
+    WrongStorage,
 }
 
 #[derive(Default)]
@@ -29,12 +33,11 @@ struct State {
     at: usize,
     calls: usize,
     fault: Fault,
-    owned: Vec<GpuTensorHandle>,
-    freed: Vec<u64>,
+    owned: Vec<(WeakGpuTensorHandle, RetirementProbe)>,
 }
 
 struct Provider {
-    inner: InProcessProvider,
+    inner: test_owner::Owner,
     state: Mutex<State>,
 }
 
@@ -71,37 +74,45 @@ impl Provider {
             return Ok(input.clone());
         }
         if matches!(fault, Fault::TemporaryAlias) {
-            return Ok(self.state.lock().unwrap().owned[0].clone());
+            return Ok(self.state.lock().unwrap().owned[0].0.acquire()?);
         }
-        let mut output = if minimum {
-            self.inner.reduce_min(input).await?
+        let host = self.inner.download(input)?;
+        let value = if minimum {
+            host.data.into_iter().fold(f64::INFINITY, f64::min)
         } else {
-            self.inner.reduce_max(input).await?
+            host.data.into_iter().fold(f64::NEG_INFINITY, f64::max)
         };
-        self.state.lock().unwrap().owned.push(output.clone());
-        if matches!(fault, Fault::MissingStorage) {
-            output.descriptor.storage = None;
-        }
+        // Missing metadata cannot be minted. A genuine complex allocation is
+        // instead an invalid real-range result and must be retired on rejection.
+        let output = if matches!(fault, Fault::WrongStorage) {
+            self.inner
+                .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                    data: runmat_accelerate_api::HostNumericDataView::F64(&[value, 0.0]),
+                    shape: &[1, 1],
+                    storage: GpuTensorStorage::ComplexInterleaved,
+                })?
+        } else {
+            self.inner.upload(&HostTensorView {
+                data: &[value],
+                shape: &[1, 1],
+            })?
+        };
+        self.state
+            .lock()
+            .unwrap()
+            .owned
+            .push((output.downgrade(), self.inner.probe(&output)));
         Ok(output)
     }
 
     fn assert_reclaimed(&self, input: &GpuTensorHandle) {
         let state = self.state.lock().unwrap();
-        assert_eq!(state.owned.len(), state.freed.len());
-        for output in &state.owned {
-            assert_eq!(
-                state
-                    .freed
-                    .iter()
-                    .filter(|id| **id == output.buffer_id)
-                    .count(),
-                1
-            );
+        for (_, probe) in &state.owned {
+            assert_eq!(probe.retirements(), 1);
         }
-        assert!(!state.freed.contains(&input.buffer_id));
+        assert_eq!(self.inner.probe(input).retirements(), 0);
         drop(state);
-        assert!(block_on(self.inner.download(input)).is_ok());
-        self.inner.free(input).unwrap();
+        assert!(self.inner.download(input).is_ok());
     }
 }
 
@@ -113,22 +124,19 @@ impl AccelProvider for Provider {
         self.inner.device_id()
     }
     fn device_info(&self) -> String {
-        self.inner.device_info()
+        "range owning fixture".into()
     }
     fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
-        self.inner.precision()
+        runmat_accelerate_api::ProviderPrecision::F64
     }
     fn download<'a>(&'a self, input: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
             let fault = self.step();
             self.before(fault).await?;
-            self.inner.download(input).await
+            self.inner.download(input)
         })
     }
-    fn free(&self, input: &GpuTensorHandle) -> anyhow::Result<()> {
-        self.state.lock().unwrap().freed.push(input.buffer_id);
-        self.inner.free(input)
-    }
+
     fn reduce_min<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
@@ -148,11 +156,10 @@ fn fixture(at: usize, fault: Fault) -> (&'static Provider, GpuTensorHandle) {
 }
 
 fn fixture_values(at: usize, fault: Fault, values: &[f64]) -> (&'static Provider, GpuTensorHandle) {
-    static PROVIDER: OnceLock<Provider> = OnceLock::new();
-    let provider = PROVIDER.get_or_init(|| Provider {
-        inner: InProcessProvider::new(),
+    let provider = Box::leak(Box::new(Provider {
+        inner: test_owner::Owner::new(),
         state: Mutex::default(),
-    });
+    }));
     *provider.state.lock().unwrap() = State {
         at,
         fault,
@@ -173,8 +180,10 @@ fn inverse_range_all_nan_is_inconclusive_not_complex_evidence() {
     let _serial = test_support::accel_test_lock();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
     for name in ["asin", "acos", "atanh", "acosh"] {
-        let (provider, mut input) = fixture_values(0, Fault::None, &[f64::NAN, f64::NAN]);
-        runmat_accelerate_api::mark_handle_explicit(&mut input);
+        let (provider, input) = fixture_values(0, Fault::None, &[f64::NAN, f64::NAN]);
+        let input = input
+            .with_provenance(GpuHandleProvenance::Explicit)
+            .unwrap();
         let _provider = ThreadProviderGuard::set(Some(provider));
         let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
             name,
@@ -186,11 +195,10 @@ fn inverse_range_all_nan_is_inconclusive_not_complex_evidence() {
             panic!("{name}: explicit input must retain residency");
         };
         assert!(runmat_accelerate_api::handle_is_explicit(output));
-        assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
-        let host = block_on(provider.inner.download(output)).unwrap();
+        assert_eq!(output.descriptor().storage, Some(GpuTensorStorage::Real));
+        let host = provider.inner.download(output).unwrap();
         assert!(host.data.iter().all(|value| value.is_nan()));
-        provider.inner.free(output).unwrap();
-        runmat_accelerate_api::clear_handle_metadata(output);
+        drop(result);
         provider.assert_reclaimed(&input);
     }
 }
@@ -203,12 +211,14 @@ fn inverse_range_complex_policy_is_independent_of_probe_support_and_respects_pro
         let outside = if name == "acosh" { 0.5 } else { 2.0 };
         for fault in [Fault::None, Fault::Unsupported] {
             for automatic in [false, true] {
-                let (provider, mut input) = fixture_values(1, fault, &[outside]);
-                if automatic {
-                    runmat_accelerate_api::mark_handle_automatic(&mut input);
-                } else {
-                    runmat_accelerate_api::mark_handle_explicit(&mut input);
-                }
+                let (provider, input) = fixture_values(1, fault, &[outside]);
+                let input = input
+                    .with_provenance(if automatic {
+                        GpuHandleProvenance::Automatic
+                    } else {
+                        GpuHandleProvenance::Explicit
+                    })
+                    .unwrap();
                 let _provider = ThreadProviderGuard::set(Some(provider));
                 let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
                     name,
@@ -291,13 +301,13 @@ fn inverse_range_actual_call_drop_reclaims_each_suspended_stage() {
 }
 
 #[test]
-fn inverse_range_rejects_aliases_and_missing_storage_without_freeing_borrowed_input() {
+fn inverse_range_rejects_aliases_and_wrong_storage_without_freeing_borrowed_input() {
     let _serial = test_support::accel_test_lock();
     for (step, fault) in [
         (1, Fault::BorrowedAlias),
         (2, Fault::TemporaryAlias),
-        (1, Fault::MissingStorage),
-        (2, Fault::MissingStorage),
+        (1, Fault::WrongStorage),
+        (2, Fault::WrongStorage),
     ] {
         let (provider, input) = fixture(step, fault);
         let _provider = ThreadProviderGuard::set(Some(provider));
@@ -362,9 +372,6 @@ fn inverse_range_abandonment_keeps_its_admitted_provider_after_selection_is_remo
         Poll::Pending
     ));
     drop(selected);
-    for output in &provider.state.lock().unwrap().owned {
-        runmat_accelerate_api::clear_handle_metadata(output);
-    }
     drop(call);
     provider.assert_reclaimed(&input);
 }
