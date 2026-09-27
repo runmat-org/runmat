@@ -21,6 +21,24 @@ impl WgpuProvider {
         target: NumericPrecision,
     ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry_raw(input)?;
+        // Casting is elementwise in physical order. Preserve the validated
+        // logical view rather than materializing or reinterpreting its order.
+        ensure!(
+            input.shape == entry.shape,
+            "floating cast view shape mismatch"
+        );
+        ensure!(
+            product_checked(&entry.shape) == Some(entry.len),
+            "floating cast allocation shape mismatch"
+        );
+        let transpose = runmat_accelerate_api::handle_transpose_info(input);
+        if transpose.is_some() {
+            ensure!(
+                entry.shape.len() == 2,
+                "floating cast transpose requires a matrix view"
+            );
+            super::backend_shared::build_matrix_operand_view(input, &entry)?;
+        }
         ensure!(
             entry.storage == GpuTensorStorage::Real && entry.integer_type().is_none(),
             "floating cast requires real floating storage"
@@ -37,7 +55,7 @@ impl WgpuProvider {
             NumericPrecision::F64 => NumericElementType::F64,
         };
         if entry.precision == target {
-            return Ok(self.register_numeric_buffer(
+            let output = self.register_numeric_buffer(
                 entry.buffer,
                 NumericBufferRegistration {
                     shape: entry.shape,
@@ -47,7 +65,8 @@ impl WgpuProvider {
                     allocated_bytes: entry.allocated_bytes,
                     usage: entry.usage,
                 },
-            ));
+            );
+            return self.finish_floating_cast_view(output, transpose);
         }
         let len = entry.len;
         if len > u32::MAX as usize {
@@ -132,7 +151,7 @@ impl WgpuProvider {
                 offset += count;
             }
         }
-        Ok(self.register_numeric_buffer(
+        let output = self.register_numeric_buffer(
             output,
             NumericBufferRegistration {
                 shape: entry.shape,
@@ -142,6 +161,26 @@ impl WgpuProvider {
                 allocated_bytes,
                 usage: BufferUsageClass::Generic,
             },
-        ))
+        );
+        self.finish_floating_cast_view(output, transpose)
+    }
+
+    fn finish_floating_cast_view(
+        &self,
+        output: GpuTensorHandle,
+        transpose: Option<runmat_accelerate_api::TransposeInfo>,
+    ) -> Result<GpuTensorHandle> {
+        if let Some(info) = transpose {
+            runmat_accelerate_api::record_handle_transpose(&output, info.base_rows, info.base_cols);
+            if runmat_accelerate_api::handle_transpose_info(&output) != Some(info) {
+                // A fresh registration owns this output, including same-type
+                // aliases. Never free the borrowed input registration.
+                self.free(&output)?;
+                return Err(anyhow!(
+                    "floating cast could not publish transpose metadata"
+                ));
+            }
+        }
+        Ok(output)
     }
 }

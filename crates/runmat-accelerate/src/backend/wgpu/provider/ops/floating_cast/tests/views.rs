@@ -1,0 +1,131 @@
+use super::*;
+
+fn cast_view(provider: &WgpuProvider, source: NumericPrecision, target: NumericPrecision) {
+    for shape in [vec![2, 2], vec![2, 3], vec![0, 3]] {
+        for release_source_first in [false, true] {
+            let count: usize = shape.iter().product();
+            let values: Vec<f64> = (0..count).map(|i| 16_777_215.0 + i as f64).collect();
+            let singles: Vec<f32> = values.iter().map(|v| *v as f32).collect();
+            let data = match source {
+                NumericPrecision::F32 => HostNumericDataView::F32(&singles),
+                NumericPrecision::F64 => HostNumericDataView::F64(&values),
+            };
+            let input = provider
+                .upload_numeric(&HostNumericTensorView {
+                    data,
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap();
+            let view = provider.transpose_exec(&input).unwrap();
+            let metadata = runmat_accelerate_api::handle_transpose_info(&view).unwrap();
+            let output = provider.floating_cast_exec(&view, target).unwrap();
+            assert_eq!(output.shape, vec![shape[1], shape[0]]);
+            assert_eq!(output.device_id, view.device_id);
+            assert_ne!(output.buffer_id, view.buffer_id);
+            assert_eq!(
+                runmat_accelerate_api::handle_transpose_info(&output),
+                Some(metadata)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_transpose_info(&view),
+                Some(metadata)
+            );
+            assert_eq!(
+                output.descriptor.element_type,
+                Some(match target {
+                    NumericPrecision::F32 => NumericElementType::F32,
+                    NumericPrecision::F64 => NumericElementType::F64,
+                })
+            );
+            assert_eq!(output.descriptor.storage, Some(GpuTensorStorage::Real));
+            let source_entry = provider.get_entry_raw(&view).unwrap();
+            let output_entry = provider.get_entry_raw(&output).unwrap();
+            assert_eq!(
+                Arc::ptr_eq(&source_entry.buffer, &output_entry.buffer),
+                source == target,
+                "same-type conversion is a new registration, not a payload copy"
+            );
+            drop(source_entry);
+            drop(output_entry);
+            let mut expected = Vec::with_capacity(count);
+            for row in 0..shape[0] {
+                for col in 0..shape[1] {
+                    let index = row + col * shape[0];
+                    let value = match source {
+                        NumericPrecision::F32 => f64::from(singles[index]),
+                        NumericPrecision::F64 => values[index],
+                    };
+                    expected.push(match target {
+                        NumericPrecision::F32 => f64::from(value as f32),
+                        NumericPrecision::F64 => value,
+                    });
+                }
+            }
+            provider.free(&input).unwrap();
+            if release_source_first {
+                provider.free(&view).unwrap();
+            }
+            let downloaded = block_on(provider.download_numeric(&output)).unwrap();
+            assert_eq!(downloaded.shape, vec![shape[1], shape[0]]);
+            let actual: Vec<f64> = match downloaded.data {
+                HostNumericDataOwned::F32(data) => data.into_iter().map(f64::from).collect(),
+                HostNumericDataOwned::F64(data) => data,
+                other => panic!("floating cast returned {other:?}"),
+            };
+            assert_eq!(actual, expected);
+            provider.free(&output).unwrap();
+            if !release_source_first {
+                assert!(block_on(provider.download_numeric(&view)).is_ok());
+                assert_eq!(
+                    runmat_accelerate_api::handle_transpose_info(&view),
+                    Some(metadata)
+                );
+                provider.free(&view).unwrap();
+            }
+        }
+    }
+}
+
+#[test]
+fn actual_wgpu_single_identity_preserves_asymmetric_transposed_views_without_copy() {
+    cast_view(provider(), NumericPrecision::F32, NumericPrecision::F32);
+}
+
+#[test]
+#[ignore = "requires an actual shader-f64 adapter; run explicitly in the F64 qualification gate"]
+fn actual_wgpu_floating_casts_preserve_square_rectangular_and_empty_transposed_values() {
+    let provider = provider();
+    assert_eq!(
+        provider.precision(),
+        ProviderPrecision::F64,
+        "actual shader-f64 required"
+    );
+    for source in [NumericPrecision::F32, NumericPrecision::F64] {
+        for target in [NumericPrecision::F32, NumericPrecision::F64] {
+            cast_view(provider, source, target);
+        }
+    }
+}
+
+#[test]
+fn actual_wgpu_cast_rejects_incoherent_view_before_allocating_result() {
+    let provider = provider();
+    let input = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    runmat_accelerate_api::record_handle_transpose(&input, 1, 4);
+    assert!(provider
+        .floating_cast_exec(&input, NumericPrecision::F32)
+        .is_err());
+    runmat_accelerate_api::clear_handle_transpose(&input);
+    assert_eq!(
+        block_on(provider.download_numeric(&input)).unwrap().data,
+        HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
+    );
+    provider.free(&input).unwrap();
+}

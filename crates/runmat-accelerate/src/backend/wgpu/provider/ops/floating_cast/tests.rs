@@ -1,4 +1,6 @@
 use super::*;
+#[path = "tests/views.rs"]
+mod views;
 use futures::executor::block_on;
 use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
 
