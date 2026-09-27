@@ -580,6 +580,10 @@ struct GpuInterp1Query {
     owned: bool,
 }
 
+#[cfg(test)]
+#[path = "interp1/owning_tests.rs"]
+mod owning_tests;
+
 async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> {
     if args.len() < 2 {
         return Ok(None);
@@ -621,11 +625,12 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
         )
     })?;
     let series_shape = series.y.shape().to_vec();
-    let series_metadata = gpu_helpers::snapshot_handle_metadata(series.y);
-    let resident_query_metadata = match query_value {
-        Value::GpuTensor(handle) => Some((handle, gpu_helpers::snapshot_handle_metadata(handle))),
+    let _series_residency = gpu_helpers::ResidencyRestoreGuard::new(series.y);
+    let resident_query = match query_value {
+        Value::GpuTensor(handle) => Some(handle),
         _ => None,
     };
+    let _query_residency = resident_query.map(gpu_helpers::ResidencyRestoreGuard::new);
     let series_precision = runmat_accelerate_api::handle_precision(series.y);
     if series_precision != Some(provider.precision())
         || !valid_interp1_gpu_input(series.y, &series_shape, series_precision, provider, &[])
@@ -635,28 +640,24 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
             &INTERP1_ERROR_INTERNAL,
         ));
     }
-    let mut provenance = runmat_accelerate_api::handle_provenance(series.y)
-        .unwrap_or(runmat_accelerate_api::GpuHandleProvenance::Automatic);
     let x_shape = [1, series.sample_len];
     let x_upload = provider.upload(&HostTensorView {
         data: &series.x,
         shape: &x_shape,
     });
-    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
-    if let Some((handle, metadata)) = resident_query_metadata.as_ref() {
-        gpu_helpers::restore_handle_metadata(handle, metadata);
-    }
     let x_handle = match x_upload {
         Ok(handle) => handle,
         Err(error) => {
-            return Err(interp1_error_with_message(
+            let mut failure = interp1_error_with_message(
                 format!("interp1: X upload failed: {error}"),
                 &INTERP1_ERROR_INTERNAL,
-            ));
+            );
+            failure.source = Some(error.into_boxed_dyn_error());
+            return Err(failure);
         }
     };
     let mut x_protected = vec![series.y];
-    if let Some((handle, _)) = resident_query_metadata.as_ref() {
+    if let Some(handle) = resident_query {
         x_protected.push(handle);
     }
     if !valid_interp1_gpu_input(series.y, &series_shape, series_precision, provider, &[])
@@ -668,30 +669,20 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
             &x_protected,
         )
     {
-        gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
-        return Err(interp1_error_with_message(
-            "interp1: provider returned an invalid X upload",
-            &INTERP1_ERROR_INTERNAL,
+        return Err(gpu_helpers::reject_gpu_output(
+            x_handle,
+            interp1_error_with_message(
+                "interp1: provider returned an invalid X upload",
+                &INTERP1_ERROR_INTERNAL,
+            ),
         ));
     }
-    let x_metadata = gpu_helpers::snapshot_handle_metadata(&x_handle);
 
     let query_result = gpu_query_points(query_value, provider).await;
-    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
-    gpu_helpers::restore_handle_metadata(&x_handle, &x_metadata);
-    if let Some((handle, metadata)) = resident_query_metadata.as_ref() {
-        gpu_helpers::restore_handle_metadata(handle, metadata);
-    }
     let query = match query_result {
         Ok(Some(query)) => query,
-        Ok(None) => {
-            gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
-            return Ok(None);
-        }
-        Err(err) => {
-            gpu_helpers::free_unprotected_exact_owner(&x_handle, &x_protected);
-            return Err(err);
-        }
+        Ok(None) => return Ok(None),
+        Err(err) => return Err(err),
     };
     let owned_query_protected = [series.y, &x_handle];
     let borrowed_query_protected = [&x_handle];
@@ -710,25 +701,13 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
             query_protected,
         )
     {
-        if query.owned && gpu_helpers::same_gpu_handle(&query.handle, &x_handle) {
-            gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y]);
-        } else {
-            if query.owned {
-                gpu_helpers::free_unprotected_exact_owner(&query.handle, &[series.y, &x_handle]);
-            }
-            gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y, &query.handle]);
-        }
-        return Err(interp1_error_with_message(
-            "interp1: invalid resident Xq input",
-            &INTERP1_ERROR_INTERNAL,
+        return Err(gpu_helpers::reject_gpu_output(
+            query.handle,
+            interp1_error_with_message(
+                "interp1: invalid resident Xq input",
+                &INTERP1_ERROR_INTERNAL,
+            ),
         ));
-    }
-    let query_metadata = gpu_helpers::snapshot_handle_metadata(&query.handle);
-    if !query.owned
-        && runmat_accelerate_api::handle_provenance(&query.handle)
-            == Some(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-    {
-        provenance = runmat_accelerate_api::GpuHandleProvenance::Explicit;
     }
 
     let output_shape =
@@ -749,9 +728,6 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
         },
     };
     let result = provider.interp1(&request).await;
-    gpu_helpers::restore_handle_metadata(series.y, &series_metadata);
-    gpu_helpers::restore_handle_metadata(&x_handle, &x_metadata);
-    gpu_helpers::restore_handle_metadata(&query.handle, &query_metadata);
     let valid = result.as_ref().is_ok_and(|output| {
         valid_interp1_gpu_output(
             output,
@@ -763,38 +739,38 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
             series_precision,
         )
     });
-    gpu_helpers::free_unprotected_exact_owner(&x_handle, &[series.y, &query.handle]);
-    if query.owned {
-        gpu_helpers::free_unprotected_exact_owner(&query.handle, &[series.y, &x_handle]);
-    }
-
     match result {
         Ok(mut output) if valid => {
-            runmat_accelerate_api::set_handle_provenance(&mut output, provenance);
-            Ok(Some(gpu_helpers::resident_gpu_value(output)))
+            gpu_helpers::propagate_output_provenance(&mut output, x_protected)?;
+            gpu_helpers::resident_gpu_value(output).map(Some)
         }
-        Ok(output) => {
-            gpu_helpers::free_unprotected_exact_owner(
-                &output,
-                &[series.y, &x_handle, &query.handle],
-            );
-            Err(interp1_error_with_message(
+        Ok(output) => Err(gpu_helpers::reject_gpu_output(
+            output,
+            interp1_error_with_message(
                 "interp1: provider returned an invalid interpolation result",
                 &INTERP1_ERROR_INTERNAL,
-            ))
+            ),
+        )),
+        Err(error)
+            if gpu_helpers::provider_hook_is_unsupported(&error)
+                || error.to_string() == "interp1 not supported by provider" =>
+        {
+            Ok(None)
         }
-        Err(error) if error.to_string() == "interp1 not supported by provider" => Ok(None),
-        Err(error) => Err(build_runtime_error(format!(
-            "interp1: provider execution failed: {error}"
-        ))
-        .with_builtin(NAME)
-        .with_identifier(
-            INTERP1_ERROR_INTERNAL
-                .identifier
-                .expect("interp1 internal descriptor identifier"),
-        )
-        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-        .build()),
+        Err(error) => {
+            let mut failure =
+                build_runtime_error(format!("interp1: provider execution failed: {error}"))
+                    .with_builtin(NAME)
+                    .with_identifier(
+                        INTERP1_ERROR_INTERNAL
+                            .identifier
+                            .expect("interp1 internal descriptor identifier"),
+                    )
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .build();
+            failure.source = Some(error.into_boxed_dyn_error());
+            Err(failure)
+        }
     }
 }
 
@@ -811,7 +787,7 @@ fn valid_interp1_gpu_output(
         && output.device_id() == y.device_id()
         && ![y, x, xq]
             .iter()
-            .any(|input| gpu_helpers::same_gpu_handle(input, output))
+            .any(|input| input.shares_allocation_with(output))
         && gpu_helpers::exact_provider_for_handle(output)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
@@ -832,7 +808,7 @@ fn valid_interp1_gpu_input(
         && handle.device_id() == provider.device_id()
         && !protected
             .iter()
-            .any(|input| gpu_helpers::same_gpu_handle(input, handle))
+            .any(|input| input.shares_allocation_with(handle))
         && gpu_helpers::exact_provider_for_handle(handle)
             .is_some_and(|owner| std::ptr::eq(owner, provider))
         && runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::Real
@@ -964,7 +940,7 @@ async fn gpu_query_points(
             }
             Ok(Some(GpuInterp1Query {
                 handle: handle.clone(),
-                shape: tensor::default_shape_for(&handle.shape, len),
+                shape: tensor::default_shape_for(handle.shape(), len),
                 len,
                 owned: false,
             }))
@@ -977,10 +953,12 @@ async fn gpu_query_points(
                     shape: &query.shape,
                 })
                 .map_err(|err| {
-                    interp1_error_with_message(
+                    let mut failure = interp1_error_with_message(
                         format!("interp1: Xq upload failed: {err}"),
                         &INTERP1_ERROR_INTERNAL,
-                    )
+                    );
+                    failure.source = Some(err.into_boxed_dyn_error());
+                    failure
                 })?;
             Ok(Some(GpuInterp1Query {
                 handle: uploaded,
