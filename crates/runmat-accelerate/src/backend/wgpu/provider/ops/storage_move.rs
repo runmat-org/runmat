@@ -1,6 +1,7 @@
 //! Bit-preserving storage moves use the allocation's physical element type,
 //! independently of the provider's arithmetic precision.
 use super::*;
+#[path = "storage_move/permutation.rs"]
 mod permutation;
 
 impl WgpuProvider {

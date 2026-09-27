@@ -42,45 +42,47 @@ impl AllocationState {
             record.phase = Phase::Retiring(Stage::Cache);
             record.entry.take()
         };
-        let mut stage = Stage::Cache;
-        let mut failure = Failure::Cache;
-        let mut disposition = Disposition::Retained;
+        let stage = std::cell::Cell::new(Stage::Cache);
+        let failure = std::cell::Cell::new(Failure::Cache);
+        let disposition = std::cell::Cell::new(Disposition::Retained);
         // Keep the ticket outside the caught closure. A callback unwind cannot
         // accidentally destroy the payload before its failed phase is recorded.
         let result = catch_allocation_cleanup_unwind(|| -> Result<()> {
             let payload = entry.as_ref().ok_or(AllocationStateError::NotLive)?;
             self.bind_groups
                 .invalidate_buffer(Arc::as_ptr(&payload.buffer) as usize)?;
-            failure = Failure::MapPoisoned;
+            failure.set(Failure::MapPoisoned);
             self.retirement_stage(id, Stage::Provenance)?;
-            stage = Stage::Provenance;
-            failure = Failure::Provenance;
+            stage.set(Stage::Provenance);
+            failure.set(Failure::Provenance);
             if let Some(resources) = self.kernel_resources.upgrade() {
                 resources.clear_matmul_source_checked(id)?;
             }
-            failure = Failure::MapPoisoned;
+            failure.set(Failure::MapPoisoned);
             self.retirement_stage(id, Stage::Residency)?;
-            stage = Stage::Residency;
-            failure = Failure::Callback;
-            clear_residency(handle)
-                .map_err(|_| AllocationStateError::Cleanup { stage, failure })?;
-            failure = Failure::MapPoisoned;
+            stage.set(Stage::Residency);
+            failure.set(Failure::Callback);
+            clear_residency(handle).map_err(|_| AllocationStateError::Cleanup {
+                stage: stage.get(),
+                failure: failure.get(),
+            })?;
+            failure.set(Failure::MapPoisoned);
             self.retirement_stage(id, Stage::Annotations)?;
-            stage = Stage::Annotations;
-            failure = Failure::AnnotationLock;
+            stage.set(Stage::Annotations);
+            failure.set(Failure::AnnotationLock);
             runmat_accelerate_api::clear_handle_annotations_checked(handle)?;
-            failure = Failure::MapPoisoned;
+            failure.set(Failure::MapPoisoned);
             self.retirement_stage(id, Stage::Resource)?;
-            stage = Stage::Resource;
+            stage.set(Stage::Resource);
             // Once consumed, an unwind is uncertain release, never retryable.
-            disposition = Disposition::Uncertain;
-            failure = Failure::Unwind;
+            disposition.set(Disposition::Uncertain);
+            failure.set(Failure::Unwind);
             if let Some(payload) = entry.take() {
                 self.release_payload(payload);
             }
-            disposition = Disposition::Released;
-            stage = Stage::Complete;
-            failure = Failure::MapPoisoned;
+            disposition.set(Disposition::Released);
+            stage.set(Stage::Complete);
+            failure.set(Failure::MapPoisoned);
             let removed = self.lock_records()?.remove(&id);
             drop(removed);
             Ok(())
@@ -88,13 +90,13 @@ impl AllocationState {
         match result {
             Ok(Ok(())) => Ok(()),
             Ok(Err(error)) => {
-                self.fail(id, stage, failure, disposition, entry);
+                self.fail(id, stage.get(), failure.get(), disposition.get(), entry);
                 Err(error)
             }
             Err(_) => {
-                self.fail(id, stage, Failure::Unwind, disposition, entry);
+                self.fail(id, stage.get(), Failure::Unwind, disposition.get(), entry);
                 Err(AllocationStateError::Cleanup {
-                    stage,
+                    stage: stage.get(),
                     failure: Failure::Unwind,
                 }
                 .into())
