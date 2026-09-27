@@ -63,9 +63,16 @@ fn compiled_inventory_preserves_runtime_registration_provenance() {
         .iter()
         .find(|constant| constant.name == "pi")
         .expect("missing pi constant registration");
-    assert!(constant.source_file.ends_with("builtins/constants/mod.rs"));
-    assert!(constant.module_path.ends_with("builtins::constants"));
-    assert_eq!(constant.builtin_path, "crate::builtins::constants");
+    assert!(constant
+        .source_file
+        .ends_with("builtins/constants/core/pi.rs"));
+    assert!(constant
+        .module_path
+        .ends_with("builtins::constants::core::pi"));
+    assert_eq!(
+        constant.builtin_path,
+        "crate::builtins::constants::core::pi"
+    );
     let readiness = &inventory.snapshot.validation.migration_readiness;
     assert_eq!(
         readiness.status,
