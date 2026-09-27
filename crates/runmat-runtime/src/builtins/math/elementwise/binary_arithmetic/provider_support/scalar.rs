@@ -34,7 +34,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) async fn device_re
     identity: BuiltinCatalogIdentity,
     handle: &GpuTensorHandle,
 ) -> BuiltinResult<Option<f64>> {
-    if !is_scalar_shape(&handle.shape)
+    if !is_scalar_shape(handle.shape())
         || runmat_accelerate_api::handle_integer_type(handle).is_some()
     {
         return Ok(None);

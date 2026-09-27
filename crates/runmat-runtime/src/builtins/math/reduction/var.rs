@@ -832,8 +832,8 @@ async fn var_gpu_reduce(
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
 ) -> Option<GpuTensorHandle> {
-    let (dims, _) = resolve_axes(&handle.shape, &args.axes).ok()?;
-    let elements = tensor::element_count(&handle.shape);
+    let (dims, _) = resolve_axes(handle.shape(), &args.axes).ok()?;
+    let elements = tensor::element_count(handle.shape());
     if dims.is_empty() {
         if elements == 1 || !matches!(args.axes, VarAxes::Default) {
             return None;
@@ -851,7 +851,7 @@ async fn var_gpu_reduce(
     };
 
     let std_handle = if dims.len() == handle.shape().len() {
-        if is_scalar_shape(&handle.shape) {
+        if is_scalar_shape(handle.shape()) {
             return Some(handle.clone());
         }
         provider

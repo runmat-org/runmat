@@ -332,7 +332,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             // Support scalar indexing cases mirroring Tensor branch
             if indices.len() == 1 {
                 let idx = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
-                let total = h.shape.iter().product();
+                let total = h.shape().iter().product();
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, total),
@@ -344,8 +344,8 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             } else if indices.len() == 2 {
                 let row = positive_integer_index(indices[0], "RunMat:IndexOutOfBounds")?;
                 let col = positive_integer_index(indices[1], "RunMat:IndexOutOfBounds")?;
-                let rows = h.shape.first().copied().unwrap_or(1);
-                let cols = h.shape.get(1).copied().unwrap_or(1);
+                let rows = h.shape().first().copied().unwrap_or(1);
+                let cols = h.shape().get(1).copied().unwrap_or(1);
                 if row < 1 || row > rows || col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
                         format!("Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"),

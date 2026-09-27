@@ -323,7 +323,7 @@ async fn ifftshift_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResu
             Ok(ifftshift_tensor(tensor, &dims).map(tensor::tensor_into_value)?)
         }
         Value::GpuTensor(handle) => {
-            let dims = compute_ifftshift_dims(&handle.shape, dims_arg)?;
+            let dims = compute_ifftshift_dims(handle.shape(), dims_arg)?;
             Ok(ifftshift_gpu(handle, &dims).await?)
         }
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) | Value::Cell(_) => {
@@ -446,7 +446,7 @@ fn ifftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logic
 }
 
 async fn ifftshift_gpu(handle: GpuTensorHandle, dims: &[usize]) -> BuiltinResult<Value> {
-    let plan = build_shift_plan(&handle.shape, dims, ShiftKind::Ifft);
+    let plan = build_shift_plan(handle.shape(), dims, ShiftKind::Ifft);
     if plan.is_noop() {
         return Ok(Value::GpuTensor(handle));
     }

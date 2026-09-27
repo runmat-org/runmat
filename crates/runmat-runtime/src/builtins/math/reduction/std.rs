@@ -566,8 +566,8 @@ async fn parse_axes(value: &Value) -> BuiltinResult<Option<StdAxes>> {
         Value::Tensor(t) => (tensor::is_scalar_tensor(t), tensor_len(t) == 0),
         Value::LogicalArray(logical) => (logical.data.len() == 1, logical.data.is_empty()),
         Value::GpuTensor(handle) => {
-            let count = tensor::element_count(&handle.shape);
-            (is_scalar_shape(&handle.shape) || count == 1, count == 0)
+            let count = tensor::element_count(handle.shape());
+            (is_scalar_shape(handle.shape()) || count == 1, count == 0)
         }
         _ => (false, false),
     };
@@ -876,7 +876,7 @@ async fn std_gpu_reduce(
     handle: &GpuTensorHandle,
     args: &ParsedArguments,
 ) -> Option<GpuTensorHandle> {
-    let (dims, _) = resolve_axes(&handle.shape, &args.axes).ok()?;
+    let (dims, _) = resolve_axes(handle.shape(), &args.axes).ok()?;
     let normalization = match args.normalization {
         StdNormalization::Sample => ProviderStdNormalization::Sample,
         StdNormalization::Population => ProviderStdNormalization::Population,
@@ -891,7 +891,7 @@ async fn std_gpu_reduce(
     }
 
     if dims.len() == handle.shape().len() {
-        if is_scalar_shape(&handle.shape) {
+        if is_scalar_shape(handle.shape()) {
             return Some(handle.clone());
         }
         return provider

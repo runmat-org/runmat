@@ -110,7 +110,7 @@ pub(crate) fn is_scalar_like(value: &Value) -> bool {
         Value::Tensor(t) => tensor::is_scalar_tensor(t),
         Value::LogicalArray(la) => la.data.len() == 1,
         Value::ComplexTensor(t) => tensor::is_scalar_complex_tensor(t),
-        Value::GpuTensor(handle) => tensor::element_count(&handle.shape) == 1,
+        Value::GpuTensor(handle) => tensor::element_count(handle.shape()) == 1,
         _ => false,
     }
 }

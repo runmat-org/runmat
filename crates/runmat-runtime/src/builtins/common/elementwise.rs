@@ -146,9 +146,9 @@ async fn to_host_value(v: &Value) -> Result<Value, String> {
                 Ok(gathered)
             } else {
                 // Fallback: zeros tensor with same shape
-                let total: usize = h.shape.iter().product();
+                let total: usize = h.shape().iter().product();
                 Ok(Value::Tensor(
-                    Tensor::new(vec![0.0; total], h.shape.clone()).map_err(|e| e.to_string())?,
+                    Tensor::new(vec![0.0; total], h.shape().to_vec()).map_err(|e| e.to_string())?,
                 ))
             }
         }

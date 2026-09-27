@@ -58,7 +58,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::StructArray(array) => normalize_shape(array.shape()),
         Value::ObjectArray(array) => normalize_shape(array.shape()),
-        Value::GpuTensor(handle) => normalize_shape(&handle.shape),
+        Value::GpuTensor(handle) => normalize_shape(handle.shape()),
         _ => vec![1, 1],
     };
     Ok(dims)
@@ -79,7 +79,7 @@ pub async fn value_numel(value: &Value) -> Result<usize, RuntimeError> {
         Value::StructArray(array) => array.len(),
         Value::ObjectArray(array) => array.len(),
         Value::GpuTensor(handle) => handle
-            .shape
+            .shape()
             .iter()
             .copied()
             .fold(1usize, |acc, dim| acc.saturating_mul(dim)),

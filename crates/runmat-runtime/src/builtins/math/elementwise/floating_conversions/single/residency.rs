@@ -23,7 +23,7 @@ pub(super) async fn convert_to_gpu(
     })?;
     let value = match value {
         Value::GpuTensor(handle)
-            if valid_single_resident_value(&handle, prototype, provider, &handle.shape) =>
+            if valid_single_resident_value(&handle, prototype, provider, handle.shape()) =>
         {
             return Ok(Value::GpuTensor(handle));
         }

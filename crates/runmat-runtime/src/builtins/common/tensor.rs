@@ -347,8 +347,8 @@ fn scalar_f64_from_host_value(value: &Value) -> Result<Option<f64>, String> {
 pub async fn scalar_f64_from_value_async(value: &Value) -> Result<Option<f64>, String> {
     match value {
         Value::GpuTensor(handle) => {
-            if !handle.shape.is_empty() {
-                let len = element_count(&handle.shape);
+            if !handle.shape().is_empty() {
+                let len = element_count(handle.shape());
                 if len != 1 {
                     return Err(format!("expected scalar gpuArray, got array of size {len}"));
                 }
@@ -511,13 +511,13 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                 Value::Tensor(t) => {
                     if t.is_empty() {
                         tracing::warn!(
-                            gpu_shape = ?handle.shape,
+                            gpu_shape = ?handle.shape(),
                             "dims_from_value_async: gathered GPU tensor has no data"
                         );
                     }
                     tracing::trace!(
                         "dims_from_value_async: GPU tensor values gpu_shape={:?} host_shape={:?} class={} elements={}",
-                        handle.shape,
+                        handle.shape(),
                         t.shape,
                         t.numeric_dtype().class_name(),
                         t.len()
@@ -530,7 +530,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                     };
                     if dims.is_none() {
                         tracing::debug!(
-                            gpu_shape = ?handle.shape,
+                            gpu_shape = ?handle.shape(),
                             host_shape = ?t.shape,
                             "dims_from_value_async: GPU tensor not interpretable as dims"
                         );
@@ -546,7 +546,7 @@ pub async fn dims_from_value_async(value: &Value) -> Result<Option<Vec<usize>>, 
                     let dims = dims_from_tensor_values(&values, &la.shape)?;
                     if dims.is_none() {
                         tracing::debug!(
-                            gpu_shape = ?handle.shape,
+                            gpu_shape = ?handle.shape(),
                             host_shape = ?la.shape,
                             "dims_from_value_async: GPU logical not interpretable as dims"
                         );

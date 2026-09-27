@@ -881,7 +881,7 @@ fn gpu_y_layout(
         .ok_or_else(|| {
             interp1_error_with_message("interp1: Y size overflow", &INTERP1_ERROR_INVALID_INPUT)
         })?;
-    let shape = tensor::default_shape_for(&handle.shape, len);
+    let shape = tensor::default_shape_for(handle.shape(), len);
     let sample_len = explicit_sample_len
         .unwrap_or_else(|| shape.iter().copied().find(|dim| *dim > 1).unwrap_or(len));
     if sample_len < 2 {
@@ -1156,7 +1156,7 @@ mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpu output");
             };
-            assert_eq!(handle.shape, vec![1, 2]);
+            assert_eq!(handle.shape(), vec![1, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0]);
             let _ = provider.free(&y);
@@ -1187,7 +1187,7 @@ mod tests {
             let Value::GpuTensor(handle) = result else {
                 panic!("expected resident gpu output");
             };
-            assert_eq!(handle.shape, vec![1, 2, 2]);
+            assert_eq!(handle.shape(), vec![1, 2, 2]);
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
             assert_eq!(gathered.materialize_f64(), vec![15.0, 30.0, 150.0, 300.0]);
             let _ = provider.free(&y);

@@ -446,7 +446,7 @@ async fn ifft_gpu(
     dimension: Option<usize>,
     symmetric: bool,
 ) -> BuiltinResult<Value> {
-    let mut logical_shape = normalize_scalar_shape(&handle.shape);
+    let mut logical_shape = normalize_scalar_shape(handle.shape());
 
     let dim_one_based = match dimension {
         Some(0) => return Err(ifft_error(&IFFT_ERROR_INVALID_DIMENSION)),

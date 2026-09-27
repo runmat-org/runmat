@@ -373,7 +373,7 @@ async fn fft_gpu(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<Value> {
-    let mut shape = normalize_scalar_shape(&handle.shape);
+    let mut shape = normalize_scalar_shape(handle.shape());
 
     let dim_one_based = match dimension {
         Some(0) => return Err(fft_error(&FFT_ERROR_INVALID_DIMENSION)),
