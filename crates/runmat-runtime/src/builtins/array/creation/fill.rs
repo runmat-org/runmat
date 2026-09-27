@@ -1115,7 +1115,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_accelerate_api::HostTensorView;
+    use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView, HostTensorView};
 
     #[test]
     fn resident_single_like_complex_fill_keeps_single_components() {

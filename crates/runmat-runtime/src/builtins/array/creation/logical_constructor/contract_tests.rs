@@ -1,9 +1,10 @@
 //! Shared applicability: these witnesses cover all four constant constructors.
 use super::*;
 use runmat_accelerate_api::{
+    allocation::WeakGpuTensorHandle,
     test_support::{RetirementProbe, TestAllocationOwner},
     AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorView,
-    NumericElementType, WeakGpuTensorHandle,
+    NumericElementType,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -274,7 +275,7 @@ fn logical_constructors_preserve_borrowed_alias_metadata_and_storage() {
 }
 
 #[test]
-fn logical_constructors_upload_native_single_when_f32_provider_has_no_fill_hooks() {
+fn logical_constructors_upload_native_logical_when_f32_provider_has_no_fill_hooks() {
     test_support::with_f32_test_provider(|provider| {
         assert!(provider.ones(&[2, 3]).is_err());
         assert!(provider.zeros(&[2, 3]).is_err());
@@ -298,15 +299,17 @@ fn logical_constructors_upload_native_single_when_f32_provider_has_no_fill_hooks
             assert_eq!(handle.shape(), vec![2, 3]);
             assert_eq!(
                 handle.physical().element_type(),
-                runmat_accelerate_api::NumericElementType::F32
+                runmat_accelerate_api::NumericElementType::U8
             );
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             assert!(
                 crate::builtins::common::gpu_helpers::exact_provider_for_handle(&handle)
                     .is_some_and(|owner| std::ptr::eq(owner, provider))
             );
+            let lease = handle.allocation_lease().downgrade();
             let gathered = test_support::gather(Value::GpuTensor(handle)).expect("logical gather");
             assert_eq!(gathered.materialize_f64(), vec![expected; 6]);
+            assert!(lease.acquire().is_none());
         }
         assert!(!runmat_accelerate_api::handle_is_logical(&prototype));
     });

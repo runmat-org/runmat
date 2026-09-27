@@ -892,8 +892,11 @@ pub(crate) mod tests {
                 }
             }
             Value::GpuTensor(h) => {
-                assert_eq!(h.shape, vec![3, 4]);
+                assert_eq!(h.shape(), vec![3, 4]);
                 assert!(runmat_accelerate_api::handle_is_explicit(&h));
+                let lease = h.allocation_lease().downgrade();
+                drop(h);
+                assert!(lease.acquire().is_none());
             }
             other => panic!("expected tensor or gpu tensor, got {other:?}"),
         }

@@ -2,9 +2,10 @@
 use super::*;
 use futures::executor::block_on;
 use runmat_accelerate_api::{
+    allocation::WeakGpuTensorHandle,
     test_support::{RetirementProbe, TestAllocationOwner},
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostNumericDataOwned, HostNumericDataView,
-    HostNumericTensorOwned, HostTensorOwned, HostTensorView, WeakGpuTensorHandle,
+    HostNumericTensorOwned, HostTensorOwned, HostTensorView,
 };
 use std::sync::Mutex;
 
@@ -64,6 +65,7 @@ impl AccelProvider for Provider {
                     return Ok(HostTensorOwned {
                         data,
                         shape: handle.shape().to_vec(),
+                        storage: GpuTensorStorage::Real,
                     });
                 }
             }
