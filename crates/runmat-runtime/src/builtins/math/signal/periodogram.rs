@@ -91,7 +91,7 @@ const PERIODOGRAM_INPUTS: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::NumericArray,
         arity: BuiltinParamArity::Required,
         default: None,
-        description: "Input signal vector or matrix with one signal per column.",
+        description: "Input signal vector or matrix with one signal per column. In RunMat its floating precision determines every numerical output class.",
     },
     BuiltinParamDescriptor {
         name: "window",
@@ -396,6 +396,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
         }
     }
+    let output_precision = super::common::output_precision::SignalPrecision::of(&x);
     let borrowed = std::iter::once(&x)
         .chain(rest.iter())
         .filter_map(|value| {
@@ -468,7 +469,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         None => parse_options(rest, input.rows, input.is_complex).await?,
     };
     let eval = compute_periodogram(&input.columns, &options)?;
-    output_eval(eval)
+    output_eval(eval, output_precision)
 }
 
 async fn ensure_periodogram_integer_boundary(
@@ -493,12 +494,17 @@ async fn ensure_periodogram_integer_boundary(
     Ok(())
 }
 
-fn output_eval(eval: PeriodogramEvaluation) -> BuiltinResult<Value> {
+fn output_eval(
+    eval: PeriodogramEvaluation,
+    precision: super::common::output_precision::SignalPrecision,
+) -> BuiltinResult<Value> {
     let freq_len = eval.f.len();
-    let pxx = Tensor::new(eval.pxx, vec![freq_len, eval.columns])
+    let pxx = precision
+        .real(eval.pxx, vec![freq_len, eval.columns])
         .map(Value::Tensor)
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e))?;
-    let f = Tensor::new(eval.f, vec![freq_len, 1])
+    let f = precision
+        .real(eval.f, vec![freq_len, 1])
         .map(Value::Tensor)
         .map_err(|e| periodogram_error_with_detail(&PERIODOGRAM_ERROR_INTERNAL, e))?;
     if let Some(out_count) = crate::output_count::current_output_count() {

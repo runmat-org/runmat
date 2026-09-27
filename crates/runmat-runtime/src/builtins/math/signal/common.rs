@@ -5,6 +5,8 @@ use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+pub(super) mod output_precision;
+
 const EPS: f64 = 1.0e-12;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

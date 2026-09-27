@@ -31,6 +31,7 @@
   },
   "description": "`spectrogram(x)` computes a short-time Fourier transform (STFT) of a signal. Optional arguments select the segment window, overlap, DFT length or explicit frequency grid, sampling frequency, frequency range, and PSD or power-spectrum scaling.",
   "behaviors": [
+    "RunMat returns every numerical output in the signal's floating precision: single signals produce single STFT, PSD, frequency, and time arrays, and double signals produce double arrays. STFT storage remains complex. Window and sampling-control classes do not change this rule. This is RunMat's policy, not a claim of verified MATLAB class parity. The host reference computes FFT and window arithmetic in double and casts once when publishing single outputs.",
     "`s = spectrogram(x)` returns the complex STFT matrix with time increasing across columns and frequency increasing down rows.",
     "`[s, f, t, ps] = spectrogram(...)` also returns the frequency vector, segment midpoint vector, and PSD or power-spectrum matrix.",
     "`win` may be a positive scalar length, a finite real window vector, or `[]`. `[]` uses a Hamming window sized to divide the signal into about eight 50%-overlapped sections.",

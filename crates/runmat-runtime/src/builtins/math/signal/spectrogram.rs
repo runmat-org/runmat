@@ -13,7 +13,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::Value;
 use rustfft::FftPlanner;
 
 use crate::builtins::common::spec::{
@@ -65,7 +65,7 @@ const SPECTROGRAM_OUTPUT_S: [BuiltinParamDescriptor; 1] = [BuiltinParamDescripto
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Complex short-time Fourier transform matrix.",
+    description: "Complex short-time Fourier transform matrix in the signal's floating precision, like every numerical output in RunMat.",
 }];
 
 const SPECTROGRAM_OUTPUT_FULL: [BuiltinParamDescriptor; 6] = [
@@ -428,6 +428,7 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
             crate::compatibility::ensure_builtin_extension_enabled(extension, BUILTIN_NAME)?;
         }
     }
+    let output_precision = super::common::output_precision::SignalPrecision::of(&x);
     let borrowed = std::iter::once(&x)
         .chain(rest.iter())
         .filter_map(|value| {
@@ -499,25 +500,30 @@ pub async fn evaluate(x: Value, rest: &[Value]) -> BuiltinResult<Value> {
         None => parse_options(rest, signal.data.len(), signal.is_complex).await?,
     };
     let eval = compute_spectrogram(&signal.data, &options)?;
-    output_eval(eval, options.reassigned)
+    output_eval(eval, options.reassigned, output_precision)
 }
 
-fn output_eval(eval: SpectrogramEvaluation, reassigned: bool) -> BuiltinResult<Value> {
+fn output_eval(
+    eval: SpectrogramEvaluation,
+    reassigned: bool,
+    precision: super::common::output_precision::SignalPrecision,
+) -> BuiltinResult<Value> {
     let rows = eval.f.len();
     let cols = eval.t.len();
-    let s = ComplexTensor::new(
-        eval.s.into_iter().map(|z| (z.re, z.im)).collect(),
-        vec![rows, cols],
-    )
-    .map(Value::ComplexTensor)
-    .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let f = Tensor::new(eval.f, vec![rows, 1])
+    let s = precision
+        .complex(eval.s, vec![rows, cols])
+        .map(Value::ComplexTensor)
+        .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
+    let f = precision
+        .real(eval.f, vec![rows, 1])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let t = Tensor::new(eval.t, vec![1, cols])
+    let t = precision
+        .real(eval.t, vec![1, cols])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-    let ps = Tensor::new(eval.ps, vec![rows, cols])
+    let ps = precision
+        .real(eval.ps, vec![rows, cols])
         .map(Value::Tensor)
         .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
 
@@ -527,10 +533,12 @@ fn output_eval(eval: SpectrogramEvaluation, reassigned: bool) -> BuiltinResult<V
         }
         let mut values = vec![s, f, t, ps];
         if reassigned {
-            let fc = Tensor::new(eval.fc, vec![rows, cols])
+            let fc = precision
+                .real(eval.fc, vec![rows, cols])
                 .map(Value::Tensor)
                 .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
-            let tc = Tensor::new(eval.tc, vec![rows, cols])
+            let tc = precision
+                .real(eval.tc, vec![rows, cols])
                 .map(Value::Tensor)
                 .map_err(|e| spectrogram_error_with_detail(&SPECTROGRAM_ERROR_INTERNAL, e))?;
             values.push(fc);
@@ -1241,7 +1249,7 @@ mod tests {
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::builtin_function_by_name;
-    use runmat_value::IntegerStorage;
+    use runmat_value::{IntegerStorage, Tensor};
 
     fn empty() -> Value {
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap())

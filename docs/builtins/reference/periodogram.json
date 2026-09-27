@@ -30,6 +30,7 @@
   },
   "description": "`periodogram(x)` estimates the power spectral density of a signal by windowing the full input and evaluating its DFT. Optional arguments select the analysis window, DFT length or explicit frequency grid, sampling frequency, frequency range, and spectrum scale.",
   "behaviors": [
+    "RunMat returns every numerical output in the signal's floating precision: single signals produce single PSD and frequency arrays, and double signals produce double arrays. Window and sampling-control classes do not change this rule. This is RunMat's policy, not a claim of verified MATLAB class parity. The host reference computes FFT and window arithmetic in double and casts once when publishing single outputs.",
     "`pxx = periodogram(x)` returns a one-sided PSD estimate for real inputs and a two-sided estimate for complex inputs.",
     "Matrix inputs are processed column-wise; `pxx` has one output column per input column.",
     "`[pxx, f] = periodogram(...)` also returns the frequency grid. Without `fs`, frequencies are in radians/sample; with `fs`, frequencies are in Hz. Passing `fs` as `[]` uses 1 Hz units.",
