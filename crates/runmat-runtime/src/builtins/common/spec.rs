@@ -4,13 +4,13 @@ mod canonical;
 mod admission;
 mod structural;
 mod epilogue;
+mod selected;
 pub use admission::*;
 pub use canonical::{
     canonical_fusion_declaration, canonical_fusion_spec, CanonicalFusionDeclaration,
 };
-pub use epilogue::{
-    fusion_binding_is_selected, fusion_epilogue_operation, FusionEpilogueOperation,
-};
+pub use epilogue::{fusion_epilogue_operation, FusionEpilogueOperation};
+pub use selected::{selected_fusion_binding, SelectedFusionBinding, SelectedFusionIdentity};
 pub use structural::FusionStructuralOperation;
 
 #[cfg(not(target_arch = "wasm32"))]

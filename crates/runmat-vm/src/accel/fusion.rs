@@ -661,7 +661,8 @@ pub fn resolve_reduction_geometry(
         }
         for node_id in &plan.group.nodes {
             if let Some(node) = graph.node(*node_id) {
-                if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name } = &node.label {
+                if let runmat_accelerate::graph::AccelNodeLabel::Builtin { name, .. } = &node.label
+                {
                     if name.eq_ignore_ascii_case("mean") {
                         for input_vid in &node.inputs {
                             if let Some(info) = graph.value(*input_vid) {

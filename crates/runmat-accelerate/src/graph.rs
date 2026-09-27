@@ -81,9 +81,16 @@ pub enum AccelOpCategory {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum AccelNodeLabel {
     Primitive(PrimitiveOp),
-    Builtin { name: String },
+    Builtin {
+        name: String,
+        #[serde(default)]
+        origin: FusionCallOrigin,
+    },
     Unknown,
 }
+
+mod call_origin;
+pub use call_origin::FusionCallOrigin;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PrimitiveOp {

@@ -18,12 +18,17 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
 pub async fn execute_matmul_epilogue_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
     // Admission reads typed operations and represented operands only. No
     // upload, metadata mutation, allocation or placement selection precedes it.
     // Provider precision/ownership metadata is read to validate representation.
-    let Some(admitted) = plan::AdmittedMatmul::new(&request, provider) else {
+    let Some(admitted) = plan::AdmittedMatmul::new(&request, provider, &bindings) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
@@ -38,6 +43,7 @@ pub async fn execute_matmul_epilogue_placed(
     };
     let selection = match select_fusion_provider_with_contract(
         &request,
+        &bindings,
         provider,
         vec![dense_output_representation(
             provider.precision(),

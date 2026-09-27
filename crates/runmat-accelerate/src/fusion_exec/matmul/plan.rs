@@ -2,10 +2,7 @@ use super::*;
 use crate::fusion::FusionOp;
 use crate::graph::PrimitiveOp;
 use runmat_accelerate_api::{MatmulAffine, MatmulEpilogue, MatmulOffset, ScaleOp};
-use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_declaration, fusion_binding_is_selected, fusion_epilogue_operation,
-    FusionEpilogueOperation, FusionStructuralOperation,
-};
+use runmat_runtime::builtins::common::spec::{FusionEpilogueOperation, FusionStructuralOperation};
 
 pub(super) struct AdmittedMatmul {
     pub left: ValueId,
@@ -36,25 +33,17 @@ enum Phase {
 
 fn matrix_root(
     operation: &FusionOp,
-    context: Option<&runmat_runtime::context::RuntimeContext>,
+    bindings: &AdmittedBindings,
 ) -> Option<(ValueId, ValueId, ValueId)> {
     let FusionOp::Builtin {
-        name,
         inputs,
         output: Some(output),
+        ..
     } = operation
     else {
         return None;
     };
-    if !fusion_binding_is_selected(name, context) {
-        return None;
-    }
-    let entry = runmat_builtins::builtin_catalog_entry_by_name(name)?;
-    let [binding] = entry.bindings else {
-        return None;
-    };
-    let declaration = canonical_fusion_declaration(entry.binding_identity(binding))?;
-    if declaration.structural != Some(FusionStructuralOperation::MatrixMultiply) {
+    if bindings.structural(0) != Some(FusionStructuralOperation::MatrixMultiply) {
         return None;
     }
     let [left, right] = inputs.as_slice() else {
@@ -81,6 +70,7 @@ impl AdmittedMatmul {
     pub fn new(
         request: &FusionExecutionRequest<'_>,
         provider: &'static dyn AccelProvider,
+        bindings: &AdmittedBindings,
     ) -> Option<Self> {
         if request.plan.group.kind != FusionKind::MatmulEpilogue
             || request.inputs.len() != request.plan.inputs.len()
@@ -88,7 +78,7 @@ impl AdmittedMatmul {
             return None;
         }
         let (root, operations) = request.plan.operations.split_first()?;
-        let (left, right, mut current) = matrix_root(root, request.runtime.as_ref())?;
+        let (left, right, mut current) = matrix_root(root, bindings)?;
         let mut result = Self {
             left,
             right,
@@ -112,29 +102,18 @@ impl AdmittedMatmul {
         // The provider executes fixed phases. Never reorder or algebraically
         // fold source operations across them, including floating-point rounds.
         let mut phase = Phase::Product;
-        for operation in operations {
+        for (index, operation) in operations.iter().enumerate() {
             let epilogue = match operation {
                 FusionOp::Builtin {
-                    name,
                     inputs,
                     output: Some(output),
-                } => Some((
-                    fusion_epilogue_operation(name, request.runtime.as_ref())?,
-                    inputs,
-                    output,
-                )),
+                    ..
+                } => Some((bindings.epilogue(index + 1)?, inputs, output)),
                 FusionOp::Primitive {
                     op: PrimitiveOp::ElemPow,
                     inputs,
                     output: Some(output),
-                } => Some((
-                    fusion_epilogue_operation(
-                        runmat_builtins::POWER_CATALOG_ENTRY.identity.name,
-                        request.runtime.as_ref(),
-                    )?,
-                    inputs,
-                    output,
-                )),
+                } => Some((bindings.epilogue(index + 1)?, inputs, output)),
                 _ => None,
             };
             if let Some((kind, inputs, output)) = epilogue {

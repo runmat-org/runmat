@@ -235,15 +235,16 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 break;
             }
             // Allow only primitive elementwise ops we can fold: add/sub/mul and elementwise divide
-            let allowed = matmul_boundary::is_declared_epilogue(next) || matches!(
-                next.label,
-                AccelNodeLabel::Primitive(PrimitiveOp::Add)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::ElemPow)
-            );
+            let allowed = matmul_boundary::is_declared_epilogue(next)
+                || matches!(
+                    next.label,
+                    AccelNodeLabel::Primitive(PrimitiveOp::Add)
+                        | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
+                        | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
+                        | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
+                        | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
+                        | AccelNodeLabel::Primitive(PrimitiveOp::ElemPow)
+                );
             if !allowed {
                 break;
             }
@@ -532,7 +533,7 @@ fn find_next_elementwise(
 
 fn is_elementwise_max_min(graph: &AccelGraph, node: &AccelNode) -> bool {
     match &node.label {
-        AccelNodeLabel::Builtin { name }
+        AccelNodeLabel::Builtin { name, .. }
             if name.eq_ignore_ascii_case("max") || name.eq_ignore_ascii_case("min") =>
         {
             if node.inputs.len() < 2 {
@@ -656,6 +657,7 @@ pub enum FusionOp {
     },
     Builtin {
         name: String,
+        origin: crate::graph::FusionCallOrigin,
         inputs: Vec<ValueId>,
         output: Option<ValueId>,
     },
@@ -808,7 +810,8 @@ fn sanitize_runtime_groups(graph: &AccelGraph, groups: &[FusionGroup]) -> Vec<Fu
             sanitized.nodes.dedup();
             if sanitized.nodes.is_empty()
                 || (sanitized.kind == FusionKind::MatmulEpilogue
-                    && !matmul_boundary::preserves_observable_values(graph, &sanitized)) {
+                    && !matmul_boundary::preserves_observable_values(graph, &sanitized))
+            {
                 None
             } else {
                 Some(sanitized)
@@ -1091,8 +1094,9 @@ impl FusionGroupPlan {
                     inputs: node.inputs.clone(),
                     output: node.outputs.first().copied(),
                 },
-                AccelNodeLabel::Builtin { name } => FusionOp::Builtin {
+                AccelNodeLabel::Builtin { name, origin } => FusionOp::Builtin {
                     name: name.clone(),
+                    origin: *origin,
                     inputs: node.inputs.clone(),
                     output: node.outputs.first().copied(),
                 },
@@ -1179,6 +1183,7 @@ impl FusionGroupPlan {
                             name: _,
                             inputs,
                             output,
+                            ..
                         } => {
                             if let Some(out) = output {
                                 prod.insert(*out, inputs.clone());
@@ -1704,6 +1709,7 @@ impl FusionGroupPlan {
                     name,
                     inputs,
                     output,
+                    ..
                 } => {
                     let expr = builtin_expr(name, inputs, &exprs, scalar_ty)?;
                     body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
@@ -1776,6 +1782,7 @@ impl FusionGroupPlan {
                     name,
                     inputs,
                     output,
+                    ..
                 } => {
                     let expr = builtin_expr(name, inputs, &exprs, scalar_ty)?;
                     body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
@@ -1919,6 +1926,7 @@ impl FusionGroupPlan {
                         name,
                         inputs,
                         output,
+                        ..
                     } => {
                         if let Some(out) = output {
                             if exprs.contains_key(out) {
@@ -2275,7 +2283,7 @@ fn detect_centered_gram(
             None => continue,
         };
         match &mean_node.label {
-            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mean") => {}
+            AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mean") => {}
             _ => continue,
         }
         if mean_node.inputs.is_empty() || mean_node.inputs[0] != matrix_val_id {
@@ -2434,7 +2442,7 @@ fn detect_power_step_normalize(
             continue;
         }
         match &matmul_node.label {
-            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mtimes") => {}
+            AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mtimes") => {}
             _ => continue,
         }
         if matmul_node.inputs.len() != 2 {
@@ -2517,7 +2525,7 @@ fn detect_explained_variance(
             continue;
         }
         match &diag_node.label {
-            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("diag") => {}
+            AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("diag") => {}
             _ => continue,
         }
         if diag_node.inputs.len() != 1 {
@@ -2532,7 +2540,7 @@ fn detect_explained_variance(
             continue;
         }
         match &matmul2_node.label {
-            AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mtimes") => {}
+            AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mtimes") => {}
             _ => continue,
         }
         if matmul2_node.inputs.len() != 2 {
@@ -2542,14 +2550,14 @@ fn detect_explained_variance(
         let (matmul1_id, matmul1_node, q_vid) = if let Some((mm_id, mm_node)) =
             node_from_value(graph, matmul2_node.inputs[0])
         {
-            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name } if name.eq_ignore_ascii_case("mtimes"))
+            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name, .. } if name.eq_ignore_ascii_case("mtimes"))
             {
                 (mm_id, mm_node, matmul2_node.inputs[1])
             } else {
                 continue;
             }
         } else if let Some((mm_id, mm_node)) = node_from_value(graph, matmul2_node.inputs[1]) {
-            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name } if name.eq_ignore_ascii_case("mtimes"))
+            if matches!(mm_node.label, AccelNodeLabel::Builtin { ref name, .. } if name.eq_ignore_ascii_case("mtimes"))
             {
                 (mm_id, mm_node, matmul2_node.inputs[0])
             } else {
@@ -2643,7 +2651,7 @@ fn analyze_power_step_denominator(
 
     let (sum_node_id, sum_node) = node_from_value(graph, sqrt_input_vid)?;
     match &sum_node.label {
-        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("sum") => {}
+        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("sum") => {}
         _ => return None,
     }
     if sum_node.inputs.is_empty() {
@@ -2693,7 +2701,7 @@ fn node_from_value(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, &AccelNo
 fn is_sqrt_node(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
-        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("sqrt") => {
+        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("sqrt") => {
             let input = node.inputs.first().copied()?;
             Some((node_id, input))
         }
@@ -2774,7 +2782,9 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                 }
                 let node_ref = graph.node(*node)?;
                 match &node_ref.label {
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("gpuarray") => {
+                    AccelNodeLabel::Builtin { name, .. }
+                        if name.eq_ignore_ascii_case("gpuarray") =>
+                    {
                         if node_ref.inputs.len() != 1 {
                             return None;
                         }
@@ -2857,7 +2867,7 @@ fn peel_numeric_casts(
                     return None;
                 }
                 let node_ref = graph.node(*node)?;
-                if let AccelNodeLabel::Builtin { name } = &node_ref.label {
+                if let AccelNodeLabel::Builtin { name, .. } = &node_ref.label {
                     if name.eq_ignore_ascii_case("gpuarray") {
                         if node_ref.inputs.len() != 1 {
                             return None;
@@ -3166,7 +3176,7 @@ fn split_max_with_zero_scalar(
 ) -> Option<(NodeId, ValueId)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
-        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max") => {
+        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max") => {
             if node.inputs.len() != 2 {
                 if log::log_enabled!(log::Level::Debug) {
                     log::debug!(
@@ -3241,7 +3251,7 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
 fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId, Vec<f64>)> {
     let (node_id, node) = node_from_value(graph, vid)?;
     match &node.label {
-        AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mean") => {}
+        AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mean") => {}
         _ => return None,
     }
     if node.inputs.len() < 2 {
@@ -4080,6 +4090,7 @@ mod tests {
         let tanh_node = AccelNode {
             id: 0,
             label: AccelNodeLabel::Builtin {
+                origin: Default::default(),
                 name: "tanh".into(),
             },
             category: AccelOpCategory::Elementwise,
@@ -4091,6 +4102,7 @@ mod tests {
         let single_node = AccelNode {
             id: 1,
             label: AccelNodeLabel::Builtin {
+                origin: Default::default(),
                 name: "single".into(),
             },
             category: AccelOpCategory::Elementwise,

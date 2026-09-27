@@ -109,7 +109,10 @@ mod tests {
             let node_id = node_id as u32;
             graph.nodes.push(AccelNode {
                 id: node_id,
-                label: AccelNodeLabel::Builtin { name: name.into() },
+                label: AccelNodeLabel::Builtin {
+                    name: name.into(),
+                    origin: Default::default(),
+                },
                 category: AccelOpCategory::Elementwise,
                 inputs: vec![node_id],
                 outputs: vec![node_id + 1],

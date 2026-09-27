@@ -22,7 +22,9 @@ fn compile_graph(source: &str) -> AccelGraph {
 
 fn has_builtin(graph: &AccelGraph, name: &str) -> bool {
     graph.nodes.iter().any(|node| match &node.label {
-        AccelNodeLabel::Builtin { name: node_name } => node_name.eq_ignore_ascii_case(name),
+        AccelNodeLabel::Builtin {
+            name: node_name, ..
+        } => node_name.eq_ignore_ascii_case(name),
         _ => false,
     })
 }

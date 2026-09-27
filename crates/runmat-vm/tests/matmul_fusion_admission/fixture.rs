@@ -65,6 +65,7 @@ pub(super) fn requested(expression: &str, left: Option<Value>) -> (FusionGroupPl
                     output: Some(output),
                 },
                 None => FusionOp::Builtin {
+                    origin: Default::default(),
                     name: name.into(),
                     inputs: operands,
                     output: Some(output),

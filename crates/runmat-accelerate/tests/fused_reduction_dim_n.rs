@@ -116,7 +116,10 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_y],
@@ -163,6 +166,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
+                    origin: Default::default(),
                     name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_y),

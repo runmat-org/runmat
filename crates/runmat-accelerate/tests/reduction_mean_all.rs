@@ -98,6 +98,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
     let node_mean = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
+            origin: Default::default(),
             name: "mean".into(),
         },
         category: AccelOpCategory::Reduction,
@@ -139,6 +140,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
                 output: Some(v_sq),
             },
             FusionOp::Builtin {
+                origin: Default::default(),
                 name: "mean".into(),
                 inputs: vec![v_sq, v_all],
                 output: Some(v_mse),

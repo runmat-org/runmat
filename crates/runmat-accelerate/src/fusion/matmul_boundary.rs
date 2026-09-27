@@ -3,7 +3,7 @@
 use super::{AccelGraph, FusionGroup};
 
 pub(super) fn is_declared_epilogue(node: &crate::graph::AccelNode) -> bool {
-    let crate::graph::AccelNodeLabel::Builtin { name } = &node.label else {
+    let crate::graph::AccelNodeLabel::Builtin { name, .. } = &node.label else {
         return false;
     };
     runmat_runtime::builtins::common::spec::fusion_epilogue_operation(name, None).is_some_and(

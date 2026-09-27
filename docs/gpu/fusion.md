@@ -4,6 +4,10 @@ The fusion engine identifies semantic regions that can run as a single accelerat
 
 This allows a single GPU kernel to perform multiple operations in a single dispatch, reducing the overhead of launching and synchronizing kernels.
 
+Graph operations retain whether they came from operator syntax or a named call. Normalizing `A*B` to the matrix-product declaration does not turn it into a call to a scoped `mtimes` replacement. Named canonical calls carry the existing catalog binding identity; older serialized nodes remain named and unresolved, never inferred to be operators from their spelling. Runtime graphs are rebuilt from bytecode instructions, and explicit unknown serialized binding identities are rejected.
+
+Every placed fusion family validates named bindings against the current runtime service before numerical probes or provider work. Replaced, absent, or ambiguous bindings retain ordinary dispatch. Object and other open-ended operands also retain runtime method dispatch. The request-local binding evidence participates in placement identity; it is not cached as permission for another invocation. Legacy declarations retain their unique physical-owner join only when no scoped service owns resolution. Shape, representation, and numerical-domain admission remain separate requirements after this binding check.
+
 Residency management is the other half of the system. Once a value becomes `Value::GpuTensor`, the VM and provider need to know when that handle is still live, when it can be reused, and when it must be freed or gathered back to host memory.
 
 ## Fusion Pipeline

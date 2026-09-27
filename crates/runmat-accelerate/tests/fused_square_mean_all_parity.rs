@@ -85,6 +85,7 @@ async fn fused_square_mean_all_matches_cpu() {
     let mean_node = AccelNode {
         id: 1,
         label: AccelNodeLabel::Builtin {
+            origin: Default::default(),
             name: "mean".into(),
         },
         category: AccelOpCategory::Reduction,
@@ -124,6 +125,7 @@ async fn fused_square_mean_all_matches_cpu() {
                 output: Some(v_sq),
             },
             FusionOp::Builtin {
+                origin: Default::default(),
                 name: "mean".into(),
                 inputs: vec![v_sq, v_all],
                 output: Some(v_mean),

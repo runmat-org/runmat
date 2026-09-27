@@ -496,15 +496,20 @@ impl<'a> GraphBuilder<'a> {
             }
         };
         if op == PrimitiveOp::Mul && !self.value_is_scalar(lhs) && !self.value_is_scalar(rhs) {
-            // `*` and the named matrix-product call share one canonical graph
-            // operation. Scalar scaling retains the elementwise primitive;
-            // unknown operands remain subject to the matmul executor's checks.
+            // Share the matrix declaration without erasing operator syntax:
+            // a named mtimes override is not primitive numeric multiplication.
             let inputs = vec![lhs, rhs];
             let out_type = self.infer_matmul_type(&inputs);
             let name = runmat_types::OperatorOverloadMethod::MatrixMultiply
                 .name()
                 .display_name();
-            self.push_builtin_node(pc, name, inputs, out_type);
+            self.push_builtin_node(
+                pc,
+                name,
+                inputs,
+                out_type,
+                runmat_types::OperatorKind::MatrixMultiply,
+            );
             return;
         }
         let inputs = vec![lhs, rhs];
@@ -567,7 +572,13 @@ impl<'a> GraphBuilder<'a> {
         }
 
         let out_type = self.infer_right_divide_type(lhs, rhs);
-        self.push_builtin_node(pc, "mrdivide", vec![lhs, rhs], out_type);
+        self.push_builtin_node(
+            pc,
+            "mrdivide",
+            vec![lhs, rhs],
+            out_type,
+            runmat_types::OperatorKind::Mrdivide,
+        );
     }
 
     fn handle_left_divide(&mut self, pc: usize) {
@@ -592,7 +603,13 @@ impl<'a> GraphBuilder<'a> {
         }
 
         let out_type = self.infer_left_divide_type(lhs, rhs);
-        self.push_builtin_node(pc, "mldivide", vec![lhs, rhs], out_type);
+        self.push_builtin_node(
+            pc,
+            "mldivide",
+            vec![lhs, rhs],
+            out_type,
+            runmat_types::OperatorKind::Mldivide,
+        );
     }
 
     fn push_binary_primitive_node(
@@ -631,7 +648,14 @@ impl<'a> GraphBuilder<'a> {
         self.stack.push(out_value);
     }
 
-    fn push_builtin_node(&mut self, pc: usize, name: &str, inputs: Vec<ValueId>, out_type: Type) {
+    fn push_builtin_node(
+        &mut self,
+        pc: usize,
+        name: &str,
+        inputs: Vec<ValueId>,
+        out_type: Type,
+        operator: runmat_types::OperatorKind,
+    ) {
         let info = self
             .builtin_cache
             .get(&name.to_ascii_lowercase())
@@ -644,7 +668,10 @@ impl<'a> GraphBuilder<'a> {
         let span = InstrSpan { start: pc, end: pc };
         let mut node = AccelNode {
             id: node_id,
-            label: AccelNodeLabel::Builtin { name: name.into() },
+            label: AccelNodeLabel::Builtin {
+                name: name.into(),
+                origin: runmat_accelerate::graph::FusionCallOrigin::Operator(operator),
+            },
             category: info.category,
             inputs: inputs.clone(),
             outputs: Vec::new(),
@@ -782,7 +809,10 @@ impl<'a> GraphBuilder<'a> {
         let span = InstrSpan { start: pc, end: pc };
         let mut node = AccelNode {
             id: node_id,
-            label: AccelNodeLabel::Builtin { name: name.into() },
+            label: AccelNodeLabel::Builtin {
+                name: name.into(),
+                origin: runmat_accelerate::graph::FusionCallOrigin::named(name),
+            },
             category: category.clone(),
             inputs: inputs.clone(),
             outputs: Vec::new(),
@@ -1316,7 +1346,7 @@ mod tests {
         for node in &graph.nodes {
             if matches!(
                 &node.label,
-                AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mrdivide")
+                AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("mrdivide")
             ) {
                 let out_id = node.outputs.first().copied().expect("output");
                 let value = graph.value(out_id).expect("value");
@@ -1348,7 +1378,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("trapz")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("trapz")
                 )
             })
             .expect("trapz node");
@@ -1377,7 +1407,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("cumtrapz")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("cumtrapz")
                 )
             })
             .expect("cumtrapz node");
@@ -1402,7 +1432,7 @@ mod tests {
                 instructions.push(Instr::CallBuiltinMulti(name.into(), arguments, outputs));
                 let graph = build_accel_graph(&instructions, &vec![Type::Unknown; arguments]);
                 let node = graph.nodes.iter().find(|node| {
-                    matches!(&node.label, AccelNodeLabel::Builtin { name: actual } if actual == name)
+                    matches!(&node.label, AccelNodeLabel::Builtin { name: actual, .. } if actual == name)
                 }).expect("canonical call node");
                 assert_eq!(node.category, expected, "{name}/{arguments}/{outputs}");
                 if expected == AccelOpCategory::Other {
@@ -1428,7 +1458,7 @@ mod tests {
             instructions.push(Instr::CallBuiltinMulti("mtimes".into(), arguments, outputs));
             let graph = build_accel_graph(&instructions, &vec![Type::Unknown; arguments]);
             let node = graph.nodes.iter().find(|node| {
-                matches!(&node.label, AccelNodeLabel::Builtin { name } if name == "mtimes")
+                matches!(&node.label, AccelNodeLabel::Builtin { name, .. } if name == "mtimes")
             }).unwrap();
             assert_eq!(node.category, expected, "{arguments}/{outputs}");
             assert_eq!(
@@ -1436,6 +1466,33 @@ mod tests {
                 expected == AccelOpCategory::MatMul
             );
         }
+    }
+
+    #[test]
+    fn rebuilt_graph_distinguishes_primitive_matrix_product_from_named_call() {
+        use runmat_accelerate::graph::FusionCallOrigin;
+        let origin = |instruction| {
+            let graph = build_accel_graph(
+                &[Instr::LoadVar(0), Instr::LoadVar(1), instruction],
+                &[Type::Unknown, Type::Unknown],
+            );
+            graph
+                .nodes
+                .into_iter()
+                .find_map(|node| match node.label {
+                    AccelNodeLabel::Builtin { name, origin } if name == "mtimes" => Some(origin),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        assert_eq!(
+            origin(Instr::Mul),
+            FusionCallOrigin::Operator(runmat_types::OperatorKind::MatrixMultiply)
+        );
+        assert_eq!(
+            origin(Instr::CallBuiltinMulti("mtimes".into(), 2, 1)),
+            FusionCallOrigin::named("mtimes")
+        );
     }
 
     #[test]
@@ -1457,7 +1514,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max")
                 )
             })
             .expect("max node");
@@ -1498,7 +1555,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max")
                 )
             })
             .expect("max node");
@@ -1532,7 +1589,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max")
                 )
             })
             .expect("max node");
@@ -1564,7 +1621,7 @@ mod tests {
             .find(|node| {
                 matches!(
                     &node.label,
-                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("max")
+                    AccelNodeLabel::Builtin { name, .. } if name.eq_ignore_ascii_case("max")
                 )
             })
             .expect("max node");

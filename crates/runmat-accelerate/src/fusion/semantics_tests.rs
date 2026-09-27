@@ -36,6 +36,7 @@ fn plan(operations: Vec<FusionOp>, output: ValueId) -> FusionGroupPlan {
 
 fn cast(name: &str, input: ValueId, output: ValueId) -> FusionOp {
     FusionOp::Builtin {
+        origin: Default::default(),
         name: name.into(),
         inputs: vec![input],
         output: Some(output),

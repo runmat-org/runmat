@@ -5,6 +5,11 @@ async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
 ) -> Result<FusionExecutionOutcome<HashMap<ValueId, Value>>> {
+    let Some(bindings) = AdmittedBindings::new(request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind"));
@@ -174,6 +179,7 @@ async fn execute_elementwise_outputs(
     ))?);
     let selection = select_fusion_provider_with_contract(
         request,
+        &bindings,
         provider,
         representations,
         Some(semantic_identity),

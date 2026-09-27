@@ -106,7 +106,10 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -145,6 +148,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
+                    origin: Default::default(),
                     name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
@@ -246,7 +250,10 @@ fn nlms_two_fused_reductions_integration() {
         };
         let sum_node = AccelNode {
             id: 1,
-            label: AccelNodeLabel::Builtin { name: "sum".into() },
+            label: AccelNodeLabel::Builtin {
+                name: "sum".into(),
+                origin: Default::default(),
+            },
             category: AccelOpCategory::Reduction,
             inputs: vec![v_mul, v_dim],
             outputs: vec![v_sum],
@@ -292,6 +299,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_mul),
                 },
                 FusionOp::Builtin {
+                    origin: Default::default(),
                     name: "sum".into(),
                     inputs: vec![v_mul, v_dim],
                     output: Some(v_sum),
@@ -442,6 +450,7 @@ fn nlms_two_fused_reductions_integration() {
         let mean_node = AccelNode {
             id: 1,
             label: AccelNodeLabel::Builtin {
+                origin: Default::default(),
                 name: "mean".into(),
             },
             category: AccelOpCategory::Reduction,
@@ -480,6 +489,7 @@ fn nlms_two_fused_reductions_integration() {
                     output: Some(v_sq),
                 },
                 FusionOp::Builtin {
+                    origin: Default::default(),
                     name: "mean".into(),
                     inputs: vec![v_sq, v_all],
                     output: Some(v_mean),

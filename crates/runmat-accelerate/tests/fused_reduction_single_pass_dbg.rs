@@ -118,6 +118,7 @@ fn fused_single_pass_sum_mul_no_alias() {
                 output: Some(v_mul),
             },
             FusionOp::Builtin {
+                origin: Default::default(),
                 name: "sum".into(),
                 inputs: vec![v_mul, v_dim],
                 output: Some(v_sum),

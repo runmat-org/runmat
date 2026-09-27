@@ -79,7 +79,10 @@ fn sum_native_graph() -> AccelGraph {
 
     let sum_node = AccelNode {
         id: 1,
-        label: AccelNodeLabel::Builtin { name: "sum".into() },
+        label: AccelNodeLabel::Builtin {
+            name: "sum".into(),
+            origin: Default::default(),
+        },
         category: AccelOpCategory::Reduction,
         inputs: vec![v_mul, v_dim, v_native],
         outputs: vec![v_sum],

@@ -19,6 +19,8 @@ static PROVIDER: Lazy<InProcessProvider> = Lazy::new(InProcessProvider::new);
 mod fixture;
 #[path = "matmul_fusion_admission/no_upload.rs"]
 mod no_upload;
+#[path = "matmul_fusion_admission/selected_binding.rs"]
+mod selected_binding;
 
 fn tensor(data: &[f64], shape: &[usize]) -> Value {
     Value::Tensor(Tensor::new(data.to_vec(), shape.to_vec()).unwrap())

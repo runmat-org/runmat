@@ -1970,7 +1970,10 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".into(),
+                    origin: Default::default(),
+                },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],
@@ -2459,7 +2462,10 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".into(),
+                    origin: Default::default(),
+                },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],
@@ -2508,7 +2514,10 @@ mod tests {
         let accel_graph = runmat_accelerate::graph::AccelGraph {
             nodes: vec![runmat_accelerate::graph::AccelNode {
                 id: 0,
-                label: runmat_accelerate::graph::AccelNodeLabel::Builtin { name: "sum".into() },
+                label: runmat_accelerate::graph::AccelNodeLabel::Builtin {
+                    name: "sum".into(),
+                    origin: Default::default(),
+                },
                 category: runmat_accelerate::graph::AccelOpCategory::Reduction,
                 inputs: vec![0],
                 outputs: vec![1],

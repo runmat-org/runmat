@@ -32,6 +32,8 @@ use std::sync::OnceLock;
 mod observation;
 mod provider_observation;
 use provider_observation::FusionPlacementSelection;
+mod admission;
+use admission::AdmittedBindings;
 mod outputs;
 mod elementwise;
 pub use elementwise::{execute_elementwise, execute_elementwise_placed};
@@ -182,11 +184,13 @@ fn fusion_input_elements(values: &[Value]) -> Option<usize> {
 
 fn select_fusion_provider(
     request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     output_shapes: &[Vec<usize>],
 ) -> Result<FusionExecutionOutcome<FusionPlacementSelection>> {
     select_fusion_provider_with_contract(
         request,
+        bindings,
         provider,
         output_shapes
             .iter()
@@ -201,6 +205,7 @@ fn select_fusion_provider(
 
 fn select_fusion_provider_with_contract(
     request: &FusionExecutionRequest<'_>,
+    bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     outputs: Vec<runmat_accelerate_api::ProviderRepresentation>,
     semantic_identity: Option<runmat_execution::Digest>,
@@ -218,6 +223,7 @@ fn select_fusion_provider_with_contract(
     };
     let observer = FusionPlacementObserver::new(request.placement);
     let typed_elementwise = semantic_identity.is_some() && request.plan.group.kind.is_elementwise();
+    let semantic_identity = Some(bindings.identity(semantic_identity)?);
     let input_refs = matmul.as_ref().map_or_else(
         || request.inputs.iter().collect::<Vec<_>>(),
         |contract| contract.inputs.clone(),
@@ -585,6 +591,11 @@ pub fn execute_reduction_with_shape_placed(
     output_shape: &[usize],
     workgroup_size: u32,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").is_ok() {
         return Err(anyhow!("fused reduction disabled by env"));
     }
@@ -612,7 +623,8 @@ pub fn execute_reduction_with_shape_placed(
         let constant_shape = request.plan.constant_shape(len);
         normalize_scalar_shape(&vec![1; constant_shape.len()])
     };
-    let selection = select_fusion_provider(&request, provider, &[output_shape.to_vec()])?;
+    let selection =
+        select_fusion_provider(&request, &bindings, provider, &[output_shape.to_vec()])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -766,13 +778,18 @@ pub async fn execute_centered_gram(request: FusionExecutionRequest<'_>) -> Resul
 pub async fn execute_centered_gram_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::CenteredGram {
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -836,13 +853,18 @@ pub async fn execute_power_step_normalize(request: FusionExecutionRequest<'_>) -
 pub async fn execute_power_step_normalize_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::PowerStepNormalize {
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -917,13 +939,18 @@ pub async fn execute_explained_variance(request: FusionExecutionRequest<'_>) -> 
 pub async fn execute_explained_variance_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ExplainedVariance {
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -1090,13 +1117,18 @@ pub async fn execute_image_normalize(request: FusionExecutionRequest<'_>) -> Res
 pub async fn execute_image_normalize_placed(
     request: FusionExecutionRequest<'_>,
 ) -> Result<FusionExecutionOutcome<Value>> {
+    let Some(bindings) = AdmittedBindings::new(&request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     crate::ensure_residency_hooks();
     reject_native_integer_fusion_inputs(&request)?;
     if request.plan.group.kind != FusionKind::ImageNormalize {
         return Err(anyhow!("unsupported fusion kind"));
     }
     let provider = provider().ok_or_else(|| anyhow!("no acceleration provider registered"))?;
-    let selection = select_fusion_provider(&request, provider, &[])?;
+    let selection = select_fusion_provider(&request, &bindings, provider, &[])?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {

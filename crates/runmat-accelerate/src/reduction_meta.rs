@@ -36,7 +36,7 @@ pub fn detect_reduction_signature(
         return None;
     }
     let (name_opt, inputs) = match &node.label {
-        crate::graph::AccelNodeLabel::Builtin { name } => {
+        crate::graph::AccelNodeLabel::Builtin { name, .. } => {
             (Some(name.as_str()), node.inputs.as_slice())
         }
         _ => (None, node.inputs.as_slice()),
