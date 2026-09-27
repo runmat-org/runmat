@@ -47,20 +47,37 @@ pub(super) fn admit_real_resident(
             element,
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
-    }) && crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
-        .is_some()
-        && (handle.shape().contains(&0)
-            || handle
-                .shape()
-                .iter()
-                .try_fold(1usize, |count, extent| count.checked_mul(*extent))
-                .is_some());
+    }) && (handle.shape().contains(&0)
+        || handle
+            .shape()
+            .iter()
+            .try_fold(1usize, |count, extent| count.checked_mul(*extent))
+            .is_some());
     if !valid {
         return Err(super::unary::error_with_detail(
             builtin,
             error,
             "expected an owned real numeric resident input",
         ));
+    }
+    Ok(())
+}
+
+// Provider availability is an execution precondition, not source-language
+// numeric admission. Check it only after pure operand-pair errors are resolved.
+pub(super) fn require_resident_provider(
+    value: &Value,
+    builtin: &str,
+    error: &'static runmat_builtins::BuiltinErrorDescriptor,
+) -> BuiltinResult<()> {
+    if let Value::GpuTensor(handle) = value {
+        if crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle).is_none() {
+            return Err(super::unary::error_with_detail(
+                builtin,
+                error,
+                "expected an owned real numeric resident input",
+            ));
+        }
     }
     Ok(())
 }

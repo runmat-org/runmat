@@ -126,6 +126,8 @@ async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     if crate::builtins::duration::is_duration_object(&lhs)
         || crate::builtins::duration::is_duration_object(&rhs)
     {
+        super::binary::require_resident_provider(&lhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
+        super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
         let lhs = gather_value(lhs).await?;
         let rhs = gather_value(rhs).await?;
         return match super::binary::plan_duration(lhs, rhs, BUILTIN_NAME)
@@ -154,6 +156,8 @@ async fn mod_non_tabular(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
     crate::builtins::common::validation::reject_typed_complex_integer(&rhs, BUILTIN_NAME)?;
     reject_integer_logical_operands(&lhs, &rhs, BUILTIN_NAME)
         .map_err(|error| mod_error_with_detail(&MOD_ERROR_INVALID_INPUT, error))?;
+    super::binary::require_resident_provider(&lhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
+    super::binary::require_resident_provider(&rhs, BUILTIN_NAME, &MOD_ERROR_INVALID_INPUT)?;
     super::preparation::remainder(
         &runmat_builtins::MOD_CATALOG_ENTRY,
         runmat_types::FloatingRemainderKind::Modulus,
@@ -195,6 +199,8 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
     if floating_shape.is_some()
         || (runmat_accelerate_api::handle_integer_type(&a).is_some()
             && runmat_accelerate_api::handle_integer_type(&b).is_some()
+            && !runmat_accelerate_api::handle_is_logical(&a)
+            && !runmat_accelerate_api::handle_is_logical(&b)
             && common_binary::matching_physical_inputs(&a, &b))
     {
         let result = {

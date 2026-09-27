@@ -24,14 +24,14 @@ fn class(value: &Value) -> OperandClass {
         }
         Value::Num(_) => OperandClass::RealDouble,
         Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_storage(handle)
-                == runmat_accelerate_api::GpuTensorStorage::Real =>
+            if !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_storage(handle)
+                    == runmat_accelerate_api::GpuTensorStorage::Real =>
         {
             if let Some(class) = runmat_accelerate_api::handle_integer_class(handle) {
                 OperandClass::Integer(class)
-            } else if !runmat_accelerate_api::handle_is_logical(handle)
-                && runmat_accelerate_api::handle_precision(handle)
-                    == Some(runmat_accelerate_api::ProviderPrecision::F64)
+            } else if runmat_accelerate_api::handle_precision(handle)
+                == Some(runmat_accelerate_api::ProviderPrecision::F64)
             {
                 OperandClass::RealDouble
             } else {

@@ -49,7 +49,10 @@ fn value_is_integer(value: &Value) -> bool {
         Value::Int(_) => true,
         Value::Tensor(tensor) => tensor.integer_storage().is_some(),
         Value::SparseTensor(tensor) => tensor.integer_storage().is_some(),
-        Value::GpuTensor(handle) => runmat_accelerate_api::handle_integer_type(handle).is_some(),
+        Value::GpuTensor(handle) => {
+            !runmat_accelerate_api::handle_is_logical(handle)
+                && runmat_accelerate_api::handle_integer_type(handle).is_some()
+        }
         _ => false,
     }
 }
@@ -916,6 +919,39 @@ fn integer_values_into_value(
 mod tests {
     use super::*;
     use runmat_value::LogicalArray;
+
+    #[test]
+    fn logical_u8_is_not_integer_arithmetic_even_with_integer_physical_storage() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
+        let logical = owner.allocate_logical(vec![1], vec![1, 1]).unwrap();
+        let resident = Value::GpuTensor(logical.handle.clone());
+        assert_eq!(
+            runmat_accelerate_api::handle_integer_type(&logical.handle),
+            Some(runmat_accelerate_api::IntegerElementType::U8)
+        );
+        assert!(!value_is_integer(&resident));
+        for other in [
+            Value::Bool(true),
+            Value::LogicalArray(LogicalArray::new(vec![1], vec![1, 1]).unwrap()),
+            resident.clone(),
+        ] {
+            for (left, right) in [(&resident, &other), (&other, &resident)] {
+                reject_integer_logical_operands(left, right, "plus").unwrap();
+                validate_integer_binary_inputs(left, right, true, true, "plus").unwrap();
+            }
+        }
+        for (left, right) in [
+            (&resident, &Value::Int(IntValue::I64(2))),
+            (&Value::Int(IntValue::I64(2)), &resident),
+        ] {
+            assert!(reject_integer_logical_operands(left, right, "plus")
+                .unwrap_err()
+                .contains("scalar double"));
+        }
+        drop(resident);
+        logical.handle.release().unwrap();
+        assert_eq!(logical.probe.retirements(), 1);
+    }
 
     fn integer(storage: IntegerStorage, shape: Vec<usize>) -> Value {
         Value::Tensor(Tensor::new_integer(storage, shape).expect("integer tensor"))
