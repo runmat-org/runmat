@@ -1,7 +1,7 @@
 mod output;
 mod policy;
 
-use super::super::super::support::facts::{materialize, preserve_shape_as_dynamic};
+use super::super::super::support::facts::{materialize_floating_result, preserve_shape_as_dynamic};
 use super::super::super::{argument_error, finish_fixed};
 use crate::{BuiltinCatalogEntry, LogarithmKind};
 use runmat_types::{CallInference, CallRequest, DynamicReason, StorageFact, ValueFact};
@@ -55,7 +55,7 @@ pub(super) fn infer_value(
         .and_then(|literal| super::literal_domain::infer(literal, policy.real_boundary()));
     let mut inferred = output::infer(policy, input, literal_domain, &mut diagnostics);
     if inferred.materialize {
-        materialize(&mut inferred.value);
+        materialize_floating_result(&mut inferred.value, false);
     } else if inferred.preserve_dynamic_shape {
         preserve_shape_as_dynamic(&mut inferred.value);
     }

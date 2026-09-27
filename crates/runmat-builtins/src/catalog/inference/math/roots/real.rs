@@ -2,7 +2,7 @@
 mod tests;
 
 use crate::catalog::inference::support::facts::{
-    materialize_preserving_sparse_storage, preserve_shape_as_dynamic,
+    materialize_floating_result, preserve_shape_as_dynamic,
 };
 use crate::catalog::inference::{argument_error, finish_fixed};
 use crate::BuiltinCatalogEntry;
@@ -43,7 +43,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
                     0,
                 ));
             }
-            materialize_preserving_sparse_storage(&mut output);
+            materialize_floating_result(&mut output, true);
             if matches!(output.storage, StorageFact::Sparse) {
                 output.residency = ResidencyFact::Host;
             } else if matches!(output.residency, ResidencyFact::Device { .. }) {

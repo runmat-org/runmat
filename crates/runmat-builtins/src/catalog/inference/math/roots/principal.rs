@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests;
 
-use crate::catalog::inference::support::facts::{materialize, preserve_shape_as_dynamic};
+use crate::catalog::inference::support::facts::{
+    materialize_floating_result, preserve_shape_as_dynamic,
+};
 use crate::catalog::inference::{finish_fixed, numeric_kind};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
@@ -97,7 +99,7 @@ fn infer_output(
 
 fn set_numeric_output(output: &mut ValueFact, class: NumericClass, domain: NumericDomain) {
     output.kind = numeric_kind(class, domain);
-    materialize(output);
+    materialize_floating_result(output, false);
     if matches!(output.residency, ResidencyFact::Device { .. }) {
         output.residency = ResidencyFact::Unknown;
     }

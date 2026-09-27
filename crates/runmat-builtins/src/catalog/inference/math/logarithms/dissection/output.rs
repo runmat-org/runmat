@@ -1,4 +1,6 @@
-use super::super::super::super::support::facts::{materialize, preserve_shape_as_dynamic};
+use super::super::super::super::support::facts::{
+    materialize_floating_result, preserve_shape_as_dynamic,
+};
 use super::super::super::super::{argument_error, numeric_kind};
 use runmat_types::{
     AliasFact, DynamicReason, MutationFact, NumericClass, NumericDomain, ResidencyFact,
@@ -54,12 +56,12 @@ pub(super) fn infer(
                 numeric.class = NumericClass::Double;
             }
             numeric.domain = NumericDomain::Real;
-            materialize(&mut output);
+            materialize_floating_result(&mut output, false);
             output
         }
         ValueKindFact::Logical | ValueKindFact::Character => {
             output.kind = numeric_kind(NumericClass::Double, NumericDomain::Real);
-            materialize(&mut output);
+            materialize_floating_result(&mut output, false);
             output
         }
         ValueKindFact::Object(object)
