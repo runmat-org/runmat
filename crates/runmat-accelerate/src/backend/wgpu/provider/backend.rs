@@ -153,13 +153,19 @@ mod trait_impl;
 pub(super) use backend_shared::*;
 pub(super) use backend_types::*;
 #[cfg(not(target_arch = "wasm32"))]
-fn install_device_error_handlers(device: &wgpu::Device) {
+fn install_device_error_handlers(device: &wgpu::Device) -> Arc<std::sync::atomic::AtomicBool> {
     device.on_uncaptured_error(Box::new(|error| {
         error!("WGPU uncaptured error: {:?}", error);
     }));
-    device.set_device_lost_callback(|reason, message| {
+    let observation_stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let weak = Arc::downgrade(&observation_stopped);
+    device.set_device_lost_callback(move |reason, message| {
         error!("WGPU device lost: reason={:?}, message={}", reason, message);
+        if let Some(stopped) = weak.upgrade() {
+            stopped.store(true, std::sync::atomic::Ordering::Release);
+        }
     });
+    observation_stopped
 }
 
 #[cfg(target_arch = "wasm32")]

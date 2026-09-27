@@ -13,7 +13,7 @@ use std::sync::{
 struct State {
     used: AtomicU32,
     limit: u32,
-    stopped: AtomicBool,
+    stopped: Arc<AtomicBool>,
 }
 struct Slot(Arc<State>);
 impl Drop for Slot {
@@ -65,19 +65,13 @@ impl NativeObservationProgress {
     pub(super) fn start(
         device: Arc<wgpu::Device>,
         limit: NonZeroU32,
+        stopped: Arc<AtomicBool>,
     ) -> std::io::Result<Arc<Self>> {
         let (sender, receiver) = sync_channel::<Job>(limit.get() as usize);
         let state = Arc::new(State {
             used: AtomicU32::new(0),
             limit: limit.get(),
-            stopped: AtomicBool::new(false),
-        });
-        let weak_state = Arc::downgrade(&state);
-        device.set_device_lost_callback(move |reason, message| {
-            log::warn!("GPU observation device lost: {reason:?}: {message}");
-            if let Some(state) = weak_state.upgrade() {
-                state.stopped.store(true, Ordering::Release);
-            }
+            stopped,
         });
         let worker_state = state.clone();
         // Detached worker owns Device, not Provider or a sender. Closing all

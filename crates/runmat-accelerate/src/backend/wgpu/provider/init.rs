@@ -234,6 +234,9 @@ impl WgpuProvider {
             .await
             .map_err(|err| anyhow!(err.to_string()))?;
         let device = Arc::new(device_raw);
+        #[cfg(not(target_arch = "wasm32"))]
+        let observation_stopped = install_device_error_handlers(&device);
+        #[cfg(target_arch = "wasm32")]
         install_device_error_handlers(&device);
         let queue = Arc::new(queue_raw);
         let adapter = Arc::new(adapter);
@@ -376,6 +379,7 @@ impl WgpuProvider {
         let observation_progress = super::observation_progress::NativeObservationProgress::start(
             device.clone(),
             std::num::NonZeroU32::new(64).expect("nonzero observation mailbox bound"),
+            observation_stopped,
         )
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
         .ok();

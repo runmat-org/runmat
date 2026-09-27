@@ -8,7 +8,7 @@ fn isolated(limit: u32) -> (NativeObservationProgress, std::sync::mpsc::Receiver
             state: Arc::new(State {
                 used: AtomicU32::new(0),
                 limit,
-                stopped: AtomicBool::new(false),
+                stopped: Arc::new(AtomicBool::new(false)),
             }),
         },
         receiver,
@@ -64,7 +64,7 @@ fn worker_poll_failure_or_device_loss_fails_and_drains_bounded_queue() {
         let state = Arc::new(State {
             used: AtomicU32::new(2),
             limit: 2,
-            stopped: AtomicBool::new(false),
+            stopped: Arc::new(AtomicBool::new(false)),
         });
         let failures = Arc::new(AtomicU32::new(0));
         let (sender, receiver) = sync_channel(2);
@@ -100,7 +100,7 @@ fn sender_shutdown_drains_without_failing_successful_jobs() {
     let state = Arc::new(State {
         used: AtomicU32::new(2),
         limit: 2,
-        stopped: AtomicBool::new(false),
+        stopped: Arc::new(AtomicBool::new(false)),
     });
     let failures = Arc::new(AtomicU32::new(0));
     let (sender, receiver) = sync_channel(2);
