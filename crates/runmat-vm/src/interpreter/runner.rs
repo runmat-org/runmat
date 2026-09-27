@@ -348,7 +348,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
             }
         }
     };
-    let projected = super::CompletedFrameProjection::new(result_vars, runtime);
+    let projected = super::CompletedFrameProjection::new(result_vars)?;
     let result_vars = projected.values();
     let fixed_outputs = func
         .output_slots
@@ -368,7 +368,7 @@ async fn invoke_semantic_function_value_with_input_residency_inner(
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
     let outputs = output_sequence(output_values, requested_outputs)?;
-    projected.finish(outputs.iter().chain(updated_captures.iter()));
+    drop(projected);
     Ok((outputs, updated_captures))
 }
 

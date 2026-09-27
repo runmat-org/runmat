@@ -243,7 +243,7 @@ async fn resume_interpreter(
             runtime.clone(),
         )
         .await?;
-    let projection = runmat_vm::CompletedFrameProjection::new(completion.values, runtime);
+    let projection = runmat_vm::CompletedFrameProjection::new(completion.values)?;
     let values = projection.values();
     let body = unit.mir().bodies.get(&function_id).ok_or_else(|| {
         super::error::stage("NativeDeoptimization", "MIR function body is unavailable")
@@ -289,11 +289,7 @@ async fn resume_interpreter(
             })
         })
         .collect();
-    projection.finish(
-        outputs
-            .iter()
-            .chain(captures.iter().map(|capture| &capture.value)),
-    );
+    drop(projection);
     Ok(NativeExecution {
         outputs,
         captures,

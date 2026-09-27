@@ -6,6 +6,8 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 mod sequence_roots;
+mod managed_roots;
+pub(crate) use managed_roots::ManagedRoots;
 #[cfg(test)]
 mod frame_tests;
 
