@@ -80,11 +80,11 @@ pub(crate) fn conjugate_integer_imaginary_storage(storage: IntegerStorage) -> In
 
 fn conjugate_chars(chars: CharArray) -> BuiltinResult<Value> {
     let data = chars
-        .data
+        .to_column_major()
         .iter()
         .map(|&character| character as u32 as f64)
         .collect();
-    let tensor = Tensor::new(data, vec![chars.rows, chars.cols])
+    let tensor = Tensor::new(data, chars.shape.clone())
         .map_err(|error| builtin_error_with_detail(&CONJ_ERROR_INTERNAL, error))?;
     Ok(tensor::tensor_into_value(tensor))
 }

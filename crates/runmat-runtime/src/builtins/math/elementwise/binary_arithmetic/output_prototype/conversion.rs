@@ -70,7 +70,7 @@ pub(super) fn char_array_to_tensor(
 ) -> BuiltinResult<Tensor> {
     Tensor::new(
         chars
-            .data
+            .to_column_major()
             .iter()
             .map(|&value| value as u32 as f64)
             .collect(),

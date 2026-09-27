@@ -47,7 +47,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::LogicalArray(value) if value.data.len() == 1 => {
             Some(if value.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        Value::CharArray(value) if value.rows * value.cols == 1 => Some(
+        Value::CharArray(value) if value.data.len() == 1 => Some(
             value
                 .data
                 .first()
@@ -124,6 +124,10 @@ fn classify_operand(context: DivisionContext, value: Value) -> BuiltinResult<Div
 }
 
 fn char_array_to_tensor(context: DivisionContext, chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols]).map_err(|error| context.internal_error(error))
+    let data: Vec<f64> = chars
+        .to_column_major()
+        .iter()
+        .map(|&ch| ch as u32 as f64)
+        .collect();
+    Tensor::new(data, chars.shape.clone()).map_err(|error| context.internal_error(error))
 }

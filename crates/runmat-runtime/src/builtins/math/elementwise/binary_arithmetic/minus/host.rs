@@ -7,7 +7,7 @@ fn scalar_real_value(value: &Value) -> Option<f64> {
         Value::LogicalArray(value) if value.data.len() == 1 => {
             Some(if value.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        Value::CharArray(value) if value.rows * value.cols == 1 => Some(
+        Value::CharArray(value) if value.data.len() == 1 => Some(
             value
                 .data
                 .first()
@@ -326,7 +326,10 @@ fn subtract_complex_real_storage(
 }
 
 fn char_array_to_tensor(chars: &CharArray) -> BuiltinResult<Tensor> {
-    let data: Vec<f64> = chars.data.iter().map(|&ch| ch as u32 as f64).collect();
-    Tensor::new(data, vec![chars.rows, chars.cols])
-        .map_err(|e| builtin_error(format!("minus: {e}")))
+    let data: Vec<f64> = chars
+        .to_column_major()
+        .iter()
+        .map(|&ch| ch as u32 as f64)
+        .collect();
+    Tensor::new(data, chars.shape.clone()).map_err(|e| builtin_error(format!("minus: {e}")))
 }

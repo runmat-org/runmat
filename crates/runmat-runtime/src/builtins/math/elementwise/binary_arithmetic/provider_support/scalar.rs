@@ -19,7 +19,7 @@ pub(in crate::builtins::math::elementwise::binary_arithmetic) fn host_real_scala
         Value::LogicalArray(value) if value.data.len() == 1 => {
             Some(if value.data[0] != 0 { 1.0 } else { 0.0 })
         }
-        Value::CharArray(value) if value.rows * value.cols == 1 => Some(
+        Value::CharArray(value) if value.data.len() == 1 => Some(
             value
                 .data
                 .first()
