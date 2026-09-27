@@ -22,11 +22,6 @@ serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
 runmat-accelerate-api = { workspace = true, features = ["test-support"] }
-futures = "0.3"
-runmat-vm = { workspace = true }
-runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
-runmat-parser = { workspace = true }
 
 [features]
 default = []

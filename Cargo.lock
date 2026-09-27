@@ -6654,7 +6654,6 @@ dependencies = [
 name = "runmat-gc"
 version = "0.6.2"
 dependencies = [
- "futures",
  "log",
  "num_cpus",
  "once_cell",
@@ -6662,12 +6661,8 @@ dependencies = [
  "parking_lot",
  "runmat-accelerate-api",
  "runmat-gc-api",
- "runmat-hir",
- "runmat-mir",
- "runmat-parser",
  "runmat-time",
  "runmat-value",
- "runmat-vm",
  "serde",
  "thiserror 1.0.69",
 ]

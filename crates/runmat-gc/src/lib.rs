@@ -310,7 +310,15 @@ impl GarbageCollector {
 
     fn allocate_inner(&self, value: Value) -> Result<(GcHandle, bool)> {
         let mut allocator = self.allocator.lock();
-        let ptr = allocator.allocate(value, &self.stats)?;
+        let ptr = match allocator.allocate_preserving_value(value, &self.stats) {
+            Ok(ptr) => ptr,
+            Err(failure) => {
+                drop(allocator);
+                let allocator::AllocationFailure { error, value } = *failure;
+                drop(value);
+                return Err(error);
+            }
+        };
         let usage = allocator.young_generation_usage();
         let alloc_count = allocator.young_allocations_count();
         let cfg = self.config.read().clone();
@@ -501,7 +509,7 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
-        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -543,6 +551,9 @@ impl GarbageCollector {
 
         // Clear dirty cards; keep remembered set for next minor cycle
         WRITE_BARRIERS.clear_after_minor_gc();
+        // Retiring an owning payload may invoke a provider callback that
+        // allocates. Heap bookkeeping is complete; do not hold its entry gate.
+        drop(collection_guard);
         drop(retired);
 
         let duration = start_time.elapsed();
@@ -572,7 +583,7 @@ impl GarbageCollector {
         {
             return Ok(0);
         }
-        let _collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
+        let collection_guard = CollectionInProgressGuard::new(&self.collection_in_progress);
         if self.allocation_in_progress.load(Ordering::Acquire) != 0 {
             return Ok(0);
         }
@@ -610,6 +621,7 @@ impl GarbageCollector {
         allocator.clear_promotion_state();
         drop(collector);
         drop(allocator);
+        drop(collection_guard);
         drop(retired);
 
         let duration = start_time.elapsed();
@@ -1127,6 +1139,7 @@ mod tests {
                 assert!(GC.allocator.try_lock().is_some());
                 assert!(GC.collector.try_lock().is_some());
                 assert!(FINALIZERS.try_lock().is_some());
+                assert!(!GC.collection_in_progress.load(Ordering::Acquire));
             }
         }
         for collect in [gc_collect_minor, gc_collect_major] {
@@ -1141,6 +1154,56 @@ mod tests {
             gc_register_finalizer(handle, Arc::new(AssertUnlocked)).unwrap();
             gc_reset_for_test().unwrap();
         });
+    }
+
+    #[test]
+    fn foreign_payload_release_can_reenter_allocation_after_collection() {
+        use runmat_value::{
+            ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignRef, ForeignResourceKey,
+            ForeignResourceRelease, ForeignTypeIdentity,
+        };
+        #[derive(Debug)]
+        struct Release(AtomicUsize);
+        impl ForeignResourceRelease for Release {
+            fn release(&self, _: &ForeignResourceKey) {
+                // Assert before entry so a regression fails rather than spinning.
+                assert!(!GC.collection_in_progress.load(Ordering::Acquire));
+                assert!(GC.allocator.try_lock().is_some());
+                let allocated = gc_allocate_rooted(Value::Num(7.0)).unwrap();
+                assert!(matches!(
+                    gc_clone_value(&allocated.handle()).unwrap(),
+                    Value::Num(7.0)
+                ));
+                allocated.unroot().unwrap();
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        for collect in [gc_collect_minor, gc_collect_major] {
+            gc_test_context(|| {
+                let release = Arc::new(Release(AtomicUsize::new(0)));
+                let value = Value::Foreign(ForeignRef::managed(
+                    ForeignResourceKey {
+                        host_identity: "gc-retirement-test".into(),
+                        handle: 1,
+                        generation: 1,
+                    },
+                    ForeignTypeIdentity {
+                        family: "test".into(),
+                        name: "resource".into(),
+                        version: 1,
+                    },
+                    ForeignOwnership::Shared,
+                    ForeignAffinity::OriginProcess,
+                    ForeignLifetime::Session,
+                    release.clone(),
+                ));
+                gc_allocate(value).unwrap();
+                assert_eq!(collect().unwrap(), 1);
+                assert_eq!(release.0.load(Ordering::Relaxed), 1);
+                gc_collect_major().unwrap();
+                assert_eq!(release.0.load(Ordering::Relaxed), 1);
+            });
+        }
     }
 
     #[test]

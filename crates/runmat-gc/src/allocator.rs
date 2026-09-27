@@ -300,6 +300,13 @@ pub struct GenerationalAllocator {
     next_epoch: usize,
 }
 
+/// An unsuccessful allocation returns its input for destruction by the caller,
+/// after any allocator lock has been released.
+pub(crate) struct AllocationFailure {
+    pub error: GcError,
+    pub value: Value,
+}
+
 impl GenerationalAllocator {
     pub fn new(config: &GcConfig) -> Self {
         let mut generations = Vec::new();
@@ -325,14 +332,35 @@ impl GenerationalAllocator {
 
     /// Allocate a Value object
     pub fn allocate(&mut self, value: Value, stats: &GcStats) -> Result<GcHandle> {
-        let size = self.estimate_value_size(&value);
+        self.allocate_preserving_value(value, stats)
+            .map_err(|failure| failure.error)
+    }
+
+    pub(crate) fn allocate_preserving_value(
+        &mut self,
+        value: Value,
+        stats: &GcStats,
+    ) -> std::result::Result<GcHandle, Box<AllocationFailure>> {
+        // Only the Value header lives in this heap; nested owned buffers use
+        // their own allocators and are released with the detached payload.
+        let size = std::mem::size_of::<Value>();
         let epoch = self.next_epoch;
-        let next_epoch = epoch.checked_add(1).ok_or_else(|| {
-            GcError::OutOfMemory("GC allocation epoch space exhausted".to_string())
-        })?;
+        let Some(next_epoch) = epoch.checked_add(1) else {
+            return Err(Box::new(AllocationFailure {
+                error: GcError::OutOfMemory("GC allocation epoch space exhausted".to_string()),
+                value,
+            }));
+        };
 
         // Always allocate in young generation first
-        let ptr = self.generations[0].allocate(size)?;
+        let ptr = match self.generations[0].allocate(size) {
+            Ok(ptr) => ptr,
+            Err(error) => return Err(Box::new(AllocationFailure { error, value })),
+        };
+        let handle = match value_handle_from_ptr(ptr.cast::<Value>(), epoch) {
+            Ok(handle) => handle,
+            Err(error) => return Err(Box::new(AllocationFailure { error, value })),
+        };
 
         // Initialize the memory with the value
         unsafe {
@@ -347,7 +375,7 @@ impl GenerationalAllocator {
         self.total_allocations.fetch_add(1, Ordering::Relaxed);
         stats.record_allocation(size);
 
-        value_handle_from_ptr(ptr.cast::<Value>(), epoch)
+        Ok(handle)
     }
 
     /// Drain young-generation pointers that must be considered during the next
@@ -567,16 +595,6 @@ impl GenerationalAllocator {
         // Keep promoted set to continue treating them as old
     }
 
-    /// Estimate the memory size of a Value
-    #[allow(clippy::only_used_in_recursion)]
-    fn estimate_value_size(&self, _value: &Value) -> usize {
-        // IMPORTANT: We currently allocate only the outer Value header in the GC heap.
-        // Nested payloads (Vecs, strings, tensors) are managed by Rust's allocator and
-        // dropped via drop_in_place during sweep. Estimating deep sizes over-reserves and
-        // causes artificial OOMs in tests. We'll move to GC-managed aggregates later.
-        std::mem::size_of::<Value>()
-    }
-
     /// Get allocator statistics
     pub fn stats(&self) -> AllocatorStats {
         AllocatorStats {
@@ -614,6 +632,36 @@ pub struct AllocatorStats {
 mod tests {
     use super::*;
     use crate::config::GcConfig;
+
+    #[test]
+    fn failed_allocation_returns_the_live_payload_without_retiring_it() {
+        use runmat_accelerate_api::{
+            test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
+        };
+        for exhausted_epoch in [false, true] {
+            let config = GcConfig {
+                young_generation_size: if exhausted_epoch { 1024 } else { 0 },
+                ..GcConfig::default()
+            };
+            let mut allocator = GenerationalAllocator::new(&config);
+            if exhausted_epoch {
+                allocator.next_epoch = usize::MAX;
+            }
+            let owner = TestAllocationOwner::new();
+            let allocation = owner
+                .allocate_zeroed(vec![1], NumericElementType::F64, GpuTensorStorage::Real)
+                .unwrap();
+            let failure = allocator
+                .allocate_preserving_value(Value::GpuTensor(allocation.handle), &GcStats::new())
+                .expect_err("allocation must fail");
+            assert!(matches!(failure.error, GcError::OutOfMemory(_)));
+            assert_eq!(allocation.probe.retirements(), 0);
+            assert!(allocator.live_ptrs.is_empty());
+            drop(allocator);
+            drop(failure);
+            assert_eq!(allocation.probe.retirements(), 1);
+        }
+    }
 
     #[test]
     fn test_size_class_classification() {
